@@ -128,17 +128,12 @@ export default function NewLogForm({ defaultDate, previousCumulative }: Props) {
       </div>
 
       <div>
-        <label htmlFor="confirmed_by" className={labelCls}>
-          확인 / 결재 <span className="text-[color:var(--accent)]">*</span>
-        </label>
-        <input
-          id="confirmed_by"
-          name="confirmed_by"
-          type="text"
-          required
-          placeholder="담당자명"
-          className={inputCls}
-        />
+        <label className={labelCls}>확인 / 결재</label>
+        <div className="mt-1 flex items-center justify-between rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-sm">
+          <span className="font-medium text-slate-800">허일수</span>
+          <span className="text-xs text-slate-400">고정</span>
+        </div>
+        <input type="hidden" name="confirmed_by" value="허일수" />
       </div>
 
       <div>
