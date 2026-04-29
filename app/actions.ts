@@ -9,7 +9,8 @@ import {
   type DrivingLog,
 } from "@/lib/supabase";
 
-const SESSION_COOKIE = "dongrae_admin";
+const ADMIN_COOKIE = "dongrae_admin";
+const DRIVER_COOKIE = "dongrae_driver";
 const DEFAULT_INITIAL_DISTANCE = 4341;
 
 // =====================================================================
@@ -19,7 +20,7 @@ export async function isAdmin(): Promise<boolean> {
   const store = await cookies();
   const expected = process.env.ADMIN_PASSWORD;
   if (!expected) return false;
-  return store.get(SESSION_COOKIE)?.value === expected;
+  return store.get(ADMIN_COOKIE)?.value === expected;
 }
 
 async function requireAdmin() {
@@ -38,7 +39,7 @@ export async function adminLogin(formData: FormData) {
     return { ok: false, message: "비밀번호가 올바르지 않습니다." };
   }
   const store = await cookies();
-  store.set(SESSION_COOKIE, password, {
+  store.set(ADMIN_COOKIE, password, {
     httpOnly: true,
     sameSite: "lax",
     path: "/",
@@ -50,7 +51,75 @@ export async function adminLogin(formData: FormData) {
 
 export async function adminLogout() {
   const store = await cookies();
-  store.delete(SESSION_COOKIE);
+  store.delete(ADMIN_COOKIE);
+  redirect("/");
+}
+
+// =====================================================================
+// Driver session (httpOnly cookie)
+// =====================================================================
+export type DriverSessionInfo = { id: string; name: string };
+
+export async function getDriverSession(): Promise<DriverSessionInfo | null> {
+  const store = await cookies();
+  const raw = store.get(DRIVER_COOKIE)?.value;
+  if (!raw) return null;
+  let parsed: { name?: string; password?: string };
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    return null;
+  }
+  if (!parsed.name || !parsed.password) return null;
+  const { data, error } = await supabase
+    .from("drivers")
+    .select("id,name,password")
+    .eq("name", parsed.name)
+    .maybeSingle();
+  if (error || !data) return null;
+  if (data.password !== parsed.password) return null;
+  return { id: data.id, name: data.name };
+}
+
+async function requireDriver(): Promise<DriverSessionInfo> {
+  const driver = await getDriverSession();
+  if (!driver) {
+    throw new Error("운전자 로그인이 필요합니다.");
+  }
+  return driver;
+}
+
+export async function loginDriver(
+  formData: FormData
+): Promise<{ ok: true; driver: { id: string; name: string } } | { ok: false; message: string }> {
+  const name = String(formData.get("name") ?? "").trim();
+  const password = String(formData.get("password") ?? "");
+  if (!name || !password) {
+    return { ok: false, message: "이름과 비밀번호를 입력해주세요." };
+  }
+  const { data, error } = await supabase
+    .from("drivers")
+    .select("id,name,password")
+    .eq("name", name)
+    .maybeSingle();
+  if (error) return { ok: false, message: error.message };
+  if (!data || data.password !== password) {
+    return { ok: false, message: "이름 또는 비밀번호가 올바르지 않습니다." };
+  }
+  const store = await cookies();
+  store.set(DRIVER_COOKIE, JSON.stringify({ name, password }), {
+    httpOnly: true,
+    sameSite: "lax",
+    path: "/",
+    maxAge: 60 * 60 * 24 * 30,
+    secure: process.env.NODE_ENV === "production",
+  });
+  return { ok: true, driver: { id: data.id, name: data.name } };
+}
+
+export async function logoutDriver() {
+  const store = await cookies();
+  store.delete(DRIVER_COOKIE);
   redirect("/");
 }
 
@@ -110,9 +179,9 @@ export async function getLatestCumulative(): Promise<number> {
 // Driving logs
 // =====================================================================
 export async function createDrivingLog(formData: FormData) {
+  const driver = await requireDriver();
+
   const driven_at = String(formData.get("driven_at") ?? "");
-  const driverName = String(formData.get("driver") ?? "").trim();
-  const driverPassword = String(formData.get("driver_password") ?? "");
   const purpose = String(formData.get("purpose") ?? "").trim();
   const departure = String(formData.get("departure") ?? "").trim();
   const waypointRaw = String(formData.get("waypoint") ?? "").trim();
@@ -122,8 +191,6 @@ export async function createDrivingLog(formData: FormData) {
 
   if (
     !driven_at ||
-    !driverName ||
-    !driverPassword ||
     !purpose ||
     !departure ||
     !destination ||
@@ -132,17 +199,6 @@ export async function createDrivingLog(formData: FormData) {
     odometer < 0
   ) {
     throw new Error("필수 항목을 모두 올바르게 입력해주세요.");
-  }
-
-  // Re-validate driver credential server-side (client uses localStorage gate only).
-  const { data: driverRow, error: driverErr } = await supabase
-    .from("drivers")
-    .select("id,name,password")
-    .eq("name", driverName)
-    .maybeSingle();
-  if (driverErr) throw new Error(driverErr.message);
-  if (!driverRow || driverRow.password !== driverPassword) {
-    throw new Error("운전자 인증에 실패했습니다. 다시 로그인해주세요.");
   }
 
   const previous = await getLatestCumulative();
@@ -157,7 +213,7 @@ export async function createDrivingLog(formData: FormData) {
 
   const { error } = await supabase.from("driving_logs").insert({
     driven_at,
-    driver: driverName,
+    driver: driver.name,
     purpose,
     departure,
     waypoint: waypointRaw || null,
@@ -184,11 +240,19 @@ export async function deleteDrivingLog(formData: FormData) {
 }
 
 export async function listDrivingLogs(month?: string): Promise<DrivingLog[]> {
+  const admin = await isAdmin();
+  const driver = admin ? null : await getDriverSession();
+  if (!admin && !driver) return [];
+
   let query = supabase
     .from("driving_logs")
     .select("*")
     .order("driven_at", { ascending: false })
     .order("created_at", { ascending: false });
+
+  if (!admin && driver) {
+    query = query.eq("driver", driver.name);
+  }
 
   if (month && /^\d{4}-\d{2}$/.test(month)) {
     const [y, m] = month.split("-").map(Number);
@@ -280,28 +344,8 @@ export async function getAdminStats(): Promise<AdminStats> {
 }
 
 // =====================================================================
-// Drivers
+// Drivers (admin management)
 // =====================================================================
-export async function loginDriver(
-  formData: FormData
-): Promise<{ ok: true; driver: { id: string; name: string } } | { ok: false; message: string }> {
-  const name = String(formData.get("name") ?? "").trim();
-  const password = String(formData.get("password") ?? "");
-  if (!name || !password) {
-    return { ok: false, message: "이름과 비밀번호를 입력해주세요." };
-  }
-  const { data, error } = await supabase
-    .from("drivers")
-    .select("id,name,password")
-    .eq("name", name)
-    .maybeSingle();
-  if (error) return { ok: false, message: error.message };
-  if (!data || data.password !== password) {
-    return { ok: false, message: "이름 또는 비밀번호가 올바르지 않습니다." };
-  }
-  return { ok: true, driver: { id: data.id, name: data.name } };
-}
-
 export async function listDrivers(): Promise<Driver[]> {
   await requireAdmin();
   const { data, error } = await supabase

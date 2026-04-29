@@ -1,32 +1,8 @@
-"use client";
+import { getDriverSession, logoutDriver } from "@/app/actions";
 
-import Link from "next/link";
-import { useDriverSession } from "@/app/components/DriverSession";
-
-export default function DriverBar() {
-  const { ready, driver, signOut } = useDriverSession();
-
-  if (!ready) {
-    return (
-      <div className="rounded-xl border border-slate-200 bg-white p-3 text-sm text-slate-400">
-        세션 확인 중…
-      </div>
-    );
-  }
-
-  if (!driver) {
-    return (
-      <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-slate-200 bg-white p-3 text-sm">
-        <span className="text-slate-500">로그인 후 운행일지를 작성할 수 있습니다.</span>
-        <Link
-          href="/login"
-          className="rounded-md bg-[color:var(--brand)] px-3 py-1.5 text-xs font-semibold text-white hover:bg-[color:var(--brand-strong)]"
-        >
-          운전자 로그인
-        </Link>
-      </div>
-    );
-  }
+export default async function DriverBar() {
+  const driver = await getDriverSession();
+  if (!driver) return null;
 
   return (
     <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-[color:var(--brand-soft)] bg-[color:var(--brand-soft)]/40 p-3 text-sm">
@@ -41,13 +17,14 @@ export default function DriverBar() {
           운전자로 로그인됨
         </span>
       </div>
-      <button
-        type="button"
-        onClick={signOut}
-        className="rounded-md border border-slate-300 bg-white px-3 py-1 text-xs font-medium text-slate-700 hover:bg-slate-50"
-      >
-        로그아웃
-      </button>
+      <form action={logoutDriver}>
+        <button
+          type="submit"
+          className="rounded-md border border-slate-300 bg-white px-3 py-1 text-xs font-medium text-slate-700 hover:bg-slate-50"
+        >
+          로그아웃
+        </button>
+      </form>
     </div>
   );
 }

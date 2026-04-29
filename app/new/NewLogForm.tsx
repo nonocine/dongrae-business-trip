@@ -3,12 +3,12 @@
 import Link from "next/link";
 import { useState, useTransition } from "react";
 import { createDrivingLog } from "@/app/actions";
-import { useDriverSession } from "@/app/components/DriverSession";
 import { VEHICLE } from "@/lib/vehicle";
 
 type Props = {
   defaultDate: string;
   previousCumulative: number;
+  driverName: string;
 };
 
 const FREQUENT_PLACES = [
@@ -20,7 +20,7 @@ const FREQUENT_PLACES = [
   "사직동 온나",
 ] as const;
 const CUSTOM = "__custom__";
-const MAX_WAYPOINTS = 5;
+const MAX_STOPS = 5;
 
 type Place = { selected: string; custom: string };
 
@@ -32,31 +32,24 @@ const labelCls = "block text-sm font-medium text-slate-700";
 const inputBase =
   "block w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm shadow-sm focus:border-[color:var(--brand)] focus:outline-none focus:ring-1 focus:ring-[color:var(--brand)]";
 const inputCls = `mt-1 ${inputBase}`;
+const fixedBoxCls =
+  "mt-1 flex items-center justify-between rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-sm";
 
 function formatNumber(n: number) {
   return new Intl.NumberFormat("ko-KR", { maximumFractionDigits: 1 }).format(n);
 }
 
-export default function NewLogForm({ defaultDate, previousCumulative }: Props) {
-  const { ready, driver, signOut } = useDriverSession();
+export default function NewLogForm({
+  defaultDate,
+  previousCumulative,
+  driverName,
+}: Props) {
   const [odometer, setOdometer] = useState<string>("");
-  const [departure, setDeparture] = useState<Place>({
-    selected: VEHICLE.centerName,
-    custom: "",
-  });
-  const [destination, setDestination] = useState<Place>({
-    selected: "",
-    custom: "",
-  });
-  const [waypoints, setWaypoints] = useState<Place[]>([]);
+  const [stops, setStops] = useState<Place[]>([{ selected: "", custom: "" }]);
   const [error, setError] = useState<string | null>(null);
   const [pending, startTransition] = useTransition();
 
-  const resolvedDeparture = resolvePlace(departure);
-  const resolvedDestination = resolvePlace(destination);
-  const resolvedWaypoints = waypoints
-    .map(resolvePlace)
-    .filter((s) => s.length > 0);
+  const resolvedStops = stops.map(resolvePlace).filter((s) => s.length > 0);
 
   const odometerNum = Number(odometer);
   const rounded =
@@ -67,52 +60,23 @@ export default function NewLogForm({ defaultDate, previousCumulative }: Props) {
     rounded !== null ? Math.round((rounded - previousCumulative) * 10) / 10 : null;
   const distanceInvalid = distance !== null && distance < 0;
 
-  function addWaypoint() {
-    if (waypoints.length >= MAX_WAYPOINTS) return;
-    setWaypoints([...waypoints, { selected: "", custom: "" }]);
+  function addStop() {
+    if (stops.length >= MAX_STOPS) return;
+    setStops([...stops, { selected: "", custom: "" }]);
   }
-  function updateWaypoint(i: number, next: Place) {
-    setWaypoints(waypoints.map((w, idx) => (idx === i ? next : w)));
+  function updateStop(i: number, next: Place) {
+    setStops(stops.map((w, idx) => (idx === i ? next : w)));
   }
-  function removeWaypoint(i: number) {
-    setWaypoints(waypoints.filter((_, idx) => idx !== i));
-  }
-
-  if (!ready) {
-    return (
-      <div className="rounded-xl border border-slate-200 bg-white p-6 text-sm text-slate-500">
-        세션 확인 중…
-      </div>
-    );
-  }
-
-  if (!driver) {
-    return (
-      <div className="space-y-4 rounded-xl border border-slate-200 bg-white p-6 text-center shadow-sm">
-        <p className="text-sm text-slate-700">
-          운행일지 작성은 <span className="font-semibold">로그인한 운전자</span>만
-          가능합니다.
-        </p>
-        <Link
-          href="/login"
-          className="inline-block rounded-md bg-[color:var(--brand)] px-4 py-2 text-sm font-semibold text-white hover:bg-[color:var(--brand-strong)]"
-        >
-          운전자 로그인
-        </Link>
-      </div>
-    );
+  function removeStop(i: number) {
+    setStops(stops.filter((_, idx) => idx !== i));
   }
 
   return (
     <form
       action={(formData) => {
         setError(null);
-        if (!resolvedDeparture) {
-          setError("출발지를 입력해주세요.");
-          return;
-        }
-        if (!resolvedDestination) {
-          setError("도착지를 입력해주세요.");
+        if (resolvedStops.length === 0) {
+          setError("최소 1개의 목적지를 입력해주세요.");
           return;
         }
         if (distanceInvalid) {
@@ -123,11 +87,9 @@ export default function NewLogForm({ defaultDate, previousCumulative }: Props) {
           );
           return;
         }
-        formData.set("driver", driver.name);
-        formData.set("driver_password", driver.password);
-        formData.set("departure", resolvedDeparture);
-        formData.set("destination", resolvedDestination);
-        formData.set("waypoint", resolvedWaypoints.join(", "));
+        formData.set("departure", VEHICLE.centerName);
+        formData.set("destination", VEHICLE.centerName);
+        formData.set("waypoint", resolvedStops.join(", "));
         startTransition(async () => {
           try {
             await createDrivingLog(formData);
@@ -140,20 +102,11 @@ export default function NewLogForm({ defaultDate, previousCumulative }: Props) {
       }}
       className="space-y-4 rounded-xl border border-slate-200 bg-white p-4 shadow-sm sm:p-5"
     >
-      <div className="flex items-center justify-between rounded-lg bg-[color:var(--brand-soft)]/60 px-3 py-2 text-sm">
-        <div>
-          <p className="text-xs text-[color:var(--brand)]">로그인 운전자</p>
-          <p className="font-semibold text-[color:var(--brand-strong)]">
-            {driver.name}
-          </p>
-        </div>
-        <button
-          type="button"
-          onClick={signOut}
-          className="rounded-md border border-slate-300 bg-white px-2.5 py-1 text-xs text-slate-700 hover:bg-slate-50"
-        >
-          로그아웃
-        </button>
+      <div className="rounded-lg bg-[color:var(--brand-soft)]/60 px-3 py-2 text-sm">
+        <p className="text-xs text-[color:var(--brand)]">로그인 운전자</p>
+        <p className="font-semibold text-[color:var(--brand-strong)]">
+          {driverName}
+        </p>
       </div>
 
       <div>
@@ -172,7 +125,7 @@ export default function NewLogForm({ defaultDate, previousCumulative }: Props) {
 
       <div>
         <label className={labelCls}>확인 / 결재</label>
-        <div className="mt-1 flex items-center justify-between rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-sm">
+        <div className={fixedBoxCls}>
           <span className="font-medium text-slate-800">허일수</span>
           <span className="text-xs text-slate-400">고정</span>
         </div>
@@ -194,53 +147,53 @@ export default function NewLogForm({ defaultDate, previousCumulative }: Props) {
       </div>
 
       <div>
-        <label className={labelCls}>
-          출발지 <span className="text-[color:var(--accent)]">*</span>
-        </label>
-        <PlacePicker value={departure} onChange={setDeparture} required />
+        <label className={labelCls}>출발지</label>
+        <div className={fixedBoxCls}>
+          <span className="font-medium text-slate-800">{VEHICLE.centerName}</span>
+          <span className="text-xs text-slate-400">고정</span>
+        </div>
       </div>
 
       <div>
         <div className="flex items-center justify-between">
           <label className={labelCls}>
-            경유지 <span className="text-slate-400">(선택)</span>
+            목적지 <span className="text-[color:var(--accent)]">*</span>
           </label>
           <span className="text-xs text-slate-400">
-            {waypoints.length}/{MAX_WAYPOINTS}
+            {stops.length}/{MAX_STOPS}
           </span>
         </div>
         <div className="mt-1 space-y-2">
-          {waypoints.map((wp, i) => (
+          {stops.map((wp, i) => (
             <PlacePicker
               key={i}
               value={wp}
-              onChange={(next) => updateWaypoint(i, next)}
-              onRemove={() => removeWaypoint(i)}
-              placeholder="경유지를 선택해주세요"
+              onChange={(next) => updateStop(i, next)}
+              onRemove={
+                stops.length > 1 ? () => removeStop(i) : undefined
+              }
+              placeholder="목적지를 선택해주세요"
+              showRemoveSlot
             />
           ))}
-          {waypoints.length < MAX_WAYPOINTS && (
+          {stops.length < MAX_STOPS && (
             <button
               type="button"
-              onClick={addWaypoint}
+              onClick={addStop}
               className="w-full rounded-md border border-dashed border-slate-300 bg-white px-3 py-2 text-sm font-medium text-slate-600 hover:bg-slate-50"
             >
-              + 경유지 추가
+              + 목적지 추가
             </button>
           )}
         </div>
       </div>
 
       <div>
-        <label className={labelCls}>
-          도착지 <span className="text-[color:var(--accent)]">*</span>
-        </label>
-        <PlacePicker
-          value={destination}
-          onChange={setDestination}
-          placeholder="도착지를 선택해주세요"
-          required
-        />
+        <label className={labelCls}>도착지</label>
+        <div className={fixedBoxCls}>
+          <span className="font-medium text-slate-800">{VEHICLE.centerName}</span>
+          <span className="text-xs text-slate-400">고정</span>
+        </div>
       </div>
 
       <div>
@@ -326,13 +279,16 @@ function PlacePicker({
   required,
   placeholder,
   onRemove,
+  showRemoveSlot,
 }: {
   value: Place;
   onChange: (next: Place) => void;
   required?: boolean;
   placeholder?: string;
   onRemove?: () => void;
+  showRemoveSlot?: boolean;
 }) {
+  const inline = !!showRemoveSlot;
   const select = (
     <select
       value={value.selected}
@@ -340,7 +296,7 @@ function PlacePicker({
         onChange({ selected: e.target.value, custom: value.custom })
       }
       required={required}
-      className={`${inputBase} ${onRemove ? "min-w-0 flex-1" : ""}`}
+      className={`${inputBase} ${inline ? "min-w-0 flex-1" : ""}`}
     >
       <option value="" disabled>
         {placeholder ?? "선택해주세요"}
@@ -355,15 +311,16 @@ function PlacePicker({
   );
 
   return (
-    <div className={onRemove ? "space-y-2" : "mt-1 space-y-2"}>
-      {onRemove ? (
+    <div className={inline ? "space-y-2" : "mt-1 space-y-2"}>
+      {inline ? (
         <div className="flex items-stretch gap-2">
           {select}
           <button
             type="button"
             onClick={onRemove}
-            aria-label="경유지 삭제"
-            className="shrink-0 rounded-md border border-slate-300 bg-white px-3 text-sm font-medium text-slate-500 hover:bg-[color:var(--accent-soft)] hover:text-[color:var(--accent)]"
+            disabled={!onRemove}
+            aria-label="목적지 삭제"
+            className="shrink-0 rounded-md border border-slate-300 bg-white px-3 text-sm font-medium text-slate-500 hover:bg-[color:var(--accent-soft)] hover:text-[color:var(--accent)] disabled:opacity-30 disabled:hover:bg-white disabled:hover:text-slate-500"
           >
             ✕
           </button>

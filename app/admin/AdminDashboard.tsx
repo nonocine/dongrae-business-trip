@@ -42,35 +42,33 @@ export default function AdminDashboard({
 
 function StatsCard({ stats }: { stats: AdminStats }) {
   return (
-    <section className={cardCls}>
-      <h3 className={sectionTitle}>운행 통계</h3>
-
-      <div className="mt-3 grid grid-cols-2 gap-3">
-        <div className="rounded-lg border border-slate-200 bg-white p-3">
-          <p className="text-[11px] font-medium text-slate-500">이번 달 운행거리</p>
-          <p className="mt-1 text-xl font-bold text-[color:var(--brand-strong)]">
-            {formatNumber(stats.thisMonthDistance)}{" "}
-            <span className="text-xs font-medium text-[color:var(--brand)]">km</span>
-          </p>
+    <div className="space-y-3">
+      <section className="overflow-hidden rounded-2xl bg-gradient-to-br from-blue-500 via-blue-600 to-indigo-700 p-5 text-white shadow-lg">
+        <h3 className="text-xs font-semibold uppercase tracking-wide opacity-80">
+          운행 통계
+        </h3>
+        <div className="mt-3 grid grid-cols-2 gap-3">
+          <div className="rounded-xl bg-white/15 p-3 backdrop-blur-sm">
+            <p className="text-[11px] font-medium opacity-80">이번 달 운행거리</p>
+            <p className="mt-1 text-2xl font-bold tracking-tight">
+              {formatNumber(stats.thisMonthDistance)}
+              <span className="ml-1 text-xs font-medium opacity-80">km</span>
+            </p>
+          </div>
+          <div className="rounded-xl bg-white/15 p-3 backdrop-blur-sm">
+            <p className="text-[11px] font-medium opacity-80">전체 누적 운행거리</p>
+            <p className="mt-1 text-2xl font-bold tracking-tight">
+              {formatNumber(stats.totalDistance)}
+              <span className="ml-1 text-xs font-medium opacity-80">km</span>
+            </p>
+          </div>
         </div>
-        <div className="rounded-lg border border-slate-200 bg-white p-3">
-          <p className="text-[11px] font-medium text-slate-500">전체 누적 운행거리</p>
-          <p className="mt-1 text-xl font-bold text-slate-900">
-            {formatNumber(stats.totalDistance)}{" "}
-            <span className="text-xs font-medium text-slate-500">km</span>
-          </p>
-        </div>
-      </div>
+      </section>
 
-      <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-2">
-        <RecentDestinationsBox items={stats.recentDestinations} />
-        <TopDestinationsBox items={stats.topDestinations} />
-      </div>
-
-      <div className="mt-3">
-        <TopDriversBox items={stats.topDrivers} />
-      </div>
-    </section>
+      <RecentDestinationsBox items={stats.recentDestinations} />
+      <TopDestinationsBox items={stats.topDestinations} />
+      <TopDriversBox items={stats.topDrivers} />
+    </div>
   );
 }
 
@@ -80,27 +78,38 @@ function RecentDestinationsBox({
   items: AdminStats["recentDestinations"];
 }) {
   return (
-    <div className="rounded-lg border border-slate-200 bg-slate-50 p-3">
-      <p className="text-[11px] font-semibold uppercase tracking-wide text-[color:var(--brand)]">
-        최근 운행 목적지
-      </p>
+    <section className="rounded-2xl border border-emerald-200 bg-gradient-to-br from-emerald-50 via-white to-emerald-50/40 p-4 shadow-sm">
+      <div className="flex items-center gap-2">
+        <span className="inline-flex h-7 w-7 items-center justify-center rounded-lg bg-emerald-500 text-white">
+          📍
+        </span>
+        <h3 className="text-sm font-semibold text-emerald-900">최근 운행 목적지</h3>
+      </div>
       {items.length === 0 ? (
-        <p className="mt-2 text-xs text-slate-500">운행 기록이 없습니다.</p>
+        <p className="mt-3 text-xs text-emerald-700/70">운행 기록이 없습니다.</p>
       ) : (
-        <ol className="mt-2 space-y-1 text-sm">
+        <ol className="mt-3 space-y-1.5 text-sm">
           {items.map((it, i) => (
-            <li key={i} className="flex items-center justify-between gap-2">
-              <span className="truncate font-medium text-slate-800">
-                {it.destination}
+            <li
+              key={i}
+              className="flex items-center justify-between gap-2 rounded-lg bg-white/70 px-3 py-2"
+            >
+              <span className="flex min-w-0 items-center gap-2">
+                <span className="inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-emerald-100 text-[10px] font-bold text-emerald-700">
+                  {i + 1}
+                </span>
+                <span className="truncate font-medium text-slate-800">
+                  {it.destination}
+                </span>
               </span>
-              <span className="shrink-0 text-xs text-slate-500">
+              <span className="shrink-0 text-xs text-emerald-700">
                 {it.driven_at.replaceAll("-", ".")}
               </span>
             </li>
           ))}
         </ol>
       )}
-    </div>
+    </section>
   );
 }
 
@@ -109,69 +118,111 @@ function TopDestinationsBox({
 }: {
   items: AdminStats["topDestinations"];
 }) {
+  const maxCount = items.reduce((m, it) => Math.max(m, it.count), 0) || 1;
   return (
-    <div className="rounded-lg border border-slate-200 bg-slate-50 p-3">
-      <p className="text-[11px] font-semibold uppercase tracking-wide text-[color:var(--brand)]">
-        자주 가는 목적지 TOP 5
-      </p>
+    <section className="rounded-2xl border border-orange-200 bg-gradient-to-br from-amber-50 via-white to-orange-50/60 p-4 shadow-sm">
+      <div className="flex items-center gap-2">
+        <span className="inline-flex h-7 w-7 items-center justify-center rounded-lg bg-orange-500 text-white">
+          🔥
+        </span>
+        <h3 className="text-sm font-semibold text-orange-900">
+          자주 가는 목적지 TOP 5
+        </h3>
+      </div>
       {items.length === 0 ? (
-        <p className="mt-2 text-xs text-slate-500">운행 기록이 없습니다.</p>
+        <p className="mt-3 text-xs text-orange-700/70">운행 기록이 없습니다.</p>
       ) : (
-        <ol className="mt-2 space-y-1 text-sm">
-          {items.map((it, i) => (
-            <li key={i} className="flex items-center justify-between gap-2">
-              <span className="flex min-w-0 items-center gap-2">
-                <span className="inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-[color:var(--brand-soft)] text-[10px] font-bold text-[color:var(--brand-strong)]">
-                  {i + 1}
-                </span>
-                <span className="truncate font-medium text-slate-800">
-                  {it.destination}
-                </span>
-              </span>
-              <span className="shrink-0 text-xs font-semibold text-slate-700">
-                {it.count}회
-              </span>
-            </li>
-          ))}
+        <ol className="mt-3 space-y-2 text-sm">
+          {items.map((it, i) => {
+            const pct = Math.max(6, (it.count / maxCount) * 100);
+            return (
+              <li key={i}>
+                <div className="flex items-center justify-between gap-2 text-xs">
+                  <span className="flex min-w-0 items-center gap-2">
+                    <span className="inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-orange-500 text-[10px] font-bold text-white">
+                      {i + 1}
+                    </span>
+                    <span className="truncate text-sm font-medium text-slate-800">
+                      {it.destination}
+                    </span>
+                  </span>
+                  <span className="shrink-0 text-xs font-bold text-orange-700">
+                    {it.count}회
+                  </span>
+                </div>
+                <div className="mt-1 h-2 overflow-hidden rounded-full bg-orange-100">
+                  <div
+                    className="h-full rounded-full bg-gradient-to-r from-amber-400 to-orange-500"
+                    style={{ width: `${pct}%` }}
+                  />
+                </div>
+              </li>
+            );
+          })}
         </ol>
       )}
-    </div>
+    </section>
   );
 }
 
 function TopDriversBox({ items }: { items: AdminStats["topDrivers"] }) {
+  const podium = [
+    {
+      medal: "🥇",
+      bg: "bg-gradient-to-br from-yellow-200 via-amber-200 to-yellow-300",
+      border: "border-amber-400",
+      text: "text-amber-900",
+    },
+    {
+      medal: "🥈",
+      bg: "bg-gradient-to-br from-slate-100 via-slate-200 to-slate-300",
+      border: "border-slate-400",
+      text: "text-slate-700",
+    },
+    {
+      medal: "🥉",
+      bg: "bg-gradient-to-br from-orange-200 via-amber-200 to-orange-300",
+      border: "border-orange-400",
+      text: "text-orange-900",
+    },
+  ];
+
   return (
-    <div className="rounded-lg border border-slate-200 bg-slate-50 p-3">
-      <p className="text-[11px] font-semibold uppercase tracking-wide text-[color:var(--brand)]">
-        운행 많이 한 운전자 TOP 3
-      </p>
+    <section className="rounded-2xl border border-amber-200 bg-gradient-to-br from-yellow-50 via-white to-amber-50/60 p-4 shadow-sm">
+      <div className="flex items-center gap-2">
+        <span className="inline-flex h-7 w-7 items-center justify-center rounded-lg bg-amber-500 text-white">
+          🏆
+        </span>
+        <h3 className="text-sm font-semibold text-amber-900">
+          운행 많이 한 운전자 TOP 3
+        </h3>
+      </div>
       {items.length === 0 ? (
-        <p className="mt-2 text-xs text-slate-500">운행 기록이 없습니다.</p>
+        <p className="mt-3 text-xs text-amber-700/70">운행 기록이 없습니다.</p>
       ) : (
-        <ol className="mt-2 grid grid-cols-3 gap-2">
-          {items.map((it, i) => (
-            <li
-              key={i}
-              className="flex flex-col items-center rounded-md bg-white p-2 text-center"
-            >
-              <span
-                className={`inline-flex h-6 w-6 items-center justify-center rounded-full text-[11px] font-bold ${
-                  i === 0
-                    ? "bg-[color:var(--accent)] text-white"
-                    : "bg-[color:var(--brand-soft)] text-[color:var(--brand-strong)]"
-                }`}
+        <ol className="mt-3 grid grid-cols-3 gap-2">
+          {items.map((it, i) => {
+            const cfg = podium[i] ?? podium[2];
+            return (
+              <li
+                key={i}
+                className={`flex flex-col items-center rounded-xl border ${cfg.border} ${cfg.bg} p-3 text-center shadow-sm`}
               >
-                {i + 1}
-              </span>
-              <span className="mt-1 truncate text-sm font-semibold text-slate-900">
-                {it.driver}
-              </span>
-              <span className="text-xs text-slate-500">{it.count}회</span>
-            </li>
-          ))}
+                <span className="text-3xl leading-none">{cfg.medal}</span>
+                <span
+                  className={`mt-2 truncate text-sm font-bold ${cfg.text}`}
+                >
+                  {it.driver}
+                </span>
+                <span className={`text-xs font-medium ${cfg.text} opacity-80`}>
+                  {it.count}회
+                </span>
+              </li>
+            );
+          })}
         </ol>
       )}
-    </div>
+    </section>
   );
 }
 

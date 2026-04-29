@@ -1,5 +1,5 @@
 import * as XLSX from "xlsx";
-import { listDrivingLogs } from "@/app/actions";
+import { isAdmin, listDrivingLogs } from "@/app/actions";
 import { VEHICLE } from "@/lib/vehicle";
 
 export const dynamic = "force-dynamic";
@@ -10,6 +10,10 @@ function formatDate(d: string) {
 }
 
 export async function GET(request: Request) {
+  if (!(await isAdmin())) {
+    return new Response("관리자 권한이 필요합니다.", { status: 403 });
+  }
+
   const url = new URL(request.url);
   const monthRaw = url.searchParams.get("month") ?? "";
   const month = /^\d{4}-\d{2}$/.test(monthRaw) ? monthRaw : "";
@@ -38,7 +42,7 @@ export async function GET(request: Request) {
       "운전자",
       "용무",
       "출발지",
-      "경유지",
+      "목적지",
       "도착지",
       "운행거리(km)",
       "누적거리(km)",
@@ -50,9 +54,9 @@ export async function GET(request: Request) {
     formatDate(r.driven_at),
     r.driver,
     r.purpose,
-    r.departure,
+    VEHICLE.centerName,
     r.waypoint ?? "",
-    r.destination,
+    VEHICLE.centerName,
     Number(r.distance),
     Number(r.total_distance),
     r.confirmed_by,

@@ -1,7 +1,8 @@
 import Link from "next/link";
+import { redirect } from "next/navigation";
 import Header from "@/app/components/Header";
 import NewLogForm from "@/app/new/NewLogForm";
-import { getLatestCumulative } from "@/app/actions";
+import { getDriverSession, getLatestCumulative } from "@/app/actions";
 
 export const dynamic = "force-dynamic";
 
@@ -12,6 +13,9 @@ function todayKR(): string {
 }
 
 export default async function NewLogPage() {
+  const driver = await getDriverSession();
+  if (!driver) redirect("/");
+
   const previous = await getLatestCumulative();
   return (
     <>
@@ -23,7 +27,11 @@ export default async function NewLogPage() {
             ← 목록
           </Link>
         </div>
-        <NewLogForm defaultDate={todayKR()} previousCumulative={previous} />
+        <NewLogForm
+          defaultDate={todayKR()}
+          previousCumulative={previous}
+          driverName={driver.name}
+        />
       </main>
     </>
   );

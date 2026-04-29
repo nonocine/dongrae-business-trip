@@ -64,7 +64,7 @@ export default function LogList({
             </div>
             {log.waypoint && (
               <div className="flex gap-2 sm:col-span-2">
-                <span className="w-14 shrink-0 text-slate-500">경유</span>
+                <span className="w-14 shrink-0 text-slate-500">목적</span>
                 <span className="text-slate-800">{log.waypoint}</span>
               </div>
             )}

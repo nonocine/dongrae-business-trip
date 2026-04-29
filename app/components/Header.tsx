@@ -32,7 +32,7 @@ export default async function Header() {
             </form>
           ) : (
             <Link
-              href="/admin"
+              href="/admin/login"
               className="rounded-md border border-slate-300 bg-white px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50"
             >
               관리자
