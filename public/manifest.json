@@ -1,0 +1,11 @@
+{
+  "name": "동래구청소년센터 차량 운행일지",
+  "short_name": "동차",
+  "icons": [
+    { "src": "/icon.svg", "sizes": "any", "type": "image/svg+xml" }
+  ],
+  "theme_color": "#1a5fb4",
+  "background_color": "#ffffff",
+  "display": "standalone",
+  "start_url": "/"
+}
