@@ -15,7 +15,9 @@ const FREQUENT_PLACES = [
   VEHICLE.centerName,
   "동래구청",
   "부산시청",
-  "기장군청",
+  "양정청소년수련관",
+  "동래시장",
+  "사직동 온나",
 ] as const;
 const CUSTOM = "__custom__";
 const MAX_WAYPOINTS = 5;

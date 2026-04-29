@@ -1,10 +1,12 @@
 import Link from "next/link";
 import Header from "@/app/components/Header";
 import LoginForm from "@/app/login/LoginForm";
+import { listDriverNames } from "@/app/actions";
 
 export const dynamic = "force-dynamic";
 
-export default function LoginPage() {
+export default async function LoginPage() {
+  const driverNames = await listDriverNames();
   return (
     <>
       <Header />
@@ -15,7 +17,7 @@ export default function LoginPage() {
             ← 목록
           </Link>
         </div>
-        <LoginForm />
+        <LoginForm driverNames={driverNames} />
       </main>
     </>
   );

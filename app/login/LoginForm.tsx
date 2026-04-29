@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useState, useTransition } from "react";
 import { loginDriver } from "@/app/actions";
 import { useDriverSession } from "@/app/components/DriverSession";
@@ -8,10 +9,29 @@ const labelCls = "block text-sm font-medium text-slate-700";
 const inputCls =
   "mt-1 block w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm shadow-sm focus:border-[color:var(--brand)] focus:outline-none focus:ring-1 focus:ring-[color:var(--brand)]";
 
-export default function LoginForm() {
+export default function LoginForm({ driverNames }: { driverNames: string[] }) {
   const { signIn } = useDriverSession();
   const [error, setError] = useState<string | null>(null);
   const [pending, startTransition] = useTransition();
+
+  if (driverNames.length === 0) {
+    return (
+      <div className="space-y-3 rounded-xl border border-slate-200 bg-white p-5 text-center shadow-sm">
+        <p className="text-sm text-slate-700">
+          등록된 운전자가 없습니다.
+        </p>
+        <p className="text-xs text-slate-500">
+          관리자에게 운전자 등록을 요청해주세요.
+        </p>
+        <Link
+          href="/admin"
+          className="mt-2 inline-block rounded-md border border-slate-300 bg-white px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50"
+        >
+          관리자 페이지
+        </Link>
+      </div>
+    );
+  }
 
   return (
     <form
@@ -34,15 +54,23 @@ export default function LoginForm() {
         <label htmlFor="name" className={labelCls}>
           이름
         </label>
-        <input
+        <select
           id="name"
           name="name"
-          type="text"
           required
+          defaultValue=""
           autoFocus
-          autoComplete="username"
           className={inputCls}
-        />
+        >
+          <option value="" disabled>
+            운전자를 선택해주세요
+          </option>
+          {driverNames.map((n) => (
+            <option key={n} value={n}>
+              {n}
+            </option>
+          ))}
+        </select>
       </div>
       <div>
         <label htmlFor="password" className={labelCls}>
@@ -73,7 +101,7 @@ export default function LoginForm() {
       </button>
 
       <p className="text-xs text-slate-500">
-        계정이 없다면 관리자에게 등록을 요청해주세요.
+        목록에 본인 이름이 없다면 관리자에게 등록을 요청해주세요.
       </p>
     </form>
   );

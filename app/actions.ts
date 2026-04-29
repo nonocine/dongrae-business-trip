@@ -312,6 +312,15 @@ export async function listDrivers(): Promise<Driver[]> {
   return (data ?? []) as Driver[];
 }
 
+export async function listDriverNames(): Promise<string[]> {
+  const { data, error } = await supabase
+    .from("drivers")
+    .select("name")
+    .order("name", { ascending: true });
+  if (error) throw new Error(error.message);
+  return (data ?? []).map((d) => d.name as string);
+}
+
 export async function addDriver(formData: FormData) {
   await requireAdmin();
   const name = String(formData.get("name") ?? "").trim();
