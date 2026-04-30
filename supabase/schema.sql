@@ -51,56 +51,139 @@ create policy "anon delete business_trips"
   using (true);
 
 -- =========================================================
--- 직원 테이블 (출장자/동행자 드롭다운 + 직원 로그인)
+-- 직원 테이블 (drivers; 차량 어플과 공유)
+--   * 과거 명: employees → drivers 로 통합
+--   * 차량 어플과 동일한 테이블을 공유합니다.
 -- =========================================================
-create table if not exists employees (
+do $$
+begin
+  if exists (select 1 from information_schema.tables
+             where table_schema = 'public' and table_name = 'employees')
+     and not exists (select 1 from information_schema.tables
+             where table_schema = 'public' and table_name = 'drivers')
+  then
+    execute 'alter table employees rename to drivers';
+  end if;
+end $$;
+
+create table if not exists drivers (
   id uuid primary key default gen_random_uuid(),
   name text not null unique,
-  position text,
   rank text,
   password text,
+  is_active boolean not null default true,
   created_at timestamptz not null default now()
 );
 
 -- 기존 테이블이 있다면 새 컬럼 추가
-alter table employees add column if not exists rank text;
-alter table employees add column if not exists password text;
+alter table drivers add column if not exists rank text;
+alter table drivers add column if not exists password text;
+alter table drivers add column if not exists is_active boolean not null default true;
 
 -- 직급 값 제약 (관장/부장/팀장/팀원 중 하나)
 do $$
 begin
   if not exists (
-    select 1 from pg_constraint where conname = 'employees_rank_check'
+    select 1 from pg_constraint where conname = 'drivers_rank_check'
   ) then
-    alter table employees add constraint employees_rank_check
+    alter table drivers add constraint drivers_rank_check
       check (rank is null or rank in ('관장','부장','팀장','팀원'));
   end if;
 end $$;
 
-create index if not exists employees_name_idx on employees (name);
+create index if not exists drivers_name_idx on drivers (name);
+create index if not exists drivers_is_active_idx on drivers (is_active);
 
-alter table employees enable row level security;
+alter table drivers enable row level security;
 
-drop policy if exists "anon read employees" on employees;
-create policy "anon read employees"
-  on employees for select
-  using (true);
+drop policy if exists "anon read drivers" on drivers;
+create policy "anon read drivers"
+  on drivers for select using (true);
 
-drop policy if exists "anon insert employees" on employees;
-create policy "anon insert employees"
-  on employees for insert
-  with check (true);
+drop policy if exists "anon insert drivers" on drivers;
+create policy "anon insert drivers"
+  on drivers for insert with check (true);
 
-drop policy if exists "anon update employees" on employees;
-create policy "anon update employees"
-  on employees for update
-  using (true)
-  with check (true);
+drop policy if exists "anon update drivers" on drivers;
+create policy "anon update drivers"
+  on drivers for update using (true) with check (true);
 
-drop policy if exists "anon delete employees" on employees;
-create policy "anon delete employees"
-  on employees for delete
-  using (true);
+drop policy if exists "anon delete drivers" on drivers;
+create policy "anon delete drivers"
+  on drivers for delete using (true);
+
+-- =========================================================
+-- 차량 운행 일지 (driving_logs; 차량 어플과 공유)
+-- =========================================================
+create table if not exists driving_logs (
+  id uuid primary key default gen_random_uuid(),
+  driven_at date not null,
+  driver text not null,
+  purpose text not null default '',
+  departure text,
+  waypoint text,
+  destination text,
+  distance numeric(10,1),
+  total_distance numeric(10,1),
+  confirmed_by text,
+  created_at timestamptz not null default now()
+);
+
+create index if not exists driving_logs_driven_at_idx on driving_logs (driven_at desc);
+create index if not exists driving_logs_driver_idx on driving_logs (driver);
+
+alter table driving_logs enable row level security;
+
+drop policy if exists "anon read driving_logs" on driving_logs;
+create policy "anon read driving_logs"
+  on driving_logs for select using (true);
+
+drop policy if exists "anon insert driving_logs" on driving_logs;
+create policy "anon insert driving_logs"
+  on driving_logs for insert with check (true);
+
+drop policy if exists "anon update driving_logs" on driving_logs;
+create policy "anon update driving_logs"
+  on driving_logs for update using (true) with check (true);
+
+drop policy if exists "anon delete driving_logs" on driving_logs;
+create policy "anon delete driving_logs"
+  on driving_logs for delete using (true);
+
+-- =========================================================
+-- 차량 정보 / 누적거리 (settings; 차량 어플과 공유)
+--   * 컬럼 형식이 아닌 Key-Value 방식으로 저장됩니다.
+--   * key 예시: 'initial_mileage', 'vehicle_number',
+--     'vehicle_model', 'insurance_company'
+--   * value 는 항상 text. 숫자값은 어플에서 읽을 때 변환합니다.
+-- =========================================================
+create table if not exists settings (
+  id uuid primary key default gen_random_uuid(),
+  key text not null unique,
+  value text,
+  created_at timestamptz not null default now()
+);
+
+create index if not exists settings_key_idx on settings (key);
+
+-- 누적거리 기본값 (없을 때만 추가)
+insert into settings (key, value)
+values ('initial_mileage', '0')
+on conflict (key) do nothing;
+
+alter table settings enable row level security;
+
+drop policy if exists "anon read settings" on settings;
+create policy "anon read settings"
+  on settings for select using (true);
+
+drop policy if exists "anon update settings" on settings;
+create policy "anon update settings"
+  on settings for update using (true) with check (true);
+
+drop policy if exists "anon insert settings" on settings;
+create policy "anon insert settings"
+  on settings for insert with check (true);
 
 -- =========================================================
 -- 통합 활동 테이블 (외근 / 출장 / 국내연수 / 해외연수 / 교육)
@@ -139,6 +222,8 @@ create table if not exists activities (
   education_hours numeric(5,1),
   attendees_count integer,
 
+  driving_log_id uuid references driving_logs(id) on delete set null,
+
   created_at timestamptz not null default now()
 );
 
@@ -169,7 +254,10 @@ alter table activities add column if not exists education_type text;
 alter table activities add column if not exists instructor text;
 alter table activities add column if not exists education_hours numeric(5,1);
 alter table activities add column if not exists attendees_count integer;
+alter table activities add column if not exists driving_log_id uuid references driving_logs(id) on delete set null;
 alter table activities add column if not exists created_at timestamptz not null default now();
+
+create index if not exists activities_driving_log_id_idx on activities (driving_log_id);
 
 create index if not exists activities_activity_type_idx on activities (activity_type);
 create index if not exists activities_start_date_idx on activities (start_date desc);

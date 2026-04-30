@@ -5,7 +5,7 @@ import ActivityList from "@/app/components/ActivityList";
 import {
   getSession,
   listActivities,
-  listEmployeeNames,
+  listDriverNames,
 } from "@/app/actions";
 
 export const dynamic = "force-dynamic";
@@ -16,9 +16,9 @@ export default async function Home() {
   if (!session) {
     let employees: string[] = [];
     try {
-      employees = await listEmployeeNames();
+      employees = await listDriverNames();
     } catch {
-      // employees 테이블이 아직 없으면 빈 목록
+      // drivers 테이블이 아직 없으면 빈 목록
     }
     return (
       <>

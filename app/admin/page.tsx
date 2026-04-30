@@ -6,7 +6,7 @@ import {
   getActivityAdminStats,
   isAdmin,
   listActivities,
-  listEmployees,
+  listDrivers,
 } from "@/app/actions";
 
 export const dynamic = "force-dynamic";
@@ -17,7 +17,8 @@ export default async function AdminPage() {
   }
 
   const [employees, stats, activities] = await Promise.all([
-    listEmployees(),
+    // 관리자 화면은 비활성 직원도 함께 조회 (퇴사자 보기 토글에서 사용)
+    listDrivers({ includeInactive: true }),
     getActivityAdminStats(),
     listActivities(),
   ]);

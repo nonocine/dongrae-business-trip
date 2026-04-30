@@ -7,15 +7,22 @@ import {
   supabase,
   normalizeBusinessTrip,
   normalizeActivity,
+  normalizeDrivingLog,
+  settingsFromRows,
   toStringArray,
   EMPLOYEE_RANKS,
   ACTIVITY_KINDS,
+  DEFAULT_DEPARTURE,
+  DEFAULT_VEHICLE_CONFIRMER,
   isActivityKind,
   type Activity,
   type ActivityKind,
   type BusinessTrip,
+  type Driver,
+  type DrivingLog,
   type Employee,
   type EmployeeRank,
+  type Settings,
   type TransportType,
 } from "@/lib/supabase";
 
@@ -96,13 +103,19 @@ export async function loginEmployee(formData: FormData) {
     return { ok: false as const, message: "4자리 숫자 비밀번호를 입력해주세요." };
   }
   const { data, error } = await supabase
-    .from("employees")
-    .select("name, password")
+    .from("drivers")
+    .select("name, password, is_active")
     .eq("name", name)
     .maybeSingle();
   if (error) return { ok: false as const, message: error.message };
   if (!data) {
     return { ok: false as const, message: "등록되지 않은 직원입니다." };
+  }
+  if (data.is_active === false) {
+    return {
+      ok: false as const,
+      message: "퇴사 처리된 계정입니다. 관리자에게 문의해주세요.",
+    };
   }
   if (!data.password) {
     return {
@@ -426,24 +439,51 @@ export async function getAdminStats(): Promise<AdminStats> {
 }
 
 // =====================================================================
-// Employees (직원 목록)
+// Drivers (직원 목록 — 차량 어플과 공유)
 // =====================================================================
-export async function listEmployees(): Promise<Employee[]> {
-  const { data, error } = await supabase
-    .from("employees")
-    .select("id,name,position,rank,password,created_at")
+const DRIVER_COLUMNS = "id,name,rank,password,is_active,created_at";
+
+export async function listDrivers(opts?: {
+  includeInactive?: boolean;
+}): Promise<Driver[]> {
+  let query = supabase
+    .from("drivers")
+    .select(DRIVER_COLUMNS)
     .order("created_at", { ascending: true });
+  if (!opts?.includeInactive) {
+    query = query.eq("is_active", true);
+  }
+  const { data, error } = await query;
   if (error) throw new Error(error.message);
-  return (data ?? []) as Employee[];
+  return (data ?? []).map((row) => ({
+    id: String((row as { id: unknown }).id ?? ""),
+    name: String((row as { name: unknown }).name ?? ""),
+    rank: ((row as { rank: unknown }).rank as EmployeeRank | null) ?? null,
+    password:
+      ((row as { password: unknown }).password as string | null) ?? null,
+    is_active: (row as { is_active: unknown }).is_active !== false,
+    created_at: String((row as { created_at: unknown }).created_at ?? ""),
+  }));
 }
 
-export async function listEmployeeNames(): Promise<string[]> {
+// 호환성을 위한 기존 이름 (활성 직원만 반환)
+export async function listEmployees(): Promise<Employee[]> {
+  return listDrivers({ includeInactive: true });
+}
+
+export async function listDriverNames(): Promise<string[]> {
   const { data, error } = await supabase
-    .from("employees")
+    .from("drivers")
     .select("name")
+    .eq("is_active", true)
     .order("name", { ascending: true });
   if (error) throw new Error(error.message);
   return (data ?? []).map((e) => e.name as string);
+}
+
+// 호환성: 기존 코드가 listEmployeeNames 를 import 합니다.
+export async function listEmployeeNames(): Promise<string[]> {
+  return listDriverNames();
 }
 
 function validateRank(raw: string): EmployeeRank | null {
@@ -454,7 +494,7 @@ function validateRank(raw: string): EmployeeRank | null {
   return null;
 }
 
-export async function addEmployee(formData: FormData) {
+export async function addDriver(formData: FormData) {
   await requireAdmin();
   const name = String(formData.get("name") ?? "").trim();
   const rankRaw = String(formData.get("rank") ?? "").trim();
@@ -467,9 +507,27 @@ export async function addEmployee(formData: FormData) {
     throw new Error("4자리 숫자 비밀번호를 입력해주세요.");
   }
 
+  // 동일 이름의 비활성 직원이 있다면 복귀 처리
+  const { data: existing } = await supabase
+    .from("drivers")
+    .select("id, is_active")
+    .eq("name", name)
+    .maybeSingle();
+  if (existing && existing.is_active === false) {
+    const { error: upErr } = await supabase
+      .from("drivers")
+      .update({ rank, password, is_active: true })
+      .eq("id", existing.id);
+    if (upErr) throw new Error(upErr.message);
+    revalidatePath("/admin");
+    revalidatePath("/new");
+    revalidatePath("/");
+    return;
+  }
+
   const { error } = await supabase
-    .from("employees")
-    .insert({ name, rank, password });
+    .from("drivers")
+    .insert({ name, rank, password, is_active: true });
   if (error) {
     if (error.code === "23505") {
       throw new Error("이미 같은 이름의 직원이 있습니다.");
@@ -481,7 +539,12 @@ export async function addEmployee(formData: FormData) {
   revalidatePath("/");
 }
 
-export async function updateEmployee(formData: FormData) {
+// 호환성: 기존 호출자가 addEmployee 를 사용
+export async function addEmployee(formData: FormData) {
+  return addDriver(formData);
+}
+
+export async function updateDriver(formData: FormData) {
   await requireAdmin();
   const id = String(formData.get("id") ?? "");
   const rankRaw = String(formData.get("rank") ?? "").trim();
@@ -491,7 +554,6 @@ export async function updateEmployee(formData: FormData) {
   const rank = validateRank(rankRaw);
   if (!rank) throw new Error("직급을 선택해주세요.");
 
-  // 비밀번호는 입력 시에만 검증·변경; 비워두면 기존값 유지
   const update: { rank: EmployeeRank; password?: string } = { rank };
   if (password.length > 0) {
     if (!/^\d{4}$/.test(password)) {
@@ -500,22 +562,127 @@ export async function updateEmployee(formData: FormData) {
     update.password = password;
   }
 
-  const { error } = await supabase
-    .from("employees")
-    .update(update)
-    .eq("id", id);
+  const { error } = await supabase.from("drivers").update(update).eq("id", id);
   if (error) throw new Error(error.message);
   revalidatePath("/admin");
 }
 
-export async function deleteEmployee(formData: FormData) {
+export async function updateEmployee(formData: FormData) {
+  return updateDriver(formData);
+}
+
+// 소프트 삭제: is_active = false
+export async function deleteDriver(formData: FormData) {
   await requireAdmin();
   const id = String(formData.get("id") ?? "");
   if (!id) throw new Error("직원 ID가 없습니다.");
-  const { error } = await supabase.from("employees").delete().eq("id", id);
+  const { error } = await supabase
+    .from("drivers")
+    .update({ is_active: false })
+    .eq("id", id);
   if (error) throw new Error(error.message);
   revalidatePath("/admin");
   revalidatePath("/new");
+  revalidatePath("/");
+}
+
+export async function deleteEmployee(formData: FormData) {
+  return deleteDriver(formData);
+}
+
+// 복귀: is_active = true
+export async function restoreDriver(formData: FormData) {
+  await requireAdmin();
+  const id = String(formData.get("id") ?? "");
+  if (!id) throw new Error("직원 ID가 없습니다.");
+  const { error } = await supabase
+    .from("drivers")
+    .update({ is_active: true })
+    .eq("id", id);
+  if (error) throw new Error(error.message);
+  revalidatePath("/admin");
+  revalidatePath("/new");
+  revalidatePath("/");
+}
+
+// =====================================================================
+// Settings (차량 정보 / 누적거리 — 차량 어플과 공유)
+//   * settings 테이블은 (key, value) Key-Value 구조입니다.
+//   * value 는 항상 text. 숫자 키는 읽을 때 Number, 쓸 때 String 변환.
+// =====================================================================
+export async function getSettings(): Promise<Settings | null> {
+  const { data, error } = await supabase
+    .from("settings")
+    .select("key, value");
+  if (error) {
+    // 테이블이 없거나 권한 부족 — 무시하고 null 반환
+    return null;
+  }
+  if (!data || data.length === 0) return null;
+  return settingsFromRows(
+    data as Array<{ key?: unknown; value?: unknown }>
+  );
+}
+
+// 단일 키 조회 (raw text)
+async function getSettingValue(key: string): Promise<string | null> {
+  const { data, error } = await supabase
+    .from("settings")
+    .select("value")
+    .eq("key", key)
+    .maybeSingle();
+  if (error || !data) return null;
+  const v = (data as { value: unknown }).value;
+  return v == null ? null : String(v);
+}
+
+// 단일 키 저장 (없으면 insert, 있으면 update)
+async function setSettingValue(key: string, value: string): Promise<void> {
+  const { data: existing } = await supabase
+    .from("settings")
+    .select("id")
+    .eq("key", key)
+    .maybeSingle();
+  if (existing) {
+    const { error } = await supabase
+      .from("settings")
+      .update({ value })
+      .eq("key", key);
+    if (error) throw new Error(error.message);
+  } else {
+    const { error } = await supabase
+      .from("settings")
+      .insert({ key, value });
+    if (error) throw new Error(error.message);
+  }
+}
+
+// =====================================================================
+// Driving logs (차량 운행 일지 — 차량 어플과 공유)
+// =====================================================================
+export async function getLatestDrivingLog(): Promise<DrivingLog | null> {
+  const { data, error } = await supabase
+    .from("driving_logs")
+    .select("*")
+    .order("driven_at", { ascending: false })
+    .order("created_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  if (error) return null;
+  if (!data) return null;
+  return normalizeDrivingLog(data as Record<string, unknown>);
+}
+
+export async function getDrivingLog(id: string): Promise<DrivingLog | null> {
+  if (!id) return null;
+  const { data, error } = await supabase
+    .from("driving_logs")
+    .select("*")
+    .eq("id", id)
+    .maybeSingle();
+  if (error) return null;
+  if (!data) return null;
+  return normalizeDrivingLog(data as Record<string, unknown>);
 }
 
 // =====================================================================
@@ -581,6 +748,84 @@ export async function createActivity(formData: FormData) {
   if (!start_date) throw new Error("날짜를 입력해주세요.");
   if (!purpose) throw new Error("목적을 입력해주세요.");
 
+  // ---------------------------------------------------------------
+  // 차량 사용 시 driving_logs 자동 저장 (외근/출장 + 기관차량)
+  // ---------------------------------------------------------------
+  const usesVehicleLog =
+    (kind === "outside_work" || kind === "business_trip") &&
+    transport_type === "vehicle";
+
+  let drivingLogId: string | null = null;
+  let prevTotalMileage: number | null = null;
+
+  if (usesVehicleLog) {
+    // 출발지/도착지/확인자는 고정값. 출장지(location)는 위 활동 폼에서 입력한 값을 사용.
+    const visitLocation = location;
+    if (!visitLocation) {
+      throw new Error("차량 사용 시 출장지를 입력해주세요.");
+    }
+    const totalDistance = numOrNull(formData.get("driving_total_distance"));
+
+    if (totalDistance == null) {
+      throw new Error("차량 사용 시 누적거리를 입력해주세요.");
+    }
+
+    // 직전 누적거리 조회 (settings.initial_mileage 키)
+    const prevRaw = await getSettingValue("initial_mileage");
+    prevTotalMileage = prevRaw != null ? Number(prevRaw) : 0;
+    if (!Number.isFinite(prevTotalMileage)) prevTotalMileage = 0;
+    if (totalDistance < prevTotalMileage) {
+      throw new Error(
+        `누적거리는 직전 운행(${prevTotalMileage.toLocaleString("ko-KR")}km)보다 작을 수 없습니다.`
+      );
+    }
+    const distance = Math.max(0, totalDistance - prevTotalMileage);
+
+    const drivingPurpose = [visitLocation, purpose].filter(Boolean).join(" ").trim();
+
+    const { data: dlog, error: dlogErr } = await supabase
+      .from("driving_logs")
+      .insert({
+        driven_at: start_date,
+        driver: author,
+        purpose: drivingPurpose || purpose,
+        departure: DEFAULT_DEPARTURE,
+        waypoint: visitLocation,
+        destination: DEFAULT_DEPARTURE,
+        distance,
+        total_distance: totalDistance,
+        confirmed_by: DEFAULT_VEHICLE_CONFIRMER,
+      })
+      .select("id")
+      .single();
+    if (dlogErr) {
+      throw new Error(`차량 운행 기록 저장 실패: ${dlogErr.message}`);
+    }
+    drivingLogId = dlog.id as string;
+
+    // settings.initial_mileage 동기화 (차량 어플과 양방향 누적거리 공유)
+    try {
+      await setSettingValue("initial_mileage", String(totalDistance));
+    } catch (e) {
+      await supabase.from("driving_logs").delete().eq("id", drivingLogId);
+      const msg = e instanceof Error ? e.message : "알 수 없는 오류";
+      throw new Error(`차량 누적거리 동기화 실패: ${msg}`);
+    }
+  }
+
+  async function rollbackVehicle() {
+    if (drivingLogId) {
+      await supabase.from("driving_logs").delete().eq("id", drivingLogId);
+    }
+    if (prevTotalMileage != null) {
+      try {
+        await setSettingValue("initial_mileage", String(prevTotalMileage));
+      } catch {
+        // 롤백 실패는 무시 (이미 에러 throw 중)
+      }
+    }
+  }
+
   const photoFiles = formData
     .getAll("photos")
     .filter((v): v is File => v instanceof File);
@@ -594,11 +839,19 @@ export async function createActivity(formData: FormData) {
     throw new Error("인증샷은 최대 5장까지 업로드할 수 있습니다.");
   }
 
-  const [photos, receipts, certificate] = await Promise.all([
-    uploadFiles(STORAGE_BUCKET_PHOTOS, photoFiles),
-    uploadFiles(STORAGE_BUCKET_RECEIPTS, receiptFiles),
-    uploadFiles(STORAGE_BUCKET_RECEIPTS, certificateFiles),
-  ]);
+  let photos: string[] = [];
+  let receipts: string[] = [];
+  let certificate: string[] = [];
+  try {
+    [photos, receipts, certificate] = await Promise.all([
+      uploadFiles(STORAGE_BUCKET_PHOTOS, photoFiles),
+      uploadFiles(STORAGE_BUCKET_RECEIPTS, receiptFiles),
+      uploadFiles(STORAGE_BUCKET_RECEIPTS, certificateFiles),
+    ]);
+  } catch (e) {
+    await rollbackVehicle();
+    throw e;
+  }
 
   const { data, error } = await supabase
     .from("activities")
@@ -630,10 +883,15 @@ export async function createActivity(formData: FormData) {
       instructor,
       education_hours,
       attendees_count,
+      driving_log_id: drivingLogId,
     })
     .select("id")
     .single();
-  if (error) throw new Error(error.message);
+  if (error) {
+    // 트랜잭션 처리: 활동 저장 실패 시 운행 기록 + 누적거리 롤백
+    await rollbackVehicle();
+    throw new Error(error.message);
+  }
 
   revalidatePath("/");
   revalidatePath("/admin");
@@ -697,38 +955,57 @@ export async function getActivity(id: string): Promise<Activity | null> {
 }
 
 export async function deleteActivity(formData: FormData) {
-  await requireAdmin();
+  const session = await requireSession();
   const id = String(formData.get("id") ?? "");
   if (!id) throw new Error("삭제할 항목 ID가 없습니다.");
 
   const { data: row, error: fetchErr } = await supabase
     .from("activities")
-    .select("photos, receipts, certificate")
+    .select("author, photos, receipts, certificate, driving_log_id")
     .eq("id", id)
     .maybeSingle();
   if (fetchErr) throw new Error(fetchErr.message);
+  if (!row) throw new Error("삭제할 활동을 찾을 수 없습니다.");
 
-  if (row) {
-    const photoKeys = toStringArray(row.photos)
-      .map((u) => extractStorageKey(u, STORAGE_BUCKET_PHOTOS))
-      .filter((k): k is string => !!k);
-    const receiptKeys = [
-      ...toStringArray(row.receipts),
-      ...toStringArray(row.certificate),
-    ]
-      .map((u) => extractStorageKey(u, STORAGE_BUCKET_RECEIPTS))
-      .filter((k): k is string => !!k);
+  // 권한: 관리자 또는 본인 활동
+  if (session.kind !== "admin" && (row as { author: string }).author !== session.name) {
+    throw new Error("본인 활동만 삭제할 수 있습니다.");
+  }
 
-    if (photoKeys.length > 0) {
-      await supabase.storage.from(STORAGE_BUCKET_PHOTOS).remove(photoKeys);
-    }
-    if (receiptKeys.length > 0) {
-      await supabase.storage.from(STORAGE_BUCKET_RECEIPTS).remove(receiptKeys);
-    }
+  const photoKeys = toStringArray(row.photos)
+    .map((u) => extractStorageKey(u, STORAGE_BUCKET_PHOTOS))
+    .filter((k): k is string => !!k);
+  const receiptKeys = [
+    ...toStringArray(row.receipts),
+    ...toStringArray(row.certificate),
+  ]
+    .map((u) => extractStorageKey(u, STORAGE_BUCKET_RECEIPTS))
+    .filter((k): k is string => !!k);
+
+  if (photoKeys.length > 0) {
+    await supabase.storage.from(STORAGE_BUCKET_PHOTOS).remove(photoKeys);
+  }
+  if (receiptKeys.length > 0) {
+    await supabase.storage.from(STORAGE_BUCKET_RECEIPTS).remove(receiptKeys);
   }
 
   const { error } = await supabase.from("activities").delete().eq("id", id);
   if (error) throw new Error(error.message);
+
+  // 연결된 운행 기록 동시 삭제 (소유자만; 운행자가 본인일 때)
+  const drivingLogId = (row as { driving_log_id: string | null })
+    .driving_log_id;
+  if (drivingLogId) {
+    if (session.kind === "admin") {
+      await supabase.from("driving_logs").delete().eq("id", drivingLogId);
+    } else {
+      await supabase
+        .from("driving_logs")
+        .delete()
+        .eq("id", drivingLogId)
+        .eq("driver", session.name);
+    }
+  }
 
   revalidatePath("/");
   revalidatePath("/admin");

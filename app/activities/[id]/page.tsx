@@ -2,7 +2,12 @@ import Link from "next/link";
 import { redirect } from "next/navigation";
 import Header from "@/app/components/Header";
 import ActivityDetail from "@/app/activities/[id]/ActivityDetail";
-import { getActivity, getSession } from "@/app/actions";
+import {
+  getActivity,
+  getDrivingLog,
+  getSession,
+  getSettings,
+} from "@/app/actions";
 
 export const dynamic = "force-dynamic";
 
@@ -18,6 +23,13 @@ export default async function ActivityDetailPage({
   ]);
   if (!activity || !session) redirect("/");
 
+  const [drivingLog, settings] = activity.driving_log_id
+    ? await Promise.all([
+        getDrivingLog(activity.driving_log_id),
+        getSettings(),
+      ])
+    : [null, null];
+
   return (
     <>
       <Header />
@@ -30,7 +42,10 @@ export default async function ActivityDetailPage({
         </div>
         <ActivityDetail
           activity={activity}
+          drivingLog={drivingLog}
+          settings={settings}
           isAdmin={session.kind === "admin"}
+          sessionName={session.kind === "employee" ? session.name : null}
         />
       </main>
     </>

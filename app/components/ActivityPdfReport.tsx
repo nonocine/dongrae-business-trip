@@ -3,6 +3,8 @@ import {
   TRANSPORT_LABEL,
   type Activity,
   type ActivityKind,
+  type DrivingLog,
+  type Settings,
 } from "@/lib/supabase";
 
 function formatKoreanDate(d: string | null) {
@@ -34,7 +36,15 @@ const REPORT_TITLE: Record<ActivityKind, string> = {
   education: "교 육 보 고 서",
 };
 
-export default function ActivityPdfReport({ activity }: { activity: Activity }) {
+export default function ActivityPdfReport({
+  activity,
+  drivingLog,
+  settings,
+}: {
+  activity: Activity;
+  drivingLog?: DrivingLog | null;
+  settings?: Settings | null;
+}) {
   const photos = activity.photos.slice(0, 4);
   const a = activity;
 
@@ -224,6 +234,163 @@ export default function ActivityPdfReport({ activity }: { activity: Activity }) 
         content={a.content || "-"}
       />
       <Block label="결과 및 성과" content={a.result || "-"} />
+
+      {/* 차량 운행 정보 */}
+      {drivingLog && (
+        <>
+          <SectionTitle>차량 운행 정보</SectionTitle>
+          <table
+            style={{
+              width: "100%",
+              marginTop: "4px",
+              borderCollapse: "collapse",
+              fontSize: "13px",
+            }}
+          >
+            <tbody>
+              {settings &&
+                (settings.vehicle_model || settings.vehicle_number) && (
+                  <tr>
+                    <th
+                      style={{
+                        width: "100px",
+                        padding: "7px 10px",
+                        background: "#f1f5f9",
+                        border: "1px solid #cbd5e1",
+                        textAlign: "center",
+                        fontWeight: 600,
+                      }}
+                    >
+                      차종/차량번호
+                    </th>
+                    <td
+                      style={{
+                        padding: "7px 12px",
+                        border: "1px solid #cbd5e1",
+                      }}
+                    >
+                      {[settings.vehicle_model, settings.vehicle_number]
+                        .filter(Boolean)
+                        .join(" / ") || "-"}
+                    </td>
+                  </tr>
+                )}
+              <tr>
+                <th
+                  style={{
+                    width: "100px",
+                    padding: "7px 10px",
+                    background: "#f1f5f9",
+                    border: "1px solid #cbd5e1",
+                    textAlign: "center",
+                    fontWeight: 600,
+                  }}
+                >
+                  운전자
+                </th>
+                <td style={{ padding: "7px 12px", border: "1px solid #cbd5e1" }}>
+                  {drivingLog.driver}
+                </td>
+              </tr>
+              <tr>
+                <th
+                  style={{
+                    width: "100px",
+                    padding: "7px 10px",
+                    background: "#f1f5f9",
+                    border: "1px solid #cbd5e1",
+                    textAlign: "center",
+                    fontWeight: 600,
+                  }}
+                >
+                  출발
+                </th>
+                <td style={{ padding: "7px 12px", border: "1px solid #cbd5e1" }}>
+                  {drivingLog.departure || "-"}
+                </td>
+              </tr>
+              <tr>
+                <th
+                  style={{
+                    width: "100px",
+                    padding: "7px 10px",
+                    background: "#f1f5f9",
+                    border: "1px solid #cbd5e1",
+                    textAlign: "center",
+                    fontWeight: 600,
+                  }}
+                >
+                  출장지
+                </th>
+                <td style={{ padding: "7px 12px", border: "1px solid #cbd5e1" }}>
+                  {drivingLog.waypoint || "-"}
+                </td>
+              </tr>
+              <tr>
+                <th
+                  style={{
+                    width: "100px",
+                    padding: "7px 10px",
+                    background: "#f1f5f9",
+                    border: "1px solid #cbd5e1",
+                    textAlign: "center",
+                    fontWeight: 600,
+                  }}
+                >
+                  도착
+                </th>
+                <td style={{ padding: "7px 12px", border: "1px solid #cbd5e1" }}>
+                  {drivingLog.destination || "-"}
+                </td>
+              </tr>
+              <tr>
+                <th
+                  style={{
+                    width: "100px",
+                    padding: "7px 10px",
+                    background: "#f1f5f9",
+                    border: "1px solid #cbd5e1",
+                    textAlign: "center",
+                    fontWeight: 600,
+                  }}
+                >
+                  운행거리
+                </th>
+                <td style={{ padding: "7px 12px", border: "1px solid #cbd5e1" }}>
+                  {drivingLog.distance != null
+                    ? `${drivingLog.distance.toLocaleString("ko-KR")} km`
+                    : "-"}
+                  {drivingLog.total_distance != null && (
+                    <span style={{ marginLeft: 8, color: "#64748b" }}>
+                      (누적{" "}
+                      {drivingLog.total_distance.toLocaleString("ko-KR")} km)
+                    </span>
+                  )}
+                </td>
+              </tr>
+              {drivingLog.confirmed_by && (
+                <tr>
+                  <th
+                    style={{
+                      width: "100px",
+                      padding: "7px 10px",
+                      background: "#f1f5f9",
+                      border: "1px solid #cbd5e1",
+                      textAlign: "center",
+                      fontWeight: 600,
+                    }}
+                  >
+                    확인자
+                  </th>
+                  <td style={{ padding: "7px 12px", border: "1px solid #cbd5e1" }}>
+                    {drivingLog.confirmed_by}
+                  </td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+        </>
+      )}
 
       {/* 인증샷 */}
       {photos.length > 0 && (

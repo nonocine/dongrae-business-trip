@@ -4,10 +4,13 @@ import Link from "next/link";
 import { useState, useTransition } from "react";
 import { createActivity } from "@/app/actions";
 import {
+  DEFAULT_DEPARTURE,
+  DEFAULT_VEHICLE_CONFIRMER,
   TRANSPORT_LABEL,
   TRANSPORT_ICON,
   getAllowedTransports,
   type ActivityKind,
+  type Settings,
   type TransportType,
 } from "@/lib/supabase";
 
@@ -24,6 +27,7 @@ type Props = {
   defaultDate: string;
   employees: string[];
   lockedTraveler: string | null;
+  settings: Settings | null;
 };
 
 const KIND_DATE_LABEL: Record<
@@ -42,6 +46,7 @@ export default function ActivityForm({
   defaultDate,
   employees,
   lockedTraveler,
+  settings,
 }: Props) {
   const allowedTransports = getAllowedTransports(kind);
   const showTransport =
@@ -117,6 +122,18 @@ export default function ActivityForm({
   const [certFiles, setCertFiles] = useState<File[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [pending, startTransition] = useTransition();
+
+  // 차량(기관차량) 사용 시 driving_logs 자동 작성용 입력
+  const showDrivingFields =
+    (kind === "outside_work" || kind === "business_trip") &&
+    transport === "vehicle";
+  const [totalDistance, setTotalDistance] = useState<string>("");
+  const prevMileage = settings?.initial_mileage ?? 0;
+  const totalNum = Number(totalDistance);
+  const drivingDistance =
+    Number.isFinite(totalNum) && totalDistance !== ""
+      ? Math.max(0, totalNum - prevMileage)
+      : null;
 
   function addCompanion() {
     const v = companionPick.trim();
@@ -479,6 +496,88 @@ export default function ActivityForm({
                 </label>
               );
             })}
+          </div>
+        </div>
+      )}
+
+      {/* 차량 운행 정보 (외근/출장 + 기관차량) */}
+      {showDrivingFields && (
+        <div className="space-y-3 rounded-lg border border-blue-200 bg-blue-50/40 p-4">
+          <div className="flex items-center justify-between">
+            <h4 className="text-sm font-semibold text-blue-900">
+              🚗 차량 운행 정보
+            </h4>
+            {settings && (settings.vehicle_number || settings.vehicle_model) && (
+              <span className="text-xs text-blue-700">
+                {[settings.vehicle_model, settings.vehicle_number]
+                  .filter(Boolean)
+                  .join(" · ")}
+              </span>
+            )}
+          </div>
+          <p className="text-xs text-blue-800/80">
+            저장 시 운행일지에도 함께 기록되며, 차량 누적거리가 자동으로
+            업데이트됩니다. 위에 입력한 <strong>출장지(장소)</strong>가 운행일지의
+            출장지로 자동 저장됩니다.
+          </p>
+
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+            <div>
+              <label className={labelCls}>출발지</label>
+              <div className="mt-1 rounded-md border border-slate-200 bg-slate-100 px-3 py-2 text-sm text-slate-600">
+                {DEFAULT_DEPARTURE}
+              </div>
+            </div>
+            <div>
+              <label className={labelCls}>도착지</label>
+              <div className="mt-1 rounded-md border border-slate-200 bg-slate-100 px-3 py-2 text-sm text-slate-600">
+                {DEFAULT_DEPARTURE}
+              </div>
+            </div>
+          </div>
+
+          <div>
+            <label className={labelCls}>확인자</label>
+            <div className="mt-1 rounded-md border border-slate-200 bg-slate-100 px-3 py-2 text-sm text-slate-600">
+              {DEFAULT_VEHICLE_CONFIRMER}
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+            <div>
+              <label className={labelCls}>현재 누적거리</label>
+              <div className="mt-1 rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-sm font-mono text-slate-700">
+                {prevMileage.toLocaleString("ko-KR")} km
+              </div>
+            </div>
+            <div>
+              <label htmlFor="driving_total_distance" className={labelCls}>
+                운행 후 누적거리 (km){" "}
+                <span className="text-red-500">*</span>
+              </label>
+              <input
+                id="driving_total_distance"
+                name="driving_total_distance"
+                type="number"
+                min={prevMileage}
+                step="0.1"
+                inputMode="decimal"
+                required
+                value={totalDistance}
+                onChange={(e) => setTotalDistance(e.target.value)}
+                className={inputCls}
+              />
+            </div>
+          </div>
+
+          <div className="rounded-md bg-white px-3 py-2 text-xs text-slate-700 shadow-sm">
+            운행거리:{" "}
+            <span className="font-semibold text-blue-700">
+              {drivingDistance == null
+                ? "-"
+                : `${drivingDistance.toLocaleString("ko-KR")} km`}
+            </span>
+            <span className="ml-2 text-slate-500">(자동 계산)</span>
           </div>
         </div>
       )}

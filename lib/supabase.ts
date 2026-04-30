@@ -137,8 +137,87 @@ export type Activity = {
   education_hours: number | null;
   attendees_count: number | null;
 
+  driving_log_id: string | null;
+
   created_at: string;
 };
+
+// 차량 운행 기본 출발지/도착지 (왕복 고정)
+export const DEFAULT_DEPARTURE = "동래구청소년센터";
+// 차량 운행 기본 확인자 (관장 확인)
+export const DEFAULT_VEHICLE_CONFIRMER = "허일수";
+
+export type DrivingLog = {
+  id: string;
+  driven_at: string;
+  driver: string;
+  purpose: string;
+  departure: string | null;
+  waypoint: string | null;
+  destination: string | null;
+  distance: number | null;
+  total_distance: number | null;
+  confirmed_by: string | null;
+  created_at: string;
+};
+
+export type Settings = {
+  id: number;
+  vehicle_number: string | null;
+  vehicle_model: string | null;
+  insurance_company: string | null;
+  initial_mileage: number | null;
+  updated_at: string | null;
+};
+
+export function normalizeDrivingLog(raw: Record<string, unknown>): DrivingLog {
+  return {
+    id: String(raw.id ?? ""),
+    driven_at: String(raw.driven_at ?? ""),
+    driver: String(raw.driver ?? ""),
+    purpose: String(raw.purpose ?? ""),
+    departure: (raw.departure as string | null) ?? null,
+    waypoint: (raw.waypoint as string | null) ?? null,
+    destination: (raw.destination as string | null) ?? null,
+    distance: raw.distance == null ? null : Number(raw.distance),
+    total_distance:
+      raw.total_distance == null ? null : Number(raw.total_distance),
+    confirmed_by: (raw.confirmed_by as string | null) ?? null,
+    created_at: String(raw.created_at ?? ""),
+  };
+}
+
+// settings 테이블이 (key, value) Key-Value 구조이므로,
+// 행 배열을 받아 Settings 모양으로 매핑합니다.
+export function settingsFromRows(
+  rows: Array<{ key?: unknown; value?: unknown }>
+): Settings {
+  const map = new Map<string, string>();
+  for (const r of rows) {
+    if (typeof r?.key === "string") {
+      const v = r.value;
+      map.set(r.key, v == null ? "" : String(v));
+    }
+  }
+  const num = (k: string): number | null => {
+    const s = map.get(k);
+    if (s == null || s === "") return null;
+    const n = Number(s);
+    return Number.isFinite(n) ? n : null;
+  };
+  const str = (k: string): string | null => {
+    const s = map.get(k);
+    return s == null || s === "" ? null : s;
+  };
+  return {
+    id: 1,
+    vehicle_number: str("vehicle_number"),
+    vehicle_model: str("vehicle_model"),
+    insurance_company: str("insurance_company"),
+    initial_mileage: num("initial_mileage"),
+    updated_at: null,
+  };
+}
 
 export function isActivityKind(s: string): s is ActivityKind {
   return (ACTIVITY_KINDS as readonly string[]).includes(s);
@@ -199,6 +278,8 @@ export function normalizeActivity(raw: Record<string, unknown>): Activity {
     attendees_count:
       raw.attendees_count == null ? null : Number(raw.attendees_count),
 
+    driving_log_id: (raw.driving_log_id as string | null) ?? null,
+
     created_at: String(raw.created_at ?? ""),
   };
 }
@@ -223,14 +304,19 @@ export type BusinessTrip = {
 export const EMPLOYEE_RANKS = ["관장", "부장", "팀장", "팀원"] as const;
 export type EmployeeRank = (typeof EMPLOYEE_RANKS)[number];
 
-export type Employee = {
+// 차량 어플과 공유하는 직원 테이블 (drivers).
+// 출장일지에서는 "직원"이라는 표현을 그대로 유지하지만 DB 테이블은 drivers 입니다.
+export type Driver = {
   id: string;
   name: string;
-  position: string | null;
   rank: EmployeeRank | null;
   password: string | null;
+  is_active: boolean;
   created_at: string;
 };
+
+// 호환성을 위한 별칭 (기존 코드는 Employee 라는 이름을 사용)
+export type Employee = Driver;
 
 // 컬럼이 text[] 가 아니라 text(JSON 문자열, Postgres 배열 리터럴, 콤마구분 등)
 // 으로 저장돼 있어도 안전하게 string[] 로 변환합니다.

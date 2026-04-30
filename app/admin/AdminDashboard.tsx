@@ -3,10 +3,11 @@
 import Link from "next/link";
 import { useMemo, useState, useTransition } from "react";
 import {
-  addEmployee,
+  addDriver,
   deleteActivity,
-  deleteEmployee,
-  updateEmployee,
+  deleteDriver,
+  restoreDriver,
+  updateDriver,
   type ActivityAdminStats,
 } from "@/app/actions";
 import {
@@ -544,26 +545,56 @@ function ActivityRow({ activity }: { activity: Activity }) {
 // 직원 관리 탭
 // =====================================================================
 function EmployeeTab({ employees }: { employees: Employee[] }) {
+  const [showInactive, setShowInactive] = useState(false);
+  const visible = useMemo(
+    () => (showInactive ? employees : employees.filter((e) => e.is_active)),
+    [employees, showInactive]
+  );
   return (
     <div className="grid grid-cols-1 gap-5 lg:grid-cols-[1fr_320px]">
-      <EmployeeListCard employees={employees} />
+      <EmployeeListCard
+        employees={visible}
+        showInactive={showInactive}
+        onToggle={setShowInactive}
+      />
       <AddEmployeeCard />
     </div>
   );
 }
 
-function EmployeeListCard({ employees }: { employees: Employee[] }) {
+function EmployeeListCard({
+  employees,
+  showInactive,
+  onToggle,
+}: {
+  employees: Employee[];
+  showInactive: boolean;
+  onToggle: (v: boolean) => void;
+}) {
   return (
     <section className={cardCls}>
-      <h3 className="text-sm font-semibold text-slate-900">
-        직원 목록{" "}
-        <span className="ml-1 text-xs font-medium text-slate-400">
-          {employees.length}명
-        </span>
-      </h3>
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <h3 className="text-sm font-semibold text-slate-900">
+          직원 목록{" "}
+          <span className="ml-1 text-xs font-medium text-slate-400">
+            {employees.length}명
+          </span>
+        </h3>
+        <label className="inline-flex cursor-pointer items-center gap-1.5 text-xs font-medium text-slate-600">
+          <input
+            type="checkbox"
+            checked={showInactive}
+            onChange={(e) => onToggle(e.target.checked)}
+            className="h-3.5 w-3.5 rounded border-slate-300 text-blue-500 focus:ring-blue-500"
+          />
+          퇴사자 보기
+        </label>
+      </div>
       {employees.length === 0 ? (
         <p className="mt-3 rounded-md border border-dashed border-slate-300 bg-slate-50 p-4 text-center text-sm text-slate-500">
-          등록된 직원이 없습니다.
+          {showInactive
+            ? "등록된 직원이 없습니다."
+            : "활성 직원이 없습니다."}
         </p>
       ) : (
         <div className="mt-3 overflow-x-auto">
@@ -573,6 +604,7 @@ function EmployeeListCard({ employees }: { employees: Employee[] }) {
                 <th className="px-3 py-2 text-left font-medium">이름</th>
                 <th className="px-3 py-2 text-left font-medium">직급</th>
                 <th className="px-3 py-2 text-left font-medium">비밀번호</th>
+                <th className="px-3 py-2 text-left font-medium">상태</th>
                 <th className="px-3 py-2 text-right font-medium">작업</th>
               </tr>
             </thead>
@@ -597,6 +629,7 @@ function EmployeeRow({ employee }: { employee: Employee }) {
   const [error, setError] = useState<string | null>(null);
   const [pending, startTransition] = useTransition();
   const [delPending, delTransition] = useTransition();
+  const [restorePending, restoreTransition] = useTransition();
 
   function reset() {
     setEditing(false);
@@ -638,13 +671,14 @@ function EmployeeRow({ employee }: { employee: Employee }) {
             className="block w-full rounded-md border border-slate-300 bg-white px-2 py-1 text-xs shadow-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
           />
         </td>
+        <td className="px-3 py-2 text-slate-500" />
         <td className="px-3 py-2 text-right">
           <form
             action={(formData) => {
               setError(null);
               startTransition(async () => {
                 try {
-                  await updateEmployee(formData);
+                  await updateDriver(formData);
                   reset();
                 } catch (e) {
                   setError(
@@ -684,39 +718,85 @@ function EmployeeRow({ employee }: { employee: Employee }) {
     );
   }
 
+  const inactive = !employee.is_active;
+
   return (
-    <tr className="hover:bg-slate-50">
-      <td className="px-3 py-2 font-medium text-slate-900">{employee.name}</td>
+    <tr className={inactive ? "bg-slate-50 text-slate-500" : "hover:bg-slate-50"}>
+      <td className="px-3 py-2 font-medium text-slate-900">
+        {employee.name}
+        {inactive && (
+          <span className="ml-1 text-xs font-normal text-slate-400">(퇴사)</span>
+        )}
+      </td>
       <td className="px-3 py-2 text-slate-700">{employee.rank ?? "-"}</td>
       <td className="px-3 py-2 font-mono text-slate-500">
         {employee.password ? "****" : "—"}
       </td>
+      <td className="whitespace-nowrap px-3 py-2">
+        <span
+          className={`inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-semibold ${
+            inactive
+              ? "bg-slate-100 text-slate-500"
+              : "bg-emerald-100 text-emerald-700"
+          }`}
+        >
+          {inactive ? "퇴사" : "활성"}
+        </span>
+      </td>
       <td className="whitespace-nowrap px-3 py-2 text-right">
-        <button
-          type="button"
-          onClick={() => setEditing(true)}
-          className="mr-1.5 rounded-md border border-slate-300 bg-white px-2.5 py-1 text-xs font-medium text-slate-700 hover:bg-slate-50"
-        >
-          수정
-        </button>
-        <form
-          action={(formData) => {
-            if (!confirm(`${employee.name} 직원을 삭제하시겠습니까?`)) return;
-            delTransition(async () => {
-              await deleteEmployee(formData);
-            });
-          }}
-          className="inline-block"
-        >
-          <input type="hidden" name="id" value={employee.id} />
-          <button
-            type="submit"
-            disabled={delPending}
-            className="rounded-md border border-red-500 bg-white px-2.5 py-1 text-xs font-medium text-red-500 hover:bg-red-50 disabled:opacity-60"
+        {inactive ? (
+          <form
+            action={(formData) => {
+              if (!confirm(`${employee.name} 직원을 복귀시키시겠습니까?`)) return;
+              restoreTransition(async () => {
+                await restoreDriver(formData);
+              });
+            }}
+            className="inline-block"
           >
-            {delPending ? "삭제 중…" : "삭제"}
-          </button>
-        </form>
+            <input type="hidden" name="id" value={employee.id} />
+            <button
+              type="submit"
+              disabled={restorePending}
+              className="rounded-md border border-emerald-500 bg-white px-2.5 py-1 text-xs font-medium text-emerald-600 hover:bg-emerald-50 disabled:opacity-60"
+            >
+              {restorePending ? "복귀 중…" : "복귀"}
+            </button>
+          </form>
+        ) : (
+          <>
+            <button
+              type="button"
+              onClick={() => setEditing(true)}
+              className="mr-1.5 rounded-md border border-slate-300 bg-white px-2.5 py-1 text-xs font-medium text-slate-700 hover:bg-slate-50"
+            >
+              수정
+            </button>
+            <form
+              action={(formData) => {
+                if (
+                  !confirm(
+                    `${employee.name} 직원을 퇴사 처리하시겠습니까?\n(소프트 삭제 — 복귀 가능)`
+                  )
+                )
+                  return;
+                delTransition(async () => {
+                  await deleteDriver(formData);
+                });
+              }}
+              className="inline-block"
+            >
+              <input type="hidden" name="id" value={employee.id} />
+              <button
+                type="submit"
+                disabled={delPending}
+                className="rounded-md border border-red-500 bg-white px-2.5 py-1 text-xs font-medium text-red-500 hover:bg-red-50 disabled:opacity-60"
+              >
+                {delPending ? "퇴사 처리 중…" : "퇴사"}
+              </button>
+            </form>
+          </>
+        )}
       </td>
     </tr>
   );
@@ -756,7 +836,7 @@ function AddEmployeeCard() {
           }
           startTransition(async () => {
             try {
-              await addEmployee(formData);
+              await addDriver(formData);
               setOk(`${name.trim()} 추가됨`);
               setName("");
               setRank("");

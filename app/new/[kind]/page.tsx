@@ -2,7 +2,11 @@ import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
 import Header from "@/app/components/Header";
 import ActivityForm from "@/app/new/[kind]/ActivityForm";
-import { getSession, listEmployeeNames } from "@/app/actions";
+import {
+  getSession,
+  getSettings,
+  listDriverNames,
+} from "@/app/actions";
 import {
   ACTIVITY_ICON,
   ACTIVITY_LABEL,
@@ -28,12 +32,10 @@ export default async function NewActivityFormPage({
   const session = await getSession();
   if (!session) redirect("/");
 
-  let employees: string[] = [];
-  try {
-    employees = await listEmployeeNames();
-  } catch {
-    // empty
-  }
+  const [employees, settings] = await Promise.all([
+    listDriverNames().catch(() => [] as string[]),
+    getSettings().catch(() => null),
+  ]);
 
   const lockedTraveler =
     session.kind === "employee" ? session.name : null;
@@ -58,6 +60,7 @@ export default async function NewActivityFormPage({
           defaultDate={todayKR()}
           employees={employees}
           lockedTraveler={lockedTraveler}
+          settings={settings}
         />
       </main>
     </>

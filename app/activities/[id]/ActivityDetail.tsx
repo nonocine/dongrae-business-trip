@@ -9,6 +9,8 @@ import {
   TRANSPORT_ICON,
   TRANSPORT_LABEL,
   type Activity,
+  type DrivingLog,
+  type Settings,
 } from "@/lib/supabase";
 import { deleteActivity } from "@/app/actions";
 import ActivityPdfReport from "@/app/components/ActivityPdfReport";
@@ -28,11 +30,18 @@ function formatRange(start: string | null, end: string | null) {
 
 export default function ActivityDetail({
   activity,
+  drivingLog,
+  settings,
   isAdmin,
+  sessionName,
 }: {
   activity: Activity;
+  drivingLog: DrivingLog | null;
+  settings: Settings | null;
   isAdmin: boolean;
+  sessionName: string | null;
 }) {
+  const canDelete = isAdmin || (sessionName !== null && sessionName === activity.author);
   const router = useRouter();
   const reportRef = useRef<HTMLDivElement>(null);
   const [pdfBusy, setPdfBusy] = useState(false);
@@ -198,6 +207,47 @@ export default function ActivityDetail({
         </section>
       )}
 
+      {drivingLog && (
+        <section className="space-y-3 rounded-xl border border-blue-200 bg-blue-50/40 p-5 shadow-sm">
+          <h3 className="text-sm font-semibold text-blue-900">
+            🚗 차량 운행 정보
+          </h3>
+          <dl className="grid grid-cols-1 gap-x-4 gap-y-2 text-sm sm:grid-cols-2">
+            {settings && (settings.vehicle_model || settings.vehicle_number) && (
+              <Field
+                label="차종/번호"
+                value={
+                  [settings.vehicle_model, settings.vehicle_number]
+                    .filter(Boolean)
+                    .join(" / ") || "-"
+                }
+              />
+            )}
+            <Field label="운전자" value={drivingLog.driver} />
+            <Field label="출발" value={drivingLog.departure || "-"} />
+            <Field label="출장지" value={drivingLog.waypoint || "-"} />
+            <Field label="도착" value={drivingLog.destination || "-"} />
+            <Field
+              label="운행거리"
+              value={
+                drivingLog.distance != null
+                  ? `${drivingLog.distance.toLocaleString("ko-KR")} km`
+                  : "-"
+              }
+            />
+            {drivingLog.total_distance != null && (
+              <Field
+                label="누적거리"
+                value={`${drivingLog.total_distance.toLocaleString("ko-KR")} km`}
+              />
+            )}
+            {drivingLog.confirmed_by && (
+              <Field label="확인자" value={drivingLog.confirmed_by} />
+            )}
+          </dl>
+        </section>
+      )}
+
       {a.photos.length > 0 && (
         <FileGallery title={`인증샷 (${a.photos.length}장)`} urls={a.photos} />
       )}
@@ -218,7 +268,7 @@ export default function ActivityDetail({
       )}
 
       <div className="flex flex-wrap items-center justify-end gap-2">
-        {isAdmin && (
+        {canDelete && (
           <button
             type="button"
             onClick={handleDelete}
@@ -250,7 +300,11 @@ export default function ActivityDetail({
         }}
       >
         <div ref={reportRef}>
-          <ActivityPdfReport activity={a} />
+          <ActivityPdfReport
+            activity={a}
+            drivingLog={drivingLog}
+            settings={settings}
+          />
         </div>
       </div>
     </div>
