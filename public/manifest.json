@@ -1,6 +1,6 @@
 {
-  "name": "동래구청소년센터 차량 운행일지",
-  "short_name": "동차",
+  "name": "동래 출장일지",
+  "short_name": "동출",
   "icons": [
     { "src": "/icon.svg", "sizes": "any", "type": "image/svg+xml" }
   ],

@@ -6,17 +6,9 @@
   <rect x="256" y="0" width="256" height="256" fill="#1a5fb4" clip-path="url(#rc)"/>
   <rect x="0" y="256" width="256" height="256" fill="#e5a50a" clip-path="url(#rc)"/>
   <rect x="256" y="256" width="256" height="256" fill="#26a269" clip-path="url(#rc)"/>
-  <circle cx="256" cy="220" r="148" fill="white" opacity="0.95"/>
-  <circle cx="256" cy="220" r="148" fill="none" stroke="#333" stroke-width="14"/>
-  <line x1="256" y1="72" x2="256" y2="170" stroke="#bbb" stroke-width="4"/>
-  <line x1="256" y1="270" x2="256" y2="368" stroke="#bbb" stroke-width="4"/>
-  <line x1="108" y1="220" x2="206" y2="220" stroke="#bbb" stroke-width="4"/>
-  <line x1="306" y1="220" x2="404" y2="220" stroke="#bbb" stroke-width="4"/>
-  <line x1="151" y1="115" x2="183" y2="147" stroke="#bbb" stroke-width="4"/>
-  <line x1="361" y1="115" x2="329" y2="147" stroke="#bbb" stroke-width="4"/>
-  <line x1="151" y1="325" x2="183" y2="293" stroke="#bbb" stroke-width="4"/>
-  <line x1="361" y1="325" x2="329" y2="293" stroke="#bbb" stroke-width="4"/>
-  <text x="256" y="248" text-anchor="middle" fill="#1a5fb4" font-size="80" font-family="Arial, sans-serif" font-weight="bold">동차</text>
-  <text x="256" y="440" text-anchor="middle" fill="white" font-size="52" font-family="Arial, sans-serif" font-weight="bold">운행일지</text>
+  <circle cx="256" cy="256" r="148" fill="white" opacity="0.95"/>
+  <circle cx="256" cy="256" r="148" fill="none" stroke="#1a5fb4" stroke-width="10"/>
+  <text x="256" y="290" text-anchor="middle" fill="#1a5fb4" font-size="140" font-family="'Apple SD Gothic Neo','Malgun Gothic',sans-serif" font-weight="800">동출</text>
+  <text x="256" y="450" text-anchor="middle" fill="white" font-size="44" font-family="'Apple SD Gothic Neo','Malgun Gothic',sans-serif" font-weight="700">출장일지</text>
   <rect x="0" y="0" width="512" height="512" rx="115" fill="none" stroke="white" stroke-width="6"/>
 </svg>

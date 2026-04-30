@@ -1,323 +1,766 @@
 "use client";
 
-import { useState, useTransition } from "react";
+import Link from "next/link";
+import { useMemo, useState, useTransition } from "react";
 import {
-  addDriver,
-  deleteDriver,
-  setInitialDistance,
-  updateDriverPassword,
-  type AdminStats,
+  addEmployee,
+  deleteActivity,
+  deleteEmployee,
+  updateEmployee,
+  type ActivityAdminStats,
 } from "@/app/actions";
-import type { Driver } from "@/lib/supabase";
+import {
+  ACTIVITY_BADGE_CLASS,
+  ACTIVITY_BAR_CLASS,
+  ACTIVITY_ICON,
+  ACTIVITY_KINDS,
+  ACTIVITY_LABEL,
+  EMPLOYEE_RANKS,
+  type Activity,
+  type ActivityKind,
+  type Employee,
+  type EmployeeRank,
+} from "@/lib/supabase";
 
-const labelCls = "block text-sm font-medium text-slate-700";
+type TabKey = "dashboard" | "activities" | "employees";
+
 const inputCls =
-  "mt-1 block w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm shadow-sm focus:border-[color:var(--brand)] focus:outline-none focus:ring-1 focus:ring-[color:var(--brand)]";
+  "mt-1 block w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm shadow-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500";
 const cardCls =
   "rounded-xl border border-slate-200 bg-white p-4 shadow-sm sm:p-5";
-const sectionTitle = "text-sm font-semibold text-slate-900";
-
-function formatNumber(n: number) {
-  return new Intl.NumberFormat("ko-KR", { maximumFractionDigits: 1 }).format(n);
-}
 
 export default function AdminDashboard({
-  drivers,
-  initialDistance,
+  employees,
   stats,
+  activities,
 }: {
-  drivers: Driver[];
-  initialDistance: number;
-  stats: AdminStats;
+  employees: Employee[];
+  stats: ActivityAdminStats;
+  activities: Activity[];
 }) {
+  const [tab, setTab] = useState<TabKey>("dashboard");
+
+  return (
+    <div className="space-y-6">
+      <StatCardsGrid stats={stats} />
+
+      <Tabs current={tab} onChange={setTab} />
+
+      {tab === "dashboard" && <DashboardTab stats={stats} />}
+      {tab === "activities" && <ActivityListTab activities={activities} />}
+      {tab === "employees" && <EmployeeTab employees={employees} />}
+    </div>
+  );
+}
+
+// =====================================================================
+// 통계 카드 (4개)
+// =====================================================================
+function StatCardsGrid({ stats }: { stats: ActivityAdminStats }) {
+  return (
+    <div className="grid grid-cols-2 gap-3 sm:gap-4 lg:grid-cols-4">
+      <StatCard
+        icon="🗓"
+        label="이번달 활동"
+        value={`${stats.thisMonth}건`}
+        accent="bg-blue-500"
+        ring="from-blue-500 to-blue-600"
+      />
+      <StatCard
+        icon="📋"
+        label="전체 활동"
+        value={`${stats.total}건`}
+        accent="bg-violet-500"
+        ring="from-violet-500 to-violet-600"
+      />
+      <StatCard
+        icon="💸"
+        label="이번달 비용"
+        value={`${stats.thisMonthCost.toLocaleString("ko-KR")}원`}
+        accent="bg-emerald-500"
+        ring="from-emerald-500 to-emerald-600"
+      />
+      <StatCard
+        icon="👥"
+        label="활동자 수"
+        value={`${stats.uniqueAuthors}명`}
+        accent="bg-amber-500"
+        ring="from-amber-500 to-amber-600"
+      />
+    </div>
+  );
+}
+
+function StatCard({
+  icon,
+  label,
+  value,
+  accent,
+  ring,
+}: {
+  icon: string;
+  label: string;
+  value: string;
+  accent: string;
+  ring: string;
+}) {
+  return (
+    <div className="relative overflow-hidden rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+      <div className={`absolute inset-x-0 top-0 h-1 bg-gradient-to-r ${ring}`} />
+      <div className="flex items-center justify-between">
+        <div>
+          <p className="text-xs font-medium text-slate-500">{label}</p>
+          <p className="mt-1 text-2xl font-bold tracking-tight text-slate-900">
+            {value}
+          </p>
+        </div>
+        <div
+          className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-lg text-xl text-white ${accent}`}
+        >
+          {icon}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// =====================================================================
+// 탭
+// =====================================================================
+function Tabs({
+  current,
+  onChange,
+}: {
+  current: TabKey;
+  onChange: (t: TabKey) => void;
+}) {
+  const tabs: { key: TabKey; label: string }[] = [
+    { key: "dashboard", label: "대시보드" },
+    { key: "activities", label: "활동 목록" },
+    { key: "employees", label: "직원 관리" },
+  ];
+  return (
+    <div className="overflow-x-auto border-b border-slate-200">
+      <nav className="flex min-w-max gap-1">
+        {tabs.map((t) => {
+          const active = t.key === current;
+          return (
+            <button
+              key={t.key}
+              type="button"
+              onClick={() => onChange(t.key)}
+              className={`relative -mb-px border-b-2 px-4 py-2.5 text-sm font-semibold transition ${
+                active
+                  ? "border-blue-500 text-blue-600"
+                  : "border-transparent text-slate-500 hover:text-slate-800"
+              }`}
+            >
+              {t.label}
+            </button>
+          );
+        })}
+      </nav>
+    </div>
+  );
+}
+
+// =====================================================================
+// 대시보드 탭
+// =====================================================================
+function DashboardTab({ stats }: { stats: ActivityAdminStats }) {
   return (
     <div className="space-y-5">
-      <StatsCard stats={stats} />
-      <InitialDistanceCard initial={initialDistance} />
-      <AddDriverCard />
-      <DriversListCard drivers={drivers} />
-    </div>
-  );
-}
-
-function StatsCard({ stats }: { stats: AdminStats }) {
-  return (
-    <div className="space-y-3">
-      <section className="overflow-hidden rounded-2xl bg-gradient-to-br from-blue-500 via-blue-600 to-indigo-700 p-5 text-white shadow-lg">
-        <h3 className="text-xs font-semibold uppercase tracking-wide opacity-80">
-          운행 통계
-        </h3>
-        <div className="mt-3 grid grid-cols-2 gap-3">
-          <div className="rounded-xl bg-white/15 p-3 backdrop-blur-sm">
-            <p className="text-[11px] font-medium opacity-80">이번 달 운행거리</p>
-            <p className="mt-1 text-2xl font-bold tracking-tight">
-              {formatNumber(stats.thisMonthDistance)}
-              <span className="ml-1 text-xs font-medium opacity-80">km</span>
-            </p>
-          </div>
-          <div className="rounded-xl bg-white/15 p-3 backdrop-blur-sm">
-            <p className="text-[11px] font-medium opacity-80">전체 누적 운행거리</p>
-            <p className="mt-1 text-2xl font-bold tracking-tight">
-              {formatNumber(stats.totalDistance)}
-              <span className="ml-1 text-xs font-medium opacity-80">km</span>
-            </p>
-          </div>
-        </div>
-      </section>
-
-      <RecentDestinationsBox items={stats.recentDestinations} />
-      <TopDestinationsBox items={stats.topDestinations} />
-      <TopDriversBox items={stats.topDrivers} />
-    </div>
-  );
-}
-
-function RecentDestinationsBox({
-  items,
-}: {
-  items: AdminStats["recentDestinations"];
-}) {
-  return (
-    <section className="rounded-2xl border border-emerald-200 bg-gradient-to-br from-emerald-50 via-white to-emerald-50/40 p-4 shadow-sm">
-      <div className="flex items-center gap-2">
-        <span className="inline-flex h-7 w-7 items-center justify-center rounded-lg bg-emerald-500 text-white">
-          📍
-        </span>
-        <h3 className="text-sm font-semibold text-emerald-900">최근 운행 목적지</h3>
+      <div className="grid grid-cols-1 gap-5 lg:grid-cols-2">
+        <ByKindCard stats={stats} />
+        <ByTravelerCard stats={stats} />
       </div>
-      {items.length === 0 ? (
-        <p className="mt-3 text-xs text-emerald-700/70">운행 기록이 없습니다.</p>
+      <RecentActivitiesCard stats={stats} />
+    </div>
+  );
+}
+
+function ByKindCard({ stats }: { stats: ActivityAdminStats }) {
+  const total = stats.byKind.reduce((s, k) => s + k.count, 0);
+  return (
+    <section className={cardCls}>
+      <h3 className="text-sm font-semibold text-slate-900">활동 유형별 통계</h3>
+      <ul className="mt-4 space-y-3">
+        {stats.byKind.map((it) => {
+          const pct = total > 0 ? (it.count / total) * 100 : 0;
+          return (
+            <li key={it.kind}>
+              <div className="flex items-center justify-between text-sm">
+                <span className="font-medium text-slate-800">
+                  {ACTIVITY_ICON[it.kind]} {ACTIVITY_LABEL[it.kind]}
+                </span>
+                <span className="text-xs font-semibold text-slate-700">
+                  {it.count}건
+                  <span className="ml-1 text-slate-400">
+                    ({pct.toFixed(0)}%)
+                  </span>
+                </span>
+              </div>
+              <div className="mt-1.5 h-2.5 overflow-hidden rounded-full bg-slate-100">
+                <div
+                  className={`h-full rounded-full bg-gradient-to-r ${ACTIVITY_BAR_CLASS[it.kind]}`}
+                  style={{ width: `${Math.max(2, pct)}%` }}
+                />
+              </div>
+            </li>
+          );
+        })}
+      </ul>
+    </section>
+  );
+}
+
+function ByTravelerCard({ stats }: { stats: ActivityAdminStats }) {
+  if (stats.byAuthor.length === 0) {
+    return (
+      <section className={cardCls}>
+        <h3 className="text-sm font-semibold text-slate-900">작성자 TOP 5</h3>
+        <p className="mt-3 text-xs text-slate-500">활동 기록이 없습니다.</p>
+      </section>
+    );
+  }
+  const max = stats.byAuthor.reduce((m, t) => Math.max(m, t.count), 0) || 1;
+  return (
+    <section className={cardCls}>
+      <h3 className="text-sm font-semibold text-slate-900">작성자 TOP 5</h3>
+      <ul className="mt-4 space-y-3">
+        {stats.byAuthor.map((it, i) => {
+          const pct = Math.max(4, (it.count / max) * 100);
+          return (
+            <li key={it.name}>
+              <div className="flex items-center justify-between text-sm">
+                <span className="flex items-center gap-2">
+                  <span className="inline-flex h-5 w-5 items-center justify-center rounded-full bg-violet-100 text-[10px] font-bold text-violet-700">
+                    {i + 1}
+                  </span>
+                  <span className="font-medium text-slate-800">{it.name}</span>
+                </span>
+                <span className="text-xs font-bold text-violet-700">
+                  {it.count}건
+                </span>
+              </div>
+              <div className="mt-1.5 h-2.5 overflow-hidden rounded-full bg-slate-100">
+                <div
+                  className="h-full rounded-full bg-gradient-to-r from-violet-400 to-violet-600"
+                  style={{ width: `${pct}%` }}
+                />
+              </div>
+            </li>
+          );
+        })}
+      </ul>
+    </section>
+  );
+}
+
+function RecentActivitiesCard({ stats }: { stats: ActivityAdminStats }) {
+  return (
+    <section className={cardCls}>
+      <h3 className="flex items-center gap-1.5 text-sm font-semibold text-slate-900">
+        <span aria-hidden>📋</span>
+        최근 활동 5건
+      </h3>
+      {stats.recent.length === 0 ? (
+        <div className="mt-2 flex flex-col items-center justify-center gap-2 py-12 text-center">
+          <div
+            aria-hidden
+            className="text-5xl text-slate-300"
+            style={{ filter: "grayscale(100%) opacity(0.6)" }}
+          >
+            📂
+          </div>
+          <p className="text-sm font-medium text-slate-400">
+            아직 등록된 활동이 없습니다.
+          </p>
+          <p className="text-xs text-slate-400">새로운 활동을 등록해보세요!</p>
+        </div>
       ) : (
-        <ol className="mt-3 space-y-1.5 text-sm">
-          {items.map((it, i) => (
-            <li
-              key={i}
-              className="flex items-center justify-between gap-2 rounded-lg bg-white/70 px-3 py-2"
-            >
-              <span className="flex min-w-0 items-center gap-2">
-                <span className="inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-emerald-100 text-[10px] font-bold text-emerald-700">
-                  {i + 1}
-                </span>
-                <span className="truncate font-medium text-slate-800">
-                  {it.destination}
-                </span>
-              </span>
-              <span className="shrink-0 text-xs text-emerald-700">
-                {it.driven_at.replaceAll("-", ".")}
-              </span>
+        <ul className="mt-3 grid grid-cols-1 gap-2.5 sm:grid-cols-2 lg:grid-cols-3">
+          {stats.recent.map((it) => (
+            <li key={it.id}>
+              <Link
+                href={`/activities/${it.id}`}
+                className="flex h-full flex-col gap-1 rounded-lg border border-slate-200 bg-white p-3 shadow-sm transition hover:-translate-y-0.5 hover:border-blue-300 hover:shadow-md"
+              >
+                <div className="flex items-center justify-between gap-2">
+                  <span
+                    className={`inline-flex items-center gap-0.5 rounded-full border px-2 py-0.5 text-[10px] font-semibold ${ACTIVITY_BADGE_CLASS[it.kind]}`}
+                  >
+                    {ACTIVITY_ICON[it.kind]} {ACTIVITY_LABEL[it.kind]}
+                  </span>
+                  {it.start_date && (
+                    <span className="text-xs font-semibold text-blue-600">
+                      {it.start_date.replaceAll("-", ".")}
+                    </span>
+                  )}
+                </div>
+                <p className="mt-1 truncate text-sm font-semibold text-slate-900">
+                  {it.location ?? "-"}
+                </p>
+                <p className="text-xs text-slate-500">👤 {it.author}</p>
+              </Link>
             </li>
           ))}
-        </ol>
+        </ul>
       )}
     </section>
   );
 }
 
-function TopDestinationsBox({
-  items,
-}: {
-  items: AdminStats["topDestinations"];
-}) {
-  const maxCount = items.reduce((m, it) => Math.max(m, it.count), 0) || 1;
-  return (
-    <section className="rounded-2xl border border-orange-200 bg-gradient-to-br from-amber-50 via-white to-orange-50/60 p-4 shadow-sm">
-      <div className="flex items-center gap-2">
-        <span className="inline-flex h-7 w-7 items-center justify-center rounded-lg bg-orange-500 text-white">
-          🔥
-        </span>
-        <h3 className="text-sm font-semibold text-orange-900">
-          자주 가는 목적지 TOP 5
-        </h3>
-      </div>
-      {items.length === 0 ? (
-        <p className="mt-3 text-xs text-orange-700/70">운행 기록이 없습니다.</p>
-      ) : (
-        <ol className="mt-3 space-y-2 text-sm">
-          {items.map((it, i) => {
-            const pct = Math.max(6, (it.count / maxCount) * 100);
-            return (
-              <li key={i}>
-                <div className="flex items-center justify-between gap-2 text-xs">
-                  <span className="flex min-w-0 items-center gap-2">
-                    <span className="inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-orange-500 text-[10px] font-bold text-white">
-                      {i + 1}
-                    </span>
-                    <span className="truncate text-sm font-medium text-slate-800">
-                      {it.destination}
-                    </span>
-                  </span>
-                  <span className="shrink-0 text-xs font-bold text-orange-700">
-                    {it.count}회
-                  </span>
-                </div>
-                <div className="mt-1 h-2 overflow-hidden rounded-full bg-orange-100">
-                  <div
-                    className="h-full rounded-full bg-gradient-to-r from-amber-400 to-orange-500"
-                    style={{ width: `${pct}%` }}
-                  />
-                </div>
-              </li>
-            );
-          })}
-        </ol>
-      )}
-    </section>
-  );
-}
+// =====================================================================
+// 활동 목록 탭 (필터 + 테이블 + 엑셀)
+// =====================================================================
+function ActivityListTab({ activities }: { activities: Activity[] }) {
+  const [kindFilter, setKindFilter] = useState<ActivityKind | "">("");
+  const [monthFilter, setMonthFilter] = useState("");
+  const [authorFilter, setAuthorFilter] = useState("");
 
-function TopDriversBox({ items }: { items: AdminStats["topDrivers"] }) {
-  const podium = [
-    {
-      medal: "🥇",
-      bg: "bg-gradient-to-br from-yellow-200 via-amber-200 to-yellow-300",
-      border: "border-amber-400",
-      text: "text-amber-900",
-    },
-    {
-      medal: "🥈",
-      bg: "bg-gradient-to-br from-slate-100 via-slate-200 to-slate-300",
-      border: "border-slate-400",
-      text: "text-slate-700",
-    },
-    {
-      medal: "🥉",
-      bg: "bg-gradient-to-br from-orange-200 via-amber-200 to-orange-300",
-      border: "border-orange-400",
-      text: "text-orange-900",
-    },
-  ];
+  const months = useMemo(() => {
+    const set = new Set<string>();
+    for (const a of activities) {
+      if (a.start_date) set.add(a.start_date.slice(0, 7));
+    }
+    return [...set].sort().reverse();
+  }, [activities]);
 
-  return (
-    <section className="rounded-2xl border border-amber-200 bg-gradient-to-br from-yellow-50 via-white to-amber-50/60 p-4 shadow-sm">
-      <div className="flex items-center gap-2">
-        <span className="inline-flex h-7 w-7 items-center justify-center rounded-lg bg-amber-500 text-white">
-          🏆
-        </span>
-        <h3 className="text-sm font-semibold text-amber-900">
-          운행 많이 한 운전자 TOP 3
-        </h3>
-      </div>
-      {items.length === 0 ? (
-        <p className="mt-3 text-xs text-amber-700/70">운행 기록이 없습니다.</p>
-      ) : (
-        <ol className="mt-3 grid grid-cols-3 gap-2">
-          {items.map((it, i) => {
-            const cfg = podium[i] ?? podium[2];
-            return (
-              <li
-                key={i}
-                className={`flex flex-col items-center rounded-xl border ${cfg.border} ${cfg.bg} p-3 text-center shadow-sm`}
-              >
-                <span className="text-3xl leading-none">{cfg.medal}</span>
-                <span
-                  className={`mt-2 truncate text-sm font-bold ${cfg.text}`}
-                >
-                  {it.driver}
-                </span>
-                <span className={`text-xs font-medium ${cfg.text} opacity-80`}>
-                  {it.count}회
-                </span>
-              </li>
-            );
-          })}
-        </ol>
-      )}
-    </section>
-  );
-}
+  const authors = useMemo(() => {
+    const set = new Set<string>();
+    for (const a of activities) set.add(a.author);
+    return [...set].sort();
+  }, [activities]);
 
-function InitialDistanceCard({ initial }: { initial: number }) {
-  const [error, setError] = useState<string | null>(null);
-  const [ok, setOk] = useState(false);
-  const [pending, startTransition] = useTransition();
+  const filtered = useMemo(() => {
+    return activities.filter((a) => {
+      if (kindFilter && a.kind !== kindFilter) return false;
+      if (monthFilter && a.start_date?.slice(0, 7) !== monthFilter) return false;
+      if (authorFilter && a.author !== authorFilter) return false;
+      return true;
+    });
+  }, [activities, kindFilter, monthFilter, authorFilter]);
+
+  const downloadHref = monthFilter
+    ? `/api/export?month=${encodeURIComponent(monthFilter)}`
+    : `/api/export`;
 
   return (
     <section className={cardCls}>
-      <div className="flex items-center justify-between">
-        <h3 className={sectionTitle}>초기 누적거리</h3>
-        <span className="rounded-full bg-[color:var(--brand-soft)] px-2.5 py-0.5 text-xs font-medium text-[color:var(--brand-strong)]">
-          현재 {formatNumber(initial)} km
-        </span>
-      </div>
-      <p className="mt-1 text-xs text-slate-500">
-        운행일지가 한 건도 없을 때 사용되는 출발 누적거리입니다. (차량 인수 시점 odometer)
-      </p>
-      <form
-        action={(formData) => {
-          setError(null);
-          setOk(false);
-          startTransition(async () => {
-            try {
-              await setInitialDistance(formData);
-              setOk(true);
-            } catch (e) {
-              setError(
-                e instanceof Error ? e.message : "저장 중 오류가 발생했습니다."
-              );
-            }
-          });
-        }}
-        className="mt-3 flex flex-col gap-2 sm:flex-row sm:items-end"
-      >
-        <div className="flex-1">
-          <label htmlFor="initial_distance" className={labelCls}>
-            초기 누적거리 (km)
-          </label>
-          <input
-            id="initial_distance"
-            name="initial_distance"
-            type="number"
-            min="0"
-            step="0.1"
-            required
-            inputMode="decimal"
-            defaultValue={initial}
-            className={inputCls}
-          />
-        </div>
-        <button
-          type="submit"
-          disabled={pending}
-          className="h-[38px] rounded-md bg-[color:var(--brand)] px-4 text-sm font-semibold text-white shadow-sm hover:bg-[color:var(--brand-strong)] disabled:opacity-60"
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <h3 className="text-sm font-semibold text-slate-900">
+          활동 목록{" "}
+          <span className="ml-1 text-xs font-medium text-slate-400">
+            {filtered.length}건
+          </span>
+        </h3>
+        <a
+          href={downloadHref}
+          className="inline-flex items-center gap-1.5 rounded-md bg-emerald-500 px-3 py-1.5 text-sm font-semibold text-white shadow-sm hover:bg-emerald-600"
         >
-          {pending ? "저장 중…" : "저장"}
-        </button>
-      </form>
-      {error && (
-        <p className="mt-2 rounded-md bg-[color:var(--accent-soft)] px-3 py-2 text-xs text-[color:var(--accent)]">
-          {error}
+          <span aria-hidden>📊</span>
+          엑셀 다운로드
+        </a>
+      </div>
+
+      <div className="mt-3 grid grid-cols-1 gap-2 sm:grid-cols-4">
+        <div>
+          <label className="text-xs font-medium text-slate-600">유형</label>
+          <select
+            value={kindFilter}
+            onChange={(e) => setKindFilter(e.target.value as ActivityKind | "")}
+            className={inputCls}
+          >
+            <option value="">전체</option>
+            {ACTIVITY_KINDS.map((k) => (
+              <option key={k} value={k}>
+                {ACTIVITY_ICON[k]} {ACTIVITY_LABEL[k]}
+              </option>
+            ))}
+          </select>
+        </div>
+        <div>
+          <label className="text-xs font-medium text-slate-600">월</label>
+          <select
+            value={monthFilter}
+            onChange={(e) => setMonthFilter(e.target.value)}
+            className={inputCls}
+          >
+            <option value="">전체</option>
+            {months.map((m) => (
+              <option key={m} value={m}>
+                {m.slice(0, 4)}년 {Number(m.slice(5, 7))}월
+              </option>
+            ))}
+          </select>
+        </div>
+        <div>
+          <label className="text-xs font-medium text-slate-600">작성자</label>
+          <select
+            value={authorFilter}
+            onChange={(e) => setAuthorFilter(e.target.value)}
+            className={inputCls}
+          >
+            <option value="">전체</option>
+            {authors.map((t) => (
+              <option key={t} value={t}>
+                {t}
+              </option>
+            ))}
+          </select>
+        </div>
+        {(kindFilter || monthFilter || authorFilter) && (
+          <div className="flex items-end">
+            <button
+              type="button"
+              onClick={() => {
+                setKindFilter("");
+                setMonthFilter("");
+                setAuthorFilter("");
+              }}
+              className="h-[38px] w-full rounded-md border border-slate-300 bg-white px-3 text-sm font-medium text-slate-700 hover:bg-slate-50"
+            >
+              필터 초기화
+            </button>
+          </div>
+        )}
+      </div>
+
+      <div className="mt-4 overflow-x-auto">
+        <table className="min-w-full divide-y divide-slate-200 text-sm">
+          <thead className="bg-slate-50 text-xs uppercase text-slate-500">
+            <tr>
+              <th className="whitespace-nowrap px-3 py-2 text-left font-medium">
+                날짜
+              </th>
+              <th className="whitespace-nowrap px-3 py-2 text-left font-medium">
+                유형
+              </th>
+              <th className="whitespace-nowrap px-3 py-2 text-left font-medium">
+                작성자
+              </th>
+              <th className="whitespace-nowrap px-3 py-2 text-left font-medium">
+                장소
+              </th>
+              <th className="whitespace-nowrap px-3 py-2 text-left font-medium">
+                동행자
+              </th>
+              <th className="whitespace-nowrap px-3 py-2 text-right font-medium">
+                작업
+              </th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-slate-100">
+            {filtered.length === 0 ? (
+              <tr>
+                <td
+                  colSpan={6}
+                  className="px-3 py-8 text-center text-sm text-slate-500"
+                >
+                  조건에 맞는 활동이 없습니다.
+                </td>
+              </tr>
+            ) : (
+              filtered.map((a) => <ActivityRow key={a.id} activity={a} />)
+            )}
+          </tbody>
+        </table>
+      </div>
+    </section>
+  );
+}
+
+function locationOf(a: Activity) {
+  if (a.kind === "overseas_training") {
+    return [a.country, a.city].filter(Boolean).join(" / ") || "-";
+  }
+  return a.location ?? "-";
+}
+
+function ActivityRow({ activity }: { activity: Activity }) {
+  const [pending, startTransition] = useTransition();
+  const a = activity;
+  const date = a.start_date
+    ? a.start_date.replaceAll("-", ".") +
+      (a.end_date && a.end_date !== a.start_date
+        ? ` ~ ${a.end_date.replaceAll("-", ".")}`
+        : "")
+    : "-";
+
+  return (
+    <tr className="hover:bg-slate-50">
+      <td className="whitespace-nowrap px-3 py-2 text-slate-700">{date}</td>
+      <td className="whitespace-nowrap px-3 py-2">
+        <span
+          className={`inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-xs font-semibold ${ACTIVITY_BADGE_CLASS[a.kind]}`}
+        >
+          {ACTIVITY_ICON[a.kind]} {ACTIVITY_LABEL[a.kind]}
+        </span>
+      </td>
+      <td className="whitespace-nowrap px-3 py-2 font-medium text-slate-900">
+        {a.author}
+      </td>
+      <td className="px-3 py-2 text-slate-700">{locationOf(a)}</td>
+      <td className="px-3 py-2 text-slate-700">
+        {a.companion.length > 0 ? a.companion.join(", ") : "-"}
+      </td>
+      <td className="whitespace-nowrap px-3 py-2 text-right">
+        <Link
+          href={`/activities/${a.id}`}
+          className="mr-2 inline-block rounded-md border border-slate-300 bg-white px-2.5 py-1 text-xs font-medium text-slate-700 hover:bg-slate-50"
+        >
+          보기
+        </Link>
+        <form
+          action={(formData) => {
+            if (
+              !confirm(
+                `${a.start_date ?? ""} ${locationOf(a)} 활동을 삭제하시겠습니까?\n첨부된 사진/영수증/수료증도 함께 삭제됩니다.`
+              )
+            )
+              return;
+            startTransition(async () => {
+              await deleteActivity(formData);
+            });
+          }}
+          className="inline-block"
+        >
+          <input type="hidden" name="id" value={a.id} />
+          <button
+            type="submit"
+            disabled={pending}
+            className="rounded-md border border-red-500 bg-white px-2.5 py-1 text-xs font-medium text-red-500 hover:bg-red-50 disabled:opacity-60"
+          >
+            {pending ? "삭제 중…" : "삭제"}
+          </button>
+        </form>
+      </td>
+    </tr>
+  );
+}
+
+// =====================================================================
+// 직원 관리 탭
+// =====================================================================
+function EmployeeTab({ employees }: { employees: Employee[] }) {
+  return (
+    <div className="grid grid-cols-1 gap-5 lg:grid-cols-[1fr_320px]">
+      <EmployeeListCard employees={employees} />
+      <AddEmployeeCard />
+    </div>
+  );
+}
+
+function EmployeeListCard({ employees }: { employees: Employee[] }) {
+  return (
+    <section className={cardCls}>
+      <h3 className="text-sm font-semibold text-slate-900">
+        직원 목록{" "}
+        <span className="ml-1 text-xs font-medium text-slate-400">
+          {employees.length}명
+        </span>
+      </h3>
+      {employees.length === 0 ? (
+        <p className="mt-3 rounded-md border border-dashed border-slate-300 bg-slate-50 p-4 text-center text-sm text-slate-500">
+          등록된 직원이 없습니다.
         </p>
-      )}
-      {ok && (
-        <p className="mt-2 rounded-md bg-emerald-50 px-3 py-2 text-xs text-emerald-700">
-          저장되었습니다.
-        </p>
+      ) : (
+        <div className="mt-3 overflow-x-auto">
+          <table className="min-w-full divide-y divide-slate-200 text-sm">
+            <thead className="bg-slate-50 text-xs uppercase text-slate-500">
+              <tr>
+                <th className="px-3 py-2 text-left font-medium">이름</th>
+                <th className="px-3 py-2 text-left font-medium">직급</th>
+                <th className="px-3 py-2 text-left font-medium">비밀번호</th>
+                <th className="px-3 py-2 text-right font-medium">작업</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-slate-100">
+              {employees.map((e) => (
+                <EmployeeRow key={e.id} employee={e} />
+              ))}
+            </tbody>
+          </table>
+        </div>
       )}
     </section>
   );
 }
 
-function AddDriverCard() {
+function EmployeeRow({ employee }: { employee: Employee }) {
+  const [editing, setEditing] = useState(false);
+  const [rank, setRank] = useState<EmployeeRank | "">(
+    (employee.rank as EmployeeRank | null) ?? ""
+  );
+  const [password, setPassword] = useState("");
+  const [error, setError] = useState<string | null>(null);
+  const [pending, startTransition] = useTransition();
+  const [delPending, delTransition] = useTransition();
+
+  function reset() {
+    setEditing(false);
+    setError(null);
+    setPassword("");
+    setRank((employee.rank as EmployeeRank | null) ?? "");
+  }
+
+  if (editing) {
+    return (
+      <tr className="bg-blue-50/40">
+        <td className="px-3 py-2 font-medium text-slate-900">{employee.name}</td>
+        <td className="px-3 py-2">
+          <select
+            value={rank}
+            onChange={(e) => setRank(e.target.value as EmployeeRank)}
+            className="block w-full rounded-md border border-slate-300 bg-white px-2 py-1 text-xs shadow-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+          >
+            <option value="" disabled>
+              직급 선택
+            </option>
+            {EMPLOYEE_RANKS.map((r) => (
+              <option key={r} value={r}>
+                {r}
+              </option>
+            ))}
+          </select>
+        </td>
+        <td className="px-3 py-2">
+          <input
+            type="text"
+            inputMode="numeric"
+            maxLength={4}
+            placeholder="비밀번호 (변경 시)"
+            value={password}
+            onChange={(e) =>
+              setPassword(e.target.value.replace(/\D/g, "").slice(0, 4))
+            }
+            className="block w-full rounded-md border border-slate-300 bg-white px-2 py-1 text-xs shadow-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+          />
+        </td>
+        <td className="px-3 py-2 text-right">
+          <form
+            action={(formData) => {
+              setError(null);
+              startTransition(async () => {
+                try {
+                  await updateEmployee(formData);
+                  reset();
+                } catch (e) {
+                  setError(
+                    e instanceof Error
+                      ? e.message
+                      : "수정 중 오류가 발생했습니다."
+                  );
+                }
+              });
+            }}
+            className="inline-flex gap-1.5"
+          >
+            <input type="hidden" name="id" value={employee.id} />
+            <input type="hidden" name="rank" value={rank} />
+            <input type="hidden" name="password" value={password} />
+            <button
+              type="submit"
+              disabled={pending}
+              className="rounded-md bg-blue-500 px-2.5 py-1 text-xs font-medium text-white shadow-sm hover:bg-blue-600 disabled:opacity-60"
+            >
+              {pending ? "저장 중…" : "저장"}
+            </button>
+            <button
+              type="button"
+              onClick={reset}
+              disabled={pending}
+              className="rounded-md border border-slate-300 bg-white px-2.5 py-1 text-xs font-medium text-slate-700 hover:bg-slate-50"
+            >
+              취소
+            </button>
+          </form>
+          {error && (
+            <p className="mt-1 text-right text-xs text-red-600">{error}</p>
+          )}
+        </td>
+      </tr>
+    );
+  }
+
+  return (
+    <tr className="hover:bg-slate-50">
+      <td className="px-3 py-2 font-medium text-slate-900">{employee.name}</td>
+      <td className="px-3 py-2 text-slate-700">{employee.rank ?? "-"}</td>
+      <td className="px-3 py-2 font-mono text-slate-500">
+        {employee.password ? "****" : "—"}
+      </td>
+      <td className="whitespace-nowrap px-3 py-2 text-right">
+        <button
+          type="button"
+          onClick={() => setEditing(true)}
+          className="mr-1.5 rounded-md border border-slate-300 bg-white px-2.5 py-1 text-xs font-medium text-slate-700 hover:bg-slate-50"
+        >
+          수정
+        </button>
+        <form
+          action={(formData) => {
+            if (!confirm(`${employee.name} 직원을 삭제하시겠습니까?`)) return;
+            delTransition(async () => {
+              await deleteEmployee(formData);
+            });
+          }}
+          className="inline-block"
+        >
+          <input type="hidden" name="id" value={employee.id} />
+          <button
+            type="submit"
+            disabled={delPending}
+            className="rounded-md border border-red-500 bg-white px-2.5 py-1 text-xs font-medium text-red-500 hover:bg-red-50 disabled:opacity-60"
+          >
+            {delPending ? "삭제 중…" : "삭제"}
+          </button>
+        </form>
+      </td>
+    </tr>
+  );
+}
+
+function AddEmployeeCard() {
+  const [name, setName] = useState("");
+  const [rank, setRank] = useState<EmployeeRank | "">("");
+  const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [ok, setOk] = useState<string | null>(null);
   const [pending, startTransition] = useTransition();
 
+  const passwordValid = /^\d{4}$/.test(password);
+
   return (
     <section className={cardCls}>
-      <h3 className={sectionTitle}>운전자 추가</h3>
+      <h3 className="text-sm font-semibold text-slate-900">직원 추가</h3>
       <p className="mt-1 text-xs text-slate-500">
-        등록된 운전자만 운행일지 작성을 할 수 있습니다.
+        등록하면 활동자 드롭다운 + 직원 로그인이 가능해집니다.
       </p>
       <form
         action={(formData) => {
           setError(null);
           setOk(null);
-          const name = String(formData.get("name") ?? "").trim();
+          if (!name.trim()) {
+            setError("이름을 입력해주세요.");
+            return;
+          }
+          if (!rank) {
+            setError("직급을 선택해주세요.");
+            return;
+          }
+          if (!passwordValid) {
+            setError("4자리 숫자 비밀번호를 입력해주세요.");
+            return;
+          }
           startTransition(async () => {
             try {
-              await addDriver(formData);
-              setOk(`${name} 추가됨`);
-              (document.getElementById("add-driver-form") as HTMLFormElement)?.reset();
+              await addEmployee(formData);
+              setOk(`${name.trim()} 추가됨`);
+              setName("");
+              setRank("");
+              setPassword("");
             } catch (e) {
               setError(
                 e instanceof Error ? e.message : "추가 중 오류가 발생했습니다."
@@ -325,44 +768,74 @@ function AddDriverCard() {
             }
           });
         }}
-        id="add-driver-form"
-        className="mt-3 grid grid-cols-1 gap-2 sm:grid-cols-[1fr_1fr_auto] sm:items-end"
+        className="mt-3 space-y-2"
       >
         <div>
-          <label htmlFor="add-name" className={labelCls}>
+          <label className="block text-xs font-medium text-slate-600">
             이름
           </label>
           <input
-            id="add-name"
             name="name"
             type="text"
             required
+            value={name}
+            onChange={(e) => setName(e.target.value)}
             placeholder="홍길동"
             className={inputCls}
           />
         </div>
         <div>
-          <label htmlFor="add-password" className={labelCls}>
-            비밀번호
+          <label className="block text-xs font-medium text-slate-600">
+            직급
+          </label>
+          <select
+            name="rank"
+            required
+            value={rank}
+            onChange={(e) => setRank(e.target.value as EmployeeRank)}
+            className={inputCls}
+          >
+            <option value="" disabled>
+              직급을 선택해주세요
+            </option>
+            {EMPLOYEE_RANKS.map((r) => (
+              <option key={r} value={r}>
+                {r}
+              </option>
+            ))}
+          </select>
+        </div>
+        <div>
+          <label className="block text-xs font-medium text-slate-600">
+            비밀번호 (4자리 숫자)
           </label>
           <input
-            id="add-password"
             name="password"
             type="text"
+            inputMode="numeric"
+            maxLength={4}
             required
-            className={inputCls}
+            placeholder="0000"
+            value={password}
+            onChange={(e) =>
+              setPassword(e.target.value.replace(/\D/g, "").slice(0, 4))
+            }
+            className={`${inputCls} font-mono tracking-widest`}
           />
+          {password.length > 0 && !passwordValid && (
+            <p className="mt-1 text-xs text-red-600">4자리 숫자를 입력하세요.</p>
+          )}
         </div>
         <button
           type="submit"
           disabled={pending}
-          className="h-[38px] rounded-md bg-[color:var(--brand)] px-4 text-sm font-semibold text-white shadow-sm hover:bg-[color:var(--brand-strong)] disabled:opacity-60"
+          className="mt-2 h-[38px] w-full rounded-md bg-blue-500 px-4 text-sm font-semibold text-white shadow-sm hover:bg-blue-600 disabled:opacity-60"
         >
-          {pending ? "추가 중…" : "추가"}
+          {pending ? "추가 중…" : "＋ 추가"}
         </button>
       </form>
       {error && (
-        <p className="mt-2 rounded-md bg-[color:var(--accent-soft)] px-3 py-2 text-xs text-[color:var(--accent)]">
+        <p className="mt-2 rounded-md bg-red-50 px-3 py-2 text-xs text-red-600">
           {error}
         </p>
       )}
@@ -372,138 +845,5 @@ function AddDriverCard() {
         </p>
       )}
     </section>
-  );
-}
-
-function DriversListCard({ drivers }: { drivers: Driver[] }) {
-  return (
-    <section className={cardCls}>
-      <h3 className={sectionTitle}>운전자 목록</h3>
-      {drivers.length === 0 ? (
-        <p className="mt-3 rounded-md border border-dashed border-slate-300 bg-slate-50 p-4 text-center text-sm text-slate-500">
-          등록된 운전자가 없습니다.
-        </p>
-      ) : (
-        <ul className="mt-3 divide-y divide-slate-100">
-          {drivers.map((d) => (
-            <DriverRow key={d.id} driver={d} />
-          ))}
-        </ul>
-      )}
-    </section>
-  );
-}
-
-function DriverRow({ driver }: { driver: Driver }) {
-  const [showPw, setShowPw] = useState(false);
-  const [pwError, setPwError] = useState<string | null>(null);
-  const [pwOk, setPwOk] = useState(false);
-  const [delError, setDelError] = useState<string | null>(null);
-  const [pwPending, pwStart] = useTransition();
-  const [delPending, delStart] = useTransition();
-
-  return (
-    <li className="py-3">
-      <div className="flex flex-wrap items-center justify-between gap-2">
-        <div>
-          <p className="font-medium text-slate-900">{driver.name}</p>
-          <p className="text-xs text-slate-500">
-            등록 {new Date(driver.created_at).toLocaleDateString("ko-KR")}
-          </p>
-        </div>
-        <div className="flex items-center gap-2">
-          <button
-            type="button"
-            onClick={() => {
-              setShowPw((s) => !s);
-              setPwError(null);
-              setPwOk(false);
-            }}
-            className="rounded-md border border-slate-300 bg-white px-2.5 py-1 text-xs font-medium text-slate-700 hover:bg-slate-50"
-          >
-            {showPw ? "닫기" : "비밀번호 변경"}
-          </button>
-          <form
-            action={(formData) => {
-              if (!confirm(`${driver.name} 운전자를 삭제하시겠습니까?`)) return;
-              setDelError(null);
-              delStart(async () => {
-                try {
-                  await deleteDriver(formData);
-                } catch (e) {
-                  setDelError(
-                    e instanceof Error ? e.message : "삭제 중 오류가 발생했습니다."
-                  );
-                }
-              });
-            }}
-          >
-            <input type="hidden" name="id" value={driver.id} />
-            <button
-              type="submit"
-              disabled={delPending}
-              className="rounded-md border border-[color:var(--accent)] bg-white px-2.5 py-1 text-xs font-medium text-[color:var(--accent)] hover:bg-[color:var(--accent-soft)] disabled:opacity-60"
-            >
-              {delPending ? "삭제 중…" : "삭제"}
-            </button>
-          </form>
-        </div>
-      </div>
-
-      {showPw && (
-        <form
-          action={(formData) => {
-            setPwError(null);
-            setPwOk(false);
-            pwStart(async () => {
-              try {
-                await updateDriverPassword(formData);
-                setPwOk(true);
-                setShowPw(false);
-              } catch (e) {
-                setPwError(
-                  e instanceof Error ? e.message : "변경 중 오류가 발생했습니다."
-                );
-              }
-            });
-          }}
-          className="mt-3 flex flex-wrap items-end gap-2 rounded-lg bg-slate-50 p-3"
-        >
-          <input type="hidden" name="id" value={driver.id} />
-          <div className="flex-1 min-w-[160px]">
-            <label
-              htmlFor={`pw-${driver.id}`}
-              className="block text-xs font-medium text-slate-600"
-            >
-              새 비밀번호
-            </label>
-            <input
-              id={`pw-${driver.id}`}
-              name="password"
-              type="text"
-              required
-              className="mt-1 block w-full rounded-md border border-slate-300 bg-white px-2.5 py-1.5 text-sm shadow-sm focus:border-[color:var(--brand)] focus:outline-none focus:ring-1 focus:ring-[color:var(--brand)]"
-            />
-          </div>
-          <button
-            type="submit"
-            disabled={pwPending}
-            className="h-[34px] rounded-md bg-[color:var(--brand)] px-3 text-xs font-semibold text-white shadow-sm hover:bg-[color:var(--brand-strong)] disabled:opacity-60"
-          >
-            {pwPending ? "변경 중…" : "저장"}
-          </button>
-        </form>
-      )}
-
-      {pwOk && (
-        <p className="mt-2 text-xs text-emerald-700">비밀번호가 변경되었습니다.</p>
-      )}
-      {pwError && (
-        <p className="mt-2 text-xs text-[color:var(--accent)]">{pwError}</p>
-      )}
-      {delError && (
-        <p className="mt-2 text-xs text-[color:var(--accent)]">{delError}</p>
-      )}
-    </li>
   );
 }

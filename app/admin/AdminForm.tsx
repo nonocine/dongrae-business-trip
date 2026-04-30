@@ -16,7 +16,8 @@ export default function AdminForm() {
             const res = await adminLogin(formData);
             if (res && !res.ok) setError(res.message);
           } catch (e) {
-            const msg = e instanceof Error ? e.message : "로그인 중 오류가 발생했습니다.";
+            const msg =
+              e instanceof Error ? e.message : "로그인 중 오류가 발생했습니다.";
             if (msg.includes("NEXT_REDIRECT")) throw e;
             setError(msg);
           }
@@ -25,7 +26,10 @@ export default function AdminForm() {
       className="space-y-4 rounded-xl border border-slate-200 bg-white p-5 shadow-sm"
     >
       <div>
-        <label htmlFor="password" className="block text-sm font-medium text-slate-700">
+        <label
+          htmlFor="password"
+          className="block text-sm font-medium text-slate-700"
+        >
           관리자 비밀번호
         </label>
         <input
@@ -52,7 +56,7 @@ export default function AdminForm() {
         {pending ? "확인 중…" : "로그인"}
       </button>
       <p className="text-xs text-slate-500">
-        관리자 로그인 시 운전자 계정 관리, 초기 누적거리 설정, 운행일지 삭제가 가능합니다.
+        관리자 로그인 시 출장 목록 전체 조회, 직원 등록/관리, 통계, 엑셀 다운로드, 출장일지 삭제가 가능합니다.
       </p>
     </form>
   );

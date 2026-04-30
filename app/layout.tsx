@@ -2,8 +2,8 @@ import type { Metadata, Viewport } from "next";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "동래구청소년센터 차량 운행일지",
-  description: "동래구청소년센터 레이 EV(04거 4911) 차량 운행일지 관리",
+  title: "동래구청소년센터 출장일지",
+  description: "동래구청소년센터 출장일지 작성 및 관리",
   manifest: "/manifest.json",
   icons: {
     icon: "/icon.svg",
