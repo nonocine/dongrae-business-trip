@@ -167,6 +167,15 @@ export type Settings = {
   vehicle_model: string | null;
   insurance_company: string | null;
   initial_mileage: number | null;
+  organization_name: string | null;
+  organization_name_old: string | null;
+  organization_name_changed_at: string | null;
+  organization_head_name: string | null;
+  organization_head_title: string | null;
+  organization_head_title_old: string | null;
+  organization_address: string | null;
+  organization_phone: string | null;
+  organization_email: string | null;
   updated_at: string | null;
 };
 
@@ -215,6 +224,15 @@ export function settingsFromRows(
     vehicle_model: str("vehicle_model"),
     insurance_company: str("insurance_company"),
     initial_mileage: num("initial_mileage"),
+    organization_name: str("organization_name"),
+    organization_name_old: str("organization_name_old"),
+    organization_name_changed_at: str("organization_name_changed_at"),
+    organization_head_name: str("organization_head_name"),
+    organization_head_title: str("organization_head_title"),
+    organization_head_title_old: str("organization_head_title_old"),
+    organization_address: str("organization_address"),
+    organization_phone: str("organization_phone"),
+    organization_email: str("organization_email"),
     updated_at: null,
   };
 }
@@ -372,5 +390,295 @@ export function normalizeBusinessTrip(raw: Record<string, unknown>): BusinessTri
     photos: toStringArray(raw.photos),
     receipts: toStringArray(raw.receipts),
     created_at: String(raw.created_at ?? ""),
+  };
+}
+
+// =====================================================================
+// HR 인사 모듈
+// =====================================================================
+
+// 명칭 변경 분기일: 이 날짜 이전은 "수련관", 이후는 "센터"
+export const HR_NAME_CHANGE_DATE = "2025-12-15";
+
+export const CERTIFICATE_TYPES = ["재직", "경력", "기타"] as const;
+export type CertificateType = (typeof CERTIFICATE_TYPES)[number];
+
+export const CERTIFICATE_TYPE_LABEL: Record<CertificateType, string> = {
+  재직: "재직증명서",
+  경력: "경력증명서",
+  기타: "기타",
+};
+
+export const CERTIFICATE_TYPE_BADGE_CLASS: Record<CertificateType, string> = {
+  재직: "bg-emerald-100 text-emerald-700 border-emerald-200",
+  경력: "bg-violet-100 text-violet-700 border-violet-200",
+  기타: "bg-slate-100 text-slate-700 border-slate-200",
+};
+
+export const GENDER_TYPES = ["남", "여"] as const;
+export type GenderType = (typeof GENDER_TYPES)[number];
+
+export const GENDER_LABEL: Record<GenderType, string> = {
+  남: "남자",
+  여: "여자",
+};
+
+export const HR_ADMIN_RANKS = ["관장", "부장"] as const;
+export type HrAdminRank = (typeof HR_ADMIN_RANKS)[number];
+
+// JSONB sub-types — 폼 작성하면서 좁힐 예정
+export type EmployeeEducation = Record<string, unknown>;
+export type EmployeeFamily = Record<string, unknown>;
+export type EmployeeLicense = Record<string, unknown>;
+export type EmployeeCareer = Record<string, unknown>;
+export type EmployeeAward = Record<string, unknown>;
+export type EmployeeTraining = Record<string, unknown>;
+export type EmployeeAppointment = Record<string, unknown>;
+
+export type EmployeeProfile = {
+  id: string;
+  driver_id: string;
+  name_chinese: string | null;
+  resident_number: string | null;
+  gender: GenderType | null;
+  birth_date: string | null;
+  address: string | null;
+  email: string | null;
+  phone: string | null;
+  photo_url: string | null;
+  join_date: string | null;
+  leave_date: string | null;
+  education: EmployeeEducation[];
+  family: EmployeeFamily[];
+  licenses: EmployeeLicense[];
+  career: EmployeeCareer[];
+  awards: EmployeeAward[];
+  trainings: EmployeeTraining[];
+  appointments: EmployeeAppointment[];
+  military_service: string | null;
+  created_at: string;
+  updated_at: string | null;
+};
+
+export type EmploymentContract = {
+  id: string;
+  driver_id: string;
+  contract_start: string;
+  contract_end: string | null;
+  position: string | null;
+  work_hours: string | null;
+  work_days: string | null;
+  weekly_hours: number | null;
+  workplace: string | null;
+  break_time: string | null;
+  payment_day: string | null;
+  contract_pdf_url: string | null;
+  signed_by_employee: string | null;
+  signed_by_employer: string | null;
+  signed_at: string | null;
+  created_at: string;
+};
+
+export type SalaryContract = {
+  id: string;
+  driver_id: string;
+  year: number;
+  period_start: string | null;
+  period_end: string | null;
+  base_salary: number | null;
+  meal_allowance: number | null;
+  qualification_allowance: number | null;
+  family_allowance: number | null;
+  management_allowance: number | null;
+  holiday_bonus: number | null;
+  transport_allowance: number | null;
+  total_annual: number | null;
+  contract_pdf_url: string | null;
+  signed_at: string | null;
+  created_at: string;
+};
+
+export type CertificateIssued = {
+  id: string;
+  driver_id: string;
+  certificate_type: CertificateType;
+  issue_number: string | null;
+  year: number | null;
+  year_seq: number | null;
+  issue_date: string | null;
+  purpose: string | null;
+  department: string | null;
+  position_detail: string | null;
+  period_from: string | null;
+  period_to: string | null;
+  duration: string | null;
+  issued_by: string | null;
+  pdf_url: string | null;
+  created_at: string;
+};
+
+// JSONB 배열을 안전하게 객체 배열로 변환합니다.
+// 컬럼이 jsonb 가 아닌 text(JSON 문자열)로 와도 처리합니다.
+function toJsonbArray<T extends Record<string, unknown>>(v: unknown): T[] {
+  if (v == null) return [];
+  if (Array.isArray(v)) {
+    return v.filter(
+      (x): x is T => x != null && typeof x === "object" && !Array.isArray(x)
+    );
+  }
+  if (typeof v === "string") {
+    const s = v.trim();
+    if (!s) return [];
+    try {
+      const parsed = JSON.parse(s);
+      if (Array.isArray(parsed)) {
+        return parsed.filter(
+          (x): x is T =>
+            x != null && typeof x === "object" && !Array.isArray(x)
+        );
+      }
+    } catch {
+      // fall through
+    }
+  }
+  return [];
+}
+
+export function normalizeEmployeeProfile(
+  raw: Record<string, unknown>
+): EmployeeProfile {
+  return {
+    id: String(raw.id ?? ""),
+    driver_id: String(raw.driver_id ?? ""),
+    name_chinese: (raw.name_chinese as string | null) ?? null,
+    resident_number: (raw.resident_number as string | null) ?? null,
+    gender: (raw.gender as GenderType | null) ?? null,
+    birth_date: (raw.birth_date as string | null) ?? null,
+    address: (raw.address as string | null) ?? null,
+    email: (raw.email as string | null) ?? null,
+    phone: (raw.phone as string | null) ?? null,
+    photo_url: (raw.photo_url as string | null) ?? null,
+    join_date: (raw.join_date as string | null) ?? null,
+    leave_date: (raw.leave_date as string | null) ?? null,
+    education: toJsonbArray<EmployeeEducation>(raw.education),
+    family: toJsonbArray<EmployeeFamily>(raw.family),
+    licenses: toJsonbArray<EmployeeLicense>(raw.licenses),
+    career: toJsonbArray<EmployeeCareer>(raw.career),
+    awards: toJsonbArray<EmployeeAward>(raw.awards),
+    trainings: toJsonbArray<EmployeeTraining>(raw.trainings),
+    appointments: toJsonbArray<EmployeeAppointment>(raw.appointments),
+    military_service: (raw.military_service as string | null) ?? null,
+    created_at: String(raw.created_at ?? ""),
+    updated_at: (raw.updated_at as string | null) ?? null,
+  };
+}
+
+export function normalizeEmploymentContract(
+  raw: Record<string, unknown>
+): EmploymentContract {
+  return {
+    id: String(raw.id ?? ""),
+    driver_id: String(raw.driver_id ?? ""),
+    contract_start: String(raw.contract_start ?? ""),
+    contract_end: (raw.contract_end as string | null) ?? null,
+    position: (raw.position as string | null) ?? null,
+    work_hours: (raw.work_hours as string | null) ?? null,
+    work_days: (raw.work_days as string | null) ?? null,
+    weekly_hours: raw.weekly_hours == null ? null : Number(raw.weekly_hours),
+    workplace: (raw.workplace as string | null) ?? null,
+    break_time: (raw.break_time as string | null) ?? null,
+    payment_day: (raw.payment_day as string | null) ?? null,
+    contract_pdf_url: (raw.contract_pdf_url as string | null) ?? null,
+    signed_by_employee: (raw.signed_by_employee as string | null) ?? null,
+    signed_by_employer: (raw.signed_by_employer as string | null) ?? null,
+    signed_at: (raw.signed_at as string | null) ?? null,
+    created_at: String(raw.created_at ?? ""),
+  };
+}
+
+export function normalizeSalaryContract(
+  raw: Record<string, unknown>
+): SalaryContract {
+  return {
+    id: String(raw.id ?? ""),
+    driver_id: String(raw.driver_id ?? ""),
+    year: Number(raw.year ?? 0),
+    period_start: (raw.period_start as string | null) ?? null,
+    period_end: (raw.period_end as string | null) ?? null,
+    base_salary: raw.base_salary == null ? null : Number(raw.base_salary),
+    meal_allowance:
+      raw.meal_allowance == null ? null : Number(raw.meal_allowance),
+    qualification_allowance:
+      raw.qualification_allowance == null
+        ? null
+        : Number(raw.qualification_allowance),
+    family_allowance:
+      raw.family_allowance == null ? null : Number(raw.family_allowance),
+    management_allowance:
+      raw.management_allowance == null
+        ? null
+        : Number(raw.management_allowance),
+    holiday_bonus:
+      raw.holiday_bonus == null ? null : Number(raw.holiday_bonus),
+    transport_allowance:
+      raw.transport_allowance == null
+        ? null
+        : Number(raw.transport_allowance),
+    total_annual: raw.total_annual == null ? null : Number(raw.total_annual),
+    contract_pdf_url: (raw.contract_pdf_url as string | null) ?? null,
+    signed_at: (raw.signed_at as string | null) ?? null,
+    created_at: String(raw.created_at ?? ""),
+  };
+}
+
+export function normalizeCertificateIssued(
+  raw: Record<string, unknown>
+): CertificateIssued {
+  return {
+    id: String(raw.id ?? ""),
+    driver_id: String(raw.driver_id ?? ""),
+    certificate_type: (raw.certificate_type as CertificateType) ?? "재직",
+    issue_number: (raw.issue_number as string | null) ?? null,
+    year: raw.year == null ? null : Number(raw.year),
+    year_seq: raw.year_seq == null ? null : Number(raw.year_seq),
+    issue_date: (raw.issue_date as string | null) ?? null,
+    purpose: (raw.purpose as string | null) ?? null,
+    department: (raw.department as string | null) ?? null,
+    position_detail: (raw.position_detail as string | null) ?? null,
+    period_from: (raw.period_from as string | null) ?? null,
+    period_to: (raw.period_to as string | null) ?? null,
+    duration: (raw.duration as string | null) ?? null,
+    issued_by: (raw.issued_by as string | null) ?? null,
+    pdf_url: (raw.pdf_url as string | null) ?? null,
+    created_at: String(raw.created_at ?? ""),
+  };
+}
+
+export function canAccessHr(rank: EmployeeRank | null): boolean {
+  if (!rank) return false;
+  return (HR_ADMIN_RANKS as readonly string[]).includes(rank);
+}
+
+// 주어진 시점의 기관명/대표 직함을 반환합니다.
+// HR_NAME_CHANGE_DATE 이전이면 *_old 값을, 이후면 신규 값을 사용합니다.
+export function getOrgInfoAt(
+  asOfDate: string | Date,
+  settings: Settings
+): { name: string; head_title: string } {
+  const dateStr =
+    asOfDate instanceof Date
+      ? asOfDate.toISOString().slice(0, 10)
+      : String(asOfDate).slice(0, 10);
+  const isBefore = dateStr < HR_NAME_CHANGE_DATE;
+  return {
+    name:
+      (isBefore
+        ? settings.organization_name_old ?? settings.organization_name
+        : settings.organization_name) ?? "",
+    head_title:
+      (isBefore
+        ? settings.organization_head_title_old ??
+          settings.organization_head_title
+        : settings.organization_head_title) ?? "",
   };
 }
