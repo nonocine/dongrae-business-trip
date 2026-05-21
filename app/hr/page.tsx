@@ -25,11 +25,16 @@ export default async function HrPage() {
     <>
       <Header />
       <main className="mx-auto w-full max-w-6xl flex-1 px-4 py-6">
-        <div className="mb-5 flex items-center justify-between">
-          <h2 className="text-2xl font-bold tracking-tight text-slate-900">
-            인사 관리
-          </h2>
-          <Link href="/" className="text-sm text-slate-500 hover:underline">
+        <div className="mb-5 flex items-end justify-between">
+          <div>
+            <p className="text-xs font-semibold tracking-wide text-navy">
+              동래구청소년센터
+            </p>
+            <h2 className="mt-0.5 text-2xl font-bold tracking-[0.1em] text-ink">
+              인사 관리
+            </h2>
+          </div>
+          <Link href="/" className="text-sm text-ink-muted hover:underline">
             ← 목록
           </Link>
         </div>

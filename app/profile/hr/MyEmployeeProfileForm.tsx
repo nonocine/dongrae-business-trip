@@ -14,17 +14,34 @@ import {
   PlaceholderTab,
   type ProfileTabKey,
 } from "@/app/hr/ProfileFormParts";
+import {
+  btnPrimary,
+  badgeSuccess,
+  badgeWarning,
+  badgeNeutral,
+  noticeError,
+  noticeSuccess,
+} from "@/lib/ui";
 
-const cardCls =
-  "rounded-xl border border-slate-200 bg-white p-4 shadow-sm sm:p-5";
+// 인사기록카드 양식 — 네이비 굵은 테두리 + #FAFAFA 배경
+const formCardCls =
+  "rounded-xl border-2 border-hr-border bg-hr-bg p-4 shadow-sm sm:p-5";
 const baseInputCls =
-  "mt-1 block w-full rounded-md border border-slate-300 px-3 py-2 text-sm shadow-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500";
-const labelCls = "block text-xs font-medium text-slate-600";
+  "mt-1 block w-full rounded-md border border-line px-3 py-2 text-sm text-ink-body shadow-sm placeholder:text-ink-hint focus:border-navy focus:outline-none focus:ring-1 focus:ring-navy";
+const labelCls = "block text-xs font-bold text-navy";
 
 // "1984-02-24" → "1984년 2월 24일"
 function formatBirthDate(d: string): string {
   const [y, m, day] = d.split("-");
   return `${Number(y)}년 ${Number(m)}월 ${Number(day)}일`;
+}
+
+// 작성일 표기 — updated_at 우선, 없으면 created_at, 프로필 없으면 "신규"
+function formatDocDate(profile: EmployeeProfile | null): string {
+  if (!profile) return "신규";
+  const d = profile.updated_at ?? profile.created_at;
+  if (!d) return "—";
+  return d.slice(0, 10).replaceAll("-", ".");
 }
 
 export default function MyEmployeeProfileForm({
@@ -55,35 +72,40 @@ export default function MyEmployeeProfileForm({
   );
 
   const fieldCls = locked
-    ? `${baseInputCls} cursor-not-allowed bg-slate-100 text-slate-500`
-    : `${baseInputCls} bg-white`;
+    ? `${baseInputCls} cursor-not-allowed bg-surface text-ink-muted`
+    : `${baseInputCls} bg-card`;
   const leaveCls =
     locked || employed
-      ? `${baseInputCls} cursor-not-allowed bg-slate-100 text-slate-500`
-      : `${baseInputCls} bg-white`;
+      ? `${baseInputCls} cursor-not-allowed bg-surface text-ink-muted`
+      : `${baseInputCls} bg-card`;
 
   return (
     <div className="space-y-5">
       {locked && (
-        <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
+        <div className="rounded-xl border border-warning bg-warning-soft px-4 py-3 text-sm text-warning">
           🔒 관장님이 확정한 인사기록카드입니다. 수정하려면 관장님께
           요청하세요.
         </div>
       )}
 
-      <section className={`${cardCls} ${locked ? "bg-slate-50" : ""}`}>
-        <div className="flex items-center justify-between">
-          <h3 className="text-sm font-semibold text-slate-900">
-            {driverName} 인사기록카드
+      <section className={formCardCls}>
+        {/* 양식 배너 */}
+        <div className="flex items-end justify-between border-b-2 border-hr-border pb-3">
+          <h3 className="text-base font-bold tracking-[0.35em] text-navy sm:text-lg">
+            인사기록카드
           </h3>
+          <span className="shrink-0 pb-0.5 text-xs text-ink-muted">
+            작성일 {formatDocDate(profile)}
+          </span>
+        </div>
+
+        {/* 직원명 + 상태 */}
+        <div className="mt-3 flex items-center justify-between">
+          <h4 className="text-sm font-bold text-ink">{driverName}</h4>
           <span
-            className={`inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-semibold ${
-              locked
-                ? "bg-amber-100 text-amber-700"
-                : profile
-                  ? "bg-emerald-100 text-emerald-700"
-                  : "bg-slate-100 text-slate-500"
-            }`}
+            className={
+              locked ? badgeWarning : profile ? badgeSuccess : badgeNeutral
+            }
           >
             {locked ? "🔒 잠김" : profile ? "입력됨" : "미입력"}
           </span>
@@ -147,7 +169,7 @@ export default function MyEmployeeProfileForm({
                 />
                 {rrnFilled &&
                   (parsed ? (
-                    <p className="mt-1 text-xs text-emerald-600">
+                    <p className="mt-1 text-xs text-success">
                       → 생년월일:{" "}
                       {parsed.birthDate
                         ? formatBirthDate(parsed.birthDate)
@@ -155,11 +177,11 @@ export default function MyEmployeeProfileForm({
                       / 성별: {parsed.gender ?? "-"}
                     </p>
                   ) : (
-                    <p className="mt-1 text-xs text-red-600">
+                    <p className="mt-1 text-xs text-stamp">
                       → 형식이 올바르지 않습니다
                     </p>
                   ))}
-                <p className="mt-1 text-[11px] text-slate-400">
+                <p className="mt-1 text-[11px] text-ink-hint">
                   생년월일·성별은 주민등록번호에서 자동 계산됩니다. 외국인 등은
                   비워두세요.
                 </p>
@@ -212,14 +234,14 @@ export default function MyEmployeeProfileForm({
               </div>
               <div>
                 <label className={labelCls}>퇴사일</label>
-                <label className="mt-1 flex items-center gap-1.5 text-sm text-slate-700">
+                <label className="mt-1 flex items-center gap-1.5 text-sm text-ink-body">
                   <input
                     type="checkbox"
                     name="employed"
                     checked={employed}
                     onChange={(e) => setEmployed(e.target.checked)}
                     disabled={locked}
-                    className="h-3.5 w-3.5 rounded border-slate-300 text-blue-500 focus:ring-blue-500"
+                    className="h-3.5 w-3.5 rounded border-line text-navy focus:ring-navy"
                   />
                   재직 중
                 </label>
@@ -275,22 +297,14 @@ export default function MyEmployeeProfileForm({
             <PlaceholderTab title="인사발령" />
           </div>
 
-          {error && (
-            <p className="rounded-md bg-red-50 px-3 py-2 text-xs text-red-600">
-              {error}
-            </p>
-          )}
-          {ok && (
-            <p className="rounded-md bg-emerald-50 px-3 py-2 text-xs text-emerald-700">
-              {ok}
-            </p>
-          )}
+          {error && <p className={noticeError}>{error}</p>}
+          {ok && <p className={noticeSuccess}>{ok}</p>}
 
           {!locked && (
             <button
               type="submit"
               disabled={pending}
-              className="h-[38px] w-full rounded-md bg-blue-500 px-4 text-sm font-semibold text-white shadow-sm hover:bg-blue-600 disabled:opacity-60 sm:w-auto sm:px-6"
+              className={`${btnPrimary} w-full sm:w-auto sm:px-6`}
             >
               {pending ? "저장 중…" : "저장"}
             </button>

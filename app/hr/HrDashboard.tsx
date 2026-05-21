@@ -3,13 +3,9 @@
 import { useMemo, useState } from "react";
 import EmployeeProfileForm from "@/app/hr/EmployeeProfileForm";
 import type { Driver, EmployeeProfile } from "@/lib/supabase";
+import { cardCls, inputCls, tabBarCls, tabNavCls, tabItemCls } from "@/lib/ui";
 
 type TabKey = "records" | "contracts" | "certificates";
-
-const cardCls =
-  "rounded-xl border border-slate-200 bg-white p-4 shadow-sm sm:p-5";
-const inputCls =
-  "mt-1 block w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm shadow-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500";
 
 export default function HrDashboard({
   drivers,
@@ -61,25 +57,18 @@ function Tabs({
     { key: "certificates", label: "증명서 발급" },
   ];
   return (
-    <div className="overflow-x-auto border-b border-slate-200">
-      <nav className="flex min-w-max gap-1">
-        {tabs.map((t) => {
-          const active = t.key === current;
-          return (
-            <button
-              key={t.key}
-              type="button"
-              onClick={() => onChange(t.key)}
-              className={`relative -mb-px border-b-2 px-4 py-2.5 text-sm font-semibold transition ${
-                active
-                  ? "border-blue-500 text-blue-600"
-                  : "border-transparent text-slate-500 hover:text-slate-800"
-              }`}
-            >
-              {t.label}
-            </button>
-          );
-        })}
+    <div className={tabBarCls}>
+      <nav className={tabNavCls}>
+        {tabs.map((t) => (
+          <button
+            key={t.key}
+            type="button"
+            onClick={() => onChange(t.key)}
+            className={tabItemCls(t.key === current)}
+          >
+            {t.label}
+          </button>
+        ))}
       </nav>
     </div>
   );
@@ -113,7 +102,7 @@ function RecordsTab({
     <div className="space-y-5">
       {/* 직원 선택 */}
       <section className={cardCls}>
-        <label className="block text-xs font-medium text-slate-600">
+        <label className="block text-xs font-medium text-ink-muted">
           인사기록카드를 편집할 직원 선택
         </label>
         <select
@@ -147,12 +136,12 @@ function RecordsTab({
               <div className="flex flex-col items-center justify-center gap-2 py-16 text-center">
                 <div
                   aria-hidden
-                  className="text-5xl text-slate-300"
+                  className="text-5xl text-ink-hint"
                   style={{ filter: "grayscale(100%) opacity(0.6)" }}
                 >
                   🗂
                 </div>
-                <p className="text-sm font-medium text-slate-400">
+                <p className="text-sm font-medium text-ink-muted">
                   위에서 직원을 선택하면 인사기록카드 입력 폼이 표시됩니다.
                 </p>
               </div>
@@ -186,14 +175,14 @@ function EmployeeChecklistCard({
   const done = drivers.filter((d) => profileMap.has(d.id)).length;
   return (
     <section className={`${cardCls} h-fit`}>
-      <h3 className="text-sm font-semibold text-slate-900">
+      <h3 className="text-sm font-semibold text-ink">
         직원 목록{" "}
-        <span className="ml-1 text-xs font-medium text-slate-400">
+        <span className="ml-1 text-xs font-medium text-ink-hint">
           입력 완료 {done} / {drivers.length}
         </span>
       </h3>
       {drivers.length === 0 ? (
-        <p className="mt-3 text-xs text-slate-500">
+        <p className="mt-3 text-xs text-ink-muted">
           등록된 직원이 없습니다.
         </p>
       ) : (
@@ -208,29 +197,23 @@ function EmployeeChecklistCard({
                   onClick={() => onSelect(d.id)}
                   className={`flex w-full items-center justify-between rounded-md px-2.5 py-2 text-left text-sm transition ${
                     active
-                      ? "bg-blue-50 ring-1 ring-blue-300"
-                      : "hover:bg-slate-50"
+                      ? "bg-navy-soft ring-1 ring-navy"
+                      : "hover:bg-surface"
                   }`}
                 >
                   <span className="flex items-center gap-1.5">
                     <span aria-hidden>{has ? "✅" : "❌"}</span>
-                    <span className="font-medium text-slate-800">
-                      {d.name}
-                    </span>
+                    <span className="font-medium text-ink">{d.name}</span>
                     {d.rank && (
-                      <span className="text-xs text-slate-400">
-                        {d.rank}
-                      </span>
+                      <span className="text-xs text-ink-hint">{d.rank}</span>
                     )}
                     {!d.is_active && (
-                      <span className="text-[10px] text-slate-400">
-                        (퇴사)
-                      </span>
+                      <span className="text-[10px] text-ink-hint">(퇴사)</span>
                     )}
                   </span>
                   <span
                     className={`text-[10px] font-semibold ${
-                      has ? "text-emerald-600" : "text-slate-400"
+                      has ? "text-success" : "text-ink-hint"
                     }`}
                   >
                     {has ? "입력됨" : "미입력"}
@@ -259,17 +242,17 @@ function PlaceholderCard({
 }) {
   return (
     <section className={cardCls}>
-      <h3 className="text-sm font-semibold text-slate-900">{title}</h3>
+      <h3 className="text-sm font-semibold text-ink">{title}</h3>
       <div className="mt-2 flex flex-col items-center justify-center gap-2 py-16 text-center">
         <div
           aria-hidden
-          className="text-5xl text-slate-300"
+          className="text-5xl text-ink-hint"
           style={{ filter: "grayscale(100%) opacity(0.6)" }}
         >
           {icon}
         </div>
-        <p className="text-sm font-medium text-slate-400">{desc}</p>
-        <p className="text-xs text-slate-400">곧 제공될 예정입니다.</p>
+        <p className="text-sm font-medium text-ink-muted">{desc}</p>
+        <p className="text-xs text-ink-hint">곧 제공될 예정입니다.</p>
       </div>
     </section>
   );

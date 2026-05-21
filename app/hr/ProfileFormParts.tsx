@@ -1,6 +1,7 @@
 "use client";
 
 import { EDUCATION_DEGREES, type EmployeeEducation } from "@/lib/supabase";
+import { tabBarCls, tabNavCls, tabItemCls } from "@/lib/ui";
 
 // =====================================================================
 // 인사기록카드 탭 (편집 화면)
@@ -34,25 +35,18 @@ export function ProfileTabs({
   onChange: (t: ProfileTabKey) => void;
 }) {
   return (
-    <div className="overflow-x-auto border-b border-slate-200">
-      <nav className="flex min-w-max gap-1">
-        {PROFILE_TABS.map((t) => {
-          const active = t.key === current;
-          return (
-            <button
-              key={t.key}
-              type="button"
-              onClick={() => onChange(t.key)}
-              className={`relative -mb-px whitespace-nowrap border-b-2 px-3 py-2 text-sm font-semibold transition ${
-                active
-                  ? "border-blue-500 text-blue-600"
-                  : "border-transparent text-slate-500 hover:text-slate-800"
-              }`}
-            >
-              {t.label}
-            </button>
-          );
-        })}
+    <div className={tabBarCls}>
+      <nav className={tabNavCls}>
+        {PROFILE_TABS.map((t) => (
+          <button
+            key={t.key}
+            type="button"
+            onClick={() => onChange(t.key)}
+            className={tabItemCls(t.key === current)}
+          >
+            {t.label}
+          </button>
+        ))}
       </nav>
     </div>
   );
@@ -61,12 +55,12 @@ export function ProfileTabs({
 // 아직 구현되지 않은 탭의 안내 카드
 export function PlaceholderTab({ title }: { title: string }) {
   return (
-    <div className="flex flex-col items-center justify-center gap-2 rounded-lg border border-dashed border-slate-300 bg-slate-50 py-16 text-center">
-      <div aria-hidden className="text-4xl text-slate-300">
+    <div className="flex flex-col items-center justify-center gap-2 rounded-lg border border-dashed border-line bg-surface py-16 text-center">
+      <div aria-hidden className="text-4xl text-ink-hint">
         🗂
       </div>
-      <p className="text-sm font-medium text-slate-400">{title}</p>
-      <p className="text-xs text-slate-400">다음 단계에서 제공될 예정입니다.</p>
+      <p className="text-sm font-medium text-ink-muted">{title}</p>
+      <p className="text-xs text-ink-hint">다음 단계에서 제공될 예정입니다.</p>
     </div>
   );
 }
@@ -74,9 +68,9 @@ export function PlaceholderTab({ title }: { title: string }) {
 // =====================================================================
 // 학력 동적 폼
 // =====================================================================
-const eduInputCls =
-  "block w-full rounded-md border border-slate-300 px-2.5 py-1.5 text-sm shadow-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500";
-const eduLabelCls = "text-xs text-slate-500";
+const eduInputBase =
+  "block w-full rounded-md border border-line px-2.5 py-1.5 text-sm text-ink-body shadow-sm placeholder:text-ink-hint focus:border-navy focus:outline-none focus:ring-1 focus:ring-navy";
+const eduLabelCls = "text-xs font-medium text-ink-muted";
 
 function emptyEducation(): EmployeeEducation {
   return {
@@ -109,20 +103,20 @@ export function EducationTab({
   }
 
   const fieldCls = readOnly
-    ? `${eduInputCls} cursor-not-allowed bg-slate-100 text-slate-500`
-    : `${eduInputCls} bg-white`;
+    ? `${eduInputBase} cursor-not-allowed bg-surface text-ink-muted`
+    : `${eduInputBase} bg-card`;
 
   return (
     <div className="space-y-3">
       <div className="flex items-center justify-between gap-2">
-        <p className="text-xs text-slate-500">
+        <p className="text-xs text-ink-muted">
           학력 사항을 입력하세요. 항목이 없어도 저장됩니다.
         </p>
         {!readOnly && (
           <button
             type="button"
             onClick={add}
-            className="shrink-0 rounded-md border border-blue-500 bg-white px-2.5 py-1 text-xs font-semibold text-blue-600 hover:bg-blue-50"
+            className="shrink-0 rounded-md border border-navy bg-card px-2.5 py-1 text-xs font-semibold text-navy hover:bg-navy-soft"
           >
             ＋ 학력 추가
           </button>
@@ -130,7 +124,7 @@ export function EducationTab({
       </div>
 
       {education.length === 0 ? (
-        <p className="rounded-md border border-dashed border-slate-300 bg-slate-50 px-3 py-6 text-center text-xs text-slate-400">
+        <p className="rounded-md border border-dashed border-line bg-surface px-3 py-6 text-center text-xs text-ink-hint">
           등록된 학력이 없습니다.
         </p>
       ) : (
@@ -138,17 +132,17 @@ export function EducationTab({
           {education.map((edu, idx) => (
             <li
               key={idx}
-              className="rounded-lg border border-slate-200 bg-white p-3 shadow-sm"
+              className="rounded-lg border border-line bg-hr-bg p-3 shadow-sm"
             >
               <div className="flex items-center justify-between gap-2">
-                <span className="text-xs font-semibold text-slate-500">
+                <span className="text-xs font-bold text-navy">
                   학력 {idx + 1}
                 </span>
                 {!readOnly && (
                   <button
                     type="button"
                     onClick={() => remove(idx)}
-                    className="rounded-md border border-red-300 bg-white px-2 py-0.5 text-xs font-medium text-red-500 hover:bg-red-50"
+                    className="rounded-md border border-stamp bg-card px-2 py-0.5 text-xs font-medium text-stamp hover:bg-stamp-soft"
                   >
                     🗑 삭제
                   </button>
@@ -164,7 +158,7 @@ export function EducationTab({
                     onChange={(e) => update(idx, { school: e.target.value })}
                     readOnly={readOnly}
                     placeholder="○○대학교"
-                    className={`mt-0.5 ${fieldCls}`}
+                    className={`mt-0.5 font-semibold ${fieldCls}`}
                   />
                 </div>
                 <div>
@@ -175,7 +169,7 @@ export function EducationTab({
                     onChange={(e) => update(idx, { major: e.target.value })}
                     readOnly={readOnly}
                     placeholder="○○학과"
-                    className={`mt-0.5 ${fieldCls}`}
+                    className={`mt-0.5 font-semibold ${fieldCls}`}
                   />
                 </div>
                 <div>
