@@ -2,10 +2,13 @@ import Link from "next/link";
 import Header from "@/app/components/Header";
 import HrDashboard from "@/app/hr/HrDashboard";
 import { requireHrAdmin } from "@/app/hr/actions";
+import { enforcePasswordChange } from "@/app/actions";
 
 export const dynamic = "force-dynamic";
 
 export default async function HrPage() {
+  // 임시 비밀번호 사용자는 비번 변경 페이지로 강제 이동
+  await enforcePasswordChange();
   // 관장·부장 직원 세션이 아니면 / 로 redirect
   await requireHrAdmin();
 

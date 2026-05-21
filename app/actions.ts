@@ -15,6 +15,8 @@ import {
   DEFAULT_DEPARTURE,
   DEFAULT_VEHICLE_CONFIRMER,
   isActivityKind,
+  validatePasswordStrength,
+  generateTempPassword,
   type Activity,
   type ActivityKind,
   type BusinessTrip,
@@ -99,12 +101,15 @@ export async function loginEmployee(formData: FormData) {
   if (!name) {
     return { ok: false as const, message: "직원을 선택해주세요." };
   }
-  if (!/^\d{4}$/.test(password)) {
-    return { ok: false as const, message: "4자리 숫자 비밀번호를 입력해주세요." };
+  // 직급별 비번 정책이 달라(일반 4자리 / 관장·부장 강력) 길이만 확인.
+  // 실제 일치 여부는 아래 DB 조회에서 검증합니다.
+  if (!password) {
+    return { ok: false as const, message: "비밀번호를 입력해주세요." };
   }
+  // select("*") — must_change_password 컬럼이 아직 없어도 안전합니다.
   const { data, error } = await supabase
     .from("drivers")
-    .select("name, password, is_active")
+    .select("*")
     .eq("name", name)
     .maybeSingle();
   if (error) return { ok: false as const, message: error.message };
@@ -135,7 +140,10 @@ export async function loginEmployee(formData: FormData) {
     maxAge: 60 * 60 * 24 * 30,
     secure: process.env.NODE_ENV === "production",
   });
-  redirect("/");
+  // 임시 비밀번호(must_change_password=true)면 비번 변경 페이지로 강제 이동.
+  const mustChange =
+    (data as { must_change_password?: unknown }).must_change_password === true;
+  redirect(mustChange ? "/profile/password" : "/");
 }
 
 export async function logoutCurrent() {
@@ -603,6 +611,156 @@ export async function restoreDriver(formData: FormData) {
   revalidatePath("/admin");
   revalidatePath("/new");
   revalidatePath("/");
+}
+
+// =====================================================================
+// 비밀번호 관리
+//   * drivers.password 는 평문. must_change_password / password_changed_at
+//     컬럼은 아직 DB에 없을 수 있어, 갱신 실패 시 password 만 갱신합니다.
+// =====================================================================
+
+// 임시 비밀번호 사용자(must_change_password=true)는 비번을 바꾸기 전까지
+// 다른 페이지 진입을 차단합니다. 비번 변경 페이지 자체에서는 호출하지 마세요.
+export async function enforcePasswordChange(): Promise<void> {
+  const session = await getSession();
+  if (!session || session.kind !== "employee") return;
+  try {
+    const { data, error } = await supabase
+      .from("drivers")
+      .select("*")
+      .eq("name", session.name)
+      .maybeSingle();
+    if (error || !data) return;
+    if (
+      (data as { must_change_password?: unknown }).must_change_password === true
+    ) {
+      redirect("/profile/password");
+    }
+  } catch (e) {
+    // redirect()는 NEXT_REDIRECT 에러를 throw 하므로 그대로 다시 던집니다.
+    if (e instanceof Error && e.message.includes("NEXT_REDIRECT")) throw e;
+    // 그 외(컬럼 없음 등)는 차단하지 않고 통과시킵니다.
+  }
+}
+
+// 본인 비밀번호 변경 (직원 세션 전용).
+export async function changePassword(formData: FormData) {
+  const session = await requireSession();
+  if (session.kind !== "employee") {
+    throw new Error(
+      "관리자 비밀번호는 환경변수(ADMIN_PASSWORD)로 관리됩니다."
+    );
+  }
+
+  const currentPassword = String(formData.get("current_password") ?? "").trim();
+  const newPassword = String(formData.get("new_password") ?? "").trim();
+  const confirmPassword = String(formData.get("confirm_password") ?? "").trim();
+
+  if (!currentPassword || !newPassword) {
+    throw new Error("현재 비밀번호와 새 비밀번호를 모두 입력해주세요.");
+  }
+  if (newPassword !== confirmPassword) {
+    throw new Error("새 비밀번호 확인이 일치하지 않습니다.");
+  }
+
+  const { data, error } = await supabase
+    .from("drivers")
+    .select("*")
+    .eq("name", session.name)
+    .maybeSingle();
+  if (error) throw new Error(error.message);
+  if (!data) throw new Error("직원 정보를 찾을 수 없습니다.");
+
+  if ((data as { password?: unknown }).password !== currentPassword) {
+    throw new Error("현재 비밀번호가 올바르지 않습니다.");
+  }
+
+  const rank =
+    ((data as { rank?: unknown }).rank as EmployeeRank | null) ?? null;
+  const check = validatePasswordStrength(newPassword, rank);
+  if (!check.ok) {
+    throw new Error(check.error ?? "비밀번호 정책을 만족하지 않습니다.");
+  }
+  if (newPassword === currentPassword) {
+    throw new Error("새 비밀번호가 기존 비밀번호와 동일합니다.");
+  }
+
+  const id = (data as { id: unknown }).id;
+  // 새 컬럼이 있으면 함께 갱신, 없으면(에러) password 만 갱신.
+  const { error: upErr } = await supabase
+    .from("drivers")
+    .update({
+      password: newPassword,
+      password_changed_at: new Date().toISOString(),
+      must_change_password: false,
+    })
+    .eq("id", id);
+  if (upErr) {
+    const { error: fbErr } = await supabase
+      .from("drivers")
+      .update({ password: newPassword })
+      .eq("id", id);
+    if (fbErr) throw new Error(fbErr.message);
+  }
+
+  revalidatePath("/");
+  redirect("/");
+}
+
+// 관리자가 직원 비밀번호를 임시 비번으로 재설정 (ADMIN 전용).
+export async function resetEmployeePassword(
+  formData: FormData
+): Promise<
+  | { ok: true; name: string; tempPassword: string }
+  | { ok: false; message: string }
+> {
+  try {
+    await requireAdmin();
+    const id = String(formData.get("id") ?? "");
+    if (!id) return { ok: false, message: "직원 ID가 없습니다." };
+
+    const { data: row, error: fetchErr } = await supabase
+      .from("drivers")
+      .select("name")
+      .eq("id", id)
+      .maybeSingle();
+    if (fetchErr) return { ok: false, message: fetchErr.message };
+    if (!row) return { ok: false, message: "직원을 찾을 수 없습니다." };
+
+    const tempPassword = generateTempPassword();
+
+    // 새 컬럼이 있으면 함께 갱신, 없으면(에러) password 만 갱신.
+    const { error: upErr } = await supabase
+      .from("drivers")
+      .update({
+        password: tempPassword,
+        must_change_password: true,
+        password_changed_at: null,
+      })
+      .eq("id", id);
+    if (upErr) {
+      const { error: fbErr } = await supabase
+        .from("drivers")
+        .update({ password: tempPassword })
+        .eq("id", id);
+      if (fbErr) return { ok: false, message: fbErr.message };
+    }
+
+    revalidatePath("/admin");
+    return {
+      ok: true,
+      name: String((row as { name: unknown }).name ?? ""),
+      tempPassword,
+    };
+  } catch (e) {
+    return {
+      ok: false,
+      message:
+        e instanceof Error
+          ? e.message
+          : "비밀번호 재설정 중 오류가 발생했습니다.",
+    };
+  }
 }
 
 // =====================================================================

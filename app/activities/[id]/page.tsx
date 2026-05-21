@@ -3,6 +3,7 @@ import { redirect } from "next/navigation";
 import Header from "@/app/components/Header";
 import ActivityDetail from "@/app/activities/[id]/ActivityDetail";
 import {
+  enforcePasswordChange,
   getActivity,
   getDrivingLog,
   getSession,
@@ -17,6 +18,7 @@ export default async function ActivityDetailPage({
   params: Promise<{ id: string }>;
 }) {
   const { id } = await params;
+  await enforcePasswordChange();
   const [activity, session] = await Promise.all([
     getActivity(id),
     getSession(),

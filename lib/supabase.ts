@@ -331,6 +331,9 @@ export type Driver = {
   password: string | null;
   is_active: boolean;
   created_at: string;
+  // 아래 두 컬럼은 DB에 아직 없을 수 있어 옵셔널입니다.
+  must_change_password?: boolean | null;
+  password_changed_at?: string | null;
 };
 
 // 호환성을 위한 별칭 (기존 코드는 Employee 라는 이름을 사용)
@@ -657,6 +660,50 @@ export function normalizeCertificateIssued(
 export function canAccessHr(rank: EmployeeRank | null): boolean {
   if (!rank) return false;
   return (HR_ADMIN_RANKS as readonly string[]).includes(rank);
+}
+
+// =====================================================================
+// 비밀번호 정책
+// =====================================================================
+
+// 비밀번호 강도 검증.
+//   * 일반 직원(팀장/팀원 등): 4자리 숫자 (기존 정책 유지)
+//   * 인사 권한자(관장/부장): 6자리 이상 + 영문 1자 이상 포함
+export function validatePasswordStrength(
+  password: string,
+  rank: EmployeeRank | null
+): { ok: boolean; error?: string } {
+  const pw = password ?? "";
+  const isHrAdmin =
+    !!rank && (HR_ADMIN_RANKS as readonly string[]).includes(rank);
+
+  if (isHrAdmin) {
+    if (pw.length < 6) {
+      return {
+        ok: false,
+        error: "관장·부장은 6자리 이상 비밀번호를 사용해야 합니다.",
+      };
+    }
+    if (!/[A-Za-z]/.test(pw)) {
+      return {
+        ok: false,
+        error: "관장·부장 비밀번호는 영문을 1자 이상 포함해야 합니다.",
+      };
+    }
+    return { ok: true };
+  }
+
+  if (!/^\d{4}$/.test(pw)) {
+    return { ok: false, error: "4자리 숫자 비밀번호를 입력해주세요." };
+  }
+  return { ok: true };
+}
+
+// 관리자가 직원 비번을 재설정할 때 발급하는 임시 비밀번호.
+// "Temp" + 4자리 숫자 → 영문 포함 8자라 인사 권한자 정책도 자동 통과합니다.
+export function generateTempPassword(): string {
+  const n = Math.floor(1000 + Math.random() * 9000);
+  return `Temp${n}`;
 }
 
 // 주어진 시점의 기관명/대표 직함을 반환합니다.

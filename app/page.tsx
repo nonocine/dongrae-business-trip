@@ -3,6 +3,7 @@ import Header from "@/app/components/Header";
 import LoginForm from "@/app/components/LoginForm";
 import ActivityList from "@/app/components/ActivityList";
 import {
+  enforcePasswordChange,
   getSession,
   listActivities,
   listDriverNames,
@@ -11,6 +12,8 @@ import {
 export const dynamic = "force-dynamic";
 
 export default async function Home() {
+  // 임시 비밀번호 사용자는 비번 변경 페이지로 강제 이동
+  await enforcePasswordChange();
   const session = await getSession();
 
   if (!session) {

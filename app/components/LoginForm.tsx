@@ -9,7 +9,9 @@ export default function LoginForm({ employees }: { employees: string[] }) {
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [pending, startTransition] = useTransition();
-  const passwordValid = /^\d{4}$/.test(password);
+  // 로그인 시점엔 직급(rank)을 모르므로 길이만 확인합니다.
+  // 일반 직원은 4자리 숫자, 관장·부장은 영문 포함 6자 이상 — 둘 다 허용.
+  const passwordValid = password.length >= 4;
 
   return (
     <div className="space-y-5">
@@ -45,7 +47,7 @@ export default function LoginForm({ employees }: { employees: string[] }) {
                 return;
               }
               if (!passwordValid) {
-                setError("4자리 숫자 비밀번호를 입력해주세요.");
+                setError("비밀번호를 입력해주세요.");
                 return;
               }
               startTransition(async () => {
@@ -88,22 +90,18 @@ export default function LoginForm({ employees }: { employees: string[] }) {
             </div>
             <div>
               <label className="block text-xs font-medium text-slate-600">
-                비밀번호 (4자리 숫자)
+                비밀번호
               </label>
               <input
                 name="password"
                 type="password"
-                inputMode="numeric"
-                maxLength={4}
-                pattern="\d{4}"
+                maxLength={64}
                 required
                 autoComplete="current-password"
-                placeholder="••••"
+                placeholder="비밀번호를 입력하세요"
                 value={password}
-                onChange={(e) =>
-                  setPassword(e.target.value.replace(/\D/g, "").slice(0, 4))
-                }
-                className="mt-1 block w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm font-mono tracking-[0.5em] shadow-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                onChange={(e) => setPassword(e.target.value.slice(0, 64))}
+                className="mt-1 block w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm font-mono shadow-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
               />
             </div>
             {error && (

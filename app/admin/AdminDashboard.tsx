@@ -6,6 +6,7 @@ import {
   addDriver,
   deleteActivity,
   deleteDriver,
+  resetEmployeePassword,
   restoreDriver,
   updateDriver,
   type ActivityAdminStats,
@@ -630,6 +631,11 @@ function EmployeeRow({ employee }: { employee: Employee }) {
   const [pending, startTransition] = useTransition();
   const [delPending, delTransition] = useTransition();
   const [restorePending, restoreTransition] = useTransition();
+  const [resetPending, resetTransition] = useTransition();
+  const [resetResult, setResetResult] = useState<{
+    name: string;
+    tempPassword: string;
+  } | null>(null);
 
   function reset() {
     setEditing(false);
@@ -772,6 +778,34 @@ function EmployeeRow({ employee }: { employee: Employee }) {
             >
               수정
             </button>
+            <button
+              type="button"
+              disabled={resetPending}
+              onClick={() => {
+                if (
+                  !confirm(
+                    `${employee.name} 직원의 비밀번호를 임시 비번으로 재설정하시겠습니까?\n직원은 다음 로그인 시 새 비밀번호를 설정해야 합니다.`
+                  )
+                )
+                  return;
+                resetTransition(async () => {
+                  const fd = new FormData();
+                  fd.set("id", employee.id);
+                  const res = await resetEmployeePassword(fd);
+                  if (res.ok) {
+                    setResetResult({
+                      name: res.name,
+                      tempPassword: res.tempPassword,
+                    });
+                  } else {
+                    alert(res.message);
+                  }
+                });
+              }}
+              className="mr-1.5 rounded-md border border-amber-500 bg-white px-2.5 py-1 text-xs font-medium text-amber-600 hover:bg-amber-50 disabled:opacity-60"
+            >
+              {resetPending ? "재설정 중…" : "비번 재설정"}
+            </button>
             <form
               action={(formData) => {
                 if (
@@ -795,10 +829,87 @@ function EmployeeRow({ employee }: { employee: Employee }) {
                 {delPending ? "퇴사 처리 중…" : "퇴사"}
               </button>
             </form>
+            {resetResult && (
+              <ResetPasswordModal
+                name={resetResult.name}
+                tempPassword={resetResult.tempPassword}
+                onClose={() => setResetResult(null)}
+              />
+            )}
           </>
         )}
       </td>
     </tr>
+  );
+}
+
+// =====================================================================
+// 임시 비밀번호 발급 결과 모달
+// =====================================================================
+function ResetPasswordModal({
+  name,
+  tempPassword,
+  onClose,
+}: {
+  name: string;
+  tempPassword: string;
+  onClose: () => void;
+}) {
+  const [copied, setCopied] = useState(false);
+
+  async function copy() {
+    try {
+      await navigator.clipboard.writeText(tempPassword);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    } catch {
+      setCopied(false);
+    }
+  }
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 p-4"
+      onClick={onClose}
+    >
+      <div
+        className="w-full max-w-sm rounded-xl bg-white p-5 text-left shadow-xl"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <h3 className="text-sm font-semibold text-slate-900">
+          🔑 임시 비밀번호 발급 완료
+        </h3>
+        <p className="mt-1 text-xs text-slate-500">
+          <span className="font-medium text-slate-700">{name}</span> 직원에게
+          아래 임시 비밀번호를 직접 전달해주세요.
+        </p>
+
+        <div className="mt-3 flex items-center gap-2">
+          <code className="flex-1 rounded-md border border-slate-300 bg-slate-50 px-3 py-2 text-center font-mono text-lg font-bold tracking-widest text-slate-900">
+            {tempPassword}
+          </code>
+          <button
+            type="button"
+            onClick={copy}
+            className="shrink-0 rounded-md bg-blue-500 px-3 py-2 text-xs font-semibold text-white hover:bg-blue-600"
+          >
+            {copied ? "복사됨" : "복사"}
+          </button>
+        </div>
+
+        <p className="mt-3 rounded-md bg-amber-50 px-3 py-2 text-xs text-amber-800">
+          직원이 이 비밀번호로 로그인하면 즉시 새 비밀번호를 설정해야 합니다.
+        </p>
+
+        <button
+          type="button"
+          onClick={onClose}
+          className="mt-3 w-full rounded-md border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
+        >
+          닫기
+        </button>
+      </div>
+    </div>
   );
 }
 

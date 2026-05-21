@@ -2,7 +2,11 @@ import Link from "next/link";
 import { redirect } from "next/navigation";
 import Header from "@/app/components/Header";
 import TripDetail from "@/app/trips/[id]/TripDetail";
-import { getBusinessTrip, getSession } from "@/app/actions";
+import {
+  enforcePasswordChange,
+  getBusinessTrip,
+  getSession,
+} from "@/app/actions";
 
 export const dynamic = "force-dynamic";
 
@@ -12,6 +16,7 @@ export default async function TripDetailPage({
   params: Promise<{ id: string }>;
 }) {
   const { id } = await params;
+  await enforcePasswordChange();
   const [trip, session] = await Promise.all([
     getBusinessTrip(id),
     getSession(),

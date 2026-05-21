@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import Header from "@/app/components/Header";
-import { getSession } from "@/app/actions";
+import { enforcePasswordChange, getSession } from "@/app/actions";
 import {
   ACTIVITY_KINDS,
   ACTIVITY_LABEL,
@@ -12,6 +12,7 @@ import {
 export const dynamic = "force-dynamic";
 
 export default async function NewActivityKindPage() {
+  await enforcePasswordChange();
   const session = await getSession();
   if (!session) redirect("/");
 

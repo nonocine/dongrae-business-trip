@@ -3,6 +3,7 @@ import { redirect } from "next/navigation";
 import Header from "@/app/components/Header";
 import AdminDashboard from "@/app/admin/AdminDashboard";
 import {
+  enforcePasswordChange,
   getActivityAdminStats,
   isAdmin,
   listActivities,
@@ -12,6 +13,7 @@ import {
 export const dynamic = "force-dynamic";
 
 export default async function AdminPage() {
+  await enforcePasswordChange();
   if (!(await isAdmin())) {
     redirect("/admin/login");
   }

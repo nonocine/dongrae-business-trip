@@ -3,6 +3,7 @@ import { notFound, redirect } from "next/navigation";
 import Header from "@/app/components/Header";
 import ActivityForm from "@/app/new/[kind]/ActivityForm";
 import {
+  enforcePasswordChange,
   getSession,
   getSettings,
   listDriverNames,
@@ -29,6 +30,7 @@ export default async function NewActivityFormPage({
   const { kind } = await params;
   if (!isActivityKind(kind)) notFound();
 
+  await enforcePasswordChange();
   const session = await getSession();
   if (!session) redirect("/");
 
