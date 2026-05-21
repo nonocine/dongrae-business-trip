@@ -118,13 +118,22 @@ export default function HeaderClient({
                           관리자 대시보드
                         </Link>
                       ) : (
-                        <Link
-                          href="/profile/password"
-                          onClick={() => setUserMenuOpen(false)}
-                          className="block px-3 py-2 text-sm text-slate-700 hover:bg-slate-50"
-                        >
-                          비밀번호 변경
-                        </Link>
+                        <>
+                          <Link
+                            href="/profile/hr"
+                            onClick={() => setUserMenuOpen(false)}
+                            className="block px-3 py-2 text-sm text-slate-700 hover:bg-slate-50"
+                          >
+                            내 인사기록카드
+                          </Link>
+                          <Link
+                            href="/profile/password"
+                            onClick={() => setUserMenuOpen(false)}
+                            className="block px-3 py-2 text-sm text-slate-700 hover:bg-slate-50"
+                          >
+                            비밀번호 변경
+                          </Link>
+                        </>
                       )}
                       <div className="my-1 border-t border-slate-100" />
                       <form action={logoutCurrent}>
@@ -198,13 +207,22 @@ export default function HeaderClient({
                   관리자 대시보드
                 </Link>
               ) : (
-                <Link
-                  href="/profile/password"
-                  onClick={() => setMobileOpen(false)}
-                  className="rounded-md px-3 py-2.5 text-sm font-medium text-slate-700 hover:bg-slate-100"
-                >
-                  비밀번호 변경
-                </Link>
+                <>
+                  <Link
+                    href="/profile/hr"
+                    onClick={() => setMobileOpen(false)}
+                    className="rounded-md px-3 py-2.5 text-sm font-medium text-slate-700 hover:bg-slate-100"
+                  >
+                    내 인사기록카드
+                  </Link>
+                  <Link
+                    href="/profile/password"
+                    onClick={() => setMobileOpen(false)}
+                    className="rounded-md px-3 py-2.5 text-sm font-medium text-slate-700 hover:bg-slate-100"
+                  >
+                    비밀번호 변경
+                  </Link>
+                </>
               )}
 
               <form action={logoutCurrent}>
