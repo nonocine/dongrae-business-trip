@@ -31,7 +31,7 @@ function locationOf(a: Activity): string {
 }
 
 const inputCls =
-  "block w-full rounded-md border border-slate-300 bg-white px-3 py-1.5 text-sm shadow-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500";
+  "block w-full rounded-lg border border-line bg-card px-3 py-1.5 text-sm text-ink-body shadow-sm focus:border-navy focus:outline-none focus:ring-1 focus:ring-navy";
 
 export default function ActivityList({ activities }: { activities: Activity[] }) {
   const [kindFilter, setKindFilter] = useState<ActivityKind | "">("");
@@ -58,9 +58,9 @@ export default function ActivityList({ activities }: { activities: Activity[] })
 
   return (
     <>
-      <section className="grid grid-cols-1 gap-2 rounded-xl border border-slate-200 bg-white p-3 sm:grid-cols-2">
+      <section className="grid grid-cols-1 gap-2 rounded-xl border border-line bg-card p-3 sm:grid-cols-2">
         <div>
-          <label className="text-xs font-medium text-slate-600">유형</label>
+          <label className="text-xs font-medium text-ink-muted">유형</label>
           <select
             value={kindFilter}
             onChange={(e) =>
@@ -77,7 +77,7 @@ export default function ActivityList({ activities }: { activities: Activity[] })
           </select>
         </div>
         <div>
-          <label className="text-xs font-medium text-slate-600">월</label>
+          <label className="text-xs font-medium text-ink-muted">월</label>
           <select
             value={monthFilter}
             onChange={(e) => setMonthFilter(e.target.value)}
@@ -93,23 +93,23 @@ export default function ActivityList({ activities }: { activities: Activity[] })
         </div>
       </section>
 
-      <p className="text-xs text-slate-500">
-        총 <strong className="text-slate-800">{filtered.length}</strong>건
+      <p className="text-xs text-ink-muted">
+        총 <strong className="text-ink">{filtered.length}</strong>건
       </p>
 
       {filtered.length === 0 ? (
-        <div className="rounded-xl border border-dashed border-slate-300 bg-white py-12 text-center">
+        <div className="rounded-xl border border-dashed border-line bg-card py-12 text-center">
           <div
             aria-hidden
-            className="text-5xl text-slate-300"
+            className="text-5xl text-ink-hint"
             style={{ filter: "grayscale(100%) opacity(0.6)" }}
           >
             📂
           </div>
-          <p className="mt-2 text-sm font-medium text-slate-400">
+          <p className="mt-2 text-sm font-medium text-ink-muted">
             아직 등록된 활동이 없습니다.
           </p>
-          <p className="text-xs text-slate-400">
+          <p className="text-xs text-ink-hint">
             상단의 + 버튼으로 새 활동을 작성해보세요.
           </p>
         </div>
@@ -119,7 +119,7 @@ export default function ActivityList({ activities }: { activities: Activity[] })
             <li key={a.id}>
               <Link
                 href={`/activities/${a.id}`}
-                className="block rounded-xl border border-slate-200 bg-white p-4 shadow-sm transition hover:-translate-y-0.5 hover:shadow-md"
+                className="block rounded-xl border border-line bg-card p-4 shadow-sm transition hover:-translate-y-0.5 hover:shadow-md"
               >
                 <div className="flex items-start justify-between gap-3">
                   <div className="min-w-0 flex-1">
@@ -129,21 +129,21 @@ export default function ActivityList({ activities }: { activities: Activity[] })
                       >
                         {ACTIVITY_ICON[a.kind]} {ACTIVITY_LABEL[a.kind]}
                       </span>
-                      <span className="text-xs font-medium text-slate-500">
+                      <span className="text-xs font-medium text-ink-muted">
                         {formatRange(a.start_date, a.end_date)}
                       </span>
                     </div>
-                    <p className="mt-1 truncate text-base font-semibold text-slate-900">
+                    <p className="mt-1 truncate text-base font-semibold text-ink">
                       {locationOf(a)}
                     </p>
                     {a.purpose && (
-                      <p className="mt-0.5 truncate text-xs text-slate-500">
+                      <p className="mt-0.5 truncate text-xs text-ink-muted">
                         {a.purpose}
                       </p>
                     )}
                   </div>
                   {a.photos.length > 0 && (
-                    <span className="shrink-0 text-xs text-slate-400">
+                    <span className="shrink-0 text-xs text-ink-hint">
                       📷 {a.photos.length}
                     </span>
                   )}

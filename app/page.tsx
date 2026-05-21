@@ -8,6 +8,7 @@ import {
   listActivities,
   listDriverNames,
 } from "@/app/actions";
+import { cardCls } from "@/lib/ui";
 
 export const dynamic = "force-dynamic";
 
@@ -39,20 +40,20 @@ export default async function Home() {
     <>
       <Header />
       <main className="mx-auto w-full max-w-3xl flex-1 space-y-4 px-4 py-5 sm:py-6">
-        <div>
-          <h2 className="text-lg font-bold text-slate-900">
+        <section className={cardCls}>
+          <h2 className="text-lg font-bold tracking-tight text-ink">
             {session.kind === "admin"
               ? "전체 활동 일지"
               : `${session.name} 님의 활동 일지`}
           </h2>
-          <p className="mt-0.5 text-xs text-slate-500">
+          <p className="mt-1 text-xs text-ink-muted">
             외근 · 출장 · 국내연수 · 해외연수 · 교육 모두 한곳에서 관리하세요.
           </p>
-        </div>
+        </section>
 
         <Link
           href="/new"
-          className="flex w-full items-center justify-center gap-2 rounded-xl bg-blue-500 px-4 py-3 text-base font-semibold text-white shadow-sm hover:bg-blue-600"
+          className="flex w-full items-center justify-center gap-2 rounded-xl bg-navy px-4 py-3 text-base font-semibold text-white shadow-sm transition hover:bg-navy-strong"
         >
           <span aria-hidden>＋</span>
           활동 작성

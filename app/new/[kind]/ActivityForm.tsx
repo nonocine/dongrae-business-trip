@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useState, useTransition } from "react";
 import { createActivity } from "@/app/actions";
+import { btnPrimary, btnSecondary, cardCls } from "@/lib/ui";
 import {
   DEFAULT_DEPARTURE,
   DEFAULT_VEHICLE_CONFIRMER,
@@ -14,9 +15,9 @@ import {
   type TransportType,
 } from "@/lib/supabase";
 
-const labelCls = "block text-sm font-medium text-slate-700";
+const labelCls = "block text-sm font-medium text-ink-body";
 const inputBase =
-  "block w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm shadow-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500";
+  "block w-full rounded-lg border border-line bg-card px-3 py-2 text-sm text-ink-body shadow-sm placeholder:text-ink-hint focus:border-navy focus:outline-none focus:ring-1 focus:ring-navy";
 const inputCls = `mt-1 ${inputBase}`;
 const textareaCls = `mt-1 ${inputBase} min-h-[88px] resize-y`;
 
@@ -206,7 +207,7 @@ export default function ActivityForm({
           }
         });
       }}
-      className="space-y-5 rounded-xl border border-slate-200 bg-white p-4 shadow-sm sm:p-5"
+      className={`space-y-5 ${cardCls}`}
     >
       {/* Hidden kind for safety (form action also sets it) */}
       <input type="hidden" name="kind" value={kind} />
@@ -214,15 +215,13 @@ export default function ActivityForm({
       {/* 작성자 */}
       <div>
         <label htmlFor="author" className={labelCls}>
-          작성자 <span className="text-red-500">*</span>
+          작성자 <span className="text-stamp">*</span>
         </label>
         {lockedTraveler ? (
           <>
-            <div className="mt-1 flex items-center justify-between rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-sm">
-              <span className="font-medium text-slate-800">
-                {lockedTraveler}
-              </span>
-              <span className="text-xs text-slate-400">본인</span>
+            <div className="mt-1 flex items-center justify-between rounded-lg border border-line bg-surface px-3 py-2 text-sm">
+              <span className="font-medium text-ink">{lockedTraveler}</span>
+              <span className="text-xs text-ink-hint">본인</span>
             </div>
             <input type="hidden" name="author" value={lockedTraveler} />
           </>
@@ -259,7 +258,7 @@ export default function ActivityForm({
       <div className={showEndDate ? "grid grid-cols-2 gap-3" : ""}>
         <div>
           <label htmlFor="start_date" className={labelCls}>
-            {KIND_DATE_LABEL[kind].start} <span className="text-red-500">*</span>
+            {KIND_DATE_LABEL[kind].start} <span className="text-stamp">*</span>
           </label>
           <input
             id="start_date"
@@ -289,7 +288,7 @@ export default function ActivityForm({
       {showLocationField && (
         <div>
           <label htmlFor="location" className={labelCls}>
-            {locationLabel} <span className="text-red-500">*</span>
+            {locationLabel} <span className="text-stamp">*</span>
           </label>
           <input
             id="location"
@@ -305,7 +304,7 @@ export default function ActivityForm({
         <div className="grid grid-cols-2 gap-3">
           <div>
             <label htmlFor="country" className={labelCls}>
-              국가 <span className="text-red-500">*</span>
+              국가 <span className="text-stamp">*</span>
             </label>
             <input
               id="country"
@@ -399,7 +398,7 @@ export default function ActivityForm({
             <button
               type="button"
               onClick={addCompanion}
-              className="shrink-0 rounded-md bg-slate-800 px-3 text-sm font-semibold text-white hover:bg-slate-700"
+              className="shrink-0 rounded-lg bg-navy px-3 text-sm font-semibold text-white transition hover:bg-navy-strong"
             >
               추가
             </button>
@@ -416,7 +415,7 @@ export default function ActivityForm({
             <button
               type="button"
               onClick={addCompanion}
-              className="shrink-0 rounded-md bg-slate-800 px-3 text-sm font-semibold text-white hover:bg-slate-700"
+              className="shrink-0 rounded-lg bg-navy px-3 text-sm font-semibold text-white transition hover:bg-navy-strong"
             >
               추가
             </button>
@@ -427,13 +426,13 @@ export default function ActivityForm({
             {companions.map((c) => (
               <span
                 key={c}
-                className="inline-flex items-center gap-1 rounded-full bg-blue-100 px-3 py-1 text-xs font-medium text-blue-700"
+                className="inline-flex items-center gap-1 rounded-full bg-navy-soft px-3 py-1 text-xs font-medium text-navy"
               >
                 {c}
                 <button
                   type="button"
                   onClick={() => removeCompanion(c)}
-                  className="text-blue-700 hover:text-red-500"
+                  className="text-navy hover:text-stamp"
                   aria-label={`${c} 삭제`}
                 >
                   ✕
@@ -447,7 +446,7 @@ export default function ActivityForm({
       {/* 목적 */}
       <div>
         <label htmlFor="purpose" className={labelCls}>
-          {purposeLabel} <span className="text-red-500">*</span>
+          {purposeLabel} <span className="text-stamp">*</span>
         </label>
         <input
           id="purpose"
@@ -462,7 +461,7 @@ export default function ActivityForm({
       {showTransport && allowedTransports.length > 0 && (
         <div>
           <label className={labelCls}>
-            이동수단 <span className="text-red-500">*</span>
+            이동수단 <span className="text-stamp">*</span>
           </label>
           <div
             className={`mt-1 grid gap-2`}
@@ -475,10 +474,10 @@ export default function ActivityForm({
               return (
                 <label
                   key={v}
-                  className={`flex cursor-pointer flex-col items-center gap-1 rounded-md border px-3 py-3 text-sm shadow-sm transition ${
+                  className={`flex cursor-pointer flex-col items-center gap-1 rounded-lg border px-3 py-3 text-sm shadow-sm transition ${
                     active
-                      ? "border-blue-500 bg-blue-50 text-blue-700"
-                      : "border-slate-300 bg-white text-slate-700 hover:bg-slate-50"
+                      ? "border-navy bg-navy-soft text-navy"
+                      : "border-line bg-card text-ink-body hover:bg-surface"
                   }`}
                 >
                   <input
@@ -502,20 +501,20 @@ export default function ActivityForm({
 
       {/* 차량 운행 정보 (외근/출장 + 기관차량) */}
       {showDrivingFields && (
-        <div className="space-y-3 rounded-lg border border-blue-200 bg-blue-50/40 p-4">
+        <div className="space-y-3 rounded-lg border border-line bg-surface p-4">
           <div className="flex items-center justify-between">
-            <h4 className="text-sm font-semibold text-blue-900">
+            <h4 className="text-sm font-semibold text-navy">
               🚗 차량 운행 정보
             </h4>
             {settings && (settings.vehicle_number || settings.vehicle_model) && (
-              <span className="text-xs text-blue-700">
+              <span className="text-xs text-navy">
                 {[settings.vehicle_model, settings.vehicle_number]
                   .filter(Boolean)
                   .join(" · ")}
               </span>
             )}
           </div>
-          <p className="text-xs text-blue-800/80">
+          <p className="text-xs text-ink-muted">
             저장 시 운행일지에도 함께 기록되며, 차량 누적거리가 자동으로
             업데이트됩니다. 위에 입력한 <strong>출장지(장소)</strong>가 운행일지의
             출장지로 자동 저장됩니다.
@@ -524,13 +523,13 @@ export default function ActivityForm({
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
             <div>
               <label className={labelCls}>출발지</label>
-              <div className="mt-1 rounded-md border border-slate-200 bg-slate-100 px-3 py-2 text-sm text-slate-600">
+              <div className="mt-1 rounded-lg border border-line bg-card px-3 py-2 text-sm text-ink-muted">
                 {DEFAULT_DEPARTURE}
               </div>
             </div>
             <div>
               <label className={labelCls}>도착지</label>
-              <div className="mt-1 rounded-md border border-slate-200 bg-slate-100 px-3 py-2 text-sm text-slate-600">
+              <div className="mt-1 rounded-lg border border-line bg-card px-3 py-2 text-sm text-ink-muted">
                 {DEFAULT_DEPARTURE}
               </div>
             </div>
@@ -538,7 +537,7 @@ export default function ActivityForm({
 
           <div>
             <label className={labelCls}>확인자</label>
-            <div className="mt-1 rounded-md border border-slate-200 bg-slate-100 px-3 py-2 text-sm text-slate-600">
+            <div className="mt-1 rounded-lg border border-line bg-card px-3 py-2 text-sm text-ink-muted">
               {DEFAULT_VEHICLE_CONFIRMER}
             </div>
           </div>
@@ -546,14 +545,14 @@ export default function ActivityForm({
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
             <div>
               <label className={labelCls}>현재 누적거리</label>
-              <div className="mt-1 rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-sm font-mono text-slate-700">
+              <div className="mt-1 rounded-lg border border-line bg-card px-3 py-2 text-sm font-mono text-ink-body">
                 {prevMileage.toLocaleString("ko-KR")} km
               </div>
             </div>
             <div>
               <label htmlFor="driving_total_distance" className={labelCls}>
                 운행 후 누적거리 (km){" "}
-                <span className="text-red-500">*</span>
+                <span className="text-stamp">*</span>
               </label>
               <input
                 id="driving_total_distance"
@@ -570,14 +569,14 @@ export default function ActivityForm({
             </div>
           </div>
 
-          <div className="rounded-md bg-white px-3 py-2 text-xs text-slate-700 shadow-sm">
+          <div className="rounded-lg border border-line bg-card px-3 py-2 text-xs text-ink-body shadow-sm">
             운행거리:{" "}
-            <span className="font-semibold text-blue-700">
+            <span className="font-semibold text-navy">
               {drivingDistance == null
                 ? "-"
                 : `${drivingDistance.toLocaleString("ko-KR")} km`}
             </span>
-            <span className="ml-2 text-slate-500">(자동 계산)</span>
+            <span className="ml-2 text-ink-muted">(자동 계산)</span>
           </div>
         </div>
       )}
@@ -643,22 +642,22 @@ export default function ActivityForm({
             name="accommodation"
             checked={accommodation}
             onChange={(e) => setAccommodation(e.target.checked)}
-            className="h-4 w-4 rounded border-slate-300 text-blue-500 focus:ring-blue-500"
+            className="h-4 w-4 rounded border-line text-navy focus:ring-navy"
           />
-          <span className="font-medium text-slate-700">숙박 있음</span>
+          <span className="font-medium text-ink-body">숙박 있음</span>
         </label>
       )}
 
       {/* 교육 전용 필드 */}
       {showEducationFields && (
-        <div className="space-y-3 rounded-lg border border-amber-200 bg-amber-50/40 p-4">
+        <div className="space-y-3 rounded-lg border border-line bg-surface p-4">
           <div>
             <label className={labelCls}>교육 분류</label>
             <div className="mt-1 grid grid-cols-3 gap-2">
               {(["집합", "온라인", "외부"] as const).map((v) => (
                 <label
                   key={v}
-                  className="flex cursor-pointer items-center justify-center rounded-md border border-slate-300 bg-white px-3 py-2 text-sm has-[:checked]:border-amber-500 has-[:checked]:bg-amber-100 has-[:checked]:text-amber-800"
+                  className="flex cursor-pointer items-center justify-center rounded-lg border border-line bg-card px-3 py-2 text-sm has-[:checked]:border-navy has-[:checked]:bg-navy-soft has-[:checked]:text-navy"
                 >
                   <input
                     type="radio"
@@ -736,7 +735,7 @@ export default function ActivityForm({
       <div>
         <div className="flex items-center justify-between">
           <label className={labelCls}>인증샷 (1~5장)</label>
-          <span className="text-xs text-slate-400">
+          <span className="text-xs text-ink-hint">
             {photoFiles.length}/{MAX_PHOTOS}
           </span>
         </div>
@@ -744,7 +743,7 @@ export default function ActivityForm({
           {photoPreviews.map((src, i) => (
             <div
               key={i}
-              className="relative aspect-square overflow-hidden rounded-md border border-slate-200 bg-slate-50"
+              className="relative aspect-square overflow-hidden rounded-lg border border-line bg-surface"
             >
               {/* eslint-disable-next-line @next/next/no-img-element */}
               <img
@@ -762,7 +761,7 @@ export default function ActivityForm({
             </div>
           ))}
           {photoFiles.length < MAX_PHOTOS && (
-            <label className="flex aspect-square cursor-pointer flex-col items-center justify-center rounded-md border border-dashed border-slate-300 bg-white text-slate-500 hover:bg-slate-50">
+            <label className="flex aspect-square cursor-pointer flex-col items-center justify-center rounded-lg border border-dashed border-line bg-card text-ink-muted hover:bg-surface">
               <span className="text-2xl">＋</span>
               <span className="text-xs">사진 추가</span>
               <input
@@ -798,23 +797,16 @@ export default function ActivityForm({
       )}
 
       {error && (
-        <p className="rounded-md bg-red-50 px-3 py-2 text-sm text-red-600">
+        <p className="rounded-lg bg-stamp-soft px-3 py-2 text-sm text-stamp">
           {error}
         </p>
       )}
 
       <div className="flex justify-end gap-2 pt-2">
-        <Link
-          href="/new"
-          className="rounded-md border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
-        >
+        <Link href="/new" className={btnSecondary}>
           취소
         </Link>
-        <button
-          type="submit"
-          disabled={pending}
-          className="rounded-md bg-blue-500 px-5 py-2 text-sm font-semibold text-white shadow-sm hover:bg-blue-600 disabled:opacity-60"
-        >
+        <button type="submit" disabled={pending} className={btnPrimary}>
           {pending ? "저장 중…" : "저장"}
         </button>
       </div>
@@ -840,19 +832,19 @@ function FileListField({
         {files.map((f, i) => (
           <div
             key={i}
-            className="flex items-center justify-between gap-2 rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-sm"
+            className="flex items-center justify-between gap-2 rounded-lg border border-line bg-surface px-3 py-2 text-sm"
           >
-            <span className="truncate text-slate-700">{f.name}</span>
+            <span className="truncate text-ink-body">{f.name}</span>
             <button
               type="button"
               onClick={() => onRemove(i)}
-              className="text-xs font-medium text-red-500 hover:underline"
+              className="text-xs font-medium text-stamp hover:underline"
             >
               삭제
             </button>
           </div>
         ))}
-        <label className="flex cursor-pointer items-center justify-center gap-1 rounded-md border border-dashed border-slate-300 bg-white px-3 py-2 text-sm font-medium text-slate-600 hover:bg-slate-50">
+        <label className="flex cursor-pointer items-center justify-center gap-1 rounded-lg border border-dashed border-line bg-card px-3 py-2 text-sm font-medium text-ink-muted hover:bg-surface">
           <span aria-hidden>＋</span> 파일 추가
           <input
             type="file"
