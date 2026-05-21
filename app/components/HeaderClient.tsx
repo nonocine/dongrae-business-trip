@@ -34,7 +34,7 @@ export default function HeaderClient({
   }
 
   return (
-    <header className="border-b border-slate-200 bg-white">
+    <header className="border-b border-line bg-card">
       <div className="mx-auto flex w-full max-w-6xl items-center gap-2 px-4 py-3 sm:gap-3 sm:py-4">
         {/* 모바일 햄버거 */}
         {loggedIn && (
@@ -42,7 +42,7 @@ export default function HeaderClient({
             type="button"
             onClick={() => setMobileOpen(true)}
             aria-label="메뉴 열기"
-            className="-ml-1 rounded-md p-1.5 text-xl leading-none text-slate-600 hover:bg-slate-100 md:hidden"
+            className="-ml-1 rounded-md p-1.5 text-xl leading-none text-ink-muted hover:bg-surface md:hidden"
           >
             ☰
           </button>
@@ -54,13 +54,13 @@ export default function HeaderClient({
           <img
             src="/images/dongrae-logo.png"
             alt="동래구청소년센터 로고"
-            className="h-9 w-auto rounded-md bg-white object-contain sm:h-10"
+            className="h-9 w-auto rounded-md bg-card object-contain sm:h-10"
           />
           <span className="flex flex-col leading-tight">
-            <span className="text-base font-bold tracking-tight text-slate-900 sm:text-lg">
+            <span className="text-base font-bold tracking-tight text-ink sm:text-lg">
               동업자씨
             </span>
-            <span className="hidden text-xs text-slate-500 sm:block">
+            <span className="hidden text-xs text-ink-hint sm:block">
               동래구청소년센터 업무 자동화 시스템
             </span>
           </span>
@@ -73,7 +73,7 @@ export default function HeaderClient({
               <Link
                 key={l.href}
                 href={l.href}
-                className="rounded-md px-3 py-1.5 text-sm font-medium text-slate-600 hover:bg-slate-100 hover:text-slate-900"
+                className="rounded-md px-3 py-1.5 text-sm font-medium text-ink-muted transition hover:bg-surface hover:text-ink"
               >
                 {l.label}
               </Link>
@@ -86,7 +86,7 @@ export default function HeaderClient({
           {loggedIn && (
             <>
               {/* 모바일: 이름만 */}
-              <span className="inline-flex items-center gap-1 rounded-full bg-slate-100 px-3 py-1 text-xs font-medium text-slate-700 md:hidden">
+              <span className="inline-flex items-center gap-1 rounded-full bg-surface px-3 py-1 text-xs font-medium text-ink-body md:hidden">
                 {isAdmin ? "👑 관리자" : `👤 ${displayName}`}
               </span>
 
@@ -95,7 +95,7 @@ export default function HeaderClient({
                 <button
                   type="button"
                   onClick={() => setUserMenuOpen((v) => !v)}
-                  className="inline-flex items-center gap-1 rounded-full bg-slate-100 px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-200"
+                  className="inline-flex items-center gap-1 rounded-full bg-surface px-3 py-1.5 text-xs font-medium text-ink-body transition hover:bg-navy-soft"
                 >
                   {isAdmin ? "👑 관리자" : `👤 ${displayName}`}
                   <span aria-hidden className="text-[10px]">
@@ -108,12 +108,12 @@ export default function HeaderClient({
                       className="fixed inset-0 z-30"
                       onClick={() => setUserMenuOpen(false)}
                     />
-                    <div className="absolute right-0 z-40 mt-1 w-44 overflow-hidden rounded-md border border-slate-200 bg-white py-1 shadow-lg">
+                    <div className="absolute right-0 z-40 mt-1 w-44 overflow-hidden rounded-lg border border-line bg-card py-1 shadow-lg">
                       {isAdmin ? (
                         <Link
                           href="/admin"
                           onClick={() => setUserMenuOpen(false)}
-                          className="block px-3 py-2 text-sm text-slate-700 hover:bg-slate-50"
+                          className="block px-3 py-2 text-sm text-ink-body hover:bg-surface"
                         >
                           관리자 대시보드
                         </Link>
@@ -122,24 +122,24 @@ export default function HeaderClient({
                           <Link
                             href="/profile/hr"
                             onClick={() => setUserMenuOpen(false)}
-                            className="block px-3 py-2 text-sm text-slate-700 hover:bg-slate-50"
+                            className="block px-3 py-2 text-sm text-ink-body hover:bg-surface"
                           >
                             내 인사기록카드
                           </Link>
                           <Link
                             href="/profile/password"
                             onClick={() => setUserMenuOpen(false)}
-                            className="block px-3 py-2 text-sm text-slate-700 hover:bg-slate-50"
+                            className="block px-3 py-2 text-sm text-ink-body hover:bg-surface"
                           >
                             비밀번호 변경
                           </Link>
                         </>
                       )}
-                      <div className="my-1 border-t border-slate-100" />
+                      <div className="my-1 border-t border-line" />
                       <form action={logoutCurrent}>
                         <button
                           type="submit"
-                          className="block w-full px-3 py-2 text-left text-sm text-red-600 hover:bg-red-50"
+                          className="block w-full px-3 py-2 text-left text-sm text-stamp hover:bg-stamp-soft"
                         >
                           로그아웃
                         </button>
@@ -159,27 +159,27 @@ export default function HeaderClient({
           className="fixed inset-0 z-50 md:hidden"
           onClick={() => setMobileOpen(false)}
         >
-          <div className="absolute inset-0 bg-slate-900/50" />
+          <div className="absolute inset-0 bg-black/40" />
           <div
-            className="absolute inset-y-0 left-0 flex w-64 flex-col bg-white shadow-xl"
+            className="absolute inset-y-0 left-0 flex w-64 flex-col bg-card shadow-xl"
             onClick={(e) => e.stopPropagation()}
           >
-            <div className="flex items-center justify-between border-b border-slate-200 px-4 py-3">
-              <span className="text-base font-bold tracking-tight text-slate-900">
+            <div className="flex items-center justify-between border-b border-line px-4 py-3">
+              <span className="text-base font-bold tracking-tight text-ink">
                 동업자씨
               </span>
               <button
                 type="button"
                 onClick={() => setMobileOpen(false)}
                 aria-label="메뉴 닫기"
-                className="rounded-md p-1 text-lg leading-none text-slate-500 hover:bg-slate-100"
+                className="rounded-md p-1 text-lg leading-none text-ink-muted hover:bg-surface"
               >
                 ✕
               </button>
             </div>
 
-            <div className="border-b border-slate-200 px-4 py-3">
-              <span className="text-xs font-medium text-slate-500">
+            <div className="border-b border-line px-4 py-3">
+              <span className="text-xs font-medium text-ink-muted">
                 {isAdmin ? "👑 관리자" : `👤 ${displayName}`}
               </span>
             </div>
@@ -190,19 +190,19 @@ export default function HeaderClient({
                   key={l.href}
                   href={l.href}
                   onClick={() => setMobileOpen(false)}
-                  className="rounded-md px-3 py-2.5 text-sm font-medium text-slate-700 hover:bg-slate-100"
+                  className="rounded-md px-3 py-2.5 text-sm font-medium text-ink-body hover:bg-surface"
                 >
                   {l.label}
                 </Link>
               ))}
 
-              <div className="my-1 border-t border-slate-100" />
+              <div className="my-1 border-t border-line" />
 
               {isAdmin ? (
                 <Link
                   href="/admin"
                   onClick={() => setMobileOpen(false)}
-                  className="rounded-md px-3 py-2.5 text-sm font-medium text-slate-700 hover:bg-slate-100"
+                  className="rounded-md px-3 py-2.5 text-sm font-medium text-ink-body hover:bg-surface"
                 >
                   관리자 대시보드
                 </Link>
@@ -211,14 +211,14 @@ export default function HeaderClient({
                   <Link
                     href="/profile/hr"
                     onClick={() => setMobileOpen(false)}
-                    className="rounded-md px-3 py-2.5 text-sm font-medium text-slate-700 hover:bg-slate-100"
+                    className="rounded-md px-3 py-2.5 text-sm font-medium text-ink-body hover:bg-surface"
                   >
                     내 인사기록카드
                   </Link>
                   <Link
                     href="/profile/password"
                     onClick={() => setMobileOpen(false)}
-                    className="rounded-md px-3 py-2.5 text-sm font-medium text-slate-700 hover:bg-slate-100"
+                    className="rounded-md px-3 py-2.5 text-sm font-medium text-ink-body hover:bg-surface"
                   >
                     비밀번호 변경
                   </Link>
@@ -228,7 +228,7 @@ export default function HeaderClient({
               <form action={logoutCurrent}>
                 <button
                   type="submit"
-                  className="w-full rounded-md px-3 py-2.5 text-left text-sm font-medium text-red-600 hover:bg-red-50"
+                  className="w-full rounded-md px-3 py-2.5 text-left text-sm font-medium text-stamp hover:bg-stamp-soft"
                 >
                   로그아웃
                 </button>

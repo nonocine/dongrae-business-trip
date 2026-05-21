@@ -1,21 +1,72 @@
 @import "tailwindcss";
 
 :root {
-  --background: #ffffff;
-  --foreground: #0f172a;
-  --surface: #f5f6f8;
-  --surface-border: #e5e7eb;
-  --brand: #1a5fb4;
-  --brand-strong: #15498d;
-  --brand-soft: #e8f0fb;
-  --accent: #c01c28;
-  --accent-soft: #fdecee;
+  /* 베이스 (노션 톤) */
+  --canvas: #ffffff;
+  --surface: #f8f9fa;
+  --card: #ffffff;
+  --line: #e5e7eb;
+
+  /* 텍스트 */
+  --ink: #1a1a1a;
+  --ink-body: #374151;
+  --ink-muted: #6b7280;
+  --ink-hint: #9ca3af;
+
+  /* 포인트 (공공기관 톤) */
+  --navy: #1e3a5f;
+  --navy-strong: #16314f;
+  --navy-soft: #eef2f7;
+  --stamp: #dc2626;
+  --stamp-soft: #fef2f2;
+  --success: #059669;
+  --success-soft: #ecfdf5;
+  --warning: #d97706;
+  --warning-soft: #fffbeb;
+
+  /* 인사기록카드 전용 */
+  --hr-border: #1e3a5f;
+  --hr-bg: #fafafa;
+
+  /* 하위 호환 — 기존 코드가 참조하는 변수명 유지 */
+  --background: var(--canvas);
+  --foreground: var(--ink);
+  --surface-border: var(--line);
+  --brand: var(--navy);
+  --brand-strong: var(--navy-strong);
+  --brand-soft: var(--navy-soft);
+  --accent: var(--stamp);
+  --accent-soft: var(--stamp-soft);
 }
 
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
+
+  --color-canvas: var(--canvas);
   --color-surface: var(--surface);
+  --color-card: var(--card);
+  --color-line: var(--line);
+
+  --color-ink: var(--ink);
+  --color-ink-body: var(--ink-body);
+  --color-ink-muted: var(--ink-muted);
+  --color-ink-hint: var(--ink-hint);
+
+  --color-navy: var(--navy);
+  --color-navy-strong: var(--navy-strong);
+  --color-navy-soft: var(--navy-soft);
+  --color-stamp: var(--stamp);
+  --color-stamp-soft: var(--stamp-soft);
+  --color-success: var(--success);
+  --color-success-soft: var(--success-soft);
+  --color-warning: var(--warning);
+  --color-warning-soft: var(--warning-soft);
+
+  --color-hr-border: var(--hr-border);
+  --color-hr-bg: var(--hr-bg);
+
+  /* 하위 호환 */
   --color-surface-border: var(--surface-border);
   --color-brand: var(--brand);
   --color-brand-strong: var(--brand-strong);
