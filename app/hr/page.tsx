@@ -1,7 +1,11 @@
 import Link from "next/link";
 import Header from "@/app/components/Header";
 import HrDashboard from "@/app/hr/HrDashboard";
-import { requireHrAdmin } from "@/app/hr/actions";
+import {
+  requireHrAdmin,
+  listDriversForHrProfile,
+  listEmployeeProfiles,
+} from "@/app/hr/actions";
 import { enforcePasswordChange } from "@/app/actions";
 
 export const dynamic = "force-dynamic";
@@ -11,6 +15,11 @@ export default async function HrPage() {
   await enforcePasswordChange();
   // 관장·부장 직원 세션이 아니면 / 로 redirect
   await requireHrAdmin();
+
+  const [drivers, profiles] = await Promise.all([
+    listDriversForHrProfile(),
+    listEmployeeProfiles(),
+  ]);
 
   return (
     <>
@@ -24,7 +33,7 @@ export default async function HrPage() {
             ← 목록
           </Link>
         </div>
-        <HrDashboard />
+        <HrDashboard drivers={drivers} profiles={profiles} />
       </main>
     </>
   );
