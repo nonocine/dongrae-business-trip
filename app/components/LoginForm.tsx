@@ -20,7 +20,7 @@ export default function LoginForm({ employees }: { employees: string[] }) {
           동래구청소년센터
         </p>
         <h2 className="mt-1 text-xl font-bold tracking-tight text-slate-900">
-          출장일지 로그인
+          동업자씨 로그인
         </h2>
       </div>
 
