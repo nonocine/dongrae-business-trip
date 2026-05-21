@@ -141,6 +141,7 @@ function RecordsTab({
                 key={selectedDriver.id}
                 driver={selectedDriver}
                 profile={selectedProfile}
+                onDeleted={() => setSelectedId("")}
               />
               <section className={cardCls}>
                 <h3 className="text-sm font-semibold text-slate-900">

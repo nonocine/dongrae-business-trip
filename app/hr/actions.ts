@@ -2,7 +2,7 @@
 
 import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
-import { getSession } from "@/app/actions";
+import { getSession, isAdmin } from "@/app/actions";
 import {
   supabase,
   HR_ADMIN_RANKS,
@@ -47,6 +47,30 @@ export async function requireHrAdmin(): Promise<{
   }
 
   return { name: session.name, rank: rank as HrAdminRank };
+}
+
+// 인사기록카드 삭제 권한 — ADMIN 또는 관장·부장만 통과.
+//   * requireHrAdmin 과 달리 redirect 가 아니라 throw 합니다
+//     (클라이언트에서 에러 메시지를 표시할 수 있도록).
+async function requireHrManagerOrAdmin(): Promise<void> {
+  if (await isAdmin()) return;
+
+  const session = await getSession();
+  if (!session || session.kind !== "employee") {
+    throw new Error("삭제 권한이 없습니다.");
+  }
+  const { data } = await supabase
+    .from("drivers")
+    .select("rank")
+    .eq("name", session.name)
+    .eq("is_active", true)
+    .maybeSingle();
+  const rank = (data?.rank as string | null) ?? "";
+  if (!(HR_ADMIN_RANKS as readonly string[]).includes(rank)) {
+    throw new Error(
+      "삭제 권한이 없습니다. 관리자 또는 관장·부장만 삭제할 수 있습니다."
+    );
+  }
 }
 
 // =====================================================================
@@ -145,6 +169,33 @@ export async function saveEmployeeProfile(formData: FormData) {
     .from("employee_profiles")
     .upsert(row, { onConflict: "driver_id" });
   if (error) throw new Error(error.message);
+
+  revalidatePath("/hr");
+}
+
+// 인사기록카드 삭제 — ADMIN 또는 관장·부장만. 잠긴 카드는 삭제 불가.
+export async function deleteEmployeeProfile(driverId: string) {
+  await requireHrManagerOrAdmin();
+  if (!driverId) throw new Error("직원 ID가 없습니다.");
+
+  const { data, error } = await supabase
+    .from("employee_profiles")
+    .select("is_locked")
+    .eq("driver_id", driverId)
+    .maybeSingle();
+  if (error) throw new Error(error.message);
+  if (!data) throw new Error("삭제할 인사기록카드가 없습니다.");
+  if ((data as { is_locked?: unknown }).is_locked === true) {
+    throw new Error(
+      "잠긴 인사기록카드입니다. 먼저 잠금을 해제하세요."
+    );
+  }
+
+  const { error: delErr } = await supabase
+    .from("employee_profiles")
+    .delete()
+    .eq("driver_id", driverId);
+  if (delErr) throw new Error(delErr.message);
 
   revalidatePath("/hr");
 }

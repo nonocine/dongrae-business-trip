@@ -1,7 +1,7 @@
 "use client";
 
 import { useMemo, useState, useTransition } from "react";
-import { saveEmployeeProfile } from "@/app/hr/actions";
+import { saveEmployeeProfile, deleteEmployeeProfile } from "@/app/hr/actions";
 import {
   parseResidentNumber,
   type Driver,
@@ -23,13 +23,16 @@ function formatBirthDate(d: string): string {
 export default function EmployeeProfileForm({
   driver,
   profile,
+  onDeleted,
 }: {
   driver: Driver;
   profile: EmployeeProfile | null;
+  onDeleted: () => void;
 }) {
   const [error, setError] = useState<string | null>(null);
   const [ok, setOk] = useState<string | null>(null);
   const [pending, startTransition] = useTransition();
+  const [deletePending, deleteTransition] = useTransition();
 
   // 주민번호는 제어 입력 — 입력 즉시 생년월일·성별을 재계산합니다.
   const [rrn, setRrn] = useState(profile?.resident_number ?? "");
@@ -197,13 +200,54 @@ export default function EmployeeProfileForm({
           </p>
         )}
 
-        <button
-          type="submit"
-          disabled={pending}
-          className="h-[38px] w-full rounded-md bg-blue-500 px-4 text-sm font-semibold text-white shadow-sm hover:bg-blue-600 disabled:opacity-60 sm:w-auto sm:px-6"
-        >
-          {pending ? "저장 중…" : "저장"}
-        </button>
+        <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+          <button
+            type="submit"
+            disabled={pending}
+            className="h-[38px] w-full rounded-md bg-blue-500 px-4 text-sm font-semibold text-white shadow-sm hover:bg-blue-600 disabled:opacity-60 sm:w-auto sm:px-6"
+          >
+            {pending ? "저장 중…" : "저장"}
+          </button>
+
+          {profile && (
+            <button
+              type="button"
+              disabled={deletePending || profile.is_locked}
+              onClick={() => {
+                if (profile.is_locked) return;
+                if (
+                  !confirm(
+                    `${driver.name}님의 인사기록카드를 삭제할까요?\n복구할 수 없습니다.`
+                  )
+                )
+                  return;
+                setError(null);
+                setOk(null);
+                deleteTransition(async () => {
+                  try {
+                    await deleteEmployeeProfile(driver.id);
+                    onDeleted();
+                  } catch (e) {
+                    setError(
+                      e instanceof Error
+                        ? e.message
+                        : "삭제 중 오류가 발생했습니다."
+                    );
+                  }
+                });
+              }}
+              className="h-[38px] w-full rounded-md border border-red-500 bg-white px-4 text-sm font-semibold text-red-600 hover:bg-red-50 disabled:opacity-60 sm:w-auto sm:px-6"
+            >
+              {deletePending ? "삭제 중…" : "삭제"}
+            </button>
+          )}
+        </div>
+
+        {profile?.is_locked && (
+          <p className="text-xs text-slate-500">
+            🔒 잠금 상태에서는 삭제할 수 없습니다.
+          </p>
+        )}
       </form>
     </section>
   );
