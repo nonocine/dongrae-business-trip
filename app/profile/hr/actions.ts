@@ -6,6 +6,7 @@ import {
   supabase,
   normalizeEmployeeProfile,
   parseResidentNumber,
+  parseEducationInput,
   type Driver,
   type EmployeeRank,
   type EmployeeProfile,
@@ -97,6 +98,12 @@ export async function saveMyProfile(formData: FormData) {
     gender = parsed.gender;
   }
 
+  // 재직 중이면 퇴사일을 null 로 강제 저장.
+  const employed = formData.get("employed") === "on";
+  const leave_date = employed ? null : str("leave_date");
+
+  const education = parseEducationInput(str("education"));
+
   const row = {
     driver_id,
     name_chinese: str("name_chinese"),
@@ -107,8 +114,9 @@ export async function saveMyProfile(formData: FormData) {
     email: str("email"),
     phone: str("phone"),
     join_date: str("join_date"),
-    leave_date: str("leave_date"),
+    leave_date,
     military_service: str("military_service"),
+    education,
     updated_at: new Date().toISOString(),
   };
 

@@ -430,7 +430,23 @@ export const HR_ADMIN_RANKS = ["관장", "부장"] as const;
 export type HrAdminRank = (typeof HR_ADMIN_RANKS)[number];
 
 // JSONB sub-types — 폼 작성하면서 좁힐 예정
-export type EmployeeEducation = Record<string, unknown>;
+export const EDUCATION_DEGREES = [
+  "졸업",
+  "재학",
+  "중퇴",
+  "수료",
+  "졸업예정",
+] as const;
+export type EducationDegree = (typeof EDUCATION_DEGREES)[number];
+
+export type EmployeeEducation = {
+  school: string;
+  major: string;
+  degree: EducationDegree;
+  enter_date: string;
+  graduate_date: string;
+  note: string;
+};
 export type EmployeeFamily = Record<string, unknown>;
 export type EmployeeLicense = Record<string, unknown>;
 export type EmployeeCareer = Record<string, unknown>;
@@ -581,6 +597,47 @@ export function normalizeEmployeeProfile(
     created_at: String(raw.created_at ?? ""),
     updated_at: (raw.updated_at as string | null) ?? null,
   };
+}
+
+// 임의의 객체를 EmployeeEducation 모양으로 보정합니다.
+function normalizeEducationItem(item: unknown): EmployeeEducation {
+  const o = (item ?? {}) as Record<string, unknown>;
+  const degreeRaw = String(o.degree ?? "");
+  const degree: EducationDegree = (
+    EDUCATION_DEGREES as readonly string[]
+  ).includes(degreeRaw)
+    ? (degreeRaw as EducationDegree)
+    : "졸업";
+  return {
+    school: String(o.school ?? "").trim(),
+    major: String(o.major ?? "").trim(),
+    degree,
+    enter_date: String(o.enter_date ?? "").trim(),
+    graduate_date: String(o.graduate_date ?? "").trim(),
+    note: String(o.note ?? "").trim(),
+  };
+}
+
+// DB/폼에서 온 학력 배열을 안전한 EmployeeEducation[] 로 보정합니다.
+export function normalizeEducationList(items: unknown): EmployeeEducation[] {
+  if (!Array.isArray(items)) return [];
+  return items.map(normalizeEducationItem);
+}
+
+// 폼에서 전달된 학력 JSON 문자열을 EmployeeEducation[] 로 파싱합니다.
+// 빈 값은 빈 배열, 형식 오류면 throw.
+export function parseEducationInput(raw: string | null): EmployeeEducation[] {
+  if (!raw || raw.trim() === "") return [];
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    throw new Error("학력 데이터 형식이 올바르지 않습니다.");
+  }
+  if (!Array.isArray(parsed)) {
+    throw new Error("학력 데이터 형식이 올바르지 않습니다.");
+  }
+  return normalizeEducationList(parsed);
 }
 
 export function normalizeEmploymentContract(

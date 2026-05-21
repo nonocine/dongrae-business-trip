@@ -2,11 +2,22 @@
 
 import { useMemo, useState, useTransition } from "react";
 import { saveMyProfile } from "@/app/profile/hr/actions";
-import { parseResidentNumber, type EmployeeProfile } from "@/lib/supabase";
+import {
+  parseResidentNumber,
+  normalizeEducationList,
+  type EmployeeProfile,
+  type EmployeeEducation,
+} from "@/lib/supabase";
+import {
+  ProfileTabs,
+  EducationTab,
+  PlaceholderTab,
+  type ProfileTabKey,
+} from "@/app/hr/ProfileFormParts";
 
 const cardCls =
   "rounded-xl border border-slate-200 bg-white p-4 shadow-sm sm:p-5";
-const inputCls =
+const baseInputCls =
   "mt-1 block w-full rounded-md border border-slate-300 px-3 py-2 text-sm shadow-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500";
 const labelCls = "block text-xs font-medium text-slate-600";
 
@@ -27,6 +38,7 @@ export default function MyEmployeeProfileForm({
 }) {
   const locked = profile?.is_locked === true;
 
+  const [tab, setTab] = useState<ProfileTabKey>("basic");
   const [error, setError] = useState<string | null>(null);
   const [ok, setOk] = useState<string | null>(null);
   const [pending, startTransition] = useTransition();
@@ -36,10 +48,19 @@ export default function MyEmployeeProfileForm({
   const parsed = useMemo(() => parseResidentNumber(rrn), [rrn]);
   const rrnFilled = rrn.trim().length > 0;
 
-  // 잠금 시 입력칸은 회색 처리 + 읽기 전용.
+  // 재직 중 여부 — 첫 로드 시 leave_date 없으면 재직 중.
+  const [employed, setEmployed] = useState(!profile?.leave_date);
+  const [education, setEducation] = useState<EmployeeEducation[]>(() =>
+    normalizeEducationList(profile?.education ?? [])
+  );
+
   const fieldCls = locked
-    ? `${inputCls} cursor-not-allowed bg-slate-100 text-slate-500`
-    : `${inputCls} bg-white`;
+    ? `${baseInputCls} cursor-not-allowed bg-slate-100 text-slate-500`
+    : `${baseInputCls} bg-white`;
+  const leaveCls =
+    locked || employed
+      ? `${baseInputCls} cursor-not-allowed bg-slate-100 text-slate-500`
+      : `${baseInputCls} bg-white`;
 
   return (
     <div className="space-y-5">
@@ -68,6 +89,10 @@ export default function MyEmployeeProfileForm({
           </span>
         </div>
 
+        <div className="mt-3">
+          <ProfileTabs current={tab} onChange={setTab} />
+        </div>
+
         <form
           action={(formData) => {
             setError(null);
@@ -88,118 +113,166 @@ export default function MyEmployeeProfileForm({
           className="mt-4 space-y-3"
         >
           <input type="hidden" name="driver_id" value={driverId} />
+          <input
+            type="hidden"
+            name="education"
+            value={JSON.stringify(education)}
+          />
 
-          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-            <div>
-              <label className={labelCls}>한자명</label>
-              <input
-                name="name_chinese"
-                type="text"
-                defaultValue={profile?.name_chinese ?? ""}
-                placeholder="洪吉童"
-                readOnly={locked}
-                className={fieldCls}
-              />
-            </div>
+          {/* 기본정보 탭 */}
+          <div className={tab === "basic" ? "" : "hidden"}>
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+              <div>
+                <label className={labelCls}>한자명</label>
+                <input
+                  name="name_chinese"
+                  type="text"
+                  defaultValue={profile?.name_chinese ?? ""}
+                  placeholder="洪吉童"
+                  readOnly={locked}
+                  className={fieldCls}
+                />
+              </div>
 
-            <div>
-              <label className={labelCls}>주민등록번호</label>
-              <input
-                name="resident_number"
-                type="text"
-                value={rrn}
-                onChange={(e) => setRrn(e.target.value)}
-                placeholder="000000-0000000"
-                readOnly={locked}
-                className={`${fieldCls} font-mono`}
-              />
-              {rrnFilled &&
-                (parsed ? (
-                  <p className="mt-1 text-xs text-emerald-600">
-                    → 생년월일:{" "}
-                    {parsed.birthDate
-                      ? formatBirthDate(parsed.birthDate)
-                      : "-"}{" "}
-                    / 성별: {parsed.gender ?? "-"}
-                  </p>
-                ) : (
-                  <p className="mt-1 text-xs text-red-600">
-                    → 형식이 올바르지 않습니다
-                  </p>
-                ))}
-              <p className="mt-1 text-[11px] text-slate-400">
-                생년월일·성별은 주민등록번호에서 자동 계산됩니다. 외국인 등은
-                비워두세요.
-              </p>
-            </div>
+              <div>
+                <label className={labelCls}>주민등록번호</label>
+                <input
+                  name="resident_number"
+                  type="text"
+                  value={rrn}
+                  onChange={(e) => setRrn(e.target.value)}
+                  placeholder="000000-0000000"
+                  readOnly={locked}
+                  className={`${fieldCls} font-mono`}
+                />
+                {rrnFilled &&
+                  (parsed ? (
+                    <p className="mt-1 text-xs text-emerald-600">
+                      → 생년월일:{" "}
+                      {parsed.birthDate
+                        ? formatBirthDate(parsed.birthDate)
+                        : "-"}{" "}
+                      / 성별: {parsed.gender ?? "-"}
+                    </p>
+                  ) : (
+                    <p className="mt-1 text-xs text-red-600">
+                      → 형식이 올바르지 않습니다
+                    </p>
+                  ))}
+                <p className="mt-1 text-[11px] text-slate-400">
+                  생년월일·성별은 주민등록번호에서 자동 계산됩니다. 외국인 등은
+                  비워두세요.
+                </p>
+              </div>
 
-            <div className="sm:col-span-2">
-              <label className={labelCls}>주소</label>
-              <input
-                name="address"
-                type="text"
-                defaultValue={profile?.address ?? ""}
-                placeholder="부산광역시 동래구 …"
-                readOnly={locked}
-                className={fieldCls}
-              />
-            </div>
+              <div className="sm:col-span-2">
+                <label className={labelCls}>주소</label>
+                <input
+                  name="address"
+                  type="text"
+                  defaultValue={profile?.address ?? ""}
+                  placeholder="부산광역시 동래구 …"
+                  readOnly={locked}
+                  className={fieldCls}
+                />
+              </div>
 
-            <div>
-              <label className={labelCls}>이메일</label>
-              <input
-                name="email"
-                type="email"
-                defaultValue={profile?.email ?? ""}
-                placeholder="name@example.com"
-                readOnly={locked}
-                className={fieldCls}
-              />
-            </div>
-            <div>
-              <label className={labelCls}>전화번호</label>
-              <input
-                name="phone"
-                type="tel"
-                defaultValue={profile?.phone ?? ""}
-                placeholder="010-0000-0000"
-                readOnly={locked}
-                className={fieldCls}
-              />
-            </div>
+              <div>
+                <label className={labelCls}>이메일</label>
+                <input
+                  name="email"
+                  type="email"
+                  defaultValue={profile?.email ?? ""}
+                  placeholder="name@example.com"
+                  readOnly={locked}
+                  className={fieldCls}
+                />
+              </div>
+              <div>
+                <label className={labelCls}>전화번호</label>
+                <input
+                  name="phone"
+                  type="tel"
+                  defaultValue={profile?.phone ?? ""}
+                  placeholder="010-0000-0000"
+                  readOnly={locked}
+                  className={fieldCls}
+                />
+              </div>
 
-            <div>
-              <label className={labelCls}>입사일</label>
-              <input
-                name="join_date"
-                type="date"
-                defaultValue={profile?.join_date ?? ""}
-                readOnly={locked}
-                className={fieldCls}
-              />
-            </div>
-            <div>
-              <label className={labelCls}>퇴사일 (선택)</label>
-              <input
-                name="leave_date"
-                type="date"
-                defaultValue={profile?.leave_date ?? ""}
-                readOnly={locked}
-                className={fieldCls}
-              />
-            </div>
+              <div>
+                <label className={labelCls}>입사일</label>
+                <input
+                  name="join_date"
+                  type="date"
+                  defaultValue={profile?.join_date ?? ""}
+                  readOnly={locked}
+                  className={fieldCls}
+                />
+              </div>
+              <div>
+                <label className={labelCls}>퇴사일</label>
+                <label className="mt-1 flex items-center gap-1.5 text-sm text-slate-700">
+                  <input
+                    type="checkbox"
+                    name="employed"
+                    checked={employed}
+                    onChange={(e) => setEmployed(e.target.checked)}
+                    disabled={locked}
+                    className="h-3.5 w-3.5 rounded border-slate-300 text-blue-500 focus:ring-blue-500"
+                  />
+                  재직 중
+                </label>
+                <input
+                  name="leave_date"
+                  type="date"
+                  defaultValue={profile?.leave_date ?? ""}
+                  disabled={employed || locked}
+                  className={leaveCls}
+                />
+              </div>
 
-            <div className="sm:col-span-2">
-              <label className={labelCls}>병역 (선택)</label>
-              <input
-                name="military_service"
-                type="text"
-                defaultValue={profile?.military_service ?? ""}
-                placeholder="예: 육군 병장 만기전역 / 해당없음"
-                readOnly={locked}
-                className={fieldCls}
-              />
+              <div className="sm:col-span-2">
+                <label className={labelCls}>병역 (선택)</label>
+                <input
+                  name="military_service"
+                  type="text"
+                  defaultValue={profile?.military_service ?? ""}
+                  placeholder="예: 육군 병장 만기전역 / 해당없음"
+                  readOnly={locked}
+                  className={fieldCls}
+                />
+              </div>
             </div>
+          </div>
+
+          {/* 학력 탭 */}
+          <div className={tab === "education" ? "" : "hidden"}>
+            <EducationTab
+              education={education}
+              onChange={setEducation}
+              readOnly={locked}
+            />
+          </div>
+
+          {/* 미구현 탭 */}
+          <div className={tab === "family" ? "" : "hidden"}>
+            <PlaceholderTab title="가족 사항" />
+          </div>
+          <div className={tab === "license" ? "" : "hidden"}>
+            <PlaceholderTab title="자격증" />
+          </div>
+          <div className={tab === "career" ? "" : "hidden"}>
+            <PlaceholderTab title="경력" />
+          </div>
+          <div className={tab === "award" ? "" : "hidden"}>
+            <PlaceholderTab title="수상" />
+          </div>
+          <div className={tab === "training" ? "" : "hidden"}>
+            <PlaceholderTab title="교육이수" />
+          </div>
+          <div className={tab === "appointment" ? "" : "hidden"}>
+            <PlaceholderTab title="인사발령" />
           </div>
 
           {error && (

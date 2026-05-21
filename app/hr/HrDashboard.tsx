@@ -136,23 +136,12 @@ function RecordsTab({
         {/* 좌측: 폼 */}
         <div className="space-y-5">
           {selectedDriver ? (
-            <>
-              <EmployeeProfileForm
-                key={selectedDriver.id}
-                driver={selectedDriver}
-                profile={selectedProfile}
-                onDeleted={() => setSelectedId("")}
-              />
-              <section className={cardCls}>
-                <h3 className="text-sm font-semibold text-slate-900">
-                  추가 항목
-                </h3>
-                <p className="mt-2 text-xs text-slate-500">
-                  학력 · 가족 · 자격증 · 경력 · 수상 · 교육이수 · 인사발령
-                  입력은 다음 단계에서 제공될 예정입니다.
-                </p>
-              </section>
-            </>
+            <EmployeeProfileForm
+              key={selectedDriver.id}
+              driver={selectedDriver}
+              profile={selectedProfile}
+              onDeleted={() => setSelectedId("")}
+            />
           ) : (
             <section className={cardCls}>
               <div className="flex flex-col items-center justify-center gap-2 py-16 text-center">

@@ -8,6 +8,7 @@ import {
   HR_ADMIN_RANKS,
   normalizeEmployeeProfile,
   parseResidentNumber,
+  parseEducationInput,
   type HrAdminRank,
   type Driver,
   type EmployeeRank,
@@ -129,6 +130,17 @@ export async function saveEmployeeProfile(formData: FormData) {
   const driver_id = String(formData.get("driver_id") ?? "").trim();
   if (!driver_id) throw new Error("직원을 선택해주세요.");
 
+  // 잠긴 카드는 수정 불가 (관장도 잠금 해제 전에는 수정 불가).
+  const { data: existing, error: exErr } = await supabase
+    .from("employee_profiles")
+    .select("is_locked")
+    .eq("driver_id", driver_id)
+    .maybeSingle();
+  if (exErr) throw new Error(exErr.message);
+  if (existing && (existing as { is_locked?: unknown }).is_locked === true) {
+    throw new Error("잠긴 인사기록카드입니다. 먼저 잠금을 해제하세요.");
+  }
+
   const str = (key: string): string | null => {
     const v = formData.get(key);
     if (v == null) return null;
@@ -150,6 +162,12 @@ export async function saveEmployeeProfile(formData: FormData) {
     gender = parsed.gender;
   }
 
+  // 재직 중이면 퇴사일을 null 로 강제 저장.
+  const employed = formData.get("employed") === "on";
+  const leave_date = employed ? null : str("leave_date");
+
+  const education = parseEducationInput(str("education"));
+
   const row = {
     driver_id,
     name_chinese: str("name_chinese"),
@@ -160,8 +178,9 @@ export async function saveEmployeeProfile(formData: FormData) {
     email: str("email"),
     phone: str("phone"),
     join_date: str("join_date"),
-    leave_date: str("leave_date"),
+    leave_date,
     military_service: str("military_service"),
+    education,
     updated_at: new Date().toISOString(),
   };
 
