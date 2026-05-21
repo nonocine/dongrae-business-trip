@@ -1,14 +1,24 @@
 "use client";
 
-import { useState, useTransition } from "react";
+import { useMemo, useState, useTransition } from "react";
 import { saveEmployeeProfile } from "@/app/hr/actions";
-import type { Driver, EmployeeProfile } from "@/lib/supabase";
+import {
+  parseResidentNumber,
+  type Driver,
+  type EmployeeProfile,
+} from "@/lib/supabase";
 
 const cardCls =
   "rounded-xl border border-slate-200 bg-white p-4 shadow-sm sm:p-5";
 const inputCls =
   "mt-1 block w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm shadow-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500";
 const labelCls = "block text-xs font-medium text-slate-600";
+
+// "1984-02-24" → "1984년 2월 24일"
+function formatBirthDate(d: string): string {
+  const [y, m, day] = d.split("-");
+  return `${Number(y)}년 ${Number(m)}월 ${Number(day)}일`;
+}
 
 export default function EmployeeProfileForm({
   driver,
@@ -20,6 +30,11 @@ export default function EmployeeProfileForm({
   const [error, setError] = useState<string | null>(null);
   const [ok, setOk] = useState<string | null>(null);
   const [pending, startTransition] = useTransition();
+
+  // 주민번호는 제어 입력 — 입력 즉시 생년월일·성별을 재계산합니다.
+  const [rrn, setRrn] = useState(profile?.resident_number ?? "");
+  const parsed = useMemo(() => parseResidentNumber(rrn), [rrn]);
+  const rrnFilled = rrn.trim().length > 0;
 
   return (
     <section className={cardCls}>
@@ -76,45 +91,36 @@ export default function EmployeeProfileForm({
               className={inputCls}
             />
           </div>
+
           <div>
             <label className={labelCls}>주민등록번호</label>
             <input
               name="resident_number"
               type="text"
-              defaultValue={profile?.resident_number ?? ""}
+              value={rrn}
+              onChange={(e) => setRrn(e.target.value)}
               placeholder="000000-0000000"
               className={`${inputCls} font-mono`}
             />
-          </div>
-
-          <div>
-            <label className={labelCls}>성별</label>
-            <div className="mt-1 flex gap-4 py-1.5">
-              {(["남", "여"] as const).map((g) => (
-                <label
-                  key={g}
-                  className="inline-flex cursor-pointer items-center gap-1.5 text-sm text-slate-700"
-                >
-                  <input
-                    type="radio"
-                    name="gender"
-                    value={g}
-                    defaultChecked={profile?.gender === g}
-                    className="h-3.5 w-3.5 border-slate-300 text-blue-500 focus:ring-blue-500"
-                  />
-                  {g}
-                </label>
+            {/* 자동 계산 결과 (읽기 전용) */}
+            {rrnFilled &&
+              (parsed ? (
+                <p className="mt-1 text-xs text-emerald-600">
+                  → 생년월일:{" "}
+                  {parsed.birthDate
+                    ? formatBirthDate(parsed.birthDate)
+                    : "-"}{" "}
+                  / 성별: {parsed.gender ?? "-"}
+                </p>
+              ) : (
+                <p className="mt-1 text-xs text-red-600">
+                  → 형식이 올바르지 않습니다
+                </p>
               ))}
-            </div>
-          </div>
-          <div>
-            <label className={labelCls}>생년월일</label>
-            <input
-              name="birth_date"
-              type="date"
-              defaultValue={profile?.birth_date ?? ""}
-              className={inputCls}
-            />
+            <p className="mt-1 text-[11px] text-slate-400">
+              생년월일·성별은 주민등록번호에서 자동 계산됩니다. 외국인 등은
+              비워두세요.
+            </p>
           </div>
 
           <div className="sm:col-span-2">

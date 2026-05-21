@@ -7,12 +7,14 @@ import {
   supabase,
   HR_ADMIN_RANKS,
   normalizeEmployeeProfile,
+  parseResidentNumber,
   type HrAdminRank,
   type Driver,
   type EmployeeRank,
   type EmployeeProfile,
   type EmploymentContract,
   type CertificateIssued,
+  type GenderType,
 } from "@/lib/supabase";
 
 // =====================================================================
@@ -110,17 +112,26 @@ export async function saveEmployeeProfile(formData: FormData) {
     return s.length > 0 ? s : null;
   };
 
-  const gender = str("gender");
-  if (gender != null && gender !== "남" && gender !== "여") {
-    throw new Error("성별 값이 올바르지 않습니다.");
+  // 주민등록번호에서 생년월일·성별 자동 계산.
+  // 비어있으면(외국인 등) birth_date·gender 모두 null 저장.
+  const resident_number = str("resident_number");
+  let birth_date: string | null = null;
+  let gender: GenderType | null = null;
+  if (resident_number) {
+    const parsed = parseResidentNumber(resident_number);
+    if (!parsed) {
+      throw new Error("주민등록번호 형식이 올바르지 않습니다.");
+    }
+    birth_date = parsed.birthDate;
+    gender = parsed.gender;
   }
 
   const row = {
     driver_id,
     name_chinese: str("name_chinese"),
-    resident_number: str("resident_number"),
+    resident_number,
     gender,
-    birth_date: str("birth_date"),
+    birth_date,
     address: str("address"),
     email: str("email"),
     phone: str("phone"),

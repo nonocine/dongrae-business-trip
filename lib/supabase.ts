@@ -459,6 +459,10 @@ export type EmployeeProfile = {
   trainings: EmployeeTraining[];
   appointments: EmployeeAppointment[];
   military_service: string | null;
+  // 잠금(Phase C에서 사용) — 인사기록카드 확정 후 수정 방지
+  is_locked: boolean;
+  locked_at: string | null;
+  locked_by: string | null;
   created_at: string;
   updated_at: string | null;
 };
@@ -571,6 +575,9 @@ export function normalizeEmployeeProfile(
     trainings: toJsonbArray<EmployeeTraining>(raw.trainings),
     appointments: toJsonbArray<EmployeeAppointment>(raw.appointments),
     military_service: (raw.military_service as string | null) ?? null,
+    is_locked: raw.is_locked === true,
+    locked_at: (raw.locked_at as string | null) ?? null,
+    locked_by: (raw.locked_by as string | null) ?? null,
     created_at: String(raw.created_at ?? ""),
     updated_at: (raw.updated_at as string | null) ?? null,
   };
@@ -704,6 +711,42 @@ export function validatePasswordStrength(
 export function generateTempPassword(): string {
   const n = Math.floor(1000 + Math.random() * 9000);
   return `Temp${n}`;
+}
+
+// =====================================================================
+// 주민등록번호 파싱
+// =====================================================================
+
+// 주민등록번호에서 생년월일·성별을 추출합니다.
+//   * 형식: "YYMMDD-SXXXXXX" (하이픈·공백 유무 무관, 숫자 13자리)
+//   * S(7번째): 1,2,5,6 → 1900년대 / 3,4,7,8 → 2000년대
+//   * 홀수(1,3,5,7) → 남 / 짝수(2,4,6,8) → 여
+//   * 형식이 올바르지 않으면 null 을 반환합니다.
+export function parseResidentNumber(
+  rrn: string
+): { birthDate: string | null; gender: GenderType | null } | null {
+  const digits = (rrn ?? "").replace(/\D/g, "");
+  if (digits.length !== 13) return null;
+
+  const yy = digits.slice(0, 2);
+  const mm = digits.slice(2, 4);
+  const dd = digits.slice(4, 6);
+  const s = digits.charAt(6);
+
+  let century: number;
+  if (s === "1" || s === "2" || s === "5" || s === "6") century = 1900;
+  else if (s === "3" || s === "4" || s === "7" || s === "8") century = 2000;
+  else return null;
+
+  const month = Number(mm);
+  const day = Number(dd);
+  if (month < 1 || month > 12) return null;
+  if (day < 1 || day > 31) return null;
+
+  const birthDate = `${century + Number(yy)}-${mm}-${dd}`;
+  const gender: GenderType = Number(s) % 2 === 1 ? "남" : "여";
+
+  return { birthDate, gender };
 }
 
 // 주어진 시점의 기관명/대표 직함을 반환합니다.
