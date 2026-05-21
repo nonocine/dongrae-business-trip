@@ -16,8 +16,10 @@ export default async function AdminLoginPage() {
       <Header />
       <main className="mx-auto w-full max-w-md flex-1 px-4 py-8">
         <div className="mb-4 flex items-center justify-between">
-          <h2 className="text-lg font-bold text-slate-900">관리자 로그인</h2>
-          <Link href="/" className="text-sm text-slate-500 hover:underline">
+          <h2 className="text-lg font-bold tracking-tight text-ink">
+            관리자 로그인
+          </h2>
+          <Link href="/" className="text-sm text-ink-muted hover:underline">
             ← 목록
           </Link>
         </div>

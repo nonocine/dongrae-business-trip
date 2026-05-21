@@ -30,10 +30,10 @@ export default async function AdminPage() {
       <Header />
       <main className="mx-auto w-full max-w-6xl flex-1 px-4 py-6">
         <div className="mb-5 flex items-center justify-between">
-          <h2 className="text-2xl font-bold tracking-tight text-slate-900">
+          <h2 className="text-2xl font-bold tracking-tight text-ink">
             관리자 대시보드
           </h2>
-          <Link href="/" className="text-sm text-slate-500 hover:underline">
+          <Link href="/" className="text-sm text-ink-muted hover:underline">
             ← 목록
           </Link>
         </div>

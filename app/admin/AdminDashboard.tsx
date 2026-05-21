@@ -23,13 +23,28 @@ import {
   type Employee,
   type EmployeeRank,
 } from "@/lib/supabase";
+import {
+  cardCls,
+  inputCls,
+  btnPrimary,
+  btnSecondary,
+  tabBarCls,
+  tabNavCls,
+  tabItemCls,
+  badgeSuccess,
+  badgeNeutral,
+  noticeError,
+  noticeSuccess,
+} from "@/lib/ui";
 
 type TabKey = "dashboard" | "activities" | "employees";
 
-const inputCls =
-  "mt-1 block w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm shadow-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500";
-const cardCls =
-  "rounded-xl border border-slate-200 bg-white p-4 shadow-sm sm:p-5";
+// 직원 편집 행 전용 소형 입력
+const smallInputCls =
+  "block w-full rounded-md border border-line bg-card px-2 py-1 text-xs text-ink-body shadow-sm focus:border-navy focus:outline-none focus:ring-1 focus:ring-navy";
+// 표 안 소형 버튼
+const rowBtnNeutral =
+  "rounded-md border border-line bg-card px-2.5 py-1 text-xs font-medium text-ink-body hover:bg-surface disabled:opacity-60";
 
 export default function AdminDashboard({
   employees,
@@ -61,33 +76,17 @@ export default function AdminDashboard({
 function StatCardsGrid({ stats }: { stats: ActivityAdminStats }) {
   return (
     <div className="grid grid-cols-2 gap-3 sm:gap-4 lg:grid-cols-4">
-      <StatCard
-        icon="🗓"
-        label="이번달 활동"
-        value={`${stats.thisMonth}건`}
-        accent="bg-blue-500"
-        ring="from-blue-500 to-blue-600"
-      />
-      <StatCard
-        icon="📋"
-        label="전체 활동"
-        value={`${stats.total}건`}
-        accent="bg-violet-500"
-        ring="from-violet-500 to-violet-600"
-      />
+      <StatCard icon="🗓" label="이번달 활동" value={`${stats.thisMonth}건`} />
+      <StatCard icon="📋" label="전체 활동" value={`${stats.total}건`} />
       <StatCard
         icon="💸"
         label="이번달 비용"
         value={`${stats.thisMonthCost.toLocaleString("ko-KR")}원`}
-        accent="bg-emerald-500"
-        ring="from-emerald-500 to-emerald-600"
       />
       <StatCard
         icon="👥"
         label="활동자 수"
         value={`${stats.uniqueAuthors}명`}
-        accent="bg-amber-500"
-        ring="from-amber-500 to-amber-600"
       />
     </div>
   );
@@ -97,28 +96,21 @@ function StatCard({
   icon,
   label,
   value,
-  accent,
-  ring,
 }: {
   icon: string;
   label: string;
   value: string;
-  accent: string;
-  ring: string;
 }) {
   return (
-    <div className="relative overflow-hidden rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
-      <div className={`absolute inset-x-0 top-0 h-1 bg-gradient-to-r ${ring}`} />
+    <div className="rounded-xl border border-line bg-card p-4 shadow-sm">
       <div className="flex items-center justify-between">
         <div>
-          <p className="text-xs font-medium text-slate-500">{label}</p>
-          <p className="mt-1 text-2xl font-bold tracking-tight text-slate-900">
+          <p className="text-xs font-medium text-ink-muted">{label}</p>
+          <p className="mt-1 text-2xl font-bold tracking-tight text-ink">
             {value}
           </p>
         </div>
-        <div
-          className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-lg text-xl text-white ${accent}`}
-        >
+        <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-navy-soft text-xl text-navy">
           {icon}
         </div>
       </div>
@@ -142,25 +134,18 @@ function Tabs({
     { key: "employees", label: "직원 관리" },
   ];
   return (
-    <div className="overflow-x-auto border-b border-slate-200">
-      <nav className="flex min-w-max gap-1">
-        {tabs.map((t) => {
-          const active = t.key === current;
-          return (
-            <button
-              key={t.key}
-              type="button"
-              onClick={() => onChange(t.key)}
-              className={`relative -mb-px border-b-2 px-4 py-2.5 text-sm font-semibold transition ${
-                active
-                  ? "border-blue-500 text-blue-600"
-                  : "border-transparent text-slate-500 hover:text-slate-800"
-              }`}
-            >
-              {t.label}
-            </button>
-          );
-        })}
+    <div className={tabBarCls}>
+      <nav className={tabNavCls}>
+        {tabs.map((t) => (
+          <button
+            key={t.key}
+            type="button"
+            onClick={() => onChange(t.key)}
+            className={tabItemCls(t.key === current)}
+          >
+            {t.label}
+          </button>
+        ))}
       </nav>
     </div>
   );
@@ -185,24 +170,24 @@ function ByKindCard({ stats }: { stats: ActivityAdminStats }) {
   const total = stats.byKind.reduce((s, k) => s + k.count, 0);
   return (
     <section className={cardCls}>
-      <h3 className="text-sm font-semibold text-slate-900">활동 유형별 통계</h3>
+      <h3 className="text-sm font-semibold text-ink">활동 유형별 통계</h3>
       <ul className="mt-4 space-y-3">
         {stats.byKind.map((it) => {
           const pct = total > 0 ? (it.count / total) * 100 : 0;
           return (
             <li key={it.kind}>
               <div className="flex items-center justify-between text-sm">
-                <span className="font-medium text-slate-800">
+                <span className="font-medium text-ink">
                   {ACTIVITY_ICON[it.kind]} {ACTIVITY_LABEL[it.kind]}
                 </span>
-                <span className="text-xs font-semibold text-slate-700">
+                <span className="text-xs font-semibold text-ink-body">
                   {it.count}건
-                  <span className="ml-1 text-slate-400">
+                  <span className="ml-1 text-ink-hint">
                     ({pct.toFixed(0)}%)
                   </span>
                 </span>
               </div>
-              <div className="mt-1.5 h-2.5 overflow-hidden rounded-full bg-slate-100">
+              <div className="mt-1.5 h-2.5 overflow-hidden rounded-full bg-surface">
                 <div
                   className={`h-full rounded-full bg-gradient-to-r ${ACTIVITY_BAR_CLASS[it.kind]}`}
                   style={{ width: `${Math.max(2, pct)}%` }}
@@ -220,15 +205,15 @@ function ByTravelerCard({ stats }: { stats: ActivityAdminStats }) {
   if (stats.byAuthor.length === 0) {
     return (
       <section className={cardCls}>
-        <h3 className="text-sm font-semibold text-slate-900">작성자 TOP 5</h3>
-        <p className="mt-3 text-xs text-slate-500">활동 기록이 없습니다.</p>
+        <h3 className="text-sm font-semibold text-ink">작성자 TOP 5</h3>
+        <p className="mt-3 text-xs text-ink-muted">활동 기록이 없습니다.</p>
       </section>
     );
   }
   const max = stats.byAuthor.reduce((m, t) => Math.max(m, t.count), 0) || 1;
   return (
     <section className={cardCls}>
-      <h3 className="text-sm font-semibold text-slate-900">작성자 TOP 5</h3>
+      <h3 className="text-sm font-semibold text-ink">작성자 TOP 5</h3>
       <ul className="mt-4 space-y-3">
         {stats.byAuthor.map((it, i) => {
           const pct = Math.max(4, (it.count / max) * 100);
@@ -236,18 +221,18 @@ function ByTravelerCard({ stats }: { stats: ActivityAdminStats }) {
             <li key={it.name}>
               <div className="flex items-center justify-between text-sm">
                 <span className="flex items-center gap-2">
-                  <span className="inline-flex h-5 w-5 items-center justify-center rounded-full bg-violet-100 text-[10px] font-bold text-violet-700">
+                  <span className="inline-flex h-5 w-5 items-center justify-center rounded-full bg-navy-soft text-[10px] font-bold text-navy">
                     {i + 1}
                   </span>
-                  <span className="font-medium text-slate-800">{it.name}</span>
+                  <span className="font-medium text-ink">{it.name}</span>
                 </span>
-                <span className="text-xs font-bold text-violet-700">
+                <span className="text-xs font-bold text-navy">
                   {it.count}건
                 </span>
               </div>
-              <div className="mt-1.5 h-2.5 overflow-hidden rounded-full bg-slate-100">
+              <div className="mt-1.5 h-2.5 overflow-hidden rounded-full bg-surface">
                 <div
-                  className="h-full rounded-full bg-gradient-to-r from-violet-400 to-violet-600"
+                  className="h-full rounded-full bg-navy"
                   style={{ width: `${pct}%` }}
                 />
               </div>
@@ -262,7 +247,7 @@ function ByTravelerCard({ stats }: { stats: ActivityAdminStats }) {
 function RecentActivitiesCard({ stats }: { stats: ActivityAdminStats }) {
   return (
     <section className={cardCls}>
-      <h3 className="flex items-center gap-1.5 text-sm font-semibold text-slate-900">
+      <h3 className="flex items-center gap-1.5 text-sm font-semibold text-ink">
         <span aria-hidden>📋</span>
         최근 활동 5건
       </h3>
@@ -270,15 +255,15 @@ function RecentActivitiesCard({ stats }: { stats: ActivityAdminStats }) {
         <div className="mt-2 flex flex-col items-center justify-center gap-2 py-12 text-center">
           <div
             aria-hidden
-            className="text-5xl text-slate-300"
+            className="text-5xl text-ink-hint"
             style={{ filter: "grayscale(100%) opacity(0.6)" }}
           >
             📂
           </div>
-          <p className="text-sm font-medium text-slate-400">
+          <p className="text-sm font-medium text-ink-muted">
             아직 등록된 활동이 없습니다.
           </p>
-          <p className="text-xs text-slate-400">새로운 활동을 등록해보세요!</p>
+          <p className="text-xs text-ink-hint">새로운 활동을 등록해보세요!</p>
         </div>
       ) : (
         <ul className="mt-3 grid grid-cols-1 gap-2.5 sm:grid-cols-2 lg:grid-cols-3">
@@ -286,7 +271,7 @@ function RecentActivitiesCard({ stats }: { stats: ActivityAdminStats }) {
             <li key={it.id}>
               <Link
                 href={`/activities/${it.id}`}
-                className="flex h-full flex-col gap-1 rounded-lg border border-slate-200 bg-white p-3 shadow-sm transition hover:-translate-y-0.5 hover:border-blue-300 hover:shadow-md"
+                className="flex h-full flex-col gap-1 rounded-lg border border-line bg-card p-3 shadow-sm transition hover:-translate-y-0.5 hover:border-navy hover:shadow-md"
               >
                 <div className="flex items-center justify-between gap-2">
                   <span
@@ -295,15 +280,15 @@ function RecentActivitiesCard({ stats }: { stats: ActivityAdminStats }) {
                     {ACTIVITY_ICON[it.kind]} {ACTIVITY_LABEL[it.kind]}
                   </span>
                   {it.start_date && (
-                    <span className="text-xs font-semibold text-blue-600">
+                    <span className="text-xs font-semibold text-navy">
                       {it.start_date.replaceAll("-", ".")}
                     </span>
                   )}
                 </div>
-                <p className="mt-1 truncate text-sm font-semibold text-slate-900">
+                <p className="mt-1 truncate text-sm font-semibold text-ink">
                   {it.location ?? "-"}
                 </p>
-                <p className="text-xs text-slate-500">👤 {it.author}</p>
+                <p className="text-xs text-ink-muted">👤 {it.author}</p>
               </Link>
             </li>
           ))}
@@ -351,15 +336,15 @@ function ActivityListTab({ activities }: { activities: Activity[] }) {
   return (
     <section className={cardCls}>
       <div className="flex flex-wrap items-center justify-between gap-2">
-        <h3 className="text-sm font-semibold text-slate-900">
+        <h3 className="text-sm font-semibold text-ink">
           활동 목록{" "}
-          <span className="ml-1 text-xs font-medium text-slate-400">
+          <span className="ml-1 text-xs font-medium text-ink-hint">
             {filtered.length}건
           </span>
         </h3>
         <a
           href={downloadHref}
-          className="inline-flex items-center gap-1.5 rounded-md bg-emerald-500 px-3 py-1.5 text-sm font-semibold text-white shadow-sm hover:bg-emerald-600"
+          className="inline-flex items-center gap-1.5 rounded-lg bg-success px-3 py-1.5 text-sm font-semibold text-white shadow-sm transition hover:opacity-90"
         >
           <span aria-hidden>📊</span>
           엑셀 다운로드
@@ -368,7 +353,7 @@ function ActivityListTab({ activities }: { activities: Activity[] }) {
 
       <div className="mt-3 grid grid-cols-1 gap-2 sm:grid-cols-4">
         <div>
-          <label className="text-xs font-medium text-slate-600">유형</label>
+          <label className="text-xs font-medium text-ink-muted">유형</label>
           <select
             value={kindFilter}
             onChange={(e) => setKindFilter(e.target.value as ActivityKind | "")}
@@ -383,7 +368,7 @@ function ActivityListTab({ activities }: { activities: Activity[] }) {
           </select>
         </div>
         <div>
-          <label className="text-xs font-medium text-slate-600">월</label>
+          <label className="text-xs font-medium text-ink-muted">월</label>
           <select
             value={monthFilter}
             onChange={(e) => setMonthFilter(e.target.value)}
@@ -398,7 +383,7 @@ function ActivityListTab({ activities }: { activities: Activity[] }) {
           </select>
         </div>
         <div>
-          <label className="text-xs font-medium text-slate-600">작성자</label>
+          <label className="text-xs font-medium text-ink-muted">작성자</label>
           <select
             value={authorFilter}
             onChange={(e) => setAuthorFilter(e.target.value)}
@@ -421,7 +406,7 @@ function ActivityListTab({ activities }: { activities: Activity[] }) {
                 setMonthFilter("");
                 setAuthorFilter("");
               }}
-              className="h-[38px] w-full rounded-md border border-slate-300 bg-white px-3 text-sm font-medium text-slate-700 hover:bg-slate-50"
+              className={`${btnSecondary} w-full`}
             >
               필터 초기화
             </button>
@@ -430,8 +415,8 @@ function ActivityListTab({ activities }: { activities: Activity[] }) {
       </div>
 
       <div className="mt-4 overflow-x-auto">
-        <table className="min-w-full divide-y divide-slate-200 text-sm">
-          <thead className="bg-slate-50 text-xs uppercase text-slate-500">
+        <table className="min-w-full divide-y divide-line text-sm">
+          <thead className="bg-surface text-xs uppercase text-ink-muted">
             <tr>
               <th className="whitespace-nowrap px-3 py-2 text-left font-medium">
                 날짜
@@ -453,12 +438,12 @@ function ActivityListTab({ activities }: { activities: Activity[] }) {
               </th>
             </tr>
           </thead>
-          <tbody className="divide-y divide-slate-100">
+          <tbody className="divide-y divide-line">
             {filtered.length === 0 ? (
               <tr>
                 <td
                   colSpan={6}
-                  className="px-3 py-8 text-center text-sm text-slate-500"
+                  className="px-3 py-8 text-center text-sm text-ink-muted"
                 >
                   조건에 맞는 활동이 없습니다.
                 </td>
@@ -491,8 +476,8 @@ function ActivityRow({ activity }: { activity: Activity }) {
     : "-";
 
   return (
-    <tr className="hover:bg-slate-50">
-      <td className="whitespace-nowrap px-3 py-2 text-slate-700">{date}</td>
+    <tr className="hover:bg-surface">
+      <td className="whitespace-nowrap px-3 py-2 text-ink-body">{date}</td>
       <td className="whitespace-nowrap px-3 py-2">
         <span
           className={`inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-xs font-semibold ${ACTIVITY_BADGE_CLASS[a.kind]}`}
@@ -500,17 +485,17 @@ function ActivityRow({ activity }: { activity: Activity }) {
           {ACTIVITY_ICON[a.kind]} {ACTIVITY_LABEL[a.kind]}
         </span>
       </td>
-      <td className="whitespace-nowrap px-3 py-2 font-medium text-slate-900">
+      <td className="whitespace-nowrap px-3 py-2 font-medium text-ink">
         {a.author}
       </td>
-      <td className="px-3 py-2 text-slate-700">{locationOf(a)}</td>
-      <td className="px-3 py-2 text-slate-700">
+      <td className="px-3 py-2 text-ink-body">{locationOf(a)}</td>
+      <td className="px-3 py-2 text-ink-body">
         {a.companion.length > 0 ? a.companion.join(", ") : "-"}
       </td>
       <td className="whitespace-nowrap px-3 py-2 text-right">
         <Link
           href={`/activities/${a.id}`}
-          className="mr-2 inline-block rounded-md border border-slate-300 bg-white px-2.5 py-1 text-xs font-medium text-slate-700 hover:bg-slate-50"
+          className={`mr-2 inline-block ${rowBtnNeutral}`}
         >
           보기
         </Link>
@@ -532,7 +517,7 @@ function ActivityRow({ activity }: { activity: Activity }) {
           <button
             type="submit"
             disabled={pending}
-            className="rounded-md border border-red-500 bg-white px-2.5 py-1 text-xs font-medium text-red-500 hover:bg-red-50 disabled:opacity-60"
+            className="rounded-md border border-stamp bg-card px-2.5 py-1 text-xs font-medium text-stamp hover:bg-stamp-soft disabled:opacity-60"
           >
             {pending ? "삭제 중…" : "삭제"}
           </button>
@@ -575,32 +560,32 @@ function EmployeeListCard({
   return (
     <section className={cardCls}>
       <div className="flex flex-wrap items-center justify-between gap-2">
-        <h3 className="text-sm font-semibold text-slate-900">
+        <h3 className="text-sm font-semibold text-ink">
           직원 목록{" "}
-          <span className="ml-1 text-xs font-medium text-slate-400">
+          <span className="ml-1 text-xs font-medium text-ink-hint">
             {employees.length}명
           </span>
         </h3>
-        <label className="inline-flex cursor-pointer items-center gap-1.5 text-xs font-medium text-slate-600">
+        <label className="inline-flex cursor-pointer items-center gap-1.5 text-xs font-medium text-ink-muted">
           <input
             type="checkbox"
             checked={showInactive}
             onChange={(e) => onToggle(e.target.checked)}
-            className="h-3.5 w-3.5 rounded border-slate-300 text-blue-500 focus:ring-blue-500"
+            className="h-3.5 w-3.5 rounded border-line text-navy focus:ring-navy"
           />
           퇴사자 보기
         </label>
       </div>
       {employees.length === 0 ? (
-        <p className="mt-3 rounded-md border border-dashed border-slate-300 bg-slate-50 p-4 text-center text-sm text-slate-500">
+        <p className="mt-3 rounded-lg border border-dashed border-line bg-surface p-4 text-center text-sm text-ink-muted">
           {showInactive
             ? "등록된 직원이 없습니다."
             : "활성 직원이 없습니다."}
         </p>
       ) : (
         <div className="mt-3 overflow-x-auto">
-          <table className="min-w-full divide-y divide-slate-200 text-sm">
-            <thead className="bg-slate-50 text-xs uppercase text-slate-500">
+          <table className="min-w-full divide-y divide-line text-sm">
+            <thead className="bg-surface text-xs uppercase text-ink-muted">
               <tr>
                 <th className="px-3 py-2 text-left font-medium">이름</th>
                 <th className="px-3 py-2 text-left font-medium">직급</th>
@@ -609,7 +594,7 @@ function EmployeeListCard({
                 <th className="px-3 py-2 text-right font-medium">작업</th>
               </tr>
             </thead>
-            <tbody className="divide-y divide-slate-100">
+            <tbody className="divide-y divide-line">
               {employees.map((e) => (
                 <EmployeeRow key={e.id} employee={e} />
               ))}
@@ -646,13 +631,13 @@ function EmployeeRow({ employee }: { employee: Employee }) {
 
   if (editing) {
     return (
-      <tr className="bg-blue-50/40">
-        <td className="px-3 py-2 font-medium text-slate-900">{employee.name}</td>
+      <tr className="bg-navy-soft">
+        <td className="px-3 py-2 font-medium text-ink">{employee.name}</td>
         <td className="px-3 py-2">
           <select
             value={rank}
             onChange={(e) => setRank(e.target.value as EmployeeRank)}
-            className="block w-full rounded-md border border-slate-300 bg-white px-2 py-1 text-xs shadow-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+            className={smallInputCls}
           >
             <option value="" disabled>
               직급 선택
@@ -674,10 +659,10 @@ function EmployeeRow({ employee }: { employee: Employee }) {
             onChange={(e) =>
               setPassword(e.target.value.replace(/\D/g, "").slice(0, 4))
             }
-            className="block w-full rounded-md border border-slate-300 bg-white px-2 py-1 text-xs shadow-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+            className={smallInputCls}
           />
         </td>
-        <td className="px-3 py-2 text-slate-500" />
+        <td className="px-3 py-2 text-ink-muted" />
         <td className="px-3 py-2 text-right">
           <form
             action={(formData) => {
@@ -703,7 +688,7 @@ function EmployeeRow({ employee }: { employee: Employee }) {
             <button
               type="submit"
               disabled={pending}
-              className="rounded-md bg-blue-500 px-2.5 py-1 text-xs font-medium text-white shadow-sm hover:bg-blue-600 disabled:opacity-60"
+              className="rounded-md bg-navy px-2.5 py-1 text-xs font-medium text-white shadow-sm hover:bg-navy-strong disabled:opacity-60"
             >
               {pending ? "저장 중…" : "저장"}
             </button>
@@ -711,13 +696,13 @@ function EmployeeRow({ employee }: { employee: Employee }) {
               type="button"
               onClick={reset}
               disabled={pending}
-              className="rounded-md border border-slate-300 bg-white px-2.5 py-1 text-xs font-medium text-slate-700 hover:bg-slate-50"
+              className={rowBtnNeutral}
             >
               취소
             </button>
           </form>
           {error && (
-            <p className="mt-1 text-right text-xs text-red-600">{error}</p>
+            <p className="mt-1 text-right text-xs text-stamp">{error}</p>
           )}
         </td>
       </tr>
@@ -727,25 +712,19 @@ function EmployeeRow({ employee }: { employee: Employee }) {
   const inactive = !employee.is_active;
 
   return (
-    <tr className={inactive ? "bg-slate-50 text-slate-500" : "hover:bg-slate-50"}>
-      <td className="px-3 py-2 font-medium text-slate-900">
+    <tr className={inactive ? "bg-surface text-ink-muted" : "hover:bg-surface"}>
+      <td className="px-3 py-2 font-medium text-ink">
         {employee.name}
         {inactive && (
-          <span className="ml-1 text-xs font-normal text-slate-400">(퇴사)</span>
+          <span className="ml-1 text-xs font-normal text-ink-hint">(퇴사)</span>
         )}
       </td>
-      <td className="px-3 py-2 text-slate-700">{employee.rank ?? "-"}</td>
-      <td className="px-3 py-2 font-mono text-slate-500">
+      <td className="px-3 py-2 text-ink-body">{employee.rank ?? "-"}</td>
+      <td className="px-3 py-2 font-mono text-ink-muted">
         {employee.password ? "****" : "—"}
       </td>
       <td className="whitespace-nowrap px-3 py-2">
-        <span
-          className={`inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-semibold ${
-            inactive
-              ? "bg-slate-100 text-slate-500"
-              : "bg-emerald-100 text-emerald-700"
-          }`}
-        >
+        <span className={inactive ? badgeNeutral : badgeSuccess}>
           {inactive ? "퇴사" : "활성"}
         </span>
       </td>
@@ -764,7 +743,7 @@ function EmployeeRow({ employee }: { employee: Employee }) {
             <button
               type="submit"
               disabled={restorePending}
-              className="rounded-md border border-emerald-500 bg-white px-2.5 py-1 text-xs font-medium text-emerald-600 hover:bg-emerald-50 disabled:opacity-60"
+              className="rounded-md border border-success bg-card px-2.5 py-1 text-xs font-medium text-success hover:bg-success-soft disabled:opacity-60"
             >
               {restorePending ? "복귀 중…" : "복귀"}
             </button>
@@ -774,7 +753,7 @@ function EmployeeRow({ employee }: { employee: Employee }) {
             <button
               type="button"
               onClick={() => setEditing(true)}
-              className="mr-1.5 rounded-md border border-slate-300 bg-white px-2.5 py-1 text-xs font-medium text-slate-700 hover:bg-slate-50"
+              className={`mr-1.5 ${rowBtnNeutral}`}
             >
               수정
             </button>
@@ -802,7 +781,7 @@ function EmployeeRow({ employee }: { employee: Employee }) {
                   }
                 });
               }}
-              className="mr-1.5 rounded-md border border-amber-500 bg-white px-2.5 py-1 text-xs font-medium text-amber-600 hover:bg-amber-50 disabled:opacity-60"
+              className="mr-1.5 rounded-md border border-warning bg-card px-2.5 py-1 text-xs font-medium text-warning hover:bg-warning-soft disabled:opacity-60"
             >
               {resetPending ? "재설정 중…" : "비번 재설정"}
             </button>
@@ -824,7 +803,7 @@ function EmployeeRow({ employee }: { employee: Employee }) {
               <button
                 type="submit"
                 disabled={delPending}
-                className="rounded-md border border-red-500 bg-white px-2.5 py-1 text-xs font-medium text-red-500 hover:bg-red-50 disabled:opacity-60"
+                className="rounded-md border border-stamp bg-card px-2.5 py-1 text-xs font-medium text-stamp hover:bg-stamp-soft disabled:opacity-60"
               >
                 {delPending ? "퇴사 처리 중…" : "퇴사"}
               </button>
@@ -869,42 +848,42 @@ function ResetPasswordModal({
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 p-4"
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4"
       onClick={onClose}
     >
       <div
-        className="w-full max-w-sm rounded-xl bg-white p-5 text-left shadow-xl"
+        className="w-full max-w-sm rounded-xl border border-line bg-card p-5 text-left shadow-xl"
         onClick={(e) => e.stopPropagation()}
       >
-        <h3 className="text-sm font-semibold text-slate-900">
+        <h3 className="text-sm font-semibold text-ink">
           🔑 임시 비밀번호 발급 완료
         </h3>
-        <p className="mt-1 text-xs text-slate-500">
-          <span className="font-medium text-slate-700">{name}</span> 직원에게
+        <p className="mt-1 text-xs text-ink-muted">
+          <span className="font-medium text-ink-body">{name}</span> 직원에게
           아래 임시 비밀번호를 직접 전달해주세요.
         </p>
 
         <div className="mt-3 flex items-center gap-2">
-          <code className="flex-1 rounded-md border border-slate-300 bg-slate-50 px-3 py-2 text-center font-mono text-lg font-bold tracking-widest text-slate-900">
+          <code className="flex-1 rounded-lg border border-line bg-surface px-3 py-2 text-center font-mono text-lg font-bold tracking-widest text-ink">
             {tempPassword}
           </code>
           <button
             type="button"
             onClick={copy}
-            className="shrink-0 rounded-md bg-blue-500 px-3 py-2 text-xs font-semibold text-white hover:bg-blue-600"
+            className="shrink-0 rounded-lg bg-navy px-3 py-2 text-xs font-semibold text-white hover:bg-navy-strong"
           >
             {copied ? "복사됨" : "복사"}
           </button>
         </div>
 
-        <p className="mt-3 rounded-md bg-amber-50 px-3 py-2 text-xs text-amber-800">
+        <p className="mt-3 rounded-lg bg-warning-soft px-3 py-2 text-xs text-warning">
           직원이 이 비밀번호로 로그인하면 즉시 새 비밀번호를 설정해야 합니다.
         </p>
 
         <button
           type="button"
           onClick={onClose}
-          className="mt-3 w-full rounded-md border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
+          className={`mt-3 w-full ${btnSecondary}`}
         >
           닫기
         </button>
@@ -925,8 +904,8 @@ function AddEmployeeCard() {
 
   return (
     <section className={cardCls}>
-      <h3 className="text-sm font-semibold text-slate-900">직원 추가</h3>
-      <p className="mt-1 text-xs text-slate-500">
+      <h3 className="text-sm font-semibold text-ink">직원 추가</h3>
+      <p className="mt-1 text-xs text-ink-muted">
         등록하면 활동자 드롭다운 + 직원 로그인이 가능해집니다.
       </p>
       <form
@@ -962,7 +941,7 @@ function AddEmployeeCard() {
         className="mt-3 space-y-2"
       >
         <div>
-          <label className="block text-xs font-medium text-slate-600">
+          <label className="block text-xs font-medium text-ink-muted">
             이름
           </label>
           <input
@@ -976,7 +955,7 @@ function AddEmployeeCard() {
           />
         </div>
         <div>
-          <label className="block text-xs font-medium text-slate-600">
+          <label className="block text-xs font-medium text-ink-muted">
             직급
           </label>
           <select
@@ -997,7 +976,7 @@ function AddEmployeeCard() {
           </select>
         </div>
         <div>
-          <label className="block text-xs font-medium text-slate-600">
+          <label className="block text-xs font-medium text-ink-muted">
             비밀번호 (4자리 숫자)
           </label>
           <input
@@ -1014,27 +993,19 @@ function AddEmployeeCard() {
             className={`${inputCls} font-mono tracking-widest`}
           />
           {password.length > 0 && !passwordValid && (
-            <p className="mt-1 text-xs text-red-600">4자리 숫자를 입력하세요.</p>
+            <p className="mt-1 text-xs text-stamp">4자리 숫자를 입력하세요.</p>
           )}
         </div>
         <button
           type="submit"
           disabled={pending}
-          className="mt-2 h-[38px] w-full rounded-md bg-blue-500 px-4 text-sm font-semibold text-white shadow-sm hover:bg-blue-600 disabled:opacity-60"
+          className={`${btnPrimary} mt-2 w-full`}
         >
           {pending ? "추가 중…" : "＋ 추가"}
         </button>
       </form>
-      {error && (
-        <p className="mt-2 rounded-md bg-red-50 px-3 py-2 text-xs text-red-600">
-          {error}
-        </p>
-      )}
-      {ok && (
-        <p className="mt-2 rounded-md bg-emerald-50 px-3 py-2 text-xs text-emerald-700">
-          {ok}
-        </p>
-      )}
+      {error && <p className={`mt-2 ${noticeError}`}>{error}</p>}
+      {ok && <p className={`mt-2 ${noticeSuccess}`}>{ok}</p>}
     </section>
   );
 }
