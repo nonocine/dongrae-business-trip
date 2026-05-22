@@ -3,10 +3,14 @@
 import {
   EDUCATION_DEGREES,
   FAMILY_RELATIONS,
+  APPOINTMENT_TYPES,
   type EmployeeEducation,
   type EmployeeFamily,
   type EmployeeLicense,
   type EmployeeCareer,
+  type EmployeeAward,
+  type EmployeeTraining,
+  type EmployeeAppointment,
 } from "@/lib/supabase";
 import { tabBarCls, tabNavCls, tabItemCls } from "@/lib/ui";
 
@@ -674,6 +678,366 @@ export function CareerTab({
                   onChange={(e) => update(idx, { note: e.target.value })}
                   readOnly={readOnly}
                   className={`mt-0.5 ${fieldCls}`}
+                />
+              </div>
+            </ItemCard>
+          ))}
+        </ul>
+      )}
+    </div>
+  );
+}
+
+// =====================================================================
+// 수상
+// =====================================================================
+function emptyAward(): EmployeeAward {
+  return { name: "", issuer: "", date: "", reason: "", note: "" };
+}
+
+export function AwardTab({
+  awards,
+  onChange,
+  readOnly,
+}: {
+  awards: EmployeeAward[];
+  onChange: (next: EmployeeAward[]) => void;
+  readOnly: boolean;
+}) {
+  const fieldCls = fieldClsOf(readOnly);
+  function update(idx: number, patch: Partial<EmployeeAward>) {
+    onChange(awards.map((e, i) => (i === idx ? { ...e, ...patch } : e)));
+  }
+
+  return (
+    <div className="space-y-3">
+      <div className="flex items-center justify-between gap-2">
+        <p className="text-xs text-ink-muted">
+          수상 내역을 입력하세요. 항목이 없어도 저장됩니다.
+        </p>
+        {!readOnly && (
+          <AddButton
+            label="수상 추가"
+            onClick={() => onChange([...awards, emptyAward()])}
+          />
+        )}
+      </div>
+
+      {awards.length === 0 ? (
+        <EmptyHint text="등록된 수상 내역이 없습니다." />
+      ) : (
+        <ul className="space-y-3">
+          {awards.map((awd, idx) => (
+            <ItemCard
+              key={idx}
+              index={idx}
+              label="수상"
+              readOnly={readOnly}
+              onRemove={() => onChange(awards.filter((_, i) => i !== idx))}
+            >
+              <div>
+                <label className={subLabelCls}>상명</label>
+                <input
+                  type="text"
+                  value={awd.name}
+                  onChange={(e) => update(idx, { name: e.target.value })}
+                  readOnly={readOnly}
+                  placeholder="○○상"
+                  className={`mt-0.5 font-semibold ${fieldCls}`}
+                />
+              </div>
+              <div>
+                <label className={subLabelCls}>시상기관</label>
+                <input
+                  type="text"
+                  value={awd.issuer}
+                  onChange={(e) => update(idx, { issuer: e.target.value })}
+                  readOnly={readOnly}
+                  placeholder="여성가족부"
+                  className={`mt-0.5 ${fieldCls}`}
+                />
+              </div>
+              <div>
+                <label className={subLabelCls}>수상일</label>
+                <input
+                  type="date"
+                  value={awd.date}
+                  onChange={(e) => update(idx, { date: e.target.value })}
+                  readOnly={readOnly}
+                  className={`mt-0.5 ${fieldCls}`}
+                />
+              </div>
+              <div>
+                <label className={subLabelCls}>비고 (선택)</label>
+                <input
+                  type="text"
+                  value={awd.note}
+                  onChange={(e) => update(idx, { note: e.target.value })}
+                  readOnly={readOnly}
+                  className={`mt-0.5 ${fieldCls}`}
+                />
+              </div>
+              <div className="sm:col-span-2">
+                <label className={subLabelCls}>수상 이유 (선택)</label>
+                <textarea
+                  value={awd.reason}
+                  onChange={(e) => update(idx, { reason: e.target.value })}
+                  readOnly={readOnly}
+                  rows={2}
+                  className={`mt-0.5 resize-y ${fieldCls}`}
+                />
+              </div>
+            </ItemCard>
+          ))}
+        </ul>
+      )}
+    </div>
+  );
+}
+
+// =====================================================================
+// 교육이수
+// =====================================================================
+function emptyTraining(): EmployeeTraining {
+  return {
+    name: "",
+    institution: "",
+    start_date: "",
+    end_date: "",
+    hours: "",
+    note: "",
+  };
+}
+
+export function TrainingTab({
+  trainings,
+  onChange,
+  readOnly,
+}: {
+  trainings: EmployeeTraining[];
+  onChange: (next: EmployeeTraining[]) => void;
+  readOnly: boolean;
+}) {
+  const fieldCls = fieldClsOf(readOnly);
+  function update(idx: number, patch: Partial<EmployeeTraining>) {
+    onChange(trainings.map((e, i) => (i === idx ? { ...e, ...patch } : e)));
+  }
+
+  return (
+    <div className="space-y-3">
+      <div className="flex items-center justify-between gap-2">
+        <p className="text-xs text-ink-muted">
+          교육이수 내역을 입력하세요. 항목이 없어도 저장됩니다.
+        </p>
+        {!readOnly && (
+          <AddButton
+            label="교육 추가"
+            onClick={() => onChange([...trainings, emptyTraining()])}
+          />
+        )}
+      </div>
+
+      {trainings.length === 0 ? (
+        <EmptyHint text="등록된 교육이수 내역이 없습니다." />
+      ) : (
+        <ul className="space-y-3">
+          {trainings.map((trn, idx) => (
+            <ItemCard
+              key={idx}
+              index={idx}
+              label="교육"
+              readOnly={readOnly}
+              onRemove={() => onChange(trainings.filter((_, i) => i !== idx))}
+            >
+              <div>
+                <label className={subLabelCls}>교육명</label>
+                <input
+                  type="text"
+                  value={trn.name}
+                  onChange={(e) => update(idx, { name: e.target.value })}
+                  readOnly={readOnly}
+                  placeholder="○○ 직무교육"
+                  className={`mt-0.5 font-semibold ${fieldCls}`}
+                />
+              </div>
+              <div>
+                <label className={subLabelCls}>기관</label>
+                <input
+                  type="text"
+                  value={trn.institution}
+                  onChange={(e) =>
+                    update(idx, { institution: e.target.value })
+                  }
+                  readOnly={readOnly}
+                  placeholder="한국청소년활동진흥원"
+                  className={`mt-0.5 ${fieldCls}`}
+                />
+              </div>
+              <div>
+                <label className={subLabelCls}>시작일</label>
+                <input
+                  type="date"
+                  value={trn.start_date}
+                  onChange={(e) => update(idx, { start_date: e.target.value })}
+                  readOnly={readOnly}
+                  className={`mt-0.5 ${fieldCls}`}
+                />
+              </div>
+              <div>
+                <label className={subLabelCls}>종료일</label>
+                <input
+                  type="date"
+                  value={trn.end_date}
+                  onChange={(e) => update(idx, { end_date: e.target.value })}
+                  readOnly={readOnly}
+                  className={`mt-0.5 ${fieldCls}`}
+                />
+              </div>
+              <div>
+                <label className={subLabelCls}>이수 시간</label>
+                <input
+                  type="text"
+                  value={trn.hours}
+                  onChange={(e) => update(idx, { hours: e.target.value })}
+                  readOnly={readOnly}
+                  placeholder="예: 16시간"
+                  className={`mt-0.5 ${fieldCls}`}
+                />
+              </div>
+              <div>
+                <label className={subLabelCls}>비고 (선택)</label>
+                <input
+                  type="text"
+                  value={trn.note}
+                  onChange={(e) => update(idx, { note: e.target.value })}
+                  readOnly={readOnly}
+                  className={`mt-0.5 ${fieldCls}`}
+                />
+              </div>
+            </ItemCard>
+          ))}
+        </ul>
+      )}
+    </div>
+  );
+}
+
+// =====================================================================
+// 인사발령
+// =====================================================================
+function emptyAppointment(): EmployeeAppointment {
+  return {
+    type: "입사",
+    title: "",
+    department: "",
+    effective_date: "",
+    note: "",
+  };
+}
+
+export function AppointmentTab({
+  appointments,
+  onChange,
+  readOnly,
+}: {
+  appointments: EmployeeAppointment[];
+  onChange: (next: EmployeeAppointment[]) => void;
+  readOnly: boolean;
+}) {
+  const fieldCls = fieldClsOf(readOnly);
+  function update(idx: number, patch: Partial<EmployeeAppointment>) {
+    onChange(appointments.map((e, i) => (i === idx ? { ...e, ...patch } : e)));
+  }
+
+  return (
+    <div className="space-y-3">
+      <div className="flex items-center justify-between gap-2">
+        <p className="text-xs text-ink-muted">
+          인사발령 내역을 입력하세요. 항목이 없어도 저장됩니다.
+        </p>
+        {!readOnly && (
+          <AddButton
+            label="발령 추가"
+            onClick={() => onChange([...appointments, emptyAppointment()])}
+          />
+        )}
+      </div>
+
+      {appointments.length === 0 ? (
+        <EmptyHint text="등록된 인사발령 내역이 없습니다." />
+      ) : (
+        <ul className="space-y-3">
+          {appointments.map((apt, idx) => (
+            <ItemCard
+              key={idx}
+              index={idx}
+              label="발령"
+              readOnly={readOnly}
+              onRemove={() =>
+                onChange(appointments.filter((_, i) => i !== idx))
+              }
+            >
+              <div>
+                <label className={subLabelCls}>발령 유형</label>
+                <select
+                  value={apt.type}
+                  onChange={(e) =>
+                    update(idx, {
+                      type: e.target.value as EmployeeAppointment["type"],
+                    })
+                  }
+                  disabled={readOnly}
+                  className={`mt-0.5 ${fieldCls}`}
+                >
+                  {APPOINTMENT_TYPES.map((t) => (
+                    <option key={t} value={t}>
+                      {t}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label className={subLabelCls}>직위 / 직책</label>
+                <input
+                  type="text"
+                  value={apt.title}
+                  onChange={(e) => update(idx, { title: e.target.value })}
+                  readOnly={readOnly}
+                  placeholder="팀장"
+                  className={`mt-0.5 font-semibold ${fieldCls}`}
+                />
+              </div>
+              <div>
+                <label className={subLabelCls}>부서</label>
+                <input
+                  type="text"
+                  value={apt.department}
+                  onChange={(e) => update(idx, { department: e.target.value })}
+                  readOnly={readOnly}
+                  placeholder="활동지원팀"
+                  className={`mt-0.5 ${fieldCls}`}
+                />
+              </div>
+              <div>
+                <label className={subLabelCls}>발령일</label>
+                <input
+                  type="date"
+                  value={apt.effective_date}
+                  onChange={(e) =>
+                    update(idx, { effective_date: e.target.value })
+                  }
+                  readOnly={readOnly}
+                  className={`mt-0.5 ${fieldCls}`}
+                />
+              </div>
+              <div className="sm:col-span-2">
+                <label className={subLabelCls}>비고 (선택)</label>
+                <textarea
+                  value={apt.note}
+                  onChange={(e) => update(idx, { note: e.target.value })}
+                  readOnly={readOnly}
+                  rows={2}
+                  className={`mt-0.5 resize-y ${fieldCls}`}
                 />
               </div>
             </ItemCard>

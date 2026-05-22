@@ -8,11 +8,17 @@ import {
   normalizeFamilyList,
   normalizeLicenseList,
   normalizeCareerList,
+  normalizeAwardList,
+  normalizeTrainingList,
+  normalizeAppointmentList,
   type EmployeeProfile,
   type EmployeeEducation,
   type EmployeeFamily,
   type EmployeeLicense,
   type EmployeeCareer,
+  type EmployeeAward,
+  type EmployeeTraining,
+  type EmployeeAppointment,
 } from "@/lib/supabase";
 import {
   ProfileTabs,
@@ -20,7 +26,9 @@ import {
   FamilyTab,
   LicenseTab,
   CareerTab,
-  PlaceholderTab,
+  AwardTab,
+  TrainingTab,
+  AppointmentTab,
   type ProfileTabKey,
 } from "@/app/hr/ProfileFormParts";
 import {
@@ -87,6 +95,15 @@ export default function MyEmployeeProfileForm({
   );
   const [careers, setCareers] = useState<EmployeeCareer[]>(() =>
     normalizeCareerList(profile?.career ?? [])
+  );
+  const [awards, setAwards] = useState<EmployeeAward[]>(() =>
+    normalizeAwardList(profile?.awards ?? [])
+  );
+  const [trainings, setTrainings] = useState<EmployeeTraining[]>(() =>
+    normalizeTrainingList(profile?.trainings ?? [])
+  );
+  const [appointments, setAppointments] = useState<EmployeeAppointment[]>(
+    () => normalizeAppointmentList(profile?.appointments ?? [])
   );
 
   const fieldCls = locked
@@ -165,6 +182,17 @@ export default function MyEmployeeProfileForm({
             value={JSON.stringify(licenses)}
           />
           <input type="hidden" name="career" value={JSON.stringify(careers)} />
+          <input type="hidden" name="awards" value={JSON.stringify(awards)} />
+          <input
+            type="hidden"
+            name="trainings"
+            value={JSON.stringify(trainings)}
+          />
+          <input
+            type="hidden"
+            name="appointments"
+            value={JSON.stringify(appointments)}
+          />
 
           {/* 기본정보 탭 */}
           <div className={tab === "basic" ? "" : "hidden"}>
@@ -325,15 +353,27 @@ export default function MyEmployeeProfileForm({
             />
           </div>
 
-          {/* 미구현 탭 */}
+          {/* 수상 탭 */}
           <div className={tab === "award" ? "" : "hidden"}>
-            <PlaceholderTab title="수상" />
+            <AwardTab awards={awards} onChange={setAwards} readOnly={locked} />
           </div>
+
+          {/* 교육이수 탭 */}
           <div className={tab === "training" ? "" : "hidden"}>
-            <PlaceholderTab title="교육이수" />
+            <TrainingTab
+              trainings={trainings}
+              onChange={setTrainings}
+              readOnly={locked}
+            />
           </div>
+
+          {/* 인사발령 탭 */}
           <div className={tab === "appointment" ? "" : "hidden"}>
-            <PlaceholderTab title="인사발령" />
+            <AppointmentTab
+              appointments={appointments}
+              onChange={setAppointments}
+              readOnly={locked}
+            />
           </div>
 
           {error && <p className={noticeError}>{error}</p>}

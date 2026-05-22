@@ -12,6 +12,9 @@ import {
   parseFamilyInput,
   parseLicenseInput,
   parseCareerInput,
+  parseAwardInput,
+  parseTrainingInput,
+  parseAppointmentInput,
   type HrAdminRank,
   type Driver,
   type EmployeeRank,
@@ -173,6 +176,9 @@ export async function saveEmployeeProfile(formData: FormData) {
   const family = parseFamilyInput(str("family"));
   const licenses = parseLicenseInput(str("licenses"));
   const career = parseCareerInput(str("career"));
+  const awards = parseAwardInput(str("awards"));
+  const trainings = parseTrainingInput(str("trainings"));
+  const appointments = parseAppointmentInput(str("appointments"));
 
   const row = {
     driver_id,
@@ -190,6 +196,9 @@ export async function saveEmployeeProfile(formData: FormData) {
     family,
     licenses,
     career,
+    awards,
+    trainings,
+    appointments,
     updated_at: new Date().toISOString(),
   };
 

@@ -485,9 +485,41 @@ export type EmployeeCareer = {
   duties: string;
   note: string;
 };
-export type EmployeeAward = Record<string, unknown>;
-export type EmployeeTraining = Record<string, unknown>;
-export type EmployeeAppointment = Record<string, unknown>;
+export type EmployeeAward = {
+  name: string;
+  issuer: string;
+  date: string;
+  reason: string;
+  note: string;
+};
+export type EmployeeTraining = {
+  name: string;
+  institution: string;
+  start_date: string;
+  end_date: string;
+  hours: string;
+  note: string;
+};
+
+export const APPOINTMENT_TYPES = [
+  "입사",
+  "승진",
+  "전보",
+  "직위변경",
+  "휴직",
+  "복직",
+  "퇴사",
+  "기타",
+] as const;
+export type AppointmentType = (typeof APPOINTMENT_TYPES)[number];
+
+export type EmployeeAppointment = {
+  type: AppointmentType;
+  title: string;
+  department: string;
+  effective_date: string;
+  note: string;
+};
 
 export type EmployeeProfile = {
   id: string;
@@ -775,6 +807,110 @@ export function parseCareerInput(raw: string | null): EmployeeCareer[] {
     throw new Error("경력 데이터 형식이 올바르지 않습니다.");
   }
   return normalizeCareerList(parsed);
+}
+
+// --- 수상 ---
+function normalizeAwardItem(item: unknown): EmployeeAward {
+  const o = (item ?? {}) as Record<string, unknown>;
+  return {
+    name: String(o.name ?? "").trim(),
+    issuer: String(o.issuer ?? "").trim(),
+    date: String(o.date ?? "").trim(),
+    reason: String(o.reason ?? "").trim(),
+    note: String(o.note ?? "").trim(),
+  };
+}
+
+export function normalizeAwardList(items: unknown): EmployeeAward[] {
+  if (!Array.isArray(items)) return [];
+  return items.map(normalizeAwardItem);
+}
+
+export function parseAwardInput(raw: string | null): EmployeeAward[] {
+  if (!raw || raw.trim() === "") return [];
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    throw new Error("수상 데이터 형식이 올바르지 않습니다.");
+  }
+  if (!Array.isArray(parsed)) {
+    throw new Error("수상 데이터 형식이 올바르지 않습니다.");
+  }
+  return normalizeAwardList(parsed);
+}
+
+// --- 교육이수 ---
+function normalizeTrainingItem(item: unknown): EmployeeTraining {
+  const o = (item ?? {}) as Record<string, unknown>;
+  return {
+    name: String(o.name ?? "").trim(),
+    institution: String(o.institution ?? "").trim(),
+    start_date: String(o.start_date ?? "").trim(),
+    end_date: String(o.end_date ?? "").trim(),
+    hours: String(o.hours ?? "").trim(),
+    note: String(o.note ?? "").trim(),
+  };
+}
+
+export function normalizeTrainingList(items: unknown): EmployeeTraining[] {
+  if (!Array.isArray(items)) return [];
+  return items.map(normalizeTrainingItem);
+}
+
+export function parseTrainingInput(raw: string | null): EmployeeTraining[] {
+  if (!raw || raw.trim() === "") return [];
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    throw new Error("교육이수 데이터 형식이 올바르지 않습니다.");
+  }
+  if (!Array.isArray(parsed)) {
+    throw new Error("교육이수 데이터 형식이 올바르지 않습니다.");
+  }
+  return normalizeTrainingList(parsed);
+}
+
+// --- 인사발령 ---
+function normalizeAppointmentItem(item: unknown): EmployeeAppointment {
+  const o = (item ?? {}) as Record<string, unknown>;
+  const typeRaw = String(o.type ?? "");
+  const type: AppointmentType = (
+    APPOINTMENT_TYPES as readonly string[]
+  ).includes(typeRaw)
+    ? (typeRaw as AppointmentType)
+    : "기타";
+  return {
+    type,
+    title: String(o.title ?? "").trim(),
+    department: String(o.department ?? "").trim(),
+    effective_date: String(o.effective_date ?? "").trim(),
+    note: String(o.note ?? "").trim(),
+  };
+}
+
+export function normalizeAppointmentList(
+  items: unknown
+): EmployeeAppointment[] {
+  if (!Array.isArray(items)) return [];
+  return items.map(normalizeAppointmentItem);
+}
+
+export function parseAppointmentInput(
+  raw: string | null
+): EmployeeAppointment[] {
+  if (!raw || raw.trim() === "") return [];
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    throw new Error("인사발령 데이터 형식이 올바르지 않습니다.");
+  }
+  if (!Array.isArray(parsed)) {
+    throw new Error("인사발령 데이터 형식이 올바르지 않습니다.");
+  }
+  return normalizeAppointmentList(parsed);
 }
 
 export function normalizeEmploymentContract(
