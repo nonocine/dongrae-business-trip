@@ -1,0 +1,58 @@
+"use server";
+
+import { supabase } from "@/lib/supabase";
+
+// 채용 공고 — 조회 페이지가 사용하는 필드만 정의(스코프 최소화).
+// 첨부서류(required_documents) 등 지원 단계 필드는 지원 페이지 작업 시
+// lib/supabase.ts 로 승격할 예정.
+export type RecruitmentPosting = {
+  id: string;
+  slug: string;
+  title: string;
+  field: string;
+  recruit_count: number;
+  application_start: string;
+  application_end: string;
+  qualifications: string | null;
+  preferred: string | null;
+  salary_info: string | null;
+  process_info: string | null;
+  notice: string | null;
+};
+
+function normalizeRecruitmentPosting(
+  raw: Record<string, unknown>
+): RecruitmentPosting {
+  return {
+    id: String(raw.id ?? ""),
+    slug: String(raw.slug ?? ""),
+    title: String(raw.title ?? ""),
+    field: String(raw.field ?? ""),
+    recruit_count: Number(raw.recruit_count ?? 0),
+    application_start: String(raw.application_start ?? ""),
+    application_end: String(raw.application_end ?? ""),
+    qualifications: (raw.qualifications as string | null) ?? null,
+    preferred: (raw.preferred as string | null) ?? null,
+    salary_info: (raw.salary_info as string | null) ?? null,
+    process_info: (raw.process_info as string | null) ?? null,
+    notice: (raw.notice as string | null) ?? null,
+  };
+}
+
+// 채용 공고 조회 — slug 로 단건 조회.
+//   * status='published' 인 공고만 반환합니다.
+//   * draft/closed 는 비공개이므로 null 을 반환하고, 페이지에서 404 처리합니다.
+export async function getRecruitmentPosting(
+  slug: string
+): Promise<RecruitmentPosting | null> {
+  if (!slug) return null;
+  const { data, error } = await supabase
+    .from("recruitment_postings")
+    .select("*")
+    .eq("slug", slug)
+    .eq("status", "published")
+    .maybeSingle();
+  if (error) throw new Error(error.message);
+  if (!data) return null;
+  return normalizeRecruitmentPosting(data as Record<string, unknown>);
+}
