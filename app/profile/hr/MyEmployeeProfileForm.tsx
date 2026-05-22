@@ -1,7 +1,12 @@
 "use client";
 
-import { useMemo, useState, useTransition } from "react";
-import { saveMyProfile } from "@/app/profile/hr/actions";
+import { useEffect, useMemo, useState, useTransition } from "react";
+import {
+  saveMyProfile,
+  uploadMyProfilePhoto,
+  deleteMyProfilePhoto,
+  getMyPhotoUrl,
+} from "@/app/profile/hr/actions";
 import {
   parseResidentNumber,
   normalizeEducationList,
@@ -106,6 +111,11 @@ export default function MyEmployeeProfileForm({
     () => normalizeAppointmentList(profile?.appointments ?? [])
   );
 
+  // 증명사진 — 마운트 시 1시간 임시 URL 조회
+  const [photoUrl, setPhotoUrl] = useState<string | null>(null);
+  const [photoError, setPhotoError] = useState<string | null>(null);
+  const [photoUploading, photoTransition] = useTransition();
+
   const fieldCls = locked
     ? `${baseInputCls} cursor-not-allowed bg-surface text-ink-muted`
     : `${baseInputCls} bg-card`;
@@ -113,6 +123,37 @@ export default function MyEmployeeProfileForm({
     locked || employed
       ? `${baseInputCls} cursor-not-allowed bg-surface text-ink-muted`
       : `${baseInputCls} bg-card`;
+
+  useEffect(() => {
+    let alive = true;
+    getMyPhotoUrl().then((url) => {
+      if (alive) setPhotoUrl(url);
+    });
+    return () => {
+      alive = false;
+    };
+  }, []);
+
+  function handlePhotoUpload(file: File) {
+    setPhotoError(null);
+    photoTransition(async () => {
+      const fd = new FormData();
+      fd.set("photo", file);
+      const res = await uploadMyProfilePhoto(fd);
+      if (res.ok) setPhotoUrl(res.photoUrl);
+      else setPhotoError(res.message);
+    });
+  }
+
+  function handlePhotoDelete() {
+    if (!confirm("증명사진을 삭제할까요?")) return;
+    setPhotoError(null);
+    photoTransition(async () => {
+      const res = await deleteMyProfilePhoto();
+      if (res.ok) setPhotoUrl(null);
+      else setPhotoError(res.message);
+    });
+  }
 
   return (
     <div className="space-y-5">
@@ -196,6 +237,62 @@ export default function MyEmployeeProfileForm({
 
           {/* 기본정보 탭 */}
           <div className={tab === "basic" ? "" : "hidden"}>
+            {/* 증명사진 */}
+            <div className="mb-4 flex items-start gap-4">
+              <div className="h-32 w-24 shrink-0 overflow-hidden rounded-md border border-line bg-card">
+                {photoUrl ? (
+                  // eslint-disable-next-line @next/next/no-img-element
+                  <img
+                    src={photoUrl}
+                    alt="증명사진"
+                    className="h-full w-full object-cover"
+                  />
+                ) : (
+                  <div className="flex h-full w-full items-center justify-center text-3xl text-ink-hint">
+                    👤
+                  </div>
+                )}
+              </div>
+              {!locked && (
+                <div className="flex flex-col items-start gap-1.5">
+                  <label
+                    className={`cursor-pointer rounded-lg border border-navy bg-card px-3 py-1.5 text-xs font-semibold text-navy hover:bg-navy-soft ${
+                      photoUploading ? "pointer-events-none opacity-60" : ""
+                    }`}
+                  >
+                    {photoUploading ? "처리 중…" : "사진 변경"}
+                    <input
+                      type="file"
+                      accept="image/jpeg,image/png,image/webp"
+                      className="sr-only"
+                      disabled={photoUploading}
+                      onChange={(e) => {
+                        const f = e.target.files?.[0];
+                        e.target.value = "";
+                        if (f) handlePhotoUpload(f);
+                      }}
+                    />
+                  </label>
+                  {photoUrl && (
+                    <button
+                      type="button"
+                      onClick={handlePhotoDelete}
+                      disabled={photoUploading}
+                      className="rounded-lg border border-stamp bg-card px-3 py-1.5 text-xs font-medium text-stamp hover:bg-stamp-soft disabled:opacity-60"
+                    >
+                      삭제
+                    </button>
+                  )}
+                  <p className="text-[11px] text-ink-hint">
+                    JPG · PNG · WEBP, 8MB 이하
+                  </p>
+                  {photoError && (
+                    <p className="text-xs text-stamp">{photoError}</p>
+                  )}
+                </div>
+              )}
+            </div>
+
             <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
               <div>
                 <label className={labelCls}>한자명</label>

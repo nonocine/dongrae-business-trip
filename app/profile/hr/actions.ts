@@ -13,6 +13,9 @@ import {
   parseAwardInput,
   parseTrainingInput,
   parseAppointmentInput,
+  uploadProfilePhoto,
+  removeHrDocuments,
+  signHrDocument,
   type Driver,
   type EmployeeRank,
   type EmployeeProfile,
@@ -144,4 +147,131 @@ export async function saveMyProfile(formData: FormData) {
   if (error) throw new Error(error.message);
 
   revalidatePath("/profile/hr");
+}
+
+// =====================================================================
+// 본인 증명사진 (hr-documents 버킷)
+// =====================================================================
+
+// 본인 증명사진 조회 — 1시간 임시 URL. 세션에서 직원을 도출.
+export async function getMyPhotoUrl(): Promise<string | null> {
+  const driver = await getMyDriver();
+  if (!driver) return null;
+  const { data, error } = await supabase
+    .from("employee_profiles")
+    .select("photo_url")
+    .eq("driver_id", driver.id)
+    .maybeSingle();
+  if (error || !data) return null;
+  return signHrDocument(
+    ((data as { photo_url?: unknown }).photo_url as string | null) ?? null
+  );
+}
+
+// 본인 증명사진 업로드 — 새 파일 업로드 → DB 갱신 → 옛 파일 삭제 순서.
+export async function uploadMyProfilePhoto(
+  formData: FormData
+): Promise<
+  { ok: true; photoUrl: string | null } | { ok: false; message: string }
+> {
+  try {
+    const driver = await getMyDriver();
+    if (!driver) throw new Error("직원 로그인이 필요합니다.");
+
+    const file = formData.get("photo");
+    if (!(file instanceof File) || file.size === 0) {
+      throw new Error("업로드할 사진을 선택해주세요.");
+    }
+    if (file.size > 8 * 1024 * 1024) {
+      throw new Error("사진 용량은 8MB 이하여야 합니다.");
+    }
+
+    // 기존 row 의 잠금/사진 경로 확인
+    const { data: existing, error: exErr } = await supabase
+      .from("employee_profiles")
+      .select("photo_url, is_locked")
+      .eq("driver_id", driver.id)
+      .maybeSingle();
+    if (exErr) throw new Error(exErr.message);
+    if (existing && (existing as { is_locked?: unknown }).is_locked === true) {
+      throw new Error("잠긴 인사기록카드입니다. 수정할 수 없습니다.");
+    }
+    const oldPath =
+      ((existing as { photo_url?: unknown } | null)?.photo_url as
+        | string
+        | null) ?? null;
+
+    // 1) 새 파일 업로드
+    const newPath = await uploadProfilePhoto(driver.id, file);
+
+    // 2) DB 갱신 (photo_url 컬럼만 — 다른 입력값과 간섭 없음)
+    const { error: upErr } = await supabase
+      .from("employee_profiles")
+      .upsert(
+        {
+          driver_id: driver.id,
+          photo_url: newPath,
+          updated_at: new Date().toISOString(),
+        },
+        { onConflict: "driver_id" }
+      );
+    if (upErr) throw new Error(upErr.message);
+
+    // 3) 옛 파일 삭제 (확장자가 달라 경로가 바뀐 경우만)
+    if (oldPath && oldPath !== newPath) {
+      await removeHrDocuments([oldPath]);
+    }
+
+    revalidatePath("/profile/hr");
+    return { ok: true, photoUrl: await signHrDocument(newPath) };
+  } catch (e) {
+    return {
+      ok: false,
+      message:
+        e instanceof Error
+          ? e.message
+          : "사진 업로드 중 오류가 발생했습니다.",
+    };
+  }
+}
+
+// 본인 증명사진 삭제 — DB 비우고 → Storage 삭제.
+export async function deleteMyProfilePhoto(): Promise<
+  { ok: true } | { ok: false; message: string }
+> {
+  try {
+    const driver = await getMyDriver();
+    if (!driver) throw new Error("직원 로그인이 필요합니다.");
+
+    const { data: existing, error: exErr } = await supabase
+      .from("employee_profiles")
+      .select("photo_url, is_locked")
+      .eq("driver_id", driver.id)
+      .maybeSingle();
+    if (exErr) throw new Error(exErr.message);
+    if (!existing) return { ok: true };
+    if ((existing as { is_locked?: unknown }).is_locked === true) {
+      throw new Error("잠긴 인사기록카드입니다. 수정할 수 없습니다.");
+    }
+    const oldPath =
+      ((existing as { photo_url?: unknown }).photo_url as string | null) ??
+      null;
+
+    const { error: upErr } = await supabase
+      .from("employee_profiles")
+      .update({ photo_url: null, updated_at: new Date().toISOString() })
+      .eq("driver_id", driver.id);
+    if (upErr) throw new Error(upErr.message);
+
+    if (oldPath) await removeHrDocuments([oldPath]);
+
+    revalidatePath("/profile/hr");
+    return { ok: true };
+  } catch (e) {
+    return {
+      ok: false,
+      message:
+        e instanceof Error ? e.message : "사진 삭제 중 오류가 발생했습니다.",
+    };
+  }
 }

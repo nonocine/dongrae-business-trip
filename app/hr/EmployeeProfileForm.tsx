@@ -1,7 +1,11 @@
 "use client";
 
-import { useMemo, useState, useTransition } from "react";
-import { saveEmployeeProfile, deleteEmployeeProfile } from "@/app/hr/actions";
+import { useEffect, useMemo, useState, useTransition } from "react";
+import {
+  saveEmployeeProfile,
+  deleteEmployeeProfile,
+  getEmployeePhotoUrl,
+} from "@/app/hr/actions";
 import {
   parseResidentNumber,
   normalizeEducationList,
@@ -109,6 +113,9 @@ export default function EmployeeProfileForm({
     () => normalizeAppointmentList(profile?.appointments ?? [])
   );
 
+  // 증명사진 — 마운트 시 1시간 임시 URL 조회 (관장은 조회만)
+  const [photoUrl, setPhotoUrl] = useState<string | null>(null);
+
   const fieldCls = locked
     ? `${baseInputCls} cursor-not-allowed bg-surface text-ink-muted`
     : `${baseInputCls} bg-card`;
@@ -116,6 +123,16 @@ export default function EmployeeProfileForm({
     locked || employed
       ? `${baseInputCls} cursor-not-allowed bg-surface text-ink-muted`
       : `${baseInputCls} bg-card`;
+
+  useEffect(() => {
+    let alive = true;
+    getEmployeePhotoUrl(driver.id).then((url) => {
+      if (alive) setPhotoUrl(url);
+    });
+    return () => {
+      alive = false;
+    };
+  }, [driver.id]);
 
   return (
     <div className="space-y-4">
@@ -206,6 +223,24 @@ export default function EmployeeProfileForm({
 
           {/* 기본정보 탭 */}
           <div className={tab === "basic" ? "" : "hidden"}>
+            {/* 증명사진 (관장 조회 — 읽기 전용) */}
+            <div className="mb-4">
+              <div className="h-32 w-24 overflow-hidden rounded-md border border-line bg-card">
+                {photoUrl ? (
+                  // eslint-disable-next-line @next/next/no-img-element
+                  <img
+                    src={photoUrl}
+                    alt="증명사진"
+                    className="h-full w-full object-cover"
+                  />
+                ) : (
+                  <div className="flex h-full w-full items-center justify-center text-3xl text-ink-hint">
+                    👤
+                  </div>
+                )}
+              </div>
+            </div>
+
             <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
               <div>
                 <label className={labelCls}>한자명</label>

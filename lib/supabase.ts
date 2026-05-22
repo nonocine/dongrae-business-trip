@@ -1102,3 +1102,54 @@ export function getOrgInfoAt(
         : settings.organization_head_title) ?? "",
   };
 }
+
+// =====================================================================
+// HR 문서 Storage (hr-documents 버킷 — Private)
+//   * Private 버킷이므로 photo_url 등에는 path 만 저장하고,
+//     열람 시 signHrDocument() 로 1시간 임시 URL 을 발급합니다.
+//   * getPublicUrl 은 Private 버킷에서 동작하지 않으므로 사용 금지.
+// =====================================================================
+export const HR_DOCUMENTS_BUCKET = "hr-documents";
+
+// 이미지 MIME → 확장자
+const PROFILE_PHOTO_EXT: Record<string, string> = {
+  "image/jpeg": "jpg",
+  "image/png": "png",
+  "image/webp": "webp",
+};
+
+// 본인 증명사진 업로드 — 경로 employees/{driverId}/profile-photo.{ext}.
+// 성공 시 저장된 path 를 반환합니다(공개 URL 아님).
+export async function uploadProfilePhoto(
+  driverId: string,
+  file: File
+): Promise<string> {
+  const ext = PROFILE_PHOTO_EXT[file.type];
+  if (!ext) {
+    throw new Error("JPG, PNG, WEBP 이미지만 업로드할 수 있습니다.");
+  }
+  const path = `employees/${driverId}/profile-photo.${ext}`;
+  const { error } = await supabase.storage
+    .from(HR_DOCUMENTS_BUCKET)
+    .upload(path, file, { contentType: file.type, upsert: true });
+  if (error) throw new Error(`사진 업로드 실패: ${error.message}`);
+  return path;
+}
+
+// hr-documents 버킷의 객체 삭제
+export async function removeHrDocuments(paths: string[]): Promise<void> {
+  if (paths.length === 0) return;
+  await supabase.storage.from(HR_DOCUMENTS_BUCKET).remove(paths);
+}
+
+// Private 버킷용 1시간 임시 열람 URL. path 가 없으면 null.
+export async function signHrDocument(
+  path: string | null | undefined
+): Promise<string | null> {
+  if (!path) return null;
+  const { data, error } = await supabase.storage
+    .from(HR_DOCUMENTS_BUCKET)
+    .createSignedUrl(path, 3600);
+  if (error || !data) return null;
+  return data.signedUrl;
+}

@@ -15,6 +15,7 @@ import {
   parseAwardInput,
   parseTrainingInput,
   parseAppointmentInput,
+  signHrDocument,
   type HrAdminRank,
   type Driver,
   type EmployeeRank,
@@ -235,6 +236,23 @@ export async function deleteEmployeeProfile(driverId: string) {
   if (delErr) throw new Error(delErr.message);
 
   revalidatePath("/hr");
+}
+
+// 직원 증명사진 조회 — 1시간 임시 URL. 관장·부장만 호출 가능.
+export async function getEmployeePhotoUrl(
+  driverId: string
+): Promise<string | null> {
+  await requireHrAdmin();
+  if (!driverId) return null;
+  const { data, error } = await supabase
+    .from("employee_profiles")
+    .select("photo_url")
+    .eq("driver_id", driverId)
+    .maybeSingle();
+  if (error || !data) return null;
+  return signHrDocument(
+    ((data as { photo_url?: unknown }).photo_url as string | null) ?? null
+  );
 }
 
 // =====================================================================
