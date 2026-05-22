@@ -447,9 +447,44 @@ export type EmployeeEducation = {
   graduate_date: string;
   note: string;
 };
-export type EmployeeFamily = Record<string, unknown>;
-export type EmployeeLicense = Record<string, unknown>;
-export type EmployeeCareer = Record<string, unknown>;
+export const FAMILY_RELATIONS = [
+  "본인",
+  "배우자",
+  "자녀",
+  "부",
+  "모",
+  "형제",
+  "자매",
+  "조부",
+  "조모",
+  "기타",
+] as const;
+export type FamilyRelation = (typeof FAMILY_RELATIONS)[number];
+
+export type EmployeeFamily = {
+  relation: FamilyRelation;
+  name: string;
+  birth_date: string;
+  occupation: string;
+  cohabit: boolean;
+  note: string;
+};
+export type EmployeeLicense = {
+  name: string;
+  issuer: string;
+  acquired_date: string;
+  registration_number: string;
+  note: string;
+};
+export type EmployeeCareer = {
+  company: string;
+  department: string;
+  start_date: string;
+  end_date: string;
+  current: boolean;
+  duties: string;
+  note: string;
+};
 export type EmployeeAward = Record<string, unknown>;
 export type EmployeeTraining = Record<string, unknown>;
 export type EmployeeAppointment = Record<string, unknown>;
@@ -638,6 +673,108 @@ export function parseEducationInput(raw: string | null): EmployeeEducation[] {
     throw new Error("학력 데이터 형식이 올바르지 않습니다.");
   }
   return normalizeEducationList(parsed);
+}
+
+// --- 가족 ---
+function normalizeFamilyItem(item: unknown): EmployeeFamily {
+  const o = (item ?? {}) as Record<string, unknown>;
+  const relRaw = String(o.relation ?? "");
+  const relation: FamilyRelation = (
+    FAMILY_RELATIONS as readonly string[]
+  ).includes(relRaw)
+    ? (relRaw as FamilyRelation)
+    : "기타";
+  return {
+    relation,
+    name: String(o.name ?? "").trim(),
+    birth_date: String(o.birth_date ?? "").trim(),
+    occupation: String(o.occupation ?? "").trim(),
+    cohabit: o.cohabit === true,
+    note: String(o.note ?? "").trim(),
+  };
+}
+
+export function normalizeFamilyList(items: unknown): EmployeeFamily[] {
+  if (!Array.isArray(items)) return [];
+  return items.map(normalizeFamilyItem);
+}
+
+export function parseFamilyInput(raw: string | null): EmployeeFamily[] {
+  if (!raw || raw.trim() === "") return [];
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    throw new Error("가족 데이터 형식이 올바르지 않습니다.");
+  }
+  if (!Array.isArray(parsed)) {
+    throw new Error("가족 데이터 형식이 올바르지 않습니다.");
+  }
+  return normalizeFamilyList(parsed);
+}
+
+// --- 자격증 ---
+function normalizeLicenseItem(item: unknown): EmployeeLicense {
+  const o = (item ?? {}) as Record<string, unknown>;
+  return {
+    name: String(o.name ?? "").trim(),
+    issuer: String(o.issuer ?? "").trim(),
+    acquired_date: String(o.acquired_date ?? "").trim(),
+    registration_number: String(o.registration_number ?? "").trim(),
+    note: String(o.note ?? "").trim(),
+  };
+}
+
+export function normalizeLicenseList(items: unknown): EmployeeLicense[] {
+  if (!Array.isArray(items)) return [];
+  return items.map(normalizeLicenseItem);
+}
+
+export function parseLicenseInput(raw: string | null): EmployeeLicense[] {
+  if (!raw || raw.trim() === "") return [];
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    throw new Error("자격증 데이터 형식이 올바르지 않습니다.");
+  }
+  if (!Array.isArray(parsed)) {
+    throw new Error("자격증 데이터 형식이 올바르지 않습니다.");
+  }
+  return normalizeLicenseList(parsed);
+}
+
+// --- 경력 ---
+function normalizeCareerItem(item: unknown): EmployeeCareer {
+  const o = (item ?? {}) as Record<string, unknown>;
+  return {
+    company: String(o.company ?? "").trim(),
+    department: String(o.department ?? "").trim(),
+    start_date: String(o.start_date ?? "").trim(),
+    end_date: String(o.end_date ?? "").trim(),
+    current: o.current === true,
+    duties: String(o.duties ?? "").trim(),
+    note: String(o.note ?? "").trim(),
+  };
+}
+
+export function normalizeCareerList(items: unknown): EmployeeCareer[] {
+  if (!Array.isArray(items)) return [];
+  return items.map(normalizeCareerItem);
+}
+
+export function parseCareerInput(raw: string | null): EmployeeCareer[] {
+  if (!raw || raw.trim() === "") return [];
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    throw new Error("경력 데이터 형식이 올바르지 않습니다.");
+  }
+  if (!Array.isArray(parsed)) {
+    throw new Error("경력 데이터 형식이 올바르지 않습니다.");
+  }
+  return normalizeCareerList(parsed);
 }
 
 export function normalizeEmploymentContract(

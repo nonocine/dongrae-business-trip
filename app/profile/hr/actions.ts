@@ -7,6 +7,9 @@ import {
   normalizeEmployeeProfile,
   parseResidentNumber,
   parseEducationInput,
+  parseFamilyInput,
+  parseLicenseInput,
+  parseCareerInput,
   type Driver,
   type EmployeeRank,
   type EmployeeProfile,
@@ -103,6 +106,9 @@ export async function saveMyProfile(formData: FormData) {
   const leave_date = employed ? null : str("leave_date");
 
   const education = parseEducationInput(str("education"));
+  const family = parseFamilyInput(str("family"));
+  const licenses = parseLicenseInput(str("licenses"));
+  const career = parseCareerInput(str("career"));
 
   const row = {
     driver_id,
@@ -117,6 +123,9 @@ export async function saveMyProfile(formData: FormData) {
     leave_date,
     military_service: str("military_service"),
     education,
+    family,
+    licenses,
+    career,
     updated_at: new Date().toISOString(),
   };
 

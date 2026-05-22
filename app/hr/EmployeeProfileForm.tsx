@@ -5,13 +5,22 @@ import { saveEmployeeProfile, deleteEmployeeProfile } from "@/app/hr/actions";
 import {
   parseResidentNumber,
   normalizeEducationList,
+  normalizeFamilyList,
+  normalizeLicenseList,
+  normalizeCareerList,
   type Driver,
   type EmployeeProfile,
   type EmployeeEducation,
+  type EmployeeFamily,
+  type EmployeeLicense,
+  type EmployeeCareer,
 } from "@/lib/supabase";
 import {
   ProfileTabs,
   EducationTab,
+  FamilyTab,
+  LicenseTab,
+  CareerTab,
   PlaceholderTab,
   type ProfileTabKey,
 } from "@/app/hr/ProfileFormParts";
@@ -72,6 +81,15 @@ export default function EmployeeProfileForm({
   const [employed, setEmployed] = useState(!profile?.leave_date);
   const [education, setEducation] = useState<EmployeeEducation[]>(() =>
     normalizeEducationList(profile?.education ?? [])
+  );
+  const [family, setFamily] = useState<EmployeeFamily[]>(() =>
+    normalizeFamilyList(profile?.family ?? [])
+  );
+  const [licenses, setLicenses] = useState<EmployeeLicense[]>(() =>
+    normalizeLicenseList(profile?.licenses ?? [])
+  );
+  const [careers, setCareers] = useState<EmployeeCareer[]>(() =>
+    normalizeCareerList(profile?.career ?? [])
   );
 
   const fieldCls = locked
@@ -150,6 +168,13 @@ export default function EmployeeProfileForm({
             name="education"
             value={JSON.stringify(education)}
           />
+          <input type="hidden" name="family" value={JSON.stringify(family)} />
+          <input
+            type="hidden"
+            name="licenses"
+            value={JSON.stringify(licenses)}
+          />
+          <input type="hidden" name="career" value={JSON.stringify(careers)} />
 
           {/* 기본정보 탭 */}
           <div className={tab === "basic" ? "" : "hidden"}>
@@ -287,16 +312,30 @@ export default function EmployeeProfileForm({
             />
           </div>
 
-          {/* 미구현 탭 */}
+          {/* 가족 탭 */}
           <div className={tab === "family" ? "" : "hidden"}>
-            <PlaceholderTab title="가족 사항" />
+            <FamilyTab family={family} onChange={setFamily} readOnly={locked} />
           </div>
+
+          {/* 자격증 탭 */}
           <div className={tab === "license" ? "" : "hidden"}>
-            <PlaceholderTab title="자격증" />
+            <LicenseTab
+              licenses={licenses}
+              onChange={setLicenses}
+              readOnly={locked}
+            />
           </div>
+
+          {/* 경력 탭 */}
           <div className={tab === "career" ? "" : "hidden"}>
-            <PlaceholderTab title="경력" />
+            <CareerTab
+              careers={careers}
+              onChange={setCareers}
+              readOnly={locked}
+            />
           </div>
+
+          {/* 미구현 탭 */}
           <div className={tab === "award" ? "" : "hidden"}>
             <PlaceholderTab title="수상" />
           </div>
