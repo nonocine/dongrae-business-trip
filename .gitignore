@@ -37,6 +37,9 @@ yarn-error.log*
 # claude code local settings
 .claude/settings.local.json
 
+# 내부 핸드오프 노트 (public 저장소라 비공개 유지)
+CONTEXT.md
+
 # vercel
 .vercel
 
