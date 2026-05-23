@@ -2,7 +2,12 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { getApplyPosting } from "./actions";
 import ApplyForm from "./ApplyForm";
-import { cardCls, noticeWarning } from "@/lib/ui";
+import {
+  cardCls,
+  noticeWarning,
+  splitRecruitmentFields,
+  fieldBadgeCls,
+} from "@/lib/ui";
 
 // 임시저장 후 페이지 재방문 시 최신 상태가 반영되도록 동적 렌더.
 export const dynamic = "force-dynamic";
@@ -61,9 +66,11 @@ export default async function RecruitmentApplyPage({
           </div>
         </div>
         <div className="mt-3 flex flex-wrap items-center gap-1.5 text-xs text-ink-muted sm:text-sm">
-          <span className="inline-flex items-center rounded-full bg-brand-blue-soft px-2 py-0.5 text-[11px] font-semibold text-brand-blue sm:text-xs">
-            {posting.field}
-          </span>
+          {splitRecruitmentFields(posting.field).map((f, i) => (
+            <span key={`${f}-${i}`} className={fieldBadgeCls(i)}>
+              {f}
+            </span>
+          ))}
           <span>마감 {fmtKST(posting.application_end)}</span>
         </div>
       </header>

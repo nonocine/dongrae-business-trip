@@ -1004,9 +1004,12 @@ export function canAccessHr(rank: EmployeeRank | null): boolean {
 // 비밀번호 정책
 // =====================================================================
 
+// 특수문자 — 일반적으로 인정되는 ASCII 특수문자 셋.
+const SPECIAL_CHAR_RE = /[!@#$%^&*()_+\-=[\]{};':"\\|,.<>/?~`]/;
+
 // 비밀번호 강도 검증.
 //   * 일반 직원(팀장/팀원 등): 4자리 숫자 (기존 정책 유지)
-//   * 인사 권한자(관장/부장): 6자리 이상 + 영문 1자 이상 포함
+//   * 인사 권한자(관장/부장): 8자 이상 + 영문·숫자·특수문자 모두 포함
 export function validatePasswordStrength(
   password: string,
   rank: EmployeeRank | null
@@ -1016,16 +1019,28 @@ export function validatePasswordStrength(
     !!rank && (HR_ADMIN_RANKS as readonly string[]).includes(rank);
 
   if (isHrAdmin) {
-    if (pw.length < 6) {
+    if (pw.length < 8) {
       return {
         ok: false,
-        error: "관장·부장은 6자리 이상 비밀번호를 사용해야 합니다.",
+        error: "관장·부장 비밀번호는 8자 이상이어야 합니다.",
       };
     }
     if (!/[A-Za-z]/.test(pw)) {
       return {
         ok: false,
-        error: "관장·부장 비밀번호는 영문을 1자 이상 포함해야 합니다.",
+        error: "비밀번호는 영문을 1자 이상 포함해야 합니다.",
+      };
+    }
+    if (!/\d/.test(pw)) {
+      return {
+        ok: false,
+        error: "비밀번호는 숫자를 1자 이상 포함해야 합니다.",
+      };
+    }
+    if (!SPECIAL_CHAR_RE.test(pw)) {
+      return {
+        ok: false,
+        error: "비밀번호는 특수문자(!@#$%^&* 등)를 1자 이상 포함해야 합니다.",
       };
     }
     return { ok: true };
@@ -1038,10 +1053,11 @@ export function validatePasswordStrength(
 }
 
 // 관리자가 직원 비번을 재설정할 때 발급하는 임시 비밀번호.
-// "Temp" + 4자리 숫자 → 영문 포함 8자라 인사 권한자 정책도 자동 통과합니다.
+// "Temp" + 4자리 숫자 + "!" → 9자/영문/숫자/특수문자 모두 포함하여
+// 관장·부장 강화 정책(8자 이상 · 영문 · 숫자 · 특수)도 자동 통과합니다.
 export function generateTempPassword(): string {
   const n = Math.floor(1000 + Math.random() * 9000);
-  return `Temp${n}`;
+  return `Temp${n}!`;
 }
 
 // =====================================================================

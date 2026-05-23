@@ -28,19 +28,22 @@ function scorePassword(
       : { score: 0, max: 1, label: "4자리 숫자가 필요합니다", cls: "bg-red-500" };
   }
 
+  // 강화 정책 — 8자 이상 + 영문 + 숫자 + 특수문자(필수 4종) + 길이 보너스
   let s = 0;
-  if (pw.length >= 6) s += 1;
+  if (pw.length >= 8) s += 1;
   if (/[A-Za-z]/.test(pw)) s += 1;
   if (/\d/.test(pw)) s += 1;
-  if (pw.length >= 10) s += 1;
+  if (/[!@#$%^&*()_+\-=[\]{};':"\\|,.<>/?~`]/.test(pw)) s += 1;
+  if (pw.length >= 12) s += 1; // 길이 보너스
   const table = [
     { label: "매우 약함", cls: "bg-red-500" },
     { label: "약함", cls: "bg-orange-500" },
     { label: "보통", cls: "bg-amber-500" },
     { label: "강함", cls: "bg-lime-500" },
     { label: "매우 강함", cls: "bg-emerald-500" },
+    { label: "매우 강함", cls: "bg-emerald-500" },
   ];
-  return { score: s, max: 4, label: table[s].label, cls: table[s].cls };
+  return { score: s, max: 5, label: table[s].label, cls: table[s].cls };
 }
 
 export default function ChangePasswordForm({
@@ -69,7 +72,7 @@ export default function ChangePasswordForm({
   );
 
   const policyText = isHrAdmin
-    ? "관장·부장은 6자리 이상, 영문을 1자 이상 포함해야 합니다."
+    ? "관장·부장은 8자 이상이며, 영문·숫자·특수문자를 모두 포함해야 합니다."
     : "4자리 숫자 비밀번호를 사용합니다.";
 
   const confirmMismatch = confirm.length > 0 && confirm !== next;

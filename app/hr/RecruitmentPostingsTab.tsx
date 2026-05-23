@@ -13,6 +13,8 @@ import {
   badgeWarning,
   noticeError,
   noticeSuccess,
+  splitRecruitmentFields,
+  fieldBadgeCls,
 } from "@/lib/ui";
 import {
   saveRecruitmentPosting,
@@ -198,9 +200,16 @@ function PostingRow({
             </span>
           </div>
           <p className="mt-1 text-sm font-semibold text-ink">{posting.title}</p>
-          <p className="mt-0.5 text-xs text-ink-muted">
-            {posting.field} · 모집 {posting.recruit_count}명
-          </p>
+          <div className="mt-1 flex flex-wrap items-center gap-1">
+            {splitRecruitmentFields(posting.field).map((f, i) => (
+              <span key={`${f}-${i}`} className={fieldBadgeCls(i)}>
+                {f}
+              </span>
+            ))}
+            <span className="text-xs text-ink-muted">
+              · 모집 {posting.recruit_count}명
+            </span>
+          </div>
           <p className="mt-1 text-[11px] text-ink-hint">
             {fmtKst(posting.application_start)} ~ {fmtKst(posting.application_end)}
           </p>
@@ -213,6 +222,12 @@ function PostingRow({
             className="rounded-md border border-line bg-card px-2.5 py-1 text-xs font-medium text-ink-body hover:bg-surface"
           >
             공고 보기 ↗
+          </Link>
+          <Link
+            href={`/hr/recruitment/${posting.slug}`}
+            className="rounded-md border border-brand-green bg-card px-2.5 py-1 text-xs font-semibold text-brand-green hover:bg-brand-green/10"
+          >
+            지원자 관리
           </Link>
           <button
             type="button"

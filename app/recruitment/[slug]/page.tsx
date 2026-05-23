@@ -3,10 +3,11 @@ import { notFound } from "next/navigation";
 import { getRecruitmentPosting } from "./actions";
 import {
   cardCls,
-  badgeNavy,
   badgeNeutral,
   badgeSuccess,
   noticeWarning,
+  splitRecruitmentFields,
+  fieldBadgeCls,
 } from "@/lib/ui";
 
 // DB 조회 기반이므로 매 요청마다 최신 공고를 렌더링합니다.
@@ -71,7 +72,11 @@ export default async function RecruitmentPostingPage({
           </div>
         </div>
         <div className="mt-3 flex flex-wrap items-center gap-1.5">
-          <span className={badgeNavy}>{posting.field}</span>
+          {splitRecruitmentFields(posting.field).map((f, i) => (
+            <span key={`${f}-${i}`} className={fieldBadgeCls(i)}>
+              {f}
+            </span>
+          ))}
           <span className={badgeNeutral}>
             모집 {posting.recruit_count}명
           </span>
