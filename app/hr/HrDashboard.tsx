@@ -2,17 +2,21 @@
 
 import { useMemo, useState } from "react";
 import EmployeeProfileForm from "@/app/hr/EmployeeProfileForm";
+import RecruitmentPostingsTab from "@/app/hr/RecruitmentPostingsTab";
 import type { Driver, EmployeeProfile } from "@/lib/supabase";
+import type { RecruitmentPostingAdmin } from "@/app/hr/actions";
 import { cardCls, inputCls, tabBarCls, tabNavCls, tabItemCls } from "@/lib/ui";
 
-type TabKey = "records" | "contracts" | "certificates";
+type TabKey = "records" | "contracts" | "certificates" | "recruitment";
 
 export default function HrDashboard({
   drivers,
   profiles,
+  recruitmentPostings,
 }: {
   drivers: Driver[];
   profiles: EmployeeProfile[];
+  recruitmentPostings: RecruitmentPostingAdmin[];
 }) {
   const [tab, setTab] = useState<TabKey>("records");
 
@@ -37,6 +41,9 @@ export default function HrDashboard({
           desc="재직·경력증명서를 발급하고 발급 내역을 관리할 수 있습니다."
         />
       )}
+      {tab === "recruitment" && (
+        <RecruitmentPostingsTab postings={recruitmentPostings} />
+      )}
     </div>
   );
 }
@@ -55,6 +62,7 @@ function Tabs({
     { key: "records", label: "인사기록카드" },
     { key: "contracts", label: "계약서" },
     { key: "certificates", label: "증명서 발급" },
+    { key: "recruitment", label: "채용공고" },
   ];
   return (
     <div className={tabBarCls}>

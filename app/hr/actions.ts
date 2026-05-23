@@ -267,3 +267,223 @@ export async function listCertificates(): Promise<CertificateIssued[]> {
   await requireHrAdmin();
   return [];
 }
+
+// =====================================================================
+// 채용공고 관리 (recruitment_postings)
+//   * HR 권한자(관장·부장)만 사용 가능.
+//   * 상태 (draft / published / closed) 는 HR 가 직접 토글합니다.
+//   * required_documents jsonb 는 DB 기본값 사용 — 폼에서는 편집하지 않습니다.
+// =====================================================================
+export type RecruitmentPostingAdmin = {
+  id: string;
+  slug: string;
+  title: string;
+  field: string;
+  recruit_count: number;
+  application_start: string;
+  application_end: string;
+  qualifications: string | null;
+  preferred: string | null;
+  salary_info: string | null;
+  process_info: string | null;
+  notice: string | null;
+  status: "draft" | "published" | "closed";
+  created_at: string;
+  updated_at: string;
+  created_by: string | null;
+};
+
+function normalizeRecruitmentPostingAdmin(
+  raw: Record<string, unknown>
+): RecruitmentPostingAdmin {
+  const status = String(raw.status ?? "draft");
+  const safeStatus: RecruitmentPostingAdmin["status"] =
+    status === "published" || status === "closed" ? status : "draft";
+  return {
+    id: String(raw.id ?? ""),
+    slug: String(raw.slug ?? ""),
+    title: String(raw.title ?? ""),
+    field: String(raw.field ?? ""),
+    recruit_count: Number(raw.recruit_count ?? 0),
+    application_start: String(raw.application_start ?? ""),
+    application_end: String(raw.application_end ?? ""),
+    qualifications: (raw.qualifications as string | null) ?? null,
+    preferred: (raw.preferred as string | null) ?? null,
+    salary_info: (raw.salary_info as string | null) ?? null,
+    process_info: (raw.process_info as string | null) ?? null,
+    notice: (raw.notice as string | null) ?? null,
+    status: safeStatus,
+    created_at: String(raw.created_at ?? ""),
+    updated_at: String(raw.updated_at ?? ""),
+    created_by: (raw.created_by as string | null) ?? null,
+  };
+}
+
+export async function listRecruitmentPostings(): Promise<
+  RecruitmentPostingAdmin[]
+> {
+  await requireHrAdmin();
+  const { data, error } = await supabase
+    .from("recruitment_postings")
+    .select(
+      "id,slug,title,field,recruit_count,application_start,application_end,qualifications,preferred,salary_info,process_info,notice,status,created_at,updated_at,created_by"
+    )
+    .order("created_at", { ascending: false });
+  if (error) throw new Error(error.message);
+  return (data ?? []).map((row) =>
+    normalizeRecruitmentPostingAdmin(row as Record<string, unknown>)
+  );
+}
+
+// 폼 → DB 행. id 가 있으면 update, 없으면 insert.
+//   * 입력 datetime-local 값은 KST 로 해석하여 +09:00 오프셋 ISO 로 저장.
+//   * slug 는 unique. 충돌 시 명시 에러 반환.
+export async function saveRecruitmentPosting(
+  formData: FormData
+): Promise<
+  | { ok: true; id: string; slug: string }
+  | { ok: false; message: string }
+> {
+  try {
+    const me = await requireHrAdmin();
+
+    const id = String(formData.get("id") ?? "").trim();
+    const slug = String(formData.get("slug") ?? "").trim();
+    const title = String(formData.get("title") ?? "").trim();
+    const field = String(formData.get("field") ?? "").trim();
+    const recruitCountRaw = String(formData.get("recruit_count") ?? "").trim();
+    const startLocal = String(formData.get("application_start") ?? "").trim();
+    const endLocal = String(formData.get("application_end") ?? "").trim();
+    const status = String(formData.get("status") ?? "draft").trim();
+
+    if (!slug) return { ok: false, message: "공고 URL(slug)을 입력해주세요." };
+    if (!/^[A-Za-z0-9-]+$/.test(slug)) {
+      return {
+        ok: false,
+        message: "공고 URL은 영문/숫자/하이픈(-)만 사용할 수 있습니다.",
+      };
+    }
+    if (!title) return { ok: false, message: "제목을 입력해주세요." };
+    if (!field) return { ok: false, message: "채용분야를 입력해주세요." };
+
+    const recruitCount = Number(recruitCountRaw);
+    if (!Number.isFinite(recruitCount) || recruitCount < 1) {
+      return { ok: false, message: "모집인원은 1 이상의 숫자여야 합니다." };
+    }
+    if (!startLocal || !endLocal) {
+      return { ok: false, message: "접수 시작/마감 일시를 입력해주세요." };
+    }
+    // KST(+09:00) 로 해석.
+    const startIso = `${startLocal}:00+09:00`;
+    const endIso = `${endLocal}:00+09:00`;
+    if (new Date(endIso).getTime() <= new Date(startIso).getTime()) {
+      return { ok: false, message: "마감 일시는 시작 일시보다 뒤여야 합니다." };
+    }
+
+    const safeStatus =
+      status === "published" || status === "closed" ? status : "draft";
+
+    const trimToNull = (k: string): string | null => {
+      const v = formData.get(k);
+      if (v == null) return null;
+      const s = String(v).trim();
+      return s.length > 0 ? s : null;
+    };
+
+    const row = {
+      slug,
+      title,
+      field,
+      recruit_count: recruitCount,
+      application_start: startIso,
+      application_end: endIso,
+      qualifications: trimToNull("qualifications"),
+      preferred: trimToNull("preferred"),
+      salary_info: trimToNull("salary_info"),
+      process_info: trimToNull("process_info"),
+      notice: trimToNull("notice"),
+      status: safeStatus,
+      updated_at: new Date().toISOString(),
+    };
+
+    // slug unique 충돌 사전 체크 (서로 다른 id 가 같은 slug 를 가지려 할 때).
+    const { data: dupe, error: dupeErr } = await supabase
+      .from("recruitment_postings")
+      .select("id")
+      .eq("slug", slug)
+      .maybeSingle();
+    if (dupeErr) throw new Error(dupeErr.message);
+    if (dupe && String((dupe as { id: unknown }).id) !== id) {
+      return {
+        ok: false,
+        message: "이미 사용 중인 공고 URL입니다. 다른 값으로 변경해주세요.",
+      };
+    }
+
+    let savedId = id;
+    if (id) {
+      const { error } = await supabase
+        .from("recruitment_postings")
+        .update(row)
+        .eq("id", id);
+      if (error) throw new Error(error.message);
+    } else {
+      const { data: inserted, error } = await supabase
+        .from("recruitment_postings")
+        .insert({ ...row, created_by: me.name })
+        .select("id")
+        .single();
+      if (error) throw new Error(error.message);
+      savedId = String((inserted as { id: unknown }).id);
+    }
+
+    revalidatePath("/hr");
+    revalidatePath(`/recruitment/${slug}`);
+    return { ok: true, id: savedId, slug };
+  } catch (e) {
+    return {
+      ok: false,
+      message:
+        e instanceof Error ? e.message : "공고 저장 중 오류가 발생했습니다.",
+    };
+  }
+}
+
+export async function deleteRecruitmentPosting(
+  id: string
+): Promise<{ ok: true } | { ok: false; message: string }> {
+  try {
+    await requireHrAdmin();
+    if (!id) return { ok: false, message: "삭제할 공고 ID가 없습니다." };
+
+    // 지원자가 한 명이라도 있으면 onDelete restrict 로 막힙니다.
+    // 미리 검사해서 친절한 메시지를 반환합니다.
+    const { count, error: cErr } = await supabase
+      .from("recruitment_applications")
+      .select("id", { count: "exact", head: true })
+      .eq("posting_id", id);
+    if (cErr) throw new Error(cErr.message);
+    if ((count ?? 0) > 0) {
+      return {
+        ok: false,
+        message:
+          "지원서가 접수된 공고는 삭제할 수 없습니다. 비공개(draft) 로 전환하세요.",
+      };
+    }
+
+    const { error } = await supabase
+      .from("recruitment_postings")
+      .delete()
+      .eq("id", id);
+    if (error) throw new Error(error.message);
+
+    revalidatePath("/hr");
+    return { ok: true };
+  } catch (e) {
+    return {
+      ok: false,
+      message:
+        e instanceof Error ? e.message : "공고 삭제 중 오류가 발생했습니다.",
+    };
+  }
+}

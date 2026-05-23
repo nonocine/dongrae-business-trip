@@ -27,8 +27,6 @@ import {
   noticeError,
   noticeSuccess,
   noticeWarning,
-  tabBarCls,
-  tabNavCls,
 } from "@/lib/ui";
 import {
   saveApplicationDraft,
@@ -57,12 +55,13 @@ const labelCls = "block text-xs font-bold text-brand-blue sm:text-sm";
 const applyBtnPrimary =
   "inline-flex h-[40px] items-center justify-center gap-1.5 rounded-lg bg-brand-blue px-5 text-sm font-semibold text-white shadow-sm transition hover:bg-brand-blue-strong disabled:opacity-60";
 
+// 탭 — 알약형 배너. 기본은 회색, 활성은 로고 파랑 배경 + 흰색 텍스트 + 약간 크게.
 function applyTabItemCls(active: boolean): string {
-  return `relative -mb-px whitespace-nowrap border-b-2 px-3 py-2 text-sm font-semibold transition ${
-    active
-      ? "border-brand-blue text-brand-blue"
-      : "border-transparent text-ink-muted hover:text-ink"
-  }`;
+  const base =
+    "whitespace-nowrap rounded-lg px-3.5 py-2 text-sm font-semibold transition-all duration-200 ease-out";
+  return active
+    ? `${base} bg-brand-blue text-white shadow-md scale-[1.06]`
+    : `${base} bg-surface text-ink-muted hover:bg-brand-blue-soft hover:text-brand-blue`;
 }
 
 type ApplyTabKey =
@@ -551,12 +550,12 @@ export default function ApplyForm({
           </span>
         </div>
 
-        {/* 진행바 — 9개 탭 중 현재 위치 */}
+        {/* 진행바 — 9개 탭 중 현재 위치, 로고 그린(가장 밝은 톤)으로 표시 */}
         <ProgressBar current={TAB_ORDER.indexOf(tab)} total={TAB_ORDER.length} />
 
-        {/* 탭 네비 — 활성 색상은 로고 파랑 */}
-        <div className={`mt-3 ${tabBarCls}`}>
-          <nav className={tabNavCls}>
+        {/* 탭 네비 — 알약형 배너. 활성 탭은 로고 파랑 + 약간 확대 */}
+        <div className="mt-4 overflow-x-auto pb-1">
+          <nav className="flex min-w-max items-center gap-2 py-1">
             {APPLY_TABS.map((t) => (
               <button
                 key={t.key}
@@ -1019,26 +1018,26 @@ function DocumentRow({
 }
 
 // =====================================================================
-// 진행바 — 로고 4색(파랑/빨강/노랑/초록)이 진행률에 따라 채워집니다.
-//   * 9개 탭을 4구간으로 나누어 시각적 강조: 0..2, 3..4, 5..6, 7..8.
-//   * 모든 단계가 채워지면 4색이 모두 표시됩니다.
+// 진행바 — 로고 색상 중 가장 선명한 그린으로 채웁니다.
 // =====================================================================
 function ProgressBar({ current, total }: { current: number; total: number }) {
   const safeTotal = total > 0 ? total : 1;
   const pct = Math.max(0, Math.min(100, ((current + 1) / safeTotal) * 100));
   return (
     <div className="mt-3">
-      <div className="relative h-2 w-full overflow-hidden rounded-full bg-line">
+      <div className="relative h-2.5 w-full overflow-hidden rounded-full bg-line">
         <div
-          className="h-full bg-gradient-to-r from-brand-blue via-brand-green to-brand-yellow transition-[width] duration-300 ease-out"
+          className="h-full rounded-full bg-brand-green shadow-[0_0_8px_rgba(95,173,67,0.5)] transition-[width] duration-300 ease-out"
           style={{ width: `${pct}%` }}
         />
       </div>
-      <div className="mt-1 flex items-center justify-between text-[11px] text-ink-muted">
+      <div className="mt-1.5 flex items-center justify-between text-[11px] text-ink-muted">
         <span>
           단계 {current + 1} / {safeTotal}
         </span>
-        <span>{Math.round(pct)}%</span>
+        <span className="font-semibold text-brand-green">
+          {Math.round(pct)}%
+        </span>
       </div>
     </div>
   );

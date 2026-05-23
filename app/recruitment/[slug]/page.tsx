@@ -51,16 +51,26 @@ export default async function RecruitmentPostingPage({
   ];
 
   return (
-    <main className="mx-auto w-full max-w-2xl flex-1 px-4 py-6 sm:py-8">
-      {/* 제목 */}
-      <header className="mb-5">
-        <p className="text-xs font-semibold tracking-wide text-navy">
-          채용 공고
-        </p>
-        <h1 className="mt-1 text-xl font-bold leading-snug text-ink sm:text-2xl">
-          {posting.title}
-        </h1>
-        <div className="mt-2.5 flex flex-wrap items-center gap-1.5">
+    <main className="mx-auto w-full max-w-3xl flex-1 px-4 py-6 sm:px-6 sm:py-8 lg:px-8">
+      {/* 제목 — 센터 로고 + "직원채용공고" + 공고 제목 */}
+      <header className="mb-6 border-b border-line pb-5 sm:mb-8 sm:pb-6">
+        <div className="flex items-center gap-4">
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img
+            src="/images/dongrae-logo.png"
+            alt="동래구청소년센터"
+            className="h-12 w-auto shrink-0 object-contain sm:h-14 lg:h-16"
+          />
+          <div className="min-w-0 border-l border-line pl-4">
+            <p className="text-sm font-bold tracking-[0.2em] text-brand-blue sm:text-base lg:text-lg">
+              직원채용공고
+            </p>
+            <h1 className="mt-1 truncate text-base font-semibold leading-tight text-ink sm:text-lg lg:text-xl">
+              {posting.title}
+            </h1>
+          </div>
+        </div>
+        <div className="mt-3 flex flex-wrap items-center gap-1.5">
           <span className={badgeNavy}>{posting.field}</span>
           <span className={badgeNeutral}>
             모집 {posting.recruit_count}명

@@ -36,7 +36,7 @@ export default async function RecruitmentApplyPage({
 
   return (
     <main className="mx-auto w-full max-w-4xl flex-1 px-4 py-6 sm:px-6 sm:py-8 lg:px-8 lg:py-10">
-      {/* 상단 헤더 — 센터 로고 + 공고 제목 */}
+      {/* 상단 헤더 — 센터 로고 + "직원채용공고" + 공고 제목 */}
       <header className="mb-6 border-b border-line pb-5 sm:mb-8 sm:pb-6">
         <Link
           href={`/recruitment/${slug}`}
@@ -49,13 +49,13 @@ export default async function RecruitmentApplyPage({
           <img
             src="/images/dongrae-logo.png"
             alt="동래구청소년센터"
-            className="h-10 w-auto shrink-0 object-contain sm:h-12 lg:h-14"
+            className="h-12 w-auto shrink-0 object-contain sm:h-14 lg:h-16"
           />
-          <div className="min-w-0">
-            <p className="text-xs font-semibold tracking-wide text-brand-blue sm:text-sm">
-              채용 지원서
+          <div className="min-w-0 border-l border-line pl-4">
+            <p className="text-sm font-bold tracking-[0.2em] text-brand-blue sm:text-base lg:text-lg">
+              직원채용공고
             </p>
-            <h1 className="mt-0.5 truncate text-lg font-bold leading-tight text-ink sm:text-xl lg:text-2xl">
+            <h1 className="mt-1 truncate text-base font-semibold leading-tight text-ink sm:text-lg lg:text-xl">
               {posting.title}
             </h1>
           </div>

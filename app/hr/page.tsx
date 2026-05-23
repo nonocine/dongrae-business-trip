@@ -5,6 +5,7 @@ import {
   requireHrAdmin,
   listDriversForHrProfile,
   listEmployeeProfiles,
+  listRecruitmentPostings,
 } from "@/app/hr/actions";
 import { enforcePasswordChange } from "@/app/actions";
 
@@ -16,9 +17,10 @@ export default async function HrPage() {
   // 관장·부장 직원 세션이 아니면 / 로 redirect
   await requireHrAdmin();
 
-  const [drivers, profiles] = await Promise.all([
+  const [drivers, profiles, recruitmentPostings] = await Promise.all([
     listDriversForHrProfile(),
     listEmployeeProfiles(),
+    listRecruitmentPostings(),
   ]);
 
   return (
@@ -38,7 +40,11 @@ export default async function HrPage() {
             ← 목록
           </Link>
         </div>
-        <HrDashboard drivers={drivers} profiles={profiles} />
+        <HrDashboard
+          drivers={drivers}
+          profiles={profiles}
+          recruitmentPostings={recruitmentPostings}
+        />
       </main>
     </>
   );
