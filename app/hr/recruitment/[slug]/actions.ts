@@ -34,16 +34,8 @@ export type AppStatus =
   | "final_passed"
   | "final_rejected";
 
-export const APPLICATION_STATUS_LABEL: Record<AppStatus, string> = {
-  draft: "임시저장",
-  submitted: "접수완료",
-  screening_passed: "서류합격",
-  screening_failed: "서류불합격",
-  interview_passed: "면접합격",
-  interview_failed: "면접불합격",
-  final_passed: "최종합격",
-  final_rejected: "최종불합격",
-};
+// 주의: "use server" 파일에서는 async 함수만 export 가능합니다.
+// 상태 라벨 매핑(APPLICATION_STATUS_LABEL)은 클라이언트 컴포넌트 측에서 정의합니다.
 
 export type AdminPosting = {
   id: string;

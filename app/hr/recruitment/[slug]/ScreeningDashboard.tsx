@@ -22,12 +22,24 @@ import {
   saveScreeningScore,
   updateApplicationStatus,
   bulkAnonymizeApplicants,
-  APPLICATION_STATUS_LABEL,
   type AdminApplicant,
   type AdminPosting,
   type AppStatus,
   type ScoreEntry,
 } from "./actions";
+
+// 상태 라벨 — actions.ts(use server) 에서 값(객체) export 가 금지되므로
+// 유일한 소비자인 이 파일에 정의합니다.
+const APPLICATION_STATUS_LABEL: Record<AppStatus, string> = {
+  draft: "임시저장",
+  submitted: "접수완료",
+  screening_passed: "서류합격",
+  screening_failed: "서류불합격",
+  interview_passed: "면접합격",
+  interview_failed: "면접불합격",
+  final_passed: "최종합격",
+  final_rejected: "최종불합격",
+};
 
 const SCREENING_MAX = 35;
 const INTERVIEW_MAX = 65;
