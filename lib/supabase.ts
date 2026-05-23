@@ -400,7 +400,8 @@ export function normalizeBusinessTrip(raw: Record<string, unknown>): BusinessTri
 // HR 인사 모듈
 // =====================================================================
 
-// 명칭 변경 분기일: 이 날짜 이전은 "수련관", 이후는 "센터"
+// 명칭 변경 분기일: 이 날짜 이전 시점의 문서는 organization_name_old(과거 명칭)를,
+// 이후 시점의 문서는 organization_name(현재 명칭)을 사용합니다.
 export const HR_NAME_CHANGE_DATE = "2025-12-15";
 
 export const CERTIFICATE_TYPES = ["재직", "경력", "기타"] as const;
