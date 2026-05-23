@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { notFound } from "next/navigation";
 import { getRecruitmentPosting } from "./actions";
 import {
@@ -106,20 +107,12 @@ export default async function RecruitmentPostingPage({
         {closed ? (
           <p className={noticeWarning}>접수가 마감되었습니다.</p>
         ) : (
-          <>
-            {/* /recruitment/[slug]/apply 페이지는 아직 미구현 — 비활성 버튼만 노출 */}
-            <button
-              type="button"
-              disabled
-              aria-disabled="true"
-              className="flex h-12 w-full cursor-not-allowed items-center justify-center rounded-lg bg-navy text-sm font-semibold text-white opacity-60"
-            >
-              지원하기 · 준비 중
-            </button>
-            <p className="mt-1.5 text-center text-xs text-ink-hint">
-              온라인 지원 기능은 곧 제공될 예정입니다.
-            </p>
-          </>
+          <Link
+            href={`/recruitment/${posting.slug}/apply`}
+            className="flex h-12 w-full items-center justify-center rounded-lg bg-navy text-sm font-semibold text-white shadow-sm transition hover:bg-navy-strong"
+          >
+            지원하기
+          </Link>
         )}
       </div>
     </main>
