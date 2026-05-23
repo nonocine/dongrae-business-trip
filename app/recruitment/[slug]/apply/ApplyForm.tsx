@@ -21,7 +21,6 @@ import {
   type EmployeeTraining,
 } from "@/lib/supabase";
 import {
-  btnPrimary,
   btnSecondary,
   badgeSuccess,
   badgeNeutral,
@@ -30,7 +29,6 @@ import {
   noticeWarning,
   tabBarCls,
   tabNavCls,
-  tabItemCls,
 } from "@/lib/ui";
 import {
   saveApplicationDraft,
@@ -47,12 +45,25 @@ import {
   type RequiredDoc,
 } from "./actions";
 
-// 양식 톤 — 인사기록카드와 동일한 네이비 굵은 테두리 + #FAFAFA 배경
+// 양식 톤 — 인사기록카드와 같은 굵은 테두리 + #FAFAFA 배경.
+// 채용 지원 폼은 센터 로고의 파란색 계열로 강조합니다.
 const formCardCls =
-  "rounded-xl border-2 border-hr-border bg-hr-bg p-4 shadow-sm sm:p-5";
+  "rounded-xl border-2 border-brand-blue bg-hr-bg p-4 shadow-sm sm:p-6 lg:p-8";
 const baseInputCls =
-  "mt-1 block w-full rounded-md border border-line bg-card px-3 py-2 text-sm text-ink-body shadow-sm placeholder:text-ink-hint focus:border-navy focus:outline-none focus:ring-1 focus:ring-navy";
-const labelCls = "block text-xs font-bold text-navy";
+  "mt-1 block w-full rounded-md border border-line bg-card px-3 py-2 text-sm text-ink-body shadow-sm placeholder:text-ink-hint focus:border-brand-blue focus:outline-none focus:ring-1 focus:ring-brand-blue";
+const labelCls = "block text-xs font-bold text-brand-blue sm:text-sm";
+
+// 채용 지원 폼 전용 버튼 / 탭 — 로고 파랑 사용.
+const applyBtnPrimary =
+  "inline-flex h-[40px] items-center justify-center gap-1.5 rounded-lg bg-brand-blue px-5 text-sm font-semibold text-white shadow-sm transition hover:bg-brand-blue-strong disabled:opacity-60";
+
+function applyTabItemCls(active: boolean): string {
+  return `relative -mb-px whitespace-nowrap border-b-2 px-3 py-2 text-sm font-semibold transition ${
+    active
+      ? "border-brand-blue text-brand-blue"
+      : "border-transparent text-ink-muted hover:text-ink"
+  }`;
+}
 
 type ApplyTabKey =
   | "basic"
@@ -181,7 +192,7 @@ export default function ApplyForm({
   const [loadBusy, loadTransition] = useTransition();
   const [loadMsg, setLoadMsg] = useState<string | null>(null);
 
-  // 사진 임시 URL 발급 — applicant 로드 시 1회.
+  // 사진 임시 URL 발급 — applicant 로드 시 1회. 실패해도 페이지는 살아남게 catch.
   useEffect(() => {
     let alive = true;
     const path = initialApplicant?.photo_url ?? null;
@@ -189,9 +200,13 @@ export default function ApplyForm({
       setPhotoUrl(null);
       return;
     }
-    signApplicantStoragePath(path).then((url) => {
-      if (alive) setPhotoUrl(url);
-    });
+    signApplicantStoragePath(path)
+      .then((url) => {
+        if (alive) setPhotoUrl(url);
+      })
+      .catch(() => {
+        if (alive) setPhotoUrl(null);
+      });
     return () => {
       alive = false;
     };
@@ -227,13 +242,21 @@ export default function ApplyForm({
     setError(null);
     setOk(null);
     startTransition(async () => {
-      const res = await saveApplicationDraft(posting.slug, buildFormData());
-      if (res.ok) {
-        setApplicantId(res.applicantId);
-        if (res.applicantNumber) setApplicantNumber(res.applicantNumber);
-        setOk("임시저장되었습니다.");
-      } else {
-        setError(res.message);
+      try {
+        const res = await saveApplicationDraft(posting.slug, buildFormData());
+        if (res.ok) {
+          setApplicantId(res.applicantId);
+          if (res.applicantNumber) setApplicantNumber(res.applicantNumber);
+          setOk("임시저장되었습니다.");
+        } else {
+          setError(res.message);
+        }
+      } catch (e) {
+        setError(
+          e instanceof Error
+            ? `저장 실패: ${e.message}`
+            : "임시저장 중 알 수 없는 오류가 발생했습니다."
+        );
       }
     });
   }
@@ -248,14 +271,22 @@ export default function ApplyForm({
     setError(null);
     setOk(null);
     startTransition(async () => {
-      const res = await submitApplication(posting.slug, buildFormData());
-      if (res.ok) {
-        setApplicantId(res.applicantId);
-        if (res.applicantNumber) setApplicantNumber(res.applicantNumber);
-        // 페이지를 새로 불러와 제출 완료 상태로 전환.
-        if (typeof window !== "undefined") window.location.reload();
-      } else {
-        setError(res.message);
+      try {
+        const res = await submitApplication(posting.slug, buildFormData());
+        if (res.ok) {
+          setApplicantId(res.applicantId);
+          if (res.applicantNumber) setApplicantNumber(res.applicantNumber);
+          // 페이지를 새로 불러와 제출 완료 상태로 전환.
+          if (typeof window !== "undefined") window.location.reload();
+        } else {
+          setError(res.message);
+        }
+      } catch (e) {
+        setError(
+          e instanceof Error
+            ? `제출 실패: ${e.message}`
+            : "제출 중 알 수 없는 오류가 발생했습니다."
+        );
       }
     });
   }
@@ -268,64 +299,90 @@ export default function ApplyForm({
     }
     setLoadMsg(null);
     loadTransition(async () => {
-      const res = await getApplicationDraft(posting.slug, e);
-      if (!res) {
-        setLoadMsg("해당 이메일로 저장된 지원서가 없습니다.");
-        return;
-      }
-      // 페이지 자체를 ?email= 파라미터와 함께 새로 불러와도 되지만,
-      // 클라이언트 상태에 바로 반영하는 편이 더 빠릅니다.
-      const a = res.applicant;
-      setApplicantId(a.id);
-      setApplicantNumber(a.applicant_number);
-      setEmail(a.email);
-      setName(a.name);
-      setBirthDate(a.birth_date);
-      setGender((a.gender as "M" | "F" | null) ?? "");
-      setAddress(a.address ?? "");
-      setPhone(a.phone ?? "");
-      setEducation(normalizeEducationList(a.education));
-      setLicenses(normalizeLicenseList(a.licenses));
-      setCareers(normalizeCareerList(a.career));
-      setAwards(normalizeAwardList(a.awards));
-      setTrainings(normalizeTrainingList(a.trainings));
-      setMotivation(a.motivation ?? "");
-      setSelfDev(a.self_development ?? "");
-      setCareerSummary(a.career_summary ?? "");
-      setPhilosophy(a.philosophy ?? "");
-      setAgreedPrivacy(a.agreed_privacy);
-      setAgreedCriminal(a.agreed_criminal_check);
-      setAgreedTruth(a.agreed_truth);
-      setDocPaths({ ...a.documents });
-      if (a.photo_url) {
-        const url = await signApplicantStoragePath(a.photo_url);
-        setPhotoUrl(url);
-      } else {
-        setPhotoUrl(null);
-      }
-      if (res.application.status !== "draft") {
-        setLoadMsg("이미 접수 완료된 지원서입니다. 페이지를 새로고침합니다.");
-        if (typeof window !== "undefined") window.location.reload();
-      } else {
-        setLoadMsg("불러왔습니다. 이어서 작성하세요.");
+      try {
+        const res = await getApplicationDraft(posting.slug, e);
+        if (!res) {
+          setLoadMsg("해당 이메일로 저장된 지원서가 없습니다.");
+          return;
+        }
+        const a = res.applicant;
+        setApplicantId(a.id);
+        setApplicantNumber(a.applicant_number);
+        setEmail(a.email);
+        setName(a.name);
+        setBirthDate(a.birth_date);
+        setGender((a.gender as "M" | "F" | null) ?? "");
+        setAddress(a.address ?? "");
+        setPhone(a.phone ?? "");
+        setEducation(normalizeEducationList(a.education));
+        setLicenses(normalizeLicenseList(a.licenses));
+        setCareers(normalizeCareerList(a.career));
+        setAwards(normalizeAwardList(a.awards));
+        setTrainings(normalizeTrainingList(a.trainings));
+        setMotivation(a.motivation ?? "");
+        setSelfDev(a.self_development ?? "");
+        setCareerSummary(a.career_summary ?? "");
+        setPhilosophy(a.philosophy ?? "");
+        setAgreedPrivacy(a.agreed_privacy);
+        setAgreedCriminal(a.agreed_criminal_check);
+        setAgreedTruth(a.agreed_truth);
+        setDocPaths({ ...a.documents });
+        if (a.photo_url) {
+          try {
+            const url = await signApplicantStoragePath(a.photo_url);
+            setPhotoUrl(url);
+          } catch {
+            setPhotoUrl(null);
+          }
+        } else {
+          setPhotoUrl(null);
+        }
+        if (res.application.status !== "draft") {
+          setLoadMsg("이미 접수 완료된 지원서입니다. 페이지를 새로고침합니다.");
+          if (typeof window !== "undefined") window.location.reload();
+        } else {
+          setLoadMsg("불러왔습니다. 이어서 작성하세요.");
+        }
+      } catch (err) {
+        setLoadMsg(
+          err instanceof Error
+            ? `불러오기 실패: ${err.message}`
+            : "지원서를 불러오는 중 오류가 발생했습니다."
+        );
       }
     });
   }
 
+  // 사진 / 첨부 파일 크기는 8~16MB 가능 — Server Action 본문 한도(20MB)는
+  // next.config.ts 에서 설정. 그래도 네트워크 끊김 등으로 throw 가 올라올 수 있어
+  // 모든 호출을 try/catch 로 감쌉니다.
   function handlePhotoUpload(file: File) {
     if (!applicantId) {
       setPhotoError("먼저 기본정보를 입력하고 임시저장을 눌러주세요.");
       return;
     }
+    // 클라이언트 단 사전 검증 — Server Action 한도(20MB) 안쪽 + 비즈니스 한도(8MB).
+    if (file.size > 8 * 1024 * 1024) {
+      setPhotoError("사진 용량은 8MB 이하여야 합니다.");
+      return;
+    }
     setPhotoError(null);
     photoTransition(async () => {
-      const fd = new FormData();
-      fd.set("slug", posting.slug);
-      fd.set("applicant_id", applicantId);
-      fd.set("photo", file);
-      const res = await uploadApplicantPhoto(fd);
-      if (res.ok) setPhotoUrl(res.photoUrl);
-      else setPhotoError(res.message);
+      try {
+        const fd = new FormData();
+        fd.set("slug", posting.slug);
+        fd.set("applicant_id", applicantId);
+        fd.set("photo", file);
+        const res = await uploadApplicantPhoto(fd);
+        if (res.ok) setPhotoUrl(res.photoUrl);
+        else setPhotoError(res.message);
+      } catch (e) {
+        setPhotoError(
+          e instanceof Error
+            ? `업로드 실패: ${e.message}`
+            : "사진 업로드 중 알 수 없는 오류가 발생했습니다."
+        );
+      }
     });
   }
 
@@ -334,15 +391,27 @@ export default function ApplyForm({
     if (!confirm("증명사진을 삭제할까요?")) return;
     setPhotoError(null);
     photoTransition(async () => {
-      const res = await deleteApplicantPhoto(posting.slug, applicantId);
-      if (res.ok) setPhotoUrl(null);
-      else setPhotoError(res.message);
+      try {
+        const res = await deleteApplicantPhoto(posting.slug, applicantId);
+        if (res.ok) setPhotoUrl(null);
+        else setPhotoError(res.message);
+      } catch (e) {
+        setPhotoError(
+          e instanceof Error
+            ? `삭제 실패: ${e.message}`
+            : "사진 삭제 중 오류가 발생했습니다."
+        );
+      }
     });
   }
 
   function handleDocUpload(docKey: string, file: File) {
     if (!applicantId) {
       setDocError("먼저 기본정보를 입력하고 임시저장을 눌러주세요.");
+      return;
+    }
+    if (file.size > 16 * 1024 * 1024) {
+      setDocError("파일 용량은 16MB 이하여야 합니다.");
       return;
     }
     setDocError(null);
@@ -361,6 +430,13 @@ export default function ApplyForm({
         } else {
           setDocError(res.message);
         }
+      })
+      .catch((e: unknown) => {
+        setDocError(
+          e instanceof Error
+            ? `업로드 실패: ${e.message}`
+            : "파일 업로드 중 알 수 없는 오류가 발생했습니다."
+        );
       })
       .finally(() => setDocBusyKey(null));
   }
@@ -381,6 +457,13 @@ export default function ApplyForm({
         } else {
           setDocError(res.message);
         }
+      })
+      .catch((e: unknown) => {
+        setDocError(
+          e instanceof Error
+            ? `삭제 실패: ${e.message}`
+            : "파일 삭제 중 오류가 발생했습니다."
+        );
       })
       .finally(() => setDocBusyKey(null));
   }
@@ -415,11 +498,11 @@ export default function ApplyForm({
 
       {/* 기존 지원서 불러오기 패널 — 처음 진입 시에만 노출 */}
       {!applicantId && !alreadySubmitted && (
-        <div className="rounded-xl border border-line bg-card p-3 sm:p-4">
-          <p className="text-xs font-semibold tracking-wide text-navy">
+        <div className="rounded-xl border border-brand-blue-soft bg-brand-blue-soft/40 p-4 sm:p-5">
+          <p className="text-xs font-semibold tracking-wide text-brand-blue sm:text-sm">
             기존 임시저장된 지원서가 있나요?
           </p>
-          <p className="mt-1 text-xs text-ink-hint">
+          <p className="mt-1 text-xs text-ink-muted sm:text-sm">
             이메일로 이전에 저장한 내용을 불러올 수 있습니다.
           </p>
           <div className="mt-2 flex flex-col gap-2 sm:flex-row">
@@ -445,8 +528,8 @@ export default function ApplyForm({
 
       <section className={formCardCls}>
         {/* 양식 배너 */}
-        <div className="flex items-end justify-between border-b-2 border-hr-border pb-3">
-          <h3 className="text-base font-bold tracking-[0.35em] text-navy sm:text-lg">
+        <div className="flex items-end justify-between border-b-2 border-brand-blue pb-3">
+          <h3 className="text-base font-bold tracking-[0.35em] text-brand-blue sm:text-lg lg:text-xl">
             채용지원서
           </h3>
           <span className="shrink-0 pb-0.5 text-xs text-ink-muted">
@@ -460,13 +543,18 @@ export default function ApplyForm({
 
         {/* 공고 제목 + 상태 */}
         <div className="mt-3 flex items-center justify-between gap-2">
-          <h4 className="text-sm font-bold text-ink">{posting.title}</h4>
+          <h4 className="text-sm font-bold text-ink sm:text-base">
+            {posting.title}
+          </h4>
           <span className={alreadySubmitted ? badgeSuccess : badgeNeutral}>
             {alreadySubmitted ? "접수 완료" : "작성 중"}
           </span>
         </div>
 
-        {/* 탭 네비 */}
+        {/* 진행바 — 9개 탭 중 현재 위치 */}
+        <ProgressBar current={TAB_ORDER.indexOf(tab)} total={TAB_ORDER.length} />
+
+        {/* 탭 네비 — 활성 색상은 로고 파랑 */}
         <div className={`mt-3 ${tabBarCls}`}>
           <nav className={tabNavCls}>
             {APPLY_TABS.map((t) => (
@@ -474,7 +562,7 @@ export default function ApplyForm({
                 key={t.key}
                 type="button"
                 onClick={() => setTab(t.key)}
-                className={tabItemCls(t.key === tab)}
+                className={applyTabItemCls(t.key === tab)}
               >
                 {t.label}
               </button>
@@ -503,7 +591,7 @@ export default function ApplyForm({
               {!readOnly && (
                 <div className="flex flex-col items-start gap-1.5">
                   <label
-                    className={`cursor-pointer rounded-lg border border-navy bg-card px-3 py-1.5 text-xs font-semibold text-navy hover:bg-navy-soft ${
+                    className={`cursor-pointer rounded-lg border border-brand-blue bg-card px-3 py-1.5 text-xs font-semibold text-brand-blue hover:bg-brand-blue-soft ${
                       photoBusy || !applicantId
                         ? "pointer-events-none opacity-60"
                         : ""
@@ -547,8 +635,8 @@ export default function ApplyForm({
               )}
             </div>
 
-            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-              <div className="sm:col-span-2">
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 sm:gap-4 lg:grid-cols-4">
+              <div className="sm:col-span-2 lg:col-span-2">
                 <label className={labelCls}>이메일 *</label>
                 <input
                   type="email"
@@ -562,7 +650,18 @@ export default function ApplyForm({
                   본인 식별과 결과 통보에 사용됩니다.
                 </p>
               </div>
-              <div>
+              <div className="lg:col-span-2">
+                <label className={labelCls}>연락처 *</label>
+                <input
+                  type="tel"
+                  value={phone}
+                  onChange={(e) => setPhone(e.target.value)}
+                  readOnly={readOnly}
+                  placeholder="010-0000-0000"
+                  className={baseInputCls}
+                />
+              </div>
+              <div className="lg:col-span-2">
                 <label className={labelCls}>이름 *</label>
                 <input
                   type="text"
@@ -598,18 +697,7 @@ export default function ApplyForm({
                   <option value="F">여자</option>
                 </select>
               </div>
-              <div>
-                <label className={labelCls}>연락처 *</label>
-                <input
-                  type="tel"
-                  value={phone}
-                  onChange={(e) => setPhone(e.target.value)}
-                  readOnly={readOnly}
-                  placeholder="010-0000-0000"
-                  className={baseInputCls}
-                />
-              </div>
-              <div className="sm:col-span-2">
+              <div className="sm:col-span-2 lg:col-span-4">
                 <label className={labelCls}>주소</label>
                 <input
                   type="text"
@@ -770,7 +858,7 @@ export default function ApplyForm({
                   !agreedTruth ||
                   missingRequiredDocs.length > 0
                 }
-                className={`${btnPrimary} mt-4 w-full sm:w-auto sm:px-8`}
+                className={`${applyBtnPrimary} mt-4 w-full sm:w-auto sm:px-10`}
               >
                 {pending ? "제출 중…" : "최종 제출"}
               </button>
@@ -805,7 +893,7 @@ export default function ApplyForm({
                 type="button"
                 onClick={handleSaveDraft}
                 disabled={pending}
-                className={btnPrimary}
+                className={applyBtnPrimary}
               >
                 {pending ? "저장 중…" : "임시저장"}
               </button>
@@ -897,7 +985,7 @@ function DocumentRow({
         </div>
         <div className="flex shrink-0 items-center gap-1.5">
           <label
-            className={`cursor-pointer rounded-lg border border-navy bg-card px-3 py-1.5 text-xs font-semibold text-navy hover:bg-navy-soft ${
+            className={`cursor-pointer rounded-lg border border-brand-blue bg-card px-3 py-1.5 text-xs font-semibold text-brand-blue hover:bg-brand-blue-soft ${
               disabled || busy ? "pointer-events-none opacity-60" : ""
             }`}
           >
@@ -931,6 +1019,32 @@ function DocumentRow({
 }
 
 // =====================================================================
+// 진행바 — 로고 4색(파랑/빨강/노랑/초록)이 진행률에 따라 채워집니다.
+//   * 9개 탭을 4구간으로 나누어 시각적 강조: 0..2, 3..4, 5..6, 7..8.
+//   * 모든 단계가 채워지면 4색이 모두 표시됩니다.
+// =====================================================================
+function ProgressBar({ current, total }: { current: number; total: number }) {
+  const safeTotal = total > 0 ? total : 1;
+  const pct = Math.max(0, Math.min(100, ((current + 1) / safeTotal) * 100));
+  return (
+    <div className="mt-3">
+      <div className="relative h-2 w-full overflow-hidden rounded-full bg-line">
+        <div
+          className="h-full bg-gradient-to-r from-brand-blue via-brand-green to-brand-yellow transition-[width] duration-300 ease-out"
+          style={{ width: `${pct}%` }}
+        />
+      </div>
+      <div className="mt-1 flex items-center justify-between text-[11px] text-ink-muted">
+        <span>
+          단계 {current + 1} / {safeTotal}
+        </span>
+        <span>{Math.round(pct)}%</span>
+      </div>
+    </div>
+  );
+}
+
+// =====================================================================
 // 동의 한 줄
 // =====================================================================
 function AgreeRow({
@@ -954,7 +1068,7 @@ function AgreeRow({
           checked={checked}
           onChange={(e) => onChange(e.target.checked)}
           disabled={readOnly}
-          className="mt-0.5 h-4 w-4 rounded border-line text-navy focus:ring-navy"
+          className="mt-0.5 h-4 w-4 rounded border-line text-brand-blue focus:ring-brand-blue"
         />
         <div className="min-w-0">
           <p className="text-sm font-semibold text-ink">{label}</p>

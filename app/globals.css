@@ -28,6 +28,14 @@
   --hr-border: #1e3a5f;
   --hr-bg: #fafafa;
 
+  /* 동래구청소년센터 로고 색상 — 채용 지원 폼 등에서 사용 */
+  --brand-blue: #2563b1;
+  --brand-blue-strong: #1e4e92;
+  --brand-blue-soft: #eaf2fb;
+  --brand-red: #d03832;
+  --brand-yellow: #f2bc2f;
+  --brand-green: #5fad43;
+
   /* 하위 호환 — 기존 코드가 참조하는 변수명 유지 */
   --background: var(--canvas);
   --foreground: var(--ink);
@@ -65,6 +73,13 @@
 
   --color-hr-border: var(--hr-border);
   --color-hr-bg: var(--hr-bg);
+
+  --color-brand-blue: var(--brand-blue);
+  --color-brand-blue-strong: var(--brand-blue-strong);
+  --color-brand-blue-soft: var(--brand-blue-soft);
+  --color-brand-red: var(--brand-red);
+  --color-brand-yellow: var(--brand-yellow);
+  --color-brand-green: var(--brand-green);
 
   /* 하위 호환 */
   --color-surface-border: var(--surface-border);
