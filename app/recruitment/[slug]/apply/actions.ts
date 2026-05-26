@@ -309,11 +309,10 @@ function generateApplicantNumber(): string {
 }
 
 // 폼에서 지원자 입력값을 뽑아 row 모양으로 만듭니다.
-//   * draft 단계는 필수값을 최소화(카카오 세션만 강제).
-//   * submitted 단계는 호출 쪽에서 별도 검증.
-//   * birth_date 는 date 컬럼 — 미입력 시 null 대신 undefined 로 두어
-//     payload 에서 제거합니다(INSERT 는 DB 기본값, UPDATE 는 기존 값 유지).
-//     submit 경로는 호출 전에 birth_date 존재를 검증하므로 영향 없음.
+//   * draft / submit 공통 사용. 미입력 텍스트 필드는 null 로 둡니다.
+//   * draft 는 어떤 필드도 필수 아님 — 호출 쪽에서 별도 검증 없음.
+//   * submit 은 호출 쪽에서 필수값(이름·생년월일·이메일·전화·동의 3종) 사전 검증.
+//   * 따라서 컬럼 NOT NULL 제약은 DB 에서 해제되어 있어야 합니다.
 function buildApplicantRow(formData: FormData): Record<string, unknown> {
   const genderRaw = strOrNull(formData, "gender");
   const gender =
@@ -325,15 +324,13 @@ function buildApplicantRow(formData: FormData): Record<string, unknown> {
   const awards = parseAwardInput(strOrNull(formData, "awards"));
   const trainings = parseTrainingInput(strOrNull(formData, "trainings"));
 
-  const birthDate = strOrNull(formData, "birth_date") ?? undefined;
-
   return {
-    name: strOrNull(formData, "name") ?? "",
-    birth_date: birthDate,
+    name: strOrNull(formData, "name"),
+    birth_date: strOrNull(formData, "birth_date"),
     gender,
     address: strOrNull(formData, "address"),
-    email: strOrNull(formData, "email") ?? "",
-    phone: strOrNull(formData, "phone") ?? "",
+    email: strOrNull(formData, "email"),
+    phone: strOrNull(formData, "phone"),
     education,
     licenses,
     career,
@@ -377,7 +374,9 @@ async function findExistingApplication(
 }
 
 // =====================================================================
-// 임시저장 — 어느 탭에서든 호출 가능. 본인 확인은 카카오 세션으로 강제.
+// 임시저장 — 어느 탭에서든 호출 가능. 어떤 필드도 필수 아님.
+//   * 본인 확인은 카카오 세션으로만 강제(인증 게이트).
+//   * 입력값 검증은 submit 에서만. 여기서는 들어온 값 그대로 저장.
 // =====================================================================
 export async function saveApplicationDraft(
   slug: string,
@@ -386,12 +385,6 @@ export async function saveApplicationDraft(
   try {
     const posting = await loadOpenPosting(slug);
     const kakaoId = await requireKakaoId();
-
-    // 이메일은 선택 입력(연락처 용). 적혀 있으면 형식만 검증.
-    const email = strOrNull(formData, "email");
-    if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
-      return { ok: false, message: "이메일 형식이 올바르지 않습니다." };
-    }
 
     // applicant 행 식별 — kakao_id 로만 조회(폼의 applicant_id 는 신뢰하지 않음).
     let applicantId: string | null = null;
