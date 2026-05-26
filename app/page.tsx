@@ -8,14 +8,46 @@ import {
   listActivities,
   listDriverNames,
 } from "@/app/actions";
+import { listPublishedRecruitmentSummaries } from "@/app/recruitment/[slug]/actions";
 import { cardCls } from "@/lib/ui";
 
 export const dynamic = "force-dynamic";
+
+// 메인 화면 배너 — published 공고가 있을 때만 노출.
+//   * 가장 마감이 임박한 공고 1건의 slug 로 이동.
+function RecruitmentBanner({
+  slug,
+  title,
+}: {
+  slug: string;
+  title: string;
+}) {
+  return (
+    <Link
+      href={`/recruitment/${slug}`}
+      className="flex items-center justify-between gap-2 rounded-lg border border-brand-blue bg-brand-blue-soft/40 px-4 py-2.5 text-sm font-semibold text-brand-blue shadow-sm transition hover:bg-brand-blue-soft"
+    >
+      <span className="flex min-w-0 items-center gap-2">
+        <span
+          aria-hidden
+          className="rounded-full bg-brand-blue px-2 py-0.5 text-[10px] font-bold text-white"
+        >
+          채용
+        </span>
+        <span className="truncate">직원 채용 안내 — {title}</span>
+      </span>
+      <span aria-hidden className="shrink-0">→</span>
+    </Link>
+  );
+}
 
 export default async function Home() {
   // 임시 비밀번호 사용자는 비번 변경 페이지로 강제 이동
   await enforcePasswordChange();
   const session = await getSession();
+
+  const published = await listPublishedRecruitmentSummaries();
+  const banner = published[0] ?? null;
 
   if (!session) {
     let employees: string[] = [];
@@ -27,7 +59,10 @@ export default async function Home() {
     return (
       <>
         <Header />
-        <main className="mx-auto w-full max-w-md flex-1 px-4 py-8">
+        <main className="mx-auto w-full max-w-md flex-1 space-y-3 px-4 py-8">
+          {banner && (
+            <RecruitmentBanner slug={banner.slug} title={banner.title} />
+          )}
           <LoginForm employees={employees} />
         </main>
       </>
@@ -40,6 +75,9 @@ export default async function Home() {
     <>
       <Header />
       <main className="mx-auto w-full max-w-3xl flex-1 space-y-4 px-4 py-5 sm:py-6">
+        {banner && (
+          <RecruitmentBanner slug={banner.slug} title={banner.title} />
+        )}
         <section className={cardCls}>
           <h2 className="text-lg font-bold tracking-tight text-ink">
             {session.kind === "admin"
