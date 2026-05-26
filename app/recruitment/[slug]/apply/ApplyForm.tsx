@@ -31,7 +31,6 @@ import {
 import {
   saveApplicationDraft,
   submitApplication,
-  getApplicationDraft,
   uploadApplicantPhoto,
   deleteApplicantPhoto,
   uploadApplicantDocument,
@@ -100,10 +99,12 @@ export default function ApplyForm({
   posting,
   initialApplicant,
   initialApplication,
+  kakaoNickname,
 }: {
   posting: ApplyPosting;
   initialApplicant: RecruitmentApplicant | null;
   initialApplication: RecruitmentApplication | null;
+  kakaoNickname: string;
 }) {
   // 이미 제출 완료된 지원서면 폼 자체를 비활성화하고 안내만 노출.
   const alreadySubmitted =
@@ -122,9 +123,11 @@ export default function ApplyForm({
     initialApplicant?.applicant_number ?? ""
   );
 
-  // 기본정보
+  // 기본정보 — 신규 지원자는 카카오 닉네임을 이름 기본값으로 사용.
   const [email, setEmail] = useState(initialApplicant?.email ?? "");
-  const [name, setName] = useState(initialApplicant?.name ?? "");
+  const [name, setName] = useState(
+    initialApplicant?.name ?? kakaoNickname ?? ""
+  );
   const [birthDate, setBirthDate] = useState(initialApplicant?.birth_date ?? "");
   const [gender, setGender] = useState<"M" | "F" | "">(
     initialApplicant?.gender ?? ""
@@ -185,11 +188,6 @@ export default function ApplyForm({
   );
   const [docError, setDocError] = useState<string | null>(null);
   const [docBusyKey, setDocBusyKey] = useState<string | null>(null);
-
-  // 기존 지원서 불러오기 패널
-  const [loadEmail, setLoadEmail] = useState("");
-  const [loadBusy, loadTransition] = useTransition();
-  const [loadMsg, setLoadMsg] = useState<string | null>(null);
 
   // 사진 임시 URL 발급 — applicant 로드 시 1회. 실패해도 페이지는 살아남게 catch.
   useEffect(() => {
@@ -285,68 +283,6 @@ export default function ApplyForm({
           e instanceof Error
             ? `제출 실패: ${e.message}`
             : "제출 중 알 수 없는 오류가 발생했습니다."
-        );
-      }
-    });
-  }
-
-  function handleLoadDraft() {
-    const e = loadEmail.trim();
-    if (!e) {
-      setLoadMsg("이메일을 입력해주세요.");
-      return;
-    }
-    setLoadMsg(null);
-    loadTransition(async () => {
-      try {
-        const res = await getApplicationDraft(posting.slug, e);
-        if (!res) {
-          setLoadMsg("해당 이메일로 저장된 지원서가 없습니다.");
-          return;
-        }
-        const a = res.applicant;
-        setApplicantId(a.id);
-        setApplicantNumber(a.applicant_number);
-        setEmail(a.email);
-        setName(a.name);
-        setBirthDate(a.birth_date);
-        setGender((a.gender as "M" | "F" | null) ?? "");
-        setAddress(a.address ?? "");
-        setPhone(a.phone ?? "");
-        setEducation(normalizeEducationList(a.education));
-        setLicenses(normalizeLicenseList(a.licenses));
-        setCareers(normalizeCareerList(a.career));
-        setAwards(normalizeAwardList(a.awards));
-        setTrainings(normalizeTrainingList(a.trainings));
-        setMotivation(a.motivation ?? "");
-        setSelfDev(a.self_development ?? "");
-        setCareerSummary(a.career_summary ?? "");
-        setPhilosophy(a.philosophy ?? "");
-        setAgreedPrivacy(a.agreed_privacy);
-        setAgreedCriminal(a.agreed_criminal_check);
-        setAgreedTruth(a.agreed_truth);
-        setDocPaths({ ...a.documents });
-        if (a.photo_url) {
-          try {
-            const url = await signApplicantStoragePath(a.photo_url);
-            setPhotoUrl(url);
-          } catch {
-            setPhotoUrl(null);
-          }
-        } else {
-          setPhotoUrl(null);
-        }
-        if (res.application.status !== "draft") {
-          setLoadMsg("이미 접수 완료된 지원서입니다. 페이지를 새로고침합니다.");
-          if (typeof window !== "undefined") window.location.reload();
-        } else {
-          setLoadMsg("불러왔습니다. 이어서 작성하세요.");
-        }
-      } catch (err) {
-        setLoadMsg(
-          err instanceof Error
-            ? `불러오기 실패: ${err.message}`
-            : "지원서를 불러오는 중 오류가 발생했습니다."
         );
       }
     });
@@ -492,36 +428,6 @@ export default function ApplyForm({
           {applicantNumber && (
             <span className="ml-2 font-mono">({applicantNumber})</span>
           )}
-        </div>
-      )}
-
-      {/* 기존 지원서 불러오기 패널 — 처음 진입 시에만 노출 */}
-      {!applicantId && !alreadySubmitted && (
-        <div className="rounded-xl border border-brand-blue-soft bg-brand-blue-soft/40 p-4 sm:p-5">
-          <p className="text-xs font-semibold tracking-wide text-brand-blue sm:text-sm">
-            기존 임시저장된 지원서가 있나요?
-          </p>
-          <p className="mt-1 text-xs text-ink-muted sm:text-sm">
-            이메일로 이전에 저장한 내용을 불러올 수 있습니다.
-          </p>
-          <div className="mt-2 flex flex-col gap-2 sm:flex-row">
-            <input
-              type="email"
-              value={loadEmail}
-              onChange={(e) => setLoadEmail(e.target.value)}
-              placeholder="name@example.com"
-              className={`${baseInputCls} sm:flex-1`}
-            />
-            <button
-              type="button"
-              onClick={handleLoadDraft}
-              disabled={loadBusy}
-              className={`${btnSecondary} sm:shrink-0`}
-            >
-              {loadBusy ? "불러오는 중…" : "불러오기"}
-            </button>
-          </div>
-          {loadMsg && <p className="mt-2 text-xs text-ink-muted">{loadMsg}</p>}
         </div>
       )}
 

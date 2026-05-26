@@ -1,6 +1,10 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { getApplyPosting } from "./actions";
+import {
+  getApplyPosting,
+  getKakaoSession,
+  getApplicationDraft,
+} from "./actions";
 import ApplyForm from "./ApplyForm";
 import {
   cardCls,
@@ -38,6 +42,10 @@ export default async function RecruitmentApplyPage({
 
   const closed =
     new Date(posting.application_end).getTime() < Date.now();
+
+  const session = await getKakaoSession();
+  // 로그인 된 경우에만 기존 지원서를 미리 불러옵니다.
+  const draft = session ? await getApplicationDraft(slug) : null;
 
   return (
     <main className="mx-auto w-full max-w-4xl flex-1 px-4 py-6 sm:px-6 sm:py-8 lg:px-8 lg:py-10">
@@ -83,13 +91,41 @@ export default async function RecruitmentApplyPage({
             지원서가 있더라도 제출은 불가합니다.
           </p>
         </section>
+      ) : !session ? (
+        <KakaoLoginGate slug={slug} />
       ) : (
         <ApplyForm
           posting={posting}
-          initialApplicant={null}
-          initialApplication={null}
+          initialApplicant={draft?.applicant ?? null}
+          initialApplication={draft?.application ?? null}
+          kakaoNickname={session.nickname}
         />
       )}
     </main>
+  );
+}
+
+// =====================================================================
+// 카카오 로그인 게이트 — 비로그인 상태에서 노출되는 안내 + 시작 버튼
+// =====================================================================
+function KakaoLoginGate({ slug }: { slug: string }) {
+  const href = `/api/auth/kakao?slug=${encodeURIComponent(slug)}`;
+  return (
+    <section className={cardCls}>
+      <h2 className="text-base font-bold text-ink sm:text-lg">
+        지원하려면 본인 확인이 필요합니다
+      </h2>
+      <p className="mt-2 text-xs text-ink-muted sm:text-sm">
+        카카오 계정으로 본인을 인증하면 지원서 작성을 시작할 수 있습니다.
+        작성하신 내용은 카카오 계정에 연결되어 임시저장 · 이어 작성이 가능합니다.
+      </p>
+      <a
+        href={href}
+        className="mt-5 inline-flex h-[44px] items-center justify-center gap-2 rounded-lg bg-[#FEE500] px-5 text-sm font-semibold text-[#191919] shadow-sm transition hover:brightness-95"
+      >
+        <span aria-hidden="true" className="text-base">💬</span>
+        카카오로 시작하기
+      </a>
+    </section>
   );
 }

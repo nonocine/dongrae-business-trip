@@ -1,5 +1,6 @@
 "use server";
 
+import { cookies } from "next/headers";
 import { revalidatePath } from "next/cache";
 import {
   supabase,
@@ -20,11 +21,42 @@ import {
 
 // =====================================================================
 // 채용 지원 — 외부 지원자가 채용 공고에 직접 접수하는 흐름
-//   * 인증 없음(외부 지원자) — 이메일을 식별자로 사용합니다.
+//   * 본인 확인 — 카카오 로그인(kakao_id). 이메일은 연락처로만 사용.
 //   * 임시저장 → 첨부서류 업로드 → 동의 → 최종 제출 순서.
 //   * 첨부서류는 hr-documents Private 버킷의
 //     recruitment/{posting_id}/{applicant_id}/ 경로에 저장됩니다.
 // =====================================================================
+
+// 카카오 세션 쿠키 — /api/auth/kakao/callback 에서 세팅.
+const KAKAO_ID_COOKIE = "kakao_id";
+const KAKAO_NICKNAME_COOKIE = "kakao_nickname";
+
+export type KakaoSession = {
+  kakaoId: string;
+  nickname: string;
+};
+
+export async function getKakaoSession(): Promise<KakaoSession | null> {
+  const store = await cookies();
+  const id = store.get(KAKAO_ID_COOKIE)?.value;
+  if (!id) return null;
+  return {
+    kakaoId: id,
+    nickname: store.get(KAKAO_NICKNAME_COOKIE)?.value ?? "",
+  };
+}
+
+export async function logoutKakao(): Promise<void> {
+  const store = await cookies();
+  store.delete(KAKAO_ID_COOKIE);
+  store.delete(KAKAO_NICKNAME_COOKIE);
+}
+
+async function requireKakaoId(): Promise<string> {
+  const s = await getKakaoSession();
+  if (!s) throw new Error("카카오 로그인이 필요합니다.");
+  return s.kakaoId;
+}
 
 // 공고가 정의하는 필수/선택 첨부서류 항목
 export type RequiredDoc = {
@@ -48,6 +80,7 @@ export type ApplyPosting = {
 export type RecruitmentApplicant = {
   id: string;
   applicant_number: string;
+  kakao_id: string | null;
   name: string;
   birth_date: string;
   gender: "M" | "F" | null;
@@ -116,6 +149,7 @@ function normalizeApplicant(raw: Record<string, unknown>): RecruitmentApplicant 
   return {
     id: String(raw.id ?? ""),
     applicant_number: String(raw.applicant_number ?? ""),
+    kakao_id: (raw.kakao_id as string | null) ?? null,
     name: String(raw.name ?? ""),
     birth_date: String(raw.birth_date ?? ""),
     gender: (raw.gender as "M" | "F" | null) ?? null,
@@ -193,28 +227,27 @@ export async function getApplyPosting(
 }
 
 // =====================================================================
-// 임시저장 지원서 조회 — 이메일로 본인 확인 후 불러옵니다.
+// 임시저장 지원서 조회 — 카카오 세션의 kakao_id 로 본인 행을 찾습니다.
+//   * 같은 사람이 여러 공고에 지원해도 applicant 행은 1개(kakao_id unique).
+//   * 공고별 application 행은 별도 — 본 공고와 매칭되는 것만 반환합니다.
+//   * application 이 없으면 applicant 만 로드(applicant 만 있어도 폼 자동 채움).
 // =====================================================================
 export async function getApplicationDraft(
-  slug: string,
-  applicantEmail: string
+  slug: string
 ): Promise<
-  | { applicant: RecruitmentApplicant; application: RecruitmentApplication }
+  | { applicant: RecruitmentApplicant; application: RecruitmentApplication | null }
   | null
 > {
-  const email = (applicantEmail ?? "").trim();
-  if (!slug || !email) return null;
+  const session = await getKakaoSession();
+  if (!session || !slug) return null;
 
   const posting = await getApplyPosting(slug);
   if (!posting) return null;
 
-  // 이메일로 지원자 행 조회. 동일 이메일이 여러 행이면 가장 최근(updated_at) 선택.
   const { data: appRaw, error: aErr } = await supabase
     .from("recruitment_applicants")
     .select("*")
-    .eq("email", email)
-    .order("updated_at", { ascending: false })
-    .limit(1)
+    .eq("kakao_id", session.kakaoId)
     .maybeSingle();
   if (aErr) throw new Error(aErr.message);
   if (!appRaw) return null;
@@ -228,11 +261,12 @@ export async function getApplicationDraft(
     .eq("applicant_id", applicant.id)
     .maybeSingle();
   if (rErr) throw new Error(rErr.message);
-  if (!rowRaw) return null;
 
   return {
     applicant,
-    application: normalizeApplication(rowRaw as Record<string, unknown>),
+    application: rowRaw
+      ? normalizeApplication(rowRaw as Record<string, unknown>)
+      : null,
   };
 }
 
@@ -338,7 +372,7 @@ async function findExistingApplication(
 }
 
 // =====================================================================
-// 임시저장 — 어느 탭에서든 호출 가능. 필수값은 이메일만 강제합니다.
+// 임시저장 — 어느 탭에서든 호출 가능. 본인 확인은 카카오 세션으로 강제.
 // =====================================================================
 export async function saveApplicationDraft(
   slug: string,
@@ -346,47 +380,29 @@ export async function saveApplicationDraft(
 ): Promise<SaveOk | SaveErr> {
   try {
     const posting = await loadOpenPosting(slug);
+    const kakaoId = await requireKakaoId();
 
+    // 이메일은 선택 입력(연락처 용). 적혀 있으면 형식만 검증.
     const email = strOrNull(formData, "email");
-    if (!email) {
-      return { ok: false, message: "이메일을 먼저 입력해주세요." };
-    }
-    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+    if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
       return { ok: false, message: "이메일 형식이 올바르지 않습니다." };
     }
 
-    // 기존 applicant 식별 — 폼의 hidden applicant_id 우선, 없으면 이메일로 조회.
-    const givenApplicantId = strOrNull(formData, "applicant_id");
-    let applicantId = givenApplicantId;
+    // applicant 행 식별 — kakao_id 로만 조회(폼의 applicant_id 는 신뢰하지 않음).
+    let applicantId: string | null = null;
     let applicantNumber: string | null = null;
 
-    if (!applicantId) {
-      const { data: found, error: fErr } = await supabase
-        .from("recruitment_applicants")
-        .select("id, applicant_number")
-        .eq("email", email)
-        .order("updated_at", { ascending: false })
-        .limit(1)
-        .maybeSingle();
-      if (fErr) throw new Error(fErr.message);
-      if (found) {
-        applicantId = String((found as { id: unknown }).id);
-        applicantNumber = String(
-          (found as { applicant_number: unknown }).applicant_number
-        );
-      }
-    } else {
-      const { data: existing, error: exErr } = await supabase
-        .from("recruitment_applicants")
-        .select("applicant_number")
-        .eq("id", applicantId)
-        .maybeSingle();
-      if (exErr) throw new Error(exErr.message);
-      if (existing) {
-        applicantNumber = String(
-          (existing as { applicant_number: unknown }).applicant_number
-        );
-      }
+    const { data: found, error: fErr } = await supabase
+      .from("recruitment_applicants")
+      .select("id, applicant_number")
+      .eq("kakao_id", kakaoId)
+      .maybeSingle();
+    if (fErr) throw new Error(fErr.message);
+    if (found) {
+      applicantId = String((found as { id: unknown }).id);
+      applicantNumber = String(
+        (found as { applicant_number: unknown }).applicant_number
+      );
     }
 
     // 이미 같은 공고에 제출 완료된 상태면 임시저장 불가.
@@ -412,7 +428,11 @@ export async function saveApplicationDraft(
       applicantNumber = generateApplicantNumber();
       const { data: inserted, error: insErr } = await supabase
         .from("recruitment_applicants")
-        .insert({ ...row, applicant_number: applicantNumber })
+        .insert({
+          ...row,
+          applicant_number: applicantNumber,
+          kakao_id: kakaoId,
+        })
         .select("id")
         .single();
       if (insErr) throw new Error(insErr.message);
@@ -464,6 +484,7 @@ export async function submitApplication(
 ): Promise<SaveOk | SaveErr> {
   try {
     const posting = await loadOpenPosting(slug);
+    const kakaoId = await requireKakaoId();
 
     const email = strOrNull(formData, "email");
     const name = strOrNull(formData, "name");
@@ -486,38 +507,21 @@ export async function submitApplication(
       return { ok: false, message: "모든 동의 항목에 체크해주세요." };
     }
 
-    // 임시저장과 동일한 흐름으로 applicant upsert.
-    const givenApplicantId = strOrNull(formData, "applicant_id");
-    let applicantId = givenApplicantId;
+    // applicant 식별 — kakao_id 로만 조회.
+    let applicantId: string | null = null;
     let applicantNumber: string | null = null;
 
-    if (!applicantId) {
-      const { data: found, error: fErr } = await supabase
-        .from("recruitment_applicants")
-        .select("id, applicant_number")
-        .eq("email", email)
-        .order("updated_at", { ascending: false })
-        .limit(1)
-        .maybeSingle();
-      if (fErr) throw new Error(fErr.message);
-      if (found) {
-        applicantId = String((found as { id: unknown }).id);
-        applicantNumber = String(
-          (found as { applicant_number: unknown }).applicant_number
-        );
-      }
-    } else {
-      const { data: existing, error: exErr } = await supabase
-        .from("recruitment_applicants")
-        .select("applicant_number, documents")
-        .eq("id", applicantId)
-        .maybeSingle();
-      if (exErr) throw new Error(exErr.message);
-      if (existing) {
-        applicantNumber = String(
-          (existing as { applicant_number: unknown }).applicant_number
-        );
-      }
+    const { data: found, error: fErr } = await supabase
+      .from("recruitment_applicants")
+      .select("id, applicant_number")
+      .eq("kakao_id", kakaoId)
+      .maybeSingle();
+    if (fErr) throw new Error(fErr.message);
+    if (found) {
+      applicantId = String((found as { id: unknown }).id);
+      applicantNumber = String(
+        (found as { applicant_number: unknown }).applicant_number
+      );
     }
 
     // 이미 제출 완료 상태면 거부.
@@ -543,7 +547,11 @@ export async function submitApplication(
       applicantNumber = generateApplicantNumber();
       const { data: inserted, error: insErr } = await supabase
         .from("recruitment_applicants")
-        .insert({ ...row, applicant_number: applicantNumber })
+        .insert({
+          ...row,
+          applicant_number: applicantNumber,
+          kakao_id: kakaoId,
+        })
         .select("id")
         .single();
       if (insErr) throw new Error(insErr.message);
