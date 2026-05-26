@@ -309,8 +309,11 @@ function generateApplicantNumber(): string {
 }
 
 // 폼에서 지원자 입력값을 뽑아 row 모양으로 만듭니다.
-//   * draft 단계는 필수값을 최소화(이메일만 강제).
+//   * draft 단계는 필수값을 최소화(카카오 세션만 강제).
 //   * submitted 단계는 호출 쪽에서 별도 검증.
+//   * birth_date 는 date 컬럼 — 미입력 시 null 대신 undefined 로 두어
+//     payload 에서 제거합니다(INSERT 는 DB 기본값, UPDATE 는 기존 값 유지).
+//     submit 경로는 호출 전에 birth_date 존재를 검증하므로 영향 없음.
 function buildApplicantRow(formData: FormData): Record<string, unknown> {
   const genderRaw = strOrNull(formData, "gender");
   const gender =
@@ -322,9 +325,11 @@ function buildApplicantRow(formData: FormData): Record<string, unknown> {
   const awards = parseAwardInput(strOrNull(formData, "awards"));
   const trainings = parseTrainingInput(strOrNull(formData, "trainings"));
 
+  const birthDate = strOrNull(formData, "birth_date") ?? undefined;
+
   return {
     name: strOrNull(formData, "name") ?? "",
-    birth_date: strOrNull(formData, "birth_date"),
+    birth_date: birthDate,
     gender,
     address: strOrNull(formData, "address"),
     email: strOrNull(formData, "email") ?? "",
