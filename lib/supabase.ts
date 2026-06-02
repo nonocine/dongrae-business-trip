@@ -1170,3 +1170,379 @@ export async function signHrDocument(
   if (error || !data) return null;
   return data.signedUrl;
 }
+
+// =====================================================================
+// 채용 시스템 v1.2 — 공고 · 심사위원 · 서류채점 · 면접채점 · 면접일정
+// (recruitment_scores 는 폐기 예정. 신규 4테이블로 분리)
+// =====================================================================
+
+// --- 공고 (recruitment_postings) ---
+export const RECRUITMENT_POSTING_STATUSES = [
+  "draft",
+  "published",
+  "closed",
+] as const;
+export type RecruitmentPostingStatus =
+  (typeof RECRUITMENT_POSTING_STATUSES)[number];
+
+export type RecruitmentPosting = {
+  id: string;
+  slug: string;
+  title: string;
+  field: string;
+  recruit_count: number;
+  application_start: string;
+  application_end: string;
+  qualifications: string | null;
+  preferred: string | null;
+  salary_info: string | null;
+  process_info: string | null;
+  notice: string | null;
+  attachment_url: string | null;
+  status: RecruitmentPostingStatus;
+  created_at: string;
+  updated_at: string | null;
+  created_by: string | null;
+};
+
+export function normalizeRecruitmentPosting(
+  raw: Record<string, unknown>
+): RecruitmentPosting {
+  const sRaw = String(raw.status ?? "draft");
+  const status: RecruitmentPostingStatus = (
+    RECRUITMENT_POSTING_STATUSES as readonly string[]
+  ).includes(sRaw)
+    ? (sRaw as RecruitmentPostingStatus)
+    : "draft";
+  return {
+    id: String(raw.id ?? ""),
+    slug: String(raw.slug ?? ""),
+    title: String(raw.title ?? ""),
+    field: String(raw.field ?? ""),
+    recruit_count: raw.recruit_count == null ? 0 : Number(raw.recruit_count),
+    application_start: String(raw.application_start ?? ""),
+    application_end: String(raw.application_end ?? ""),
+    qualifications: (raw.qualifications as string | null) ?? null,
+    preferred: (raw.preferred as string | null) ?? null,
+    salary_info: (raw.salary_info as string | null) ?? null,
+    process_info: (raw.process_info as string | null) ?? null,
+    notice: (raw.notice as string | null) ?? null,
+    attachment_url: (raw.attachment_url as string | null) ?? null,
+    status,
+    created_at: String(raw.created_at ?? ""),
+    updated_at: (raw.updated_at as string | null) ?? null,
+    created_by: (raw.created_by as string | null) ?? null,
+  };
+}
+
+// --- 심사위원 (recruitment_judges) ---
+export const JUDGE_TYPES = ["internal", "external"] as const;
+export type JudgeType = (typeof JUDGE_TYPES)[number];
+
+export const JUDGE_TYPE_LABEL: Record<JudgeType, string> = {
+  internal: "내부위원",
+  external: "외부위원",
+};
+
+// DB CHECK 제약:
+//   internal → driver_id NOT NULL & external_pool_id NULL
+//   external → external_pool_id NOT NULL & driver_id NULL
+export type Judge = {
+  id: string;
+  posting_id: string;
+  name: string;
+  role: string;
+  affiliation: string | null;
+  judge_type: JudgeType;
+  driver_id: string | null;
+  external_pool_id: string | null;
+  is_active: boolean;
+  display_order: number;
+  created_at: string;
+  updated_at: string | null;
+  created_by: string | null;
+};
+
+export function normalizeJudge(raw: Record<string, unknown>): Judge {
+  const t = String(raw.judge_type ?? "internal");
+  const judge_type: JudgeType = (JUDGE_TYPES as readonly string[]).includes(t)
+    ? (t as JudgeType)
+    : "internal";
+  return {
+    id: String(raw.id ?? ""),
+    posting_id: String(raw.posting_id ?? ""),
+    name: String(raw.name ?? ""),
+    role: String(raw.role ?? ""),
+    affiliation: (raw.affiliation as string | null) ?? null,
+    judge_type,
+    driver_id: (raw.driver_id as string | null) ?? null,
+    external_pool_id: (raw.external_pool_id as string | null) ?? null,
+    is_active: raw.is_active !== false,
+    display_order: raw.display_order == null ? 0 : Number(raw.display_order),
+    created_at: String(raw.created_at ?? ""),
+    updated_at: (raw.updated_at as string | null) ?? null,
+    created_by: (raw.created_by as string | null) ?? null,
+  };
+}
+
+// --- 외부위원 마스터 (external_judges_pool) ---
+// 외부위원은 풀에 한 번 등록해두고, 각 공고에 재사용. 등록 시 phone 은 11자리 숫자만.
+// 공고에 배정될 때 recruitment_judges.name/affiliation 으로 스냅샷 복사됨.
+export type ExternalJudge = {
+  id: string;
+  name: string;
+  phone: string;
+  affiliation: string;
+  default_role: string;
+  notes: string | null;
+  privacy_agreed_at: string | null;
+  privacy_agreed_by: string | null;
+  is_active: boolean;
+  created_at: string;
+  updated_at: string | null;
+  created_by: string | null;
+};
+
+export function normalizeExternalJudge(
+  raw: Record<string, unknown>
+): ExternalJudge {
+  return {
+    id: String(raw.id ?? ""),
+    name: String(raw.name ?? ""),
+    phone: String(raw.phone ?? ""),
+    affiliation: String(raw.affiliation ?? ""),
+    default_role: String(raw.default_role ?? "외부위원"),
+    notes: (raw.notes as string | null) ?? null,
+    privacy_agreed_at: (raw.privacy_agreed_at as string | null) ?? null,
+    privacy_agreed_by: (raw.privacy_agreed_by as string | null) ?? null,
+    is_active: raw.is_active !== false,
+    created_at: String(raw.created_at ?? ""),
+    updated_at: (raw.updated_at as string | null) ?? null,
+    created_by: (raw.created_by as string | null) ?? null,
+  };
+}
+
+// --- 채점 옵션 공용 타입 ---
+export type ScoreOption = { label: string; value: number };
+
+// =====================================================================
+// 서류 채점 (recruitment_document_scores) — 1명이 채점, 만점 35점
+// =====================================================================
+export const DOCUMENT_SCORE_MAX = 35;
+
+export const SCORE_DEGREE_OPTIONS: readonly ScoreOption[] = [
+  { label: "박사", value: 5 },
+  { label: "석사", value: 3 },
+  { label: "학사", value: 2 },
+  { label: "전문학사", value: 1 },
+] as const;
+
+export const SCORE_GRADE_OPTIONS: readonly ScoreOption[] = [
+  { label: "4.5 ~ 4.0", value: 5 },
+  { label: "3.9 ~ 3.5", value: 3 },
+  { label: "3.4 ~ 3.0", value: 2 },
+  { label: "2.9 ~ 2.5", value: 1 },
+] as const;
+
+export const SCORE_YOUTH_LICENSE_OPTIONS: readonly ScoreOption[] = [
+  { label: "1급", value: 5 },
+  { label: "2급", value: 4 },
+  { label: "3급", value: 2 },
+] as const;
+
+export const SCORE_OTHER_LICENSE_OPTIONS: readonly ScoreOption[] = [
+  { label: "3개 이상", value: 5 },
+  { label: "2개 이상", value: 4 },
+  { label: "1개 이상", value: 2 },
+] as const;
+
+export const SCORE_SELF_INTRO_OPTIONS: readonly ScoreOption[] = [
+  { label: "우수", value: 10 },
+  { label: "보통", value: 5 },
+  { label: "미흡", value: 3 },
+] as const;
+
+export const SCORE_QUALITATIVE_OPTIONS: readonly ScoreOption[] = [
+  { label: "우수", value: 5 },
+  { label: "보통", value: 3 },
+  { label: "미흡", value: 1 },
+] as const;
+
+export const DOCUMENT_SCORE_OPTIONS = {
+  degree: SCORE_DEGREE_OPTIONS,
+  grade: SCORE_GRADE_OPTIONS,
+  youth_license: SCORE_YOUTH_LICENSE_OPTIONS,
+  other_license: SCORE_OTHER_LICENSE_OPTIONS,
+  self_intro: SCORE_SELF_INTRO_OPTIONS,
+  qualitative: SCORE_QUALITATIVE_OPTIONS,
+} as const;
+
+// UI 라벨 — 폼/대시보드에서 컬럼 헤더로 사용
+export const DOCUMENT_SCORE_LABEL = {
+  degree: "학위",
+  grade: "성적",
+  youth_license: "청소년지도사",
+  other_license: "국가자격증",
+  self_intro: "자기소개서",
+  qualitative: "정성평가",
+} as const;
+
+export type DocumentScore = {
+  id: string;
+  application_id: string;
+  judge_id: string;
+  score_degree: number | null;
+  score_grade: number | null;
+  score_youth_license: number | null;
+  score_other_license: number | null;
+  score_self_intro: number | null;
+  score_qualitative: number | null;
+  total_score: number | null;
+  is_disqualified: boolean;
+  disqualified_reason: string | null;
+  memo: string | null;
+  signed_at: string | null;
+  created_at: string;
+  updated_at: string | null;
+};
+
+export function normalizeDocumentScore(
+  raw: Record<string, unknown>
+): DocumentScore {
+  const num = (k: string): number | null =>
+    raw[k] == null ? null : Number(raw[k]);
+  return {
+    id: String(raw.id ?? ""),
+    application_id: String(raw.application_id ?? ""),
+    judge_id: String(raw.judge_id ?? ""),
+    score_degree: num("score_degree"),
+    score_grade: num("score_grade"),
+    score_youth_license: num("score_youth_license"),
+    score_other_license: num("score_other_license"),
+    score_self_intro: num("score_self_intro"),
+    score_qualitative: num("score_qualitative"),
+    total_score: num("total_score"),
+    is_disqualified: raw.is_disqualified === true,
+    disqualified_reason: (raw.disqualified_reason as string | null) ?? null,
+    memo: (raw.memo as string | null) ?? null,
+    signed_at: (raw.signed_at as string | null) ?? null,
+    created_at: String(raw.created_at ?? ""),
+    updated_at: (raw.updated_at as string | null) ?? null,
+  };
+}
+
+// =====================================================================
+// 면접 채점 (recruitment_interview_scores) — 위원별 × 지원자별, 만점 65점
+// =====================================================================
+export const INTERVIEW_SCORE_MAX = 65;
+
+export const SCORE_UNDERSTANDING_OPTIONS: readonly ScoreOption[] = [
+  { label: "매우적합", value: 20 },
+  { label: "적합", value: 15 },
+  { label: "양호", value: 10 },
+  { label: "보통", value: 5 },
+] as const;
+
+// 자질·인생관 / 성실성 / 적극성 — 동일 척도(15/12/9/6) · 동일 라벨.
+// PDF 원본 면접 심사표에 4개 항목 모두 매우적합/적합/양호/보통 으로 통일돼 있음.
+export const SCORE_APTITUDE_OPTIONS: readonly ScoreOption[] = [
+  { label: "매우적합", value: 15 },
+  { label: "적합", value: 12 },
+  { label: "양호", value: 9 },
+  { label: "보통", value: 6 },
+] as const;
+
+export const SCORE_SINCERITY_OPTIONS: readonly ScoreOption[] = [
+  { label: "매우적합", value: 15 },
+  { label: "적합", value: 12 },
+  { label: "양호", value: 9 },
+  { label: "보통", value: 6 },
+] as const;
+
+export const SCORE_INITIATIVE_OPTIONS: readonly ScoreOption[] = [
+  { label: "매우적합", value: 15 },
+  { label: "적합", value: 12 },
+  { label: "양호", value: 9 },
+  { label: "보통", value: 6 },
+] as const;
+
+export const INTERVIEW_SCORE_OPTIONS = {
+  understanding: SCORE_UNDERSTANDING_OPTIONS,
+  aptitude: SCORE_APTITUDE_OPTIONS,
+  sincerity: SCORE_SINCERITY_OPTIONS,
+  initiative: SCORE_INITIATIVE_OPTIONS,
+} as const;
+
+export const INTERVIEW_SCORE_LABEL = {
+  understanding: "운영이해도",
+  aptitude: "자질·인생관",
+  sincerity: "성실성",
+  initiative: "적극성",
+} as const;
+
+export type InterviewScore = {
+  id: string;
+  application_id: string;
+  judge_id: string;
+  score_understanding: number | null;
+  score_aptitude: number | null;
+  score_sincerity: number | null;
+  score_initiative: number | null;
+  total_score: number | null;
+  is_absent: boolean;
+  memo: string | null;
+  signed_at: string | null;
+  created_at: string;
+  updated_at: string | null;
+};
+
+export function normalizeInterviewScore(
+  raw: Record<string, unknown>
+): InterviewScore {
+  const num = (k: string): number | null =>
+    raw[k] == null ? null : Number(raw[k]);
+  return {
+    id: String(raw.id ?? ""),
+    application_id: String(raw.application_id ?? ""),
+    judge_id: String(raw.judge_id ?? ""),
+    score_understanding: num("score_understanding"),
+    score_aptitude: num("score_aptitude"),
+    score_sincerity: num("score_sincerity"),
+    score_initiative: num("score_initiative"),
+    total_score: num("total_score"),
+    is_absent: raw.is_absent === true,
+    memo: (raw.memo as string | null) ?? null,
+    signed_at: (raw.signed_at as string | null) ?? null,
+    created_at: String(raw.created_at ?? ""),
+    updated_at: (raw.updated_at as string | null) ?? null,
+  };
+}
+
+// =====================================================================
+// 면접 일정 (recruitment_interview_schedule)
+// =====================================================================
+export type InterviewSchedule = {
+  id: string;
+  application_id: string;
+  interview_at: string;
+  location: string | null;
+  display_order: number;
+  notes: string | null;
+  created_at: string;
+  updated_at: string | null;
+};
+
+export function normalizeInterviewSchedule(
+  raw: Record<string, unknown>
+): InterviewSchedule {
+  return {
+    id: String(raw.id ?? ""),
+    application_id: String(raw.application_id ?? ""),
+    interview_at: String(raw.interview_at ?? ""),
+    location: (raw.location as string | null) ?? null,
+    display_order: raw.display_order == null ? 0 : Number(raw.display_order),
+    notes: (raw.notes as string | null) ?? null,
+    created_at: String(raw.created_at ?? ""),
+    updated_at: (raw.updated_at as string | null) ?? null,
+  };
+}
