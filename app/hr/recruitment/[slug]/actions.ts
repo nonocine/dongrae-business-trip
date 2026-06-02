@@ -1,6 +1,7 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
+import { cookies } from "next/headers";
 import {
   supabase,
   signHrDocument,
@@ -10,11 +11,17 @@ import {
   parseCareerInput,
   parseAwardInput,
   parseTrainingInput,
+  normalizeJudge,
+  normalizeExternalJudge,
+  normalizeRecruitmentPosting,
   type EmployeeEducation,
   type EmployeeLicense,
   type EmployeeCareer,
   type EmployeeAward,
   type EmployeeTraining,
+  type Judge,
+  type ExternalJudge,
+  type RecruitmentPosting,
 } from "@/lib/supabase";
 import { requireHrAdmin } from "@/app/hr/actions";
 
@@ -533,4 +540,749 @@ export async function bulkAnonymizeApplicants(slug: string): Promise<
           : "지원자 개인정보 삭제 중 오류가 발생했습니다.",
     };
   }
+}
+
+// =====================================================================
+// 심사위원 관리 (recruitment_judges) — 관장·부장만
+//   * 내부위원: drivers 의 직원을 driver_id 로 연결
+//   * 외부위원: external_judges_pool 의 풀 항목을 external_pool_id 로 연결
+//     로그인은 풀의 (name, phone) 으로 인증 — authenticateExternalJudge 참고
+// =====================================================================
+
+// 휴대전화 입력 정규화 — 하이픈/공백/점 등 모두 제거하고 숫자만 남김.
+function normalizePhone(raw: string | null | undefined): string {
+  return (raw ?? "").replace(/\D/g, "");
+}
+
+async function slugFromPostingId(postingId: string): Promise<string | null> {
+  const { data, error } = await supabase
+    .from("recruitment_postings")
+    .select("slug")
+    .eq("id", postingId)
+    .maybeSingle();
+  if (error) return null;
+  return (data as { slug?: string } | null)?.slug ?? null;
+}
+
+async function judgePostingId(judgeId: string): Promise<string | null> {
+  const { data, error } = await supabase
+    .from("recruitment_judges")
+    .select("posting_id")
+    .eq("id", judgeId)
+    .maybeSingle();
+  if (error) return null;
+  return (data as { posting_id?: string } | null)?.posting_id ?? null;
+}
+
+async function nextDisplayOrder(postingId: string): Promise<number> {
+  const { data, error } = await supabase
+    .from("recruitment_judges")
+    .select("display_order")
+    .eq("posting_id", postingId)
+    .order("display_order", { ascending: false })
+    .limit(1);
+  if (error) throw new Error(error.message);
+  const rows = (data ?? []) as { display_order?: number }[];
+  if (rows.length === 0) return 0;
+  return Number(rows[0]?.display_order ?? 0) + 1;
+}
+
+// ---------------------------------------------------------------------
+// 1) 목록 조회 — 누구나 (채점 페이지에서도 필요).
+// ---------------------------------------------------------------------
+export async function listJudges(postingId: string): Promise<Judge[]> {
+  if (!postingId) return [];
+  const { data, error } = await supabase
+    .from("recruitment_judges")
+    .select("*")
+    .eq("posting_id", postingId)
+    .order("display_order", { ascending: true })
+    .order("created_at", { ascending: true });
+  if (error) throw new Error(error.message);
+  return (data ?? []).map((row) => normalizeJudge(row as Record<string, unknown>));
+}
+
+// ---------------------------------------------------------------------
+// 2) 내부위원 등록 — drivers 에서 직원 정보를 끌어와 name 자동 채움.
+// ---------------------------------------------------------------------
+export async function addInternalJudge(input: {
+  postingId: string;
+  driverId: string;
+  role: string;
+}): Promise<Judge> {
+  const me = await requireHrAdmin();
+  const postingId = input.postingId?.trim() ?? "";
+  const driverId = input.driverId?.trim() ?? "";
+  const role = input.role?.trim() ?? "";
+  if (!postingId) throw new Error("공고 정보가 누락되었습니다.");
+  if (!driverId) throw new Error("직원을 선택해주세요.");
+  if (!role) throw new Error("직급/역할을 입력해주세요.");
+
+  // 직원 정보 조회.
+  const { data: driver, error: dErr } = await supabase
+    .from("drivers")
+    .select("id, name")
+    .eq("id", driverId)
+    .maybeSingle();
+  if (dErr) throw new Error(dErr.message);
+  if (!driver) throw new Error("존재하지 않는 직원입니다.");
+
+  // 같은 공고에 같은 driver_id 가 이미 등록돼 있는지 체크.
+  const { data: dup, error: dupErr } = await supabase
+    .from("recruitment_judges")
+    .select("id")
+    .eq("posting_id", postingId)
+    .eq("driver_id", driverId)
+    .maybeSingle();
+  if (dupErr) throw new Error(dupErr.message);
+  if (dup) throw new Error("이미 등록된 심사위원입니다.");
+
+  const order = await nextDisplayOrder(postingId);
+
+  const { data: inserted, error: insErr } = await supabase
+    .from("recruitment_judges")
+    .insert({
+      posting_id: postingId,
+      name: String((driver as { name?: string }).name ?? "").trim(),
+      role,
+      affiliation: null,
+      judge_type: "internal",
+      driver_id: driverId,
+      login_code: null,
+      is_active: true,
+      display_order: order,
+      created_by: me.name,
+    })
+    .select("*")
+    .single();
+  if (insErr) throw new Error(insErr.message);
+
+  const slug = await slugFromPostingId(postingId);
+  if (slug) revalidatePath(`/hr/recruitment/${slug}`);
+  return normalizeJudge(inserted as Record<string, unknown>);
+}
+
+// ---------------------------------------------------------------------
+// 3) 외부위원 배정 — external_judges_pool 의 풀 항목을 본 공고에 연결.
+//    name/affiliation 은 스냅샷으로 복사 (이후 풀에서 바뀌어도 본 공고 고정).
+// ---------------------------------------------------------------------
+export async function addExternalJudge(input: {
+  postingId: string;
+  externalPoolId: string;
+  role: string;
+}): Promise<Judge> {
+  const me = await requireHrAdmin();
+  const postingId = input.postingId?.trim() ?? "";
+  const externalPoolId = input.externalPoolId?.trim() ?? "";
+  const roleInput = input.role?.trim() ?? "";
+  if (!postingId) throw new Error("공고 정보가 누락되었습니다.");
+  if (!externalPoolId) throw new Error("외부위원을 선택해주세요.");
+
+  // 풀 정보 조회 — name/affiliation 스냅샷, default_role 폴백.
+  const { data: pool, error: pErr } = await supabase
+    .from("external_judges_pool")
+    .select("id, name, affiliation, default_role, is_active")
+    .eq("id", externalPoolId)
+    .maybeSingle();
+  if (pErr) throw new Error(pErr.message);
+  if (!pool) throw new Error("존재하지 않는 외부위원입니다.");
+  const poolRow = pool as {
+    name?: string;
+    affiliation?: string;
+    default_role?: string;
+    is_active?: boolean;
+  };
+  if (poolRow.is_active === false) {
+    throw new Error("비활성화된 외부위원입니다.");
+  }
+
+  // 같은 공고에 같은 풀 항목이 이미 등록돼 있는지 체크.
+  const { data: dup, error: dupErr } = await supabase
+    .from("recruitment_judges")
+    .select("id")
+    .eq("posting_id", postingId)
+    .eq("external_pool_id", externalPoolId)
+    .maybeSingle();
+  if (dupErr) throw new Error(dupErr.message);
+  if (dup) throw new Error("이미 이 공고에 등록된 외부위원입니다.");
+
+  const role = roleInput || poolRow.default_role || "외부위원";
+  const order = await nextDisplayOrder(postingId);
+
+  const { data: inserted, error: insErr } = await supabase
+    .from("recruitment_judges")
+    .insert({
+      posting_id: postingId,
+      name: String(poolRow.name ?? "").trim(),
+      role,
+      affiliation: poolRow.affiliation
+        ? String(poolRow.affiliation).trim()
+        : null,
+      judge_type: "external",
+      driver_id: null,
+      external_pool_id: externalPoolId,
+      is_active: true,
+      display_order: order,
+      created_by: me.name,
+    })
+    .select("*")
+    .single();
+  if (insErr) throw new Error(insErr.message);
+
+  const slug = await slugFromPostingId(postingId);
+  if (slug) revalidatePath(`/hr/recruitment/${slug}`);
+  return normalizeJudge(inserted as Record<string, unknown>);
+}
+
+// ---------------------------------------------------------------------
+// 4) 위원 정보 수정 — judge_type / driver_id / login_code 는 불변.
+// ---------------------------------------------------------------------
+export async function updateJudge(
+  judgeId: string,
+  patch: { name?: string; role?: string; affiliation?: string }
+): Promise<void> {
+  await requireHrAdmin();
+  if (!judgeId) throw new Error("심사위원 정보가 누락되었습니다.");
+
+  const update: Record<string, unknown> = {};
+  if (patch.name !== undefined) {
+    const v = patch.name.trim();
+    if (!v) throw new Error("이름을 입력해주세요.");
+    update.name = v;
+  }
+  if (patch.role !== undefined) {
+    const v = patch.role.trim();
+    if (!v) throw new Error("직급/역할을 입력해주세요.");
+    update.role = v;
+  }
+  if (patch.affiliation !== undefined) {
+    const v = patch.affiliation.trim();
+    update.affiliation = v.length > 0 ? v : null;
+  }
+  if (Object.keys(update).length === 0) return;
+
+  const { error } = await supabase
+    .from("recruitment_judges")
+    .update(update)
+    .eq("id", judgeId);
+  if (error) throw new Error(error.message);
+
+  const postingId = await judgePostingId(judgeId);
+  const slug = postingId ? await slugFromPostingId(postingId) : null;
+  if (slug) revalidatePath(`/hr/recruitment/${slug}`);
+}
+
+// ---------------------------------------------------------------------
+// 5) 위원 삭제 — 채점 이력이 있으면 차단 (비활성화 권장).
+// ---------------------------------------------------------------------
+export async function deleteJudge(judgeId: string): Promise<void> {
+  await requireHrAdmin();
+  if (!judgeId) throw new Error("심사위원 정보가 누락되었습니다.");
+
+  // 채점 이력 확인 — 서류·면접 양쪽 모두.
+  const { count: docCount, error: dErr } = await supabase
+    .from("recruitment_document_scores")
+    .select("id", { count: "exact", head: true })
+    .eq("judge_id", judgeId);
+  if (dErr) throw new Error(dErr.message);
+  const { count: intCount, error: iErr } = await supabase
+    .from("recruitment_interview_scores")
+    .select("id", { count: "exact", head: true })
+    .eq("judge_id", judgeId);
+  if (iErr) throw new Error(iErr.message);
+
+  const total = (docCount ?? 0) + (intCount ?? 0);
+  if (total > 0) {
+    throw new Error(
+      `이 심사위원은 이미 ${total}건의 채점을 했습니다. 비활성화를 권장합니다.`
+    );
+  }
+
+  // 삭제 전에 slug 확보 (삭제 후엔 lookup 불가).
+  const postingId = await judgePostingId(judgeId);
+
+  const { error } = await supabase
+    .from("recruitment_judges")
+    .delete()
+    .eq("id", judgeId);
+  if (error) throw new Error(error.message);
+
+  const slug = postingId ? await slugFromPostingId(postingId) : null;
+  if (slug) revalidatePath(`/hr/recruitment/${slug}`);
+}
+
+// ---------------------------------------------------------------------
+// 6) 활성/비활성 토글 — 기존 점수는 보존.
+// ---------------------------------------------------------------------
+export async function toggleJudgeActive(judgeId: string): Promise<void> {
+  await requireHrAdmin();
+  if (!judgeId) throw new Error("심사위원 정보가 누락되었습니다.");
+
+  const { data, error } = await supabase
+    .from("recruitment_judges")
+    .select("is_active, posting_id")
+    .eq("id", judgeId)
+    .maybeSingle();
+  if (error) throw new Error(error.message);
+  if (!data) throw new Error("존재하지 않는 심사위원입니다.");
+  const current = (data as { is_active?: boolean }).is_active === true;
+  const postingId =
+    (data as { posting_id?: string }).posting_id ?? null;
+
+  const { error: upErr } = await supabase
+    .from("recruitment_judges")
+    .update({ is_active: !current })
+    .eq("id", judgeId);
+  if (upErr) throw new Error(upErr.message);
+
+  const slug = postingId ? await slugFromPostingId(postingId) : null;
+  if (slug) revalidatePath(`/hr/recruitment/${slug}`);
+}
+
+// ---------------------------------------------------------------------
+// 7) 표시 순서 일괄 변경 — 배열 순서대로 display_order = 0,1,2,...
+// ---------------------------------------------------------------------
+export async function reorderJudges(
+  postingId: string,
+  judgeIds: string[]
+): Promise<void> {
+  await requireHrAdmin();
+  if (!postingId) throw new Error("공고 정보가 누락되었습니다.");
+  if (!Array.isArray(judgeIds) || judgeIds.length === 0) return;
+
+  for (let i = 0; i < judgeIds.length; i++) {
+    const id = judgeIds[i];
+    if (!id) continue;
+    const { error } = await supabase
+      .from("recruitment_judges")
+      .update({ display_order: i })
+      .eq("id", id)
+      .eq("posting_id", postingId); // 안전망: 다른 공고 위원이 섞여있어도 무시.
+    if (error) throw new Error(error.message);
+  }
+
+  const slug = await slugFromPostingId(postingId);
+  if (slug) revalidatePath(`/hr/recruitment/${slug}`);
+}
+
+// =====================================================================
+// 외부위원 풀 (external_judges_pool) — 마스터 데이터 관리
+//   * 공고 무관하게 1회 등록, 여러 공고에 재사용
+//   * 로그인: (name, phone) + 공고측 recruitment_judges.is_active 다층 체크
+// =====================================================================
+
+// ---------------------------------------------------------------------
+// E1) 풀 조회 — phone/소속 등 PII 포함이므로 관장·부장만.
+// ---------------------------------------------------------------------
+export async function listExternalJudges(): Promise<ExternalJudge[]> {
+  await requireHrAdmin();
+  const { data, error } = await supabase
+    .from("external_judges_pool")
+    .select("*")
+    .order("created_at", { ascending: false });
+  if (error) throw new Error(error.message);
+  return (data ?? []).map((row) =>
+    normalizeExternalJudge(row as Record<string, unknown>)
+  );
+}
+
+// ---------------------------------------------------------------------
+// E2) 풀에 외부위원 신규 등록.
+// ---------------------------------------------------------------------
+export async function createExternalJudge(input: {
+  name: string;
+  phone: string;
+  affiliation: string;
+  default_role?: string;
+  notes?: string;
+  privacy_agreed: boolean;
+}): Promise<ExternalJudge> {
+  const me = await requireHrAdmin();
+  const name = input.name?.trim() ?? "";
+  const phone = normalizePhone(input.phone ?? "");
+  const affiliation = input.affiliation?.trim() ?? "";
+  const default_role =
+    (input.default_role?.trim() ?? "") || "외부위원";
+  const notes = input.notes?.trim() ? input.notes.trim() : null;
+
+  if (!name) throw new Error("이름을 입력해주세요.");
+  if (!affiliation) throw new Error("소속을 입력해주세요.");
+  if (!/^010\d{8}$/.test(phone)) {
+    throw new Error("휴대전화는 010 으로 시작하는 11자리 숫자여야 합니다.");
+  }
+  if (input.privacy_agreed !== true) {
+    throw new Error("개인정보 수집 동의가 필요합니다.");
+  }
+
+  // (name, phone) UNIQUE — DB 제약이 있지만 친절한 메시지 위해 선체크.
+  const { data: dup, error: dupErr } = await supabase
+    .from("external_judges_pool")
+    .select("id")
+    .eq("name", name)
+    .eq("phone", phone)
+    .maybeSingle();
+  if (dupErr) throw new Error(dupErr.message);
+  if (dup) {
+    throw new Error("이미 등록된 외부위원입니다 (이름·휴대전화 중복).");
+  }
+
+  const now = new Date().toISOString();
+  const { data: inserted, error: insErr } = await supabase
+    .from("external_judges_pool")
+    .insert({
+      name,
+      phone,
+      affiliation,
+      default_role,
+      notes,
+      privacy_agreed_at: now,
+      privacy_agreed_by: me.name,
+      is_active: true,
+      created_by: me.name,
+    })
+    .select("*")
+    .single();
+  if (insErr) throw new Error(insErr.message);
+
+  revalidatePath("/hr/recruitment");
+  return normalizeExternalJudge(inserted as Record<string, unknown>);
+}
+
+// ---------------------------------------------------------------------
+// E3) 풀 정보 수정 — is_active 는 toggle 액션으로 분리.
+// ---------------------------------------------------------------------
+export async function updateExternalJudge(
+  id: string,
+  patch: {
+    name?: string;
+    phone?: string;
+    affiliation?: string;
+    default_role?: string;
+    notes?: string;
+  }
+): Promise<void> {
+  await requireHrAdmin();
+  if (!id) throw new Error("외부위원 정보가 누락되었습니다.");
+
+  const update: Record<string, unknown> = {};
+  if (patch.name !== undefined) {
+    const v = patch.name.trim();
+    if (!v) throw new Error("이름을 입력해주세요.");
+    update.name = v;
+  }
+  if (patch.phone !== undefined) {
+    const v = normalizePhone(patch.phone);
+    if (!/^010\d{8}$/.test(v)) {
+      throw new Error("휴대전화는 010 으로 시작하는 11자리 숫자여야 합니다.");
+    }
+    update.phone = v;
+  }
+  if (patch.affiliation !== undefined) {
+    const v = patch.affiliation.trim();
+    if (!v) throw new Error("소속을 입력해주세요.");
+    update.affiliation = v;
+  }
+  if (patch.default_role !== undefined) {
+    const v = patch.default_role.trim();
+    update.default_role = v || "외부위원";
+  }
+  if (patch.notes !== undefined) {
+    const v = patch.notes.trim();
+    update.notes = v || null;
+  }
+  if (Object.keys(update).length === 0) return;
+
+  const { error } = await supabase
+    .from("external_judges_pool")
+    .update(update)
+    .eq("id", id);
+  if (error) {
+    // (name, phone) UNIQUE 위반을 친절한 메시지로 변환.
+    const code = (error as { code?: string }).code ?? "";
+    if (code === "23505" || /unique/i.test(error.message)) {
+      throw new Error("동일한 이름·휴대전화 조합이 이미 존재합니다.");
+    }
+    throw new Error(error.message);
+  }
+
+  revalidatePath("/hr/recruitment");
+}
+
+// ---------------------------------------------------------------------
+// E4) 풀 활성/비활성 토글.
+//    비활성화 시: 어떤 공고에라도 활성 위원으로 배정돼 있으면 차단.
+//    (공고측 위원을 먼저 비활성화하라고 안내)
+// ---------------------------------------------------------------------
+export async function toggleExternalJudgeActive(id: string): Promise<void> {
+  await requireHrAdmin();
+  if (!id) throw new Error("외부위원 정보가 누락되었습니다.");
+
+  const { data, error } = await supabase
+    .from("external_judges_pool")
+    .select("is_active")
+    .eq("id", id)
+    .maybeSingle();
+  if (error) throw new Error(error.message);
+  if (!data) throw new Error("존재하지 않는 외부위원입니다.");
+  const current = (data as { is_active?: boolean }).is_active === true;
+
+  // 활성 → 비활성으로 가는 경우에만 참여 중 채용 체크.
+  // 단, 이미 종료(closed/archived)된 공고는 카운트에서 제외 — 풀 정리를 막을 이유 없음.
+  if (current) {
+    const { data: rows, error: cErr } = await supabase
+      .from("recruitment_judges")
+      .select("id, posting:recruitment_postings!inner(status)")
+      .eq("external_pool_id", id)
+      .eq("is_active", true);
+    if (cErr) throw new Error(cErr.message);
+    const activeRows = (rows ?? []).filter((r) => {
+      const p = (r as { posting?: { status?: string } | { status?: string }[] })
+        .posting;
+      const status = Array.isArray(p) ? p[0]?.status : p?.status;
+      return status !== "closed" && status !== "archived";
+    });
+    const n = activeRows.length;
+    if (n > 0) {
+      throw new Error(
+        `현재 ${n}건의 진행 중 채용에 참여 중입니다. 먼저 공고측 위원을 비활성화하세요.`
+      );
+    }
+  }
+
+  const { error: upErr } = await supabase
+    .from("external_judges_pool")
+    .update({ is_active: !current })
+    .eq("id", id);
+  if (upErr) throw new Error(upErr.message);
+
+  revalidatePath("/hr/recruitment");
+}
+
+// ---------------------------------------------------------------------
+// E5) 풀에서 외부위원 삭제 — 어떤 공고에라도 사용 이력이 있으면 차단.
+// ---------------------------------------------------------------------
+export async function deleteExternalJudge(id: string): Promise<void> {
+  await requireHrAdmin();
+  if (!id) throw new Error("외부위원 정보가 누락되었습니다.");
+
+  // 사용 이력(활성/비활성 무관) 체크.
+  const { count, error: cErr } = await supabase
+    .from("recruitment_judges")
+    .select("id", { count: "exact", head: true })
+    .eq("external_pool_id", id);
+  if (cErr) throw new Error(cErr.message);
+  const n = count ?? 0;
+  if (n > 0) {
+    throw new Error(
+      `이 외부위원은 이미 ${n}건의 채용에 사용되었습니다. 비활성화를 권장합니다.`
+    );
+  }
+
+  const { error } = await supabase
+    .from("external_judges_pool")
+    .delete()
+    .eq("id", id);
+  if (error) throw new Error(error.message);
+
+  revalidatePath("/hr/recruitment");
+}
+
+// =====================================================================
+// 외부위원 로그인 인증 — 누구나 호출 가능 (외부위원 로그인 페이지에서 사용)
+//   다층 체크:
+//     1) phone 정규화 (하이픈/공백 제거 → 11자리)
+//     2) 풀에서 (name, phone, is_active=true) 일치 행 확인
+//     3) 공고 slug 존재 확인
+//     4) 공고 status 가 closed/archived 가 아닌지 확인 (종료된 채용 차단)
+//     5) 해당 공고의 recruitment_judges 에 풀ID 가 is_active=true 로 등록돼 있는지 확인
+//   어느 한 단계라도 실패하면 null 반환 (어느 단계에서 실패했는지 노출 안 함)
+// =====================================================================
+export async function authenticateExternalJudge(input: {
+  postingSlug: string;
+  name: string;
+  phone: string;
+}): Promise<{ judge: Judge; posting: RecruitmentPosting } | null> {
+  const slug = input.postingSlug?.trim() ?? "";
+  const name = input.name?.trim() ?? "";
+  const phone = normalizePhone(input.phone ?? "");
+  if (!slug || !name || !phone) return null;
+
+  // 1) 풀 인증 — 활성 외부위원만.
+  const { data: pool, error: pErr } = await supabase
+    .from("external_judges_pool")
+    .select("id")
+    .eq("name", name)
+    .eq("phone", phone)
+    .eq("is_active", true)
+    .maybeSingle();
+  if (pErr || !pool) return null;
+  const poolId = String((pool as { id?: string }).id ?? "");
+  if (!poolId) return null;
+
+  // 2) 공고 조회.
+  const { data: posting, error: postErr } = await supabase
+    .from("recruitment_postings")
+    .select("*")
+    .eq("slug", slug)
+    .maybeSingle();
+  if (postErr || !posting) return null;
+  const postingId = String((posting as { id?: string }).id ?? "");
+  if (!postingId) return null;
+
+  // 3) 공고 status 차단 — 종료된 채용은 위원도 더 이상 접근 불가.
+  //    관장이 위원측 토글을 안 껐어도 status 만 closed/archived 면 자동 차단.
+  const postingStatus = String(
+    (posting as { status?: string }).status ?? ""
+  );
+  if (postingStatus === "closed" || postingStatus === "archived") {
+    return null;
+  }
+
+  // 4) 본 공고에 풀ID 가 활성 위원으로 등록돼 있는지 확인.
+  const { data: judge, error: jErr } = await supabase
+    .from("recruitment_judges")
+    .select("*")
+    .eq("posting_id", postingId)
+    .eq("external_pool_id", poolId)
+    .eq("is_active", true)
+    .maybeSingle();
+  if (jErr || !judge) return null;
+
+  return {
+    judge: normalizeJudge(judge as Record<string, unknown>),
+    posting: normalizeRecruitmentPosting(posting as Record<string, unknown>),
+  };
+}
+
+// =====================================================================
+// 외부위원 세션 (쿠키 'dongrae_external_judge')
+//   * 기존 직원/관리자 세션(Session in app/actions.ts)과 완전 분리.
+//     getSession() 은 외부위원을 인식하지 못함 — 의도된 격리.
+//   * 쿠키 값: ExternalJudgeSession 객체의 JSON 문자열.
+//   * 유효기간 8시간 — 면접 당일 단위로 만료.
+//   * 매 요청마다 requireExternalJudge() 가 DB 재검증을 수행하므로,
+//     쿠키 발급 후 관리자가 위원/공고를 비활성화해도 즉시 차단됨.
+// =====================================================================
+
+const EXTERNAL_JUDGE_COOKIE = "dongrae_external_judge";
+const EXTERNAL_JUDGE_MAX_AGE = 60 * 60 * 8; // 8시간
+
+export type ExternalJudgeSession = {
+  judgeId: string;
+  externalPoolId: string;
+  name: string;
+  postingId: string;
+  postingSlug: string;
+};
+
+// ---------------------------------------------------------------------
+// loginExternalJudge — authenticateExternalJudge 결과를 쿠키에 봉인.
+//   실패 시 어디서 실패했는지 노출하지 않고 일반적 메시지 반환.
+// ---------------------------------------------------------------------
+export async function loginExternalJudge(input: {
+  postingSlug: string;
+  name: string;
+  phone: string;
+}): Promise<{ success: boolean; error?: string }> {
+  const auth = await authenticateExternalJudge(input);
+  if (!auth) {
+    return {
+      success: false,
+      error: "이름 또는 연락처가 일치하지 않습니다.",
+    };
+  }
+
+  const session: ExternalJudgeSession = {
+    judgeId: auth.judge.id,
+    externalPoolId: auth.judge.external_pool_id ?? "",
+    name: auth.judge.name,
+    postingId: auth.posting.id,
+    postingSlug: auth.posting.slug,
+  };
+
+  const store = await cookies();
+  store.set(EXTERNAL_JUDGE_COOKIE, JSON.stringify(session), {
+    httpOnly: true,
+    sameSite: "lax",
+    path: "/",
+    maxAge: EXTERNAL_JUDGE_MAX_AGE,
+    secure: process.env.NODE_ENV === "production",
+  });
+  return { success: true };
+}
+
+// ---------------------------------------------------------------------
+// logoutExternalJudge — 쿠키 삭제. 실패해도 조용히 통과.
+// ---------------------------------------------------------------------
+export async function logoutExternalJudge(): Promise<void> {
+  const store = await cookies();
+  store.delete(EXTERNAL_JUDGE_COOKIE);
+}
+
+// ---------------------------------------------------------------------
+// getExternalJudgeSession — 쿠키만 신뢰. DB 조회 없음 (가벼움).
+//   파싱 실패·필수 필드 누락 시 null. 페이지가 단순 분기에 사용.
+// ---------------------------------------------------------------------
+export async function getExternalJudgeSession(): Promise<ExternalJudgeSession | null> {
+  const store = await cookies();
+  const raw = store.get(EXTERNAL_JUDGE_COOKIE)?.value;
+  if (!raw) return null;
+  try {
+    const parsed = JSON.parse(raw) as Partial<ExternalJudgeSession>;
+    if (
+      typeof parsed?.judgeId === "string" &&
+      parsed.judgeId.length > 0 &&
+      typeof parsed?.externalPoolId === "string" &&
+      typeof parsed?.name === "string" &&
+      typeof parsed?.postingId === "string" &&
+      parsed.postingId.length > 0 &&
+      typeof parsed?.postingSlug === "string" &&
+      parsed.postingSlug.length > 0
+    ) {
+      return parsed as ExternalJudgeSession;
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+// ---------------------------------------------------------------------
+// requireExternalJudge — 쿠키 + DB 다층 재검증. 보호된 페이지/액션에서 사용.
+//   1) 쿠키 존재
+//   2) recruitment_judges.is_active=true 인지 DB 재확인
+//   3) 공고 status 가 closed/archived 가 아닌지 DB 재확인
+//   어느 단계라도 실패하면 throw — 호출 측에서 catch 후 로그인 페이지로 redirect 권장.
+// ---------------------------------------------------------------------
+export async function requireExternalJudge(): Promise<ExternalJudgeSession> {
+  const session = await getExternalJudgeSession();
+  if (!session) throw new Error("외부위원 로그인이 필요합니다.");
+
+  // 2) 위원 재검증.
+  const { data: judge, error: jErr } = await supabase
+    .from("recruitment_judges")
+    .select("is_active")
+    .eq("id", session.judgeId)
+    .maybeSingle();
+  if (jErr) throw new Error("세션 검증 실패: " + jErr.message);
+  if (!judge || (judge as { is_active?: boolean }).is_active !== true) {
+    throw new Error("외부위원 자격이 종료되었습니다. 다시 로그인해주세요.");
+  }
+
+  // 3) 공고 status 재검증.
+  const { data: posting, error: pErr } = await supabase
+    .from("recruitment_postings")
+    .select("status")
+    .eq("id", session.postingId)
+    .maybeSingle();
+  if (pErr) throw new Error("세션 검증 실패: " + pErr.message);
+  if (!posting) {
+    throw new Error("공고가 존재하지 않습니다.");
+  }
+  const status = String((posting as { status?: string }).status ?? "");
+  if (status === "closed" || status === "archived") {
+    throw new Error("이 채용은 종료되었습니다.");
+  }
+
+  return session;
 }
