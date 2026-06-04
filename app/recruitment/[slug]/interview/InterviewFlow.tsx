@@ -6,6 +6,7 @@ import {
   useState,
   useTransition,
   type PointerEvent as ReactPointerEvent,
+  type ReactNode,
 } from "react";
 import {
   badgeNeutral,
@@ -18,8 +19,11 @@ import {
 import {
   listInterviewCandidates,
   saveInterviewScore,
+  getInterviewApplicantDetail,
   type InterviewCandidate,
   type InterviewPosting,
+  type InterviewApplicantDetail,
+  type InterviewDoc,
 } from "./actions";
 
 // 태블릿 친화 — 큰 글씨, 큰 버튼, 터치 친화.
@@ -498,6 +502,8 @@ function ScoreStep({
   const [error, setError] = useState<string | null>(null);
   const [ok, setOk] = useState<string | null>(null);
   const [pending, startTransition] = useTransition();
+  // 모바일 탭 — 좁은 화면에서 지원서/채점 전환 (넓은 화면은 항상 2단).
+  const [tab, setTab] = useState<"app" | "score">("app");
 
   const total = isAbsent ? 0 : (q1 ?? 0) + (q2 ?? 0) + (q3 ?? 0) + (q4 ?? 0);
   const allChosen =
@@ -546,7 +552,7 @@ function ScoreStep({
   }
 
   return (
-    <section className="rounded-2xl border-2 border-brand-blue bg-hr-bg p-5 shadow-sm sm:p-6 md:p-8">
+    <section className="rounded-2xl border-2 border-brand-blue bg-hr-bg p-4 shadow-sm sm:p-6 md:p-8">
       <div className="flex flex-wrap items-end justify-between gap-2 border-b-2 border-brand-blue/30 pb-4">
         <div>
           <p className="text-sm font-bold tracking-[0.2em] text-brand-blue md:text-base">
@@ -564,94 +570,385 @@ function ScoreStep({
         </button>
       </div>
 
-      <div className="mt-5">
-        <label className="flex items-center gap-3 rounded-xl border-2 border-line bg-card px-4 py-3">
-          <input
-            type="checkbox"
-            checked={isAbsent}
-            onChange={(e) => setIsAbsent(e.target.checked)}
-            className="h-5 w-5 rounded border-line text-stamp focus:ring-stamp"
-          />
-          <span className="text-base font-bold text-ink md:text-lg">
-            불참 처리 (전체 0점)
-          </span>
-        </label>
-      </div>
-
-      {!isAbsent && (
-        <div className="mt-5 space-y-5">
-          <ScoreItem
-            title="① 청소년활동 운영의 이해도 및 업무수행 능력"
-            sub="업무관련 지식 · 의사소통 능력 · 관계형성 능력 · 운영계획"
-            maxLabel="배점 20"
-            choices={Q1_CHOICES}
-            value={q1}
-            onChange={setQ1}
-          />
-          <ScoreItem
-            title="② 교육자적 자질과 인생·직업·사회관"
-            sub="교육자적 소양 · 용모·표정·인상 · 사고방식·성품"
-            maxLabel="배점 15"
-            choices={Q_15_CHOICES}
-            value={q2}
-            onChange={setQ2}
-          />
-          <ScoreItem
-            title="③ 성실성"
-            sub="근로의식 · 책임의식 · 성취욕구"
-            maxLabel="배점 15"
-            choices={Q_15_CHOICES}
-            value={q3}
-            onChange={setQ3}
-          />
-          <ScoreItem
-            title="④ 업무에 대한 적극성"
-            sub="입사 후 목표 · 달성의지 · 고난극복 경험"
-            maxLabel="배점 15"
-            choices={Q_15_CHOICES}
-            value={q4}
-            onChange={setQ4}
-          />
-        </div>
-      )}
-
-      <div className="mt-6 flex items-center justify-between rounded-xl bg-brand-blue-soft px-5 py-4">
-        <span className="text-base font-bold text-brand-blue md:text-lg">
-          합계
-        </span>
-        <span className="text-2xl font-bold text-brand-blue md:text-3xl">
-          {total} <span className="text-base">/ 65</span>
-        </span>
-      </div>
-
-      <div className="mt-5">
-        <label className={tabletLabelCls}>메모 (선택)</label>
-        <textarea
-          value={memo}
-          onChange={(e) => setMemo(e.target.value)}
-          rows={3}
-          placeholder="채점 메모 (선택)"
-          className={`${tabletInputCls} mt-1.5 resize-y`}
-        />
-      </div>
-
-      {error && <p className={`mt-4 ${noticeError}`}>{error}</p>}
-      {ok && <p className={`mt-4 ${noticeSuccess}`}>{ok}</p>}
-
-      <div className="mt-5 flex flex-col gap-2 sm:flex-row sm:justify-end">
-        <button type="button" onClick={onBack} className={tabletBtnSecondary}>
-          취소
+      {/* 모바일 탭 — 좁은 화면에서 지원서/채점 전환 */}
+      <div className="mt-4 grid grid-cols-2 gap-1.5 rounded-xl bg-brand-blue-soft p-1 lg:hidden">
+        <button
+          type="button"
+          onClick={() => setTab("app")}
+          className={mobileTabCls(tab === "app")}
+        >
+          📄 지원서
         </button>
         <button
           type="button"
-          onClick={handleSave}
-          disabled={pending || !allChosen}
-          className={`${tabletBtnPrimary} sm:px-10`}
+          onClick={() => setTab("score")}
+          className={mobileTabCls(tab === "score")}
         >
-          {pending ? "저장 중…" : "채점 완료 및 저장"}
+          📝 채점
         </button>
       </div>
+
+      <div className="mt-5 lg:grid lg:grid-cols-[3fr_2fr] lg:gap-6 lg:items-start">
+        {/* 좌측: 지원서 (페이지와 함께 스크롤) */}
+        <div className={`${tab === "app" ? "block" : "hidden"} lg:block`}>
+          <ApplicantDetailPanel
+            slug={posting.slug}
+            applicationId={candidate.application_id}
+          />
+        </div>
+
+        {/* 우측: 채점 폼 (넓은 화면에서 sticky) */}
+        <div className={`${tab === "score" ? "block" : "hidden"} lg:block`}>
+          <div className="space-y-5 lg:sticky lg:top-4">
+            <label className="flex items-center gap-3 rounded-xl border-2 border-line bg-card px-4 py-3">
+              <input
+                type="checkbox"
+                checked={isAbsent}
+                onChange={(e) => setIsAbsent(e.target.checked)}
+                className="h-5 w-5 rounded border-line text-stamp focus:ring-stamp"
+              />
+              <span className="text-base font-bold text-ink md:text-lg">
+                불참 처리 (전체 0점)
+              </span>
+            </label>
+
+            {!isAbsent && (
+              <div className="space-y-5">
+                <ScoreItem
+                  title="① 청소년활동 운영의 이해도 및 업무수행 능력"
+                  sub="업무관련 지식 · 의사소통 능력 · 관계형성 능력 · 운영계획"
+                  maxLabel="배점 20"
+                  choices={Q1_CHOICES}
+                  value={q1}
+                  onChange={setQ1}
+                />
+                <ScoreItem
+                  title="② 교육자적 자질과 인생·직업·사회관"
+                  sub="교육자적 소양 · 용모·표정·인상 · 사고방식·성품"
+                  maxLabel="배점 15"
+                  choices={Q_15_CHOICES}
+                  value={q2}
+                  onChange={setQ2}
+                />
+                <ScoreItem
+                  title="③ 성실성"
+                  sub="근로의식 · 책임의식 · 성취욕구"
+                  maxLabel="배점 15"
+                  choices={Q_15_CHOICES}
+                  value={q3}
+                  onChange={setQ3}
+                />
+                <ScoreItem
+                  title="④ 업무에 대한 적극성"
+                  sub="입사 후 목표 · 달성의지 · 고난극복 경험"
+                  maxLabel="배점 15"
+                  choices={Q_15_CHOICES}
+                  value={q4}
+                  onChange={setQ4}
+                />
+              </div>
+            )}
+
+            <div className="flex items-center justify-between rounded-xl bg-brand-blue-soft px-5 py-4">
+              <span className="text-base font-bold text-brand-blue md:text-lg">
+                합계
+              </span>
+              <span className="text-2xl font-bold text-brand-blue md:text-3xl">
+                {total} <span className="text-base">/ 65</span>
+              </span>
+            </div>
+
+            <div>
+              <label className={tabletLabelCls}>메모 (선택)</label>
+              <textarea
+                value={memo}
+                onChange={(e) => setMemo(e.target.value)}
+                rows={3}
+                placeholder="채점 메모 (선택)"
+                className={`${tabletInputCls} mt-1.5 resize-y`}
+              />
+            </div>
+
+            {error && <p className={noticeError}>{error}</p>}
+            {ok && <p className={noticeSuccess}>{ok}</p>}
+
+            <div className="flex flex-col gap-2 sm:flex-row sm:justify-end">
+              <button
+                type="button"
+                onClick={onBack}
+                className={tabletBtnSecondary}
+              >
+                취소
+              </button>
+              <button
+                type="button"
+                onClick={handleSave}
+                disabled={pending || !allChosen}
+                className={`${tabletBtnPrimary} sm:px-10`}
+              >
+                {pending ? "저장 중…" : "채점 완료 및 저장"}
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
     </section>
+  );
+}
+
+// 모바일 탭 버튼 스타일
+function mobileTabCls(active: boolean): string {
+  return `rounded-lg px-3 py-2.5 text-center text-sm font-bold transition ${
+    active ? "bg-brand-blue text-white shadow" : "text-brand-blue"
+  }`;
+}
+
+// =====================================================================
+// 좌측: 지원서 상세 패널
+//   * requireExternalJudge 인증 후 supabaseAdmin 으로 조회(서버 액션).
+//   * 연락처·이메일·주소·생년월일 등 민감정보는 서버에서 제외하고 내려줍니다.
+// =====================================================================
+function ApplicantDetailPanel({
+  slug,
+  applicationId,
+}: {
+  slug: string;
+  applicationId: string;
+}) {
+  const [detail, setDetail] = useState<InterviewApplicantDetail | null>(null);
+  const [err, setErr] = useState<string | null>(null);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    let cancelled = false;
+    setLoading(true);
+    setErr(null);
+    setDetail(null);
+    getInterviewApplicantDetail(applicationId)
+      .then((res) => {
+        if (cancelled) return;
+        if (res.ok) setDetail(res.detail);
+        else setErr(res.message);
+      })
+      .catch(() => {
+        if (!cancelled) setErr("지원서를 불러오지 못했습니다.");
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [applicationId]);
+
+  if (loading) {
+    return (
+      <div className="rounded-2xl border-2 border-line bg-card p-4 md:p-5">
+        <p className="py-10 text-center text-sm text-ink-muted">
+          지원서를 불러오는 중…
+        </p>
+      </div>
+    );
+  }
+
+  if (err) {
+    const needLogin = err.includes("로그인");
+    return (
+      <div className="rounded-2xl border-2 border-line bg-card p-6 text-center">
+        <p className="text-sm font-semibold text-stamp">{err}</p>
+        {needLogin && (
+          <a
+            href={`/recruitment/${slug}/judge-login`}
+            className={`${tabletBtnPrimary} mt-4 w-full sm:w-auto`}
+          >
+            외부위원 로그인
+          </a>
+        )}
+      </div>
+    );
+  }
+
+  if (!detail) return null;
+
+  return (
+    <div className="space-y-4">
+      <div className="rounded-2xl border-2 border-line bg-card p-4 md:p-5">
+        <h3 className="text-xl font-bold text-ink md:text-2xl">{detail.name}</h3>
+        <div className="mt-2 flex flex-wrap items-center gap-1.5">
+          <span className="text-sm text-ink-muted">지원분야</span>
+          {splitRecruitmentFields(detail.field).map((f, i) => (
+            <span key={`${f}-${i}`} className={fieldBadgeCls(i)}>
+              {f}
+            </span>
+          ))}
+        </div>
+      </div>
+
+      <DetailSection title="학력">
+        {detail.education.length === 0 ? (
+          <p className="text-sm text-ink-hint">학력 정보가 없습니다.</p>
+        ) : (
+          <ul className="space-y-2">
+            {detail.education.map((e, i) => (
+              <li key={i} className="rounded-lg bg-surface px-3 py-2 text-sm">
+                <span className="font-semibold text-ink">{e.school}</span>
+                {e.major && <span className="text-ink-body"> · {e.major}</span>}
+                {e.degree && (
+                  <span className="ml-1 text-xs text-ink-muted">
+                    ({e.degree})
+                  </span>
+                )}
+                {(e.enter_date || e.graduate_date) && (
+                  <div className="mt-0.5 text-xs text-ink-hint">
+                    {e.enter_date} ~ {e.graduate_date}
+                  </div>
+                )}
+              </li>
+            ))}
+          </ul>
+        )}
+      </DetailSection>
+
+      <DetailSection title="경력사항">
+        {detail.career.length === 0 ? (
+          <p className="text-sm text-ink-hint">경력 사항이 없습니다.</p>
+        ) : (
+          <ul className="space-y-2">
+            {detail.career.map((c, i) => (
+              <li key={i} className="rounded-lg bg-surface px-3 py-2 text-sm">
+                <span className="font-semibold text-ink">{c.company}</span>
+                {c.department && (
+                  <span className="text-ink-body"> · {c.department}</span>
+                )}
+                {(c.start_date || c.end_date || c.current) && (
+                  <div className="mt-0.5 text-xs text-ink-hint">
+                    {c.start_date} ~ {c.current ? "재직중" : c.end_date}
+                  </div>
+                )}
+                {c.duties && (
+                  <p className="mt-1 whitespace-pre-wrap text-xs text-ink-body">
+                    {c.duties}
+                  </p>
+                )}
+              </li>
+            ))}
+          </ul>
+        )}
+      </DetailSection>
+
+      <DetailSection title="자기소개서">
+        <div className="space-y-3">
+          <Statement
+            label="지원 동기 및 입사 후 포부"
+            value={detail.motivation}
+          />
+          <Statement label="자기개발 계획" value={detail.self_development} />
+          <Statement
+            label="직무관련 경력 및 활동 결과"
+            value={detail.career_summary}
+          />
+          <Statement
+            label="청소년관 · 직업관 · 삶의 철학"
+            value={detail.philosophy}
+          />
+        </div>
+      </DetailSection>
+
+      {detail.documents.length > 0 && (
+        <DetailSection title="첨부 서류">
+          <div className="space-y-4">
+            {detail.documents.map((d) => (
+              <DocPreview key={d.key} doc={d} />
+            ))}
+          </div>
+        </DetailSection>
+      )}
+    </div>
+  );
+}
+
+function DetailSection({
+  title,
+  children,
+}: {
+  title: string;
+  children: ReactNode;
+}) {
+  return (
+    <div className="rounded-2xl border-2 border-line bg-card p-4 md:p-5">
+      <h4 className="text-sm font-bold tracking-wide text-brand-blue md:text-base">
+        {title}
+      </h4>
+      <div className="mt-3">{children}</div>
+    </div>
+  );
+}
+
+function Statement({
+  label,
+  value,
+}: {
+  label: string;
+  value: string | null;
+}) {
+  return (
+    <div>
+      <p className="text-xs font-bold text-ink-muted md:text-sm">{label}</p>
+      {value && value.trim() ? (
+        <p className="mt-1 whitespace-pre-wrap rounded-lg bg-surface px-3 py-2 text-sm leading-relaxed text-ink-body">
+          {value}
+        </p>
+      ) : (
+        <p className="mt-1 text-xs text-ink-hint">작성된 내용이 없습니다.</p>
+      )}
+    </div>
+  );
+}
+
+function DocPreview({ doc }: { doc: InterviewDoc }) {
+  return (
+    <div>
+      <div className="mb-1.5 flex items-center justify-between gap-2">
+        <p className="text-sm font-semibold text-ink">{doc.label}</p>
+        {doc.url && (
+          <a
+            href={doc.url}
+            target="_blank"
+            rel="noreferrer"
+            className="shrink-0 text-xs font-semibold text-brand-blue hover:underline"
+          >
+            새 창 ↗
+          </a>
+        )}
+      </div>
+      {!doc.url ? (
+        <p className="rounded-lg border border-dashed border-line bg-surface px-3 py-4 text-center text-xs text-ink-hint">
+          미제출
+        </p>
+      ) : doc.kind === "pdf" ? (
+        <iframe
+          src={doc.url}
+          title={doc.label}
+          className="h-[420px] w-full rounded-lg border border-line bg-white md:h-[520px]"
+        />
+      ) : doc.kind === "image" ? (
+        // eslint-disable-next-line @next/next/no-img-element
+        <img
+          src={doc.url}
+          alt={doc.label}
+          className="w-full rounded-lg border border-line"
+        />
+      ) : (
+        <a
+          href={doc.url}
+          target="_blank"
+          rel="noreferrer"
+          className="block rounded-lg border border-line bg-surface px-3 py-4 text-center text-sm font-semibold text-brand-blue hover:bg-brand-blue-soft"
+        >
+          파일 열기 ↗
+        </a>
+      )}
+    </div>
   );
 }
 

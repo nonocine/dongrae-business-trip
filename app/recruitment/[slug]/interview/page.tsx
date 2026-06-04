@@ -15,7 +15,7 @@ export default async function RecruitmentInterviewPage({
   if (!posting) notFound();
 
   return (
-    <main className="mx-auto w-full max-w-4xl flex-1 px-4 py-6 sm:px-6 sm:py-8 lg:py-10">
+    <main className="mx-auto w-full max-w-6xl flex-1 px-4 py-6 sm:px-6 sm:py-8 lg:py-10">
       <header className="mb-6 border-b border-line pb-5 sm:mb-8 sm:pb-6">
         <div className="flex items-center gap-4">
           {/* eslint-disable-next-line @next/next/no-img-element */}
