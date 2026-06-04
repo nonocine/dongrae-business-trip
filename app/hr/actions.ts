@@ -24,6 +24,7 @@ import {
   type CertificateIssued,
   type GenderType,
 } from "@/lib/supabase";
+import { supabaseAdmin } from "@/lib/supabaseAdmin";
 
 // =====================================================================
 // 인사 모듈 권한 — drivers.rank IN ('관장', '부장') 인 직원 세션만 통과.
@@ -107,7 +108,7 @@ export async function listDriversForHrProfile(): Promise<Driver[]> {
 // 전체 인사기록카드 목록 (직원명은 drivers 목록으로 매칭).
 export async function listEmployeeProfiles(): Promise<EmployeeProfile[]> {
   await requireHrAdmin();
-  const { data, error } = await supabase.from("employee_profiles").select("*");
+  const { data, error } = await supabaseAdmin.from("employee_profiles").select("*");
   if (error) throw new Error(error.message);
   return (data ?? []).map((row) =>
     normalizeEmployeeProfile(row as Record<string, unknown>)
@@ -120,7 +121,7 @@ export async function getEmployeeProfile(
 ): Promise<EmployeeProfile | null> {
   await requireHrAdmin();
   if (!driverId) return null;
-  const { data, error } = await supabase
+  const { data, error } = await supabaseAdmin
     .from("employee_profiles")
     .select("*")
     .eq("driver_id", driverId)
@@ -138,7 +139,7 @@ export async function saveEmployeeProfile(formData: FormData) {
   if (!driver_id) throw new Error("직원을 선택해주세요.");
 
   // 잠긴 카드는 수정 불가 (관장도 잠금 해제 전에는 수정 불가).
-  const { data: existing, error: exErr } = await supabase
+  const { data: existing, error: exErr } = await supabaseAdmin
     .from("employee_profiles")
     .select("is_locked")
     .eq("driver_id", driver_id)
@@ -203,7 +204,7 @@ export async function saveEmployeeProfile(formData: FormData) {
     updated_at: new Date().toISOString(),
   };
 
-  const { error } = await supabase
+  const { error } = await supabaseAdmin
     .from("employee_profiles")
     .upsert(row, { onConflict: "driver_id" });
   if (error) throw new Error(error.message);
@@ -216,7 +217,7 @@ export async function deleteEmployeeProfile(driverId: string) {
   await requireHrManagerOrAdmin();
   if (!driverId) throw new Error("직원 ID가 없습니다.");
 
-  const { data, error } = await supabase
+  const { data, error } = await supabaseAdmin
     .from("employee_profiles")
     .select("is_locked")
     .eq("driver_id", driverId)
@@ -229,7 +230,7 @@ export async function deleteEmployeeProfile(driverId: string) {
     );
   }
 
-  const { error: delErr } = await supabase
+  const { error: delErr } = await supabaseAdmin
     .from("employee_profiles")
     .delete()
     .eq("driver_id", driverId);
@@ -244,7 +245,7 @@ export async function getEmployeePhotoUrl(
 ): Promise<string | null> {
   await requireHrAdmin();
   if (!driverId) return null;
-  const { data, error } = await supabase
+  const { data, error } = await supabaseAdmin
     .from("employee_profiles")
     .select("photo_url")
     .eq("driver_id", driverId)
@@ -458,7 +459,7 @@ export async function deleteRecruitmentPosting(
 
     // 지원자가 한 명이라도 있으면 onDelete restrict 로 막힙니다.
     // 미리 검사해서 친절한 메시지를 반환합니다.
-    const { count, error: cErr } = await supabase
+    const { count, error: cErr } = await supabaseAdmin
       .from("recruitment_applications")
       .select("id", { count: "exact", head: true })
       .eq("posting_id", id);

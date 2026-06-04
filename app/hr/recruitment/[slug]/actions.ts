@@ -23,6 +23,7 @@ import {
   type ExternalJudge,
   type RecruitmentPosting,
 } from "@/lib/supabase";
+import { supabaseAdmin } from "@/lib/supabaseAdmin";
 import { requireHrAdmin } from "@/app/hr/actions";
 
 // =====================================================================
@@ -208,7 +209,7 @@ export async function listApplicantsForAdmin(
   if (!adm) return [];
   const { posting, requiredDocs } = adm;
 
-  const { data: apps, error: aErr } = await supabase
+  const { data: apps, error: aErr } = await supabaseAdmin
     .from("recruitment_applications")
     .select(
       "id, applicant_id, status, submitted_at, applicant:recruitment_applicants(*)"
@@ -291,7 +292,7 @@ export async function listScoresForPosting(
   const adm = await getPostingForAdmin(slug);
   if (!adm) return [];
 
-  const { data: appRows, error: e1 } = await supabase
+  const { data: appRows, error: e1 } = await supabaseAdmin
     .from("recruitment_applications")
     .select("id")
     .eq("posting_id", adm.posting.id);
@@ -299,7 +300,7 @@ export async function listScoresForPosting(
   const ids = (appRows ?? []).map((x) => String((x as { id: unknown }).id));
   if (ids.length === 0) return [];
 
-  const { data, error } = await supabase
+  const { data, error } = await supabaseAdmin
     .from("recruitment_scores")
     .select("*")
     .in("application_id", ids);
@@ -359,7 +360,7 @@ export async function saveScreeningScore(
         ? memoRaw.trim()
         : null;
 
-    const { error } = await supabase.from("recruitment_scores").upsert(
+    const { error } = await supabaseAdmin.from("recruitment_scores").upsert(
       {
         application_id: applicationId,
         stage: "screening",
@@ -408,7 +409,7 @@ export async function updateApplicationStatus(
       patch.hired_at = new Date().toISOString().slice(0, 10);
     }
 
-    const { error } = await supabase
+    const { error } = await supabaseAdmin
       .from("recruitment_applications")
       .update(patch)
       .eq("id", applicationId);
@@ -449,7 +450,7 @@ export async function bulkAnonymizeApplicants(slug: string): Promise<
     const postingId = adm.posting.id;
 
     // 본 공고의 applications + applicants 조회.
-    const { data: rows, error } = await supabase
+    const { data: rows, error } = await supabaseAdmin
       .from("recruitment_applications")
       .select(
         "id, applicant_id, converted_to_employee_id, applicant:recruitment_applicants(id, photo_url, documents)"
@@ -501,7 +502,7 @@ export async function bulkAnonymizeApplicants(slug: string): Promise<
       // 행마다 다른 placeholder(email) 필요해서 한 줄씩 업데이트.
       for (const id of applicantIds) {
         const placeholderEmail = `deleted-${id.slice(0, 8)}@deleted.local`;
-        const { error: upErr } = await supabase
+        const { error: upErr } = await supabaseAdmin
           .from("recruitment_applicants")
           .update({
             name: "[개인정보 삭제됨]",
@@ -565,7 +566,7 @@ async function slugFromPostingId(postingId: string): Promise<string | null> {
 }
 
 async function judgePostingId(judgeId: string): Promise<string | null> {
-  const { data, error } = await supabase
+  const { data, error } = await supabaseAdmin
     .from("recruitment_judges")
     .select("posting_id")
     .eq("id", judgeId)
@@ -575,7 +576,7 @@ async function judgePostingId(judgeId: string): Promise<string | null> {
 }
 
 async function nextDisplayOrder(postingId: string): Promise<number> {
-  const { data, error } = await supabase
+  const { data, error } = await supabaseAdmin
     .from("recruitment_judges")
     .select("display_order")
     .eq("posting_id", postingId)
@@ -592,7 +593,7 @@ async function nextDisplayOrder(postingId: string): Promise<number> {
 // ---------------------------------------------------------------------
 export async function listJudges(postingId: string): Promise<Judge[]> {
   if (!postingId) return [];
-  const { data, error } = await supabase
+  const { data, error } = await supabaseAdmin
     .from("recruitment_judges")
     .select("*")
     .eq("posting_id", postingId)
@@ -628,7 +629,7 @@ export async function addInternalJudge(input: {
   if (!driver) throw new Error("존재하지 않는 직원입니다.");
 
   // 같은 공고에 같은 driver_id 가 이미 등록돼 있는지 체크.
-  const { data: dup, error: dupErr } = await supabase
+  const { data: dup, error: dupErr } = await supabaseAdmin
     .from("recruitment_judges")
     .select("id")
     .eq("posting_id", postingId)
@@ -639,7 +640,7 @@ export async function addInternalJudge(input: {
 
   const order = await nextDisplayOrder(postingId);
 
-  const { data: inserted, error: insErr } = await supabase
+  const { data: inserted, error: insErr } = await supabaseAdmin
     .from("recruitment_judges")
     .insert({
       posting_id: postingId,
@@ -679,7 +680,7 @@ export async function addExternalJudge(input: {
   if (!externalPoolId) throw new Error("외부위원을 선택해주세요.");
 
   // 풀 정보 조회 — name/affiliation 스냅샷, default_role 폴백.
-  const { data: pool, error: pErr } = await supabase
+  const { data: pool, error: pErr } = await supabaseAdmin
     .from("external_judges_pool")
     .select("id, name, affiliation, default_role, is_active")
     .eq("id", externalPoolId)
@@ -697,7 +698,7 @@ export async function addExternalJudge(input: {
   }
 
   // 같은 공고에 같은 풀 항목이 이미 등록돼 있는지 체크.
-  const { data: dup, error: dupErr } = await supabase
+  const { data: dup, error: dupErr } = await supabaseAdmin
     .from("recruitment_judges")
     .select("id")
     .eq("posting_id", postingId)
@@ -709,7 +710,7 @@ export async function addExternalJudge(input: {
   const role = roleInput || poolRow.default_role || "외부위원";
   const order = await nextDisplayOrder(postingId);
 
-  const { data: inserted, error: insErr } = await supabase
+  const { data: inserted, error: insErr } = await supabaseAdmin
     .from("recruitment_judges")
     .insert({
       posting_id: postingId,
@@ -761,7 +762,7 @@ export async function updateJudge(
   }
   if (Object.keys(update).length === 0) return;
 
-  const { error } = await supabase
+  const { error } = await supabaseAdmin
     .from("recruitment_judges")
     .update(update)
     .eq("id", judgeId);
@@ -780,12 +781,12 @@ export async function deleteJudge(judgeId: string): Promise<void> {
   if (!judgeId) throw new Error("심사위원 정보가 누락되었습니다.");
 
   // 채점 이력 확인 — 서류·면접 양쪽 모두.
-  const { count: docCount, error: dErr } = await supabase
+  const { count: docCount, error: dErr } = await supabaseAdmin
     .from("recruitment_document_scores")
     .select("id", { count: "exact", head: true })
     .eq("judge_id", judgeId);
   if (dErr) throw new Error(dErr.message);
-  const { count: intCount, error: iErr } = await supabase
+  const { count: intCount, error: iErr } = await supabaseAdmin
     .from("recruitment_interview_scores")
     .select("id", { count: "exact", head: true })
     .eq("judge_id", judgeId);
@@ -801,7 +802,7 @@ export async function deleteJudge(judgeId: string): Promise<void> {
   // 삭제 전에 slug 확보 (삭제 후엔 lookup 불가).
   const postingId = await judgePostingId(judgeId);
 
-  const { error } = await supabase
+  const { error } = await supabaseAdmin
     .from("recruitment_judges")
     .delete()
     .eq("id", judgeId);
@@ -818,7 +819,7 @@ export async function toggleJudgeActive(judgeId: string): Promise<void> {
   await requireHrAdmin();
   if (!judgeId) throw new Error("심사위원 정보가 누락되었습니다.");
 
-  const { data, error } = await supabase
+  const { data, error } = await supabaseAdmin
     .from("recruitment_judges")
     .select("is_active, posting_id")
     .eq("id", judgeId)
@@ -829,7 +830,7 @@ export async function toggleJudgeActive(judgeId: string): Promise<void> {
   const postingId =
     (data as { posting_id?: string }).posting_id ?? null;
 
-  const { error: upErr } = await supabase
+  const { error: upErr } = await supabaseAdmin
     .from("recruitment_judges")
     .update({ is_active: !current })
     .eq("id", judgeId);
@@ -853,7 +854,7 @@ export async function reorderJudges(
   for (let i = 0; i < judgeIds.length; i++) {
     const id = judgeIds[i];
     if (!id) continue;
-    const { error } = await supabase
+    const { error } = await supabaseAdmin
       .from("recruitment_judges")
       .update({ display_order: i })
       .eq("id", id)
@@ -876,7 +877,7 @@ export async function reorderJudges(
 // ---------------------------------------------------------------------
 export async function listExternalJudges(): Promise<ExternalJudge[]> {
   await requireHrAdmin();
-  const { data, error } = await supabase
+  const { data, error } = await supabaseAdmin
     .from("external_judges_pool")
     .select("*")
     .order("created_at", { ascending: false });
@@ -915,7 +916,7 @@ export async function createExternalJudge(input: {
   }
 
   // (name, phone) UNIQUE — DB 제약이 있지만 친절한 메시지 위해 선체크.
-  const { data: dup, error: dupErr } = await supabase
+  const { data: dup, error: dupErr } = await supabaseAdmin
     .from("external_judges_pool")
     .select("id")
     .eq("name", name)
@@ -927,7 +928,7 @@ export async function createExternalJudge(input: {
   }
 
   const now = new Date().toISOString();
-  const { data: inserted, error: insErr } = await supabase
+  const { data: inserted, error: insErr } = await supabaseAdmin
     .from("external_judges_pool")
     .insert({
       name,
@@ -992,7 +993,7 @@ export async function updateExternalJudge(
   }
   if (Object.keys(update).length === 0) return;
 
-  const { error } = await supabase
+  const { error } = await supabaseAdmin
     .from("external_judges_pool")
     .update(update)
     .eq("id", id);
@@ -1017,7 +1018,7 @@ export async function toggleExternalJudgeActive(id: string): Promise<void> {
   await requireHrAdmin();
   if (!id) throw new Error("외부위원 정보가 누락되었습니다.");
 
-  const { data, error } = await supabase
+  const { data, error } = await supabaseAdmin
     .from("external_judges_pool")
     .select("is_active")
     .eq("id", id)
@@ -1029,7 +1030,7 @@ export async function toggleExternalJudgeActive(id: string): Promise<void> {
   // 활성 → 비활성으로 가는 경우에만 참여 중 채용 체크.
   // 단, 이미 종료(closed/archived)된 공고는 카운트에서 제외 — 풀 정리를 막을 이유 없음.
   if (current) {
-    const { data: rows, error: cErr } = await supabase
+    const { data: rows, error: cErr } = await supabaseAdmin
       .from("recruitment_judges")
       .select("id, posting:recruitment_postings!inner(status)")
       .eq("external_pool_id", id)
@@ -1049,7 +1050,7 @@ export async function toggleExternalJudgeActive(id: string): Promise<void> {
     }
   }
 
-  const { error: upErr } = await supabase
+  const { error: upErr } = await supabaseAdmin
     .from("external_judges_pool")
     .update({ is_active: !current })
     .eq("id", id);
@@ -1066,7 +1067,7 @@ export async function deleteExternalJudge(id: string): Promise<void> {
   if (!id) throw new Error("외부위원 정보가 누락되었습니다.");
 
   // 사용 이력(활성/비활성 무관) 체크.
-  const { count, error: cErr } = await supabase
+  const { count, error: cErr } = await supabaseAdmin
     .from("recruitment_judges")
     .select("id", { count: "exact", head: true })
     .eq("external_pool_id", id);
@@ -1078,7 +1079,7 @@ export async function deleteExternalJudge(id: string): Promise<void> {
     );
   }
 
-  const { error } = await supabase
+  const { error } = await supabaseAdmin
     .from("external_judges_pool")
     .delete()
     .eq("id", id);
@@ -1108,7 +1109,7 @@ export async function authenticateExternalJudge(input: {
   if (!slug || !name || !phone) return null;
 
   // 1) 풀 인증 — 활성 외부위원만.
-  const { data: pool, error: pErr } = await supabase
+  const { data: pool, error: pErr } = await supabaseAdmin
     .from("external_judges_pool")
     .select("id")
     .eq("name", name)
@@ -1139,7 +1140,7 @@ export async function authenticateExternalJudge(input: {
   }
 
   // 4) 본 공고에 풀ID 가 활성 위원으로 등록돼 있는지 확인.
-  const { data: judge, error: jErr } = await supabase
+  const { data: judge, error: jErr } = await supabaseAdmin
     .from("recruitment_judges")
     .select("*")
     .eq("posting_id", postingId)
@@ -1259,7 +1260,7 @@ export async function requireExternalJudge(): Promise<ExternalJudgeSession> {
   if (!session) throw new Error("외부위원 로그인이 필요합니다.");
 
   // 2) 위원 재검증.
-  const { data: judge, error: jErr } = await supabase
+  const { data: judge, error: jErr } = await supabaseAdmin
     .from("recruitment_judges")
     .select("is_active")
     .eq("id", session.judgeId)

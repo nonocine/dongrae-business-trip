@@ -21,6 +21,7 @@ import {
   type EmployeeProfile,
   type GenderType,
 } from "@/lib/supabase";
+import { supabaseAdmin } from "@/lib/supabaseAdmin";
 
 // 세션의 직원 이름으로 drivers row 를 조회합니다.
 // 타 직원 카드 접근을 막기 위해 driver_id 는 항상 세션에서만 도출합니다.
@@ -55,7 +56,7 @@ export async function getMyProfile(): Promise<{
   const driver = await getMyDriver();
   if (!driver) return null;
 
-  const { data, error } = await supabase
+  const { data, error } = await supabaseAdmin
     .from("employee_profiles")
     .select("*")
     .eq("driver_id", driver.id)
@@ -77,7 +78,7 @@ export async function saveMyProfile(formData: FormData) {
   const driver_id = driver.id;
 
   // 잠금 확인 — 잠긴 카드는 본인도 수정 불가 (클라이언트 readOnly 우회 차단).
-  const { data: existing, error: exErr } = await supabase
+  const { data: existing, error: exErr } = await supabaseAdmin
     .from("employee_profiles")
     .select("is_locked")
     .eq("driver_id", driver_id)
@@ -141,7 +142,7 @@ export async function saveMyProfile(formData: FormData) {
     updated_at: new Date().toISOString(),
   };
 
-  const { error } = await supabase
+  const { error } = await supabaseAdmin
     .from("employee_profiles")
     .upsert(row, { onConflict: "driver_id" });
   if (error) throw new Error(error.message);
@@ -157,7 +158,7 @@ export async function saveMyProfile(formData: FormData) {
 export async function getMyPhotoUrl(): Promise<string | null> {
   const driver = await getMyDriver();
   if (!driver) return null;
-  const { data, error } = await supabase
+  const { data, error } = await supabaseAdmin
     .from("employee_profiles")
     .select("photo_url")
     .eq("driver_id", driver.id)
@@ -187,7 +188,7 @@ export async function uploadMyProfilePhoto(
     }
 
     // 기존 row 의 잠금/사진 경로 확인
-    const { data: existing, error: exErr } = await supabase
+    const { data: existing, error: exErr } = await supabaseAdmin
       .from("employee_profiles")
       .select("photo_url, is_locked")
       .eq("driver_id", driver.id)
@@ -205,7 +206,7 @@ export async function uploadMyProfilePhoto(
     const newPath = await uploadProfilePhoto(driver.id, file);
 
     // 2) DB 갱신 (photo_url 컬럼만 — 다른 입력값과 간섭 없음)
-    const { error: upErr } = await supabase
+    const { error: upErr } = await supabaseAdmin
       .from("employee_profiles")
       .upsert(
         {
@@ -243,7 +244,7 @@ export async function deleteMyProfilePhoto(): Promise<
     const driver = await getMyDriver();
     if (!driver) throw new Error("직원 로그인이 필요합니다.");
 
-    const { data: existing, error: exErr } = await supabase
+    const { data: existing, error: exErr } = await supabaseAdmin
       .from("employee_profiles")
       .select("photo_url, is_locked")
       .eq("driver_id", driver.id)
@@ -257,7 +258,7 @@ export async function deleteMyProfilePhoto(): Promise<
       ((existing as { photo_url?: unknown }).photo_url as string | null) ??
       null;
 
-    const { error: upErr } = await supabase
+    const { error: upErr } = await supabaseAdmin
       .from("employee_profiles")
       .update({ photo_url: null, updated_at: new Date().toISOString() })
       .eq("driver_id", driver.id);

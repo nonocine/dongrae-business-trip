@@ -18,6 +18,7 @@ import {
   type EmployeeAward,
   type EmployeeTraining,
 } from "@/lib/supabase";
+import { supabaseAdmin } from "@/lib/supabaseAdmin";
 
 // =====================================================================
 // 채용 지원 — 외부 지원자가 채용 공고에 직접 접수하는 흐름
@@ -244,7 +245,7 @@ export async function getApplicationDraft(
   const posting = await getApplyPosting(slug);
   if (!posting) return null;
 
-  const { data: appRaw, error: aErr } = await supabase
+  const { data: appRaw, error: aErr } = await supabaseAdmin
     .from("recruitment_applicants")
     .select("*")
     .eq("kakao_id", session.kakaoId)
@@ -254,7 +255,7 @@ export async function getApplicationDraft(
 
   const applicant = normalizeApplicant(appRaw as Record<string, unknown>);
 
-  const { data: rowRaw, error: rErr } = await supabase
+  const { data: rowRaw, error: rErr } = await supabaseAdmin
     .from("recruitment_applications")
     .select("*")
     .eq("posting_id", posting.id)
@@ -362,7 +363,7 @@ async function findExistingApplication(
   postingId: string,
   applicantId: string
 ): Promise<RecruitmentApplication | null> {
-  const { data, error } = await supabase
+  const { data, error } = await supabaseAdmin
     .from("recruitment_applications")
     .select("*")
     .eq("posting_id", postingId)
@@ -390,7 +391,7 @@ export async function saveApplicationDraft(
     let applicantId: string | null = null;
     let applicantNumber: string | null = null;
 
-    const { data: found, error: fErr } = await supabase
+    const { data: found, error: fErr } = await supabaseAdmin
       .from("recruitment_applicants")
       .select("id, applicant_number")
       .eq("kakao_id", kakaoId)
@@ -417,14 +418,14 @@ export async function saveApplicationDraft(
     const row = buildApplicantRow(formData);
 
     if (applicantId) {
-      const { error: upErr } = await supabase
+      const { error: upErr } = await supabaseAdmin
         .from("recruitment_applicants")
         .update(row)
         .eq("id", applicantId);
       if (upErr) throw new Error(upErr.message);
     } else {
       applicantNumber = generateApplicantNumber();
-      const { data: inserted, error: insErr } = await supabase
+      const { data: inserted, error: insErr } = await supabaseAdmin
         .from("recruitment_applicants")
         .insert({
           ...row,
@@ -438,7 +439,7 @@ export async function saveApplicationDraft(
     }
 
     // recruitment_applications upsert(draft).
-    const { data: appRow, error: appErr } = await supabase
+    const { data: appRow, error: appErr } = await supabaseAdmin
       .from("recruitment_applications")
       .upsert(
         {
@@ -509,7 +510,7 @@ export async function submitApplication(
     let applicantId: string | null = null;
     let applicantNumber: string | null = null;
 
-    const { data: found, error: fErr } = await supabase
+    const { data: found, error: fErr } = await supabaseAdmin
       .from("recruitment_applicants")
       .select("id, applicant_number")
       .eq("kakao_id", kakaoId)
@@ -536,14 +537,14 @@ export async function submitApplication(
     const row = buildApplicantRow(formData);
 
     if (applicantId) {
-      const { error: upErr } = await supabase
+      const { error: upErr } = await supabaseAdmin
         .from("recruitment_applicants")
         .update(row)
         .eq("id", applicantId);
       if (upErr) throw new Error(upErr.message);
     } else {
       applicantNumber = generateApplicantNumber();
-      const { data: inserted, error: insErr } = await supabase
+      const { data: inserted, error: insErr } = await supabaseAdmin
         .from("recruitment_applicants")
         .insert({
           ...row,
@@ -557,7 +558,7 @@ export async function submitApplication(
     }
 
     // 필수 첨부서류 검증 — 저장된 documents 확인.
-    const { data: docRow, error: dErr } = await supabase
+    const { data: docRow, error: dErr } = await supabaseAdmin
       .from("recruitment_applicants")
       .select("documents")
       .eq("id", applicantId)
@@ -578,7 +579,7 @@ export async function submitApplication(
     }
 
     // applications 행을 submitted 로 업데이트.
-    const { data: appRow, error: appErr } = await supabase
+    const { data: appRow, error: appErr } = await supabaseAdmin
       .from("recruitment_applications")
       .upsert(
         {
@@ -661,7 +662,7 @@ export async function uploadApplicantPhoto(
     }
 
     // 기존 사진 경로 보관(삭제용).
-    const { data: prev, error: pErr } = await supabase
+    const { data: prev, error: pErr } = await supabaseAdmin
       .from("recruitment_applicants")
       .select("photo_url")
       .eq("id", applicantId)
@@ -678,7 +679,7 @@ export async function uploadApplicantPhoto(
       .upload(newPath, file, { contentType: file.type, upsert: true });
     if (upErr) throw new Error(`사진 업로드 실패: ${upErr.message}`);
 
-    const { error: dbErr } = await supabase
+    const { error: dbErr } = await supabaseAdmin
       .from("recruitment_applicants")
       .update({
         photo_url: newPath,
@@ -716,7 +717,7 @@ export async function deleteApplicantPhoto(
       throw new Error("이미 접수 완료된 지원서는 수정할 수 없습니다.");
     }
 
-    const { data: prev, error: pErr } = await supabase
+    const { data: prev, error: pErr } = await supabaseAdmin
       .from("recruitment_applicants")
       .select("photo_url")
       .eq("id", applicantId)
@@ -727,7 +728,7 @@ export async function deleteApplicantPhoto(
         | string
         | null) ?? null;
 
-    const { error: dbErr } = await supabase
+    const { error: dbErr } = await supabaseAdmin
       .from("recruitment_applicants")
       .update({
         photo_url: null,
@@ -792,7 +793,7 @@ export async function uploadApplicantDocument(
     }
 
     // 기존 path 확보(확장자가 다르면 새 경로로 교체되므로 옛 파일 정리).
-    const { data: prev, error: pErr } = await supabase
+    const { data: prev, error: pErr } = await supabaseAdmin
       .from("recruitment_applicants")
       .select("documents")
       .eq("id", applicantId)
@@ -810,7 +811,7 @@ export async function uploadApplicantDocument(
     if (upErr) throw new Error(`업로드 실패: ${upErr.message}`);
 
     const nextDocs = { ...prevDocs, [docKey]: newPath };
-    const { error: dbErr } = await supabase
+    const { error: dbErr } = await supabaseAdmin
       .from("recruitment_applicants")
       .update({
         documents: nextDocs,
@@ -853,7 +854,7 @@ export async function deleteApplicantDocument(
       throw new Error("이미 접수 완료된 지원서는 수정할 수 없습니다.");
     }
 
-    const { data: prev, error: pErr } = await supabase
+    const { data: prev, error: pErr } = await supabaseAdmin
       .from("recruitment_applicants")
       .select("documents")
       .eq("id", applicantId)
@@ -868,7 +869,7 @@ export async function deleteApplicantDocument(
     const nextDocs = { ...prevDocs };
     delete nextDocs[docKey];
 
-    const { error: dbErr } = await supabase
+    const { error: dbErr } = await supabaseAdmin
       .from("recruitment_applicants")
       .update({
         documents: nextDocs,

@@ -2,6 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { supabase } from "@/lib/supabase";
+import { supabaseAdmin } from "@/lib/supabaseAdmin";
 
 // =====================================================================
 // 면접 채점 — /recruitment/[slug]/interview
@@ -58,7 +59,7 @@ export async function listInterviewCandidates(
   const p = await getInterviewPosting(slug);
   if (!p) return [];
 
-  const { data: apps, error } = await supabase
+  const { data: apps, error } = await supabaseAdmin
     .from("recruitment_applications")
     .select(
       "id, applicant_id, status, applicant:recruitment_applicants(applicant_number, name, birth_date)"
@@ -78,7 +79,7 @@ export async function listInterviewCandidates(
   let scoredSet = new Set<string>();
   const rn = reviewerName.trim();
   if (rn.length > 0 && appIds.length > 0) {
-    const { data: scored } = await supabase
+    const { data: scored } = await supabaseAdmin
       .from("recruitment_scores")
       .select("application_id")
       .eq("stage", "interview")
@@ -168,7 +169,7 @@ export async function saveInterviewScore(
     const memoRaw = String(formData.get("memo") ?? "").trim();
     const memo = memoRaw.length > 0 ? memoRaw : null;
 
-    const { error } = await supabase.from("recruitment_scores").upsert(
+    const { error } = await supabaseAdmin.from("recruitment_scores").upsert(
       {
         application_id: applicationId,
         stage: "interview",
