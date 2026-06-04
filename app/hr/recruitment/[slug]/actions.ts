@@ -1287,3 +1287,135 @@ export async function requireExternalJudge(): Promise<ExternalJudgeSession> {
 
   return session;
 }
+
+// =====================================================================
+// 2-D-4) 공고별 외부위원 배정 토글 — /hr/recruitment/[slug]/judges
+//   * external_judges_pool 의 위원을 본 공고에 켜고(배정)/끄는(해제) 토글.
+//   * 배정 = recruitment_judges 에 is_active=true 스냅샷 행 생성/재활성화
+//     (addExternalJudge 와 달리 중복이면 throw 하지 않고 멱등 재활성화).
+//   * 해제 = 행을 is_active=false 로 소프트 비활성화. 채점 이력·스냅샷을
+//     보존하고, 재배정 시 같은 행을 되살립니다(삭제하지 않음).
+//   * 모두 service_role(supabaseAdmin) + requireHrAdmin 게이트.
+// =====================================================================
+export async function assignJudgeToPosting(
+  slug: string,
+  poolId: string
+): Promise<{ ok: true; judge: Judge } | { ok: false; message: string }> {
+  try {
+    const me = await requireHrAdmin();
+    const s = slug?.trim() ?? "";
+    const externalPoolId = poolId?.trim() ?? "";
+    if (!s) return { ok: false, message: "공고 정보가 누락되었습니다." };
+    if (!externalPoolId)
+      return { ok: false, message: "외부위원을 선택해주세요." };
+
+    // getPostingForAdmin 이 requireHrAdmin 재검증 + postingId 해석을 겸함.
+    const adm = await getPostingForAdmin(s);
+    if (!adm) return { ok: false, message: "공고를 찾을 수 없습니다." };
+    const postingId = adm.posting.id;
+
+    // 풀 정보 — name/affiliation/default_role 스냅샷 + 활성 확인.
+    const { data: pool, error: pErr } = await supabaseAdmin
+      .from("external_judges_pool")
+      .select("id, name, affiliation, default_role, is_active")
+      .eq("id", externalPoolId)
+      .maybeSingle();
+    if (pErr) throw new Error(pErr.message);
+    if (!pool) return { ok: false, message: "존재하지 않는 외부위원입니다." };
+    const poolRow = pool as {
+      name?: string;
+      affiliation?: string;
+      default_role?: string;
+      is_active?: boolean;
+    };
+    if (poolRow.is_active === false) {
+      return { ok: false, message: "비활성화된 외부위원입니다." };
+    }
+
+    // 기존 배정 행이 있으면 재활성화, 없으면 새 스냅샷 insert.
+    const { data: existing, error: exErr } = await supabaseAdmin
+      .from("recruitment_judges")
+      .select("*")
+      .eq("posting_id", postingId)
+      .eq("external_pool_id", externalPoolId)
+      .maybeSingle();
+    if (exErr) throw new Error(exErr.message);
+
+    let judgeRow: Record<string, unknown>;
+    if (existing) {
+      const { data: updated, error: upErr } = await supabaseAdmin
+        .from("recruitment_judges")
+        .update({ is_active: true })
+        .eq("id", (existing as { id: unknown }).id)
+        .select("*")
+        .single();
+      if (upErr) throw new Error(upErr.message);
+      judgeRow = updated as Record<string, unknown>;
+    } else {
+      const order = await nextDisplayOrder(postingId);
+      const { data: inserted, error: insErr } = await supabaseAdmin
+        .from("recruitment_judges")
+        .insert({
+          posting_id: postingId,
+          name: String(poolRow.name ?? "").trim(),
+          role: poolRow.default_role || "외부위원",
+          affiliation: poolRow.affiliation
+            ? String(poolRow.affiliation).trim()
+            : null,
+          judge_type: "external",
+          driver_id: null,
+          external_pool_id: externalPoolId,
+          is_active: true,
+          display_order: order,
+          created_by: me.name,
+        })
+        .select("*")
+        .single();
+      if (insErr) throw new Error(insErr.message);
+      judgeRow = inserted as Record<string, unknown>;
+    }
+
+    revalidatePath(`/hr/recruitment/${s}/judges`);
+    revalidatePath(`/hr/recruitment/${s}`);
+    return { ok: true, judge: normalizeJudge(judgeRow) };
+  } catch (e) {
+    return {
+      ok: false,
+      message:
+        e instanceof Error ? e.message : "위원 배정 중 오류가 발생했습니다.",
+    };
+  }
+}
+
+export async function unassignJudgeFromPosting(
+  slug: string,
+  judgeId: string
+): Promise<{ ok: true } | { ok: false; message: string }> {
+  try {
+    await requireHrAdmin();
+    const s = slug?.trim() ?? "";
+    const jid = judgeId?.trim() ?? "";
+    if (!jid) return { ok: false, message: "심사위원 정보가 누락되었습니다." };
+
+    // 소프트 비활성화 — 채점 이력/스냅샷 보존, 재배정 시 되살림.
+    const { error } = await supabaseAdmin
+      .from("recruitment_judges")
+      .update({ is_active: false })
+      .eq("id", jid);
+    if (error) throw new Error(error.message);
+
+    if (s) {
+      revalidatePath(`/hr/recruitment/${s}/judges`);
+      revalidatePath(`/hr/recruitment/${s}`);
+    }
+    return { ok: true };
+  } catch (e) {
+    return {
+      ok: false,
+      message:
+        e instanceof Error
+          ? e.message
+          : "위원 배정 해제 중 오류가 발생했습니다.",
+    };
+  }
+}

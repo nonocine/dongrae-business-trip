@@ -40,14 +40,22 @@ export default async function RecruitmentAdminPage({
           >
             ← 인사 관리
           </Link>
-          <a
-            href={`/recruitment/${slug}/interview`}
-            target="_blank"
-            rel="noreferrer"
-            className="rounded-lg border border-brand-green bg-card px-3 py-1.5 text-xs font-semibold text-brand-green hover:bg-brand-green/10"
-          >
-            면접 채점 페이지 ↗
-          </a>
+          <div className="flex items-center gap-2">
+            <Link
+              href={`/hr/recruitment/${slug}/judges`}
+              className="rounded-lg border border-navy bg-card px-3 py-1.5 text-xs font-semibold text-navy hover:bg-navy-soft"
+            >
+              외부위원 배정
+            </Link>
+            <a
+              href={`/recruitment/${slug}/interview`}
+              target="_blank"
+              rel="noreferrer"
+              className="rounded-lg border border-brand-green bg-card px-3 py-1.5 text-xs font-semibold text-brand-green hover:bg-brand-green/10"
+            >
+              면접 채점 페이지 ↗
+            </a>
+          </div>
         </div>
         <ScreeningDashboard
           posting={adm.posting}
