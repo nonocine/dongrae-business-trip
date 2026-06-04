@@ -27,6 +27,7 @@ import {
   type Settings,
   type TransportType,
 } from "@/lib/supabase";
+import { supabaseAdmin } from "@/lib/supabaseAdmin";
 
 const ADMIN_COOKIE = "dongrae_admin";
 const EMPLOYEE_COOKIE = "dongrae_employee";
@@ -1011,7 +1012,7 @@ export async function createActivity(formData: FormData) {
     throw e;
   }
 
-  const { data, error } = await supabase
+  const { data, error } = await supabaseAdmin
     .from("activities")
     .insert({
       // DB column is `activity_type`
@@ -1064,7 +1065,7 @@ export async function listActivities(opts?: {
   const session = await getSession();
   if (!session) return [];
 
-  let query = supabase
+  let query = supabaseAdmin
     .from("activities")
     .select("*")
     .order("start_date", { ascending: false, nullsFirst: false })
@@ -1099,7 +1100,7 @@ export async function getActivity(id: string): Promise<Activity | null> {
   const session = await getSession();
   if (!session) return null;
 
-  const { data, error } = await supabase
+  const { data, error } = await supabaseAdmin
     .from("activities")
     .select("*")
     .eq("id", id)
@@ -1117,7 +1118,7 @@ export async function deleteActivity(formData: FormData) {
   const id = String(formData.get("id") ?? "");
   if (!id) throw new Error("삭제할 항목 ID가 없습니다.");
 
-  const { data: row, error: fetchErr } = await supabase
+  const { data: row, error: fetchErr } = await supabaseAdmin
     .from("activities")
     .select("author, photos, receipts, certificate, driving_log_id")
     .eq("id", id)
@@ -1147,7 +1148,7 @@ export async function deleteActivity(formData: FormData) {
     await supabase.storage.from(STORAGE_BUCKET_RECEIPTS).remove(receiptKeys);
   }
 
-  const { error } = await supabase.from("activities").delete().eq("id", id);
+  const { error } = await supabaseAdmin.from("activities").delete().eq("id", id);
   if (error) throw new Error(error.message);
 
   // 연결된 운행 기록 동시 삭제 (소유자만; 운행자가 본인일 때)
@@ -1191,7 +1192,7 @@ export type ActivityAdminStats = {
 export async function getActivityAdminStats(): Promise<ActivityAdminStats> {
   await requireAdmin();
 
-  const { data, error } = await supabase
+  const { data, error } = await supabaseAdmin
     .from("activities")
     .select(
       "id, activity_type, start_date, location, author, transport_cost, accommodation_cost, training_cost, created_at"
