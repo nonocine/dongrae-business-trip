@@ -87,15 +87,23 @@ export default function RecruitmentPostingsTab({
               {sorted.length}건
             </span>
           </h3>
-          {editing.kind !== "new" && (
-            <button
-              type="button"
-              onClick={() => setEditing({ kind: "new" })}
-              className={btnPrimary}
+          <div className="flex flex-wrap items-center gap-2">
+            <Link
+              href="/hr/external-judges"
+              className="inline-flex h-[38px] items-center justify-center gap-1.5 rounded-lg border border-navy bg-card px-4 text-sm font-semibold text-navy shadow-sm transition hover:bg-navy-soft"
             >
-              ＋ 새 공고
-            </button>
-          )}
+              👥 외부 심사위원 관리
+            </Link>
+            {editing.kind !== "new" && (
+              <button
+                type="button"
+                onClick={() => setEditing({ kind: "new" })}
+                className={btnPrimary}
+              >
+                ＋ 새 공고
+              </button>
+            )}
+          </div>
         </div>
 
         {sorted.length === 0 ? (
