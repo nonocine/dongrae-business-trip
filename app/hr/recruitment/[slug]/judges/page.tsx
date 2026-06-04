@@ -4,7 +4,9 @@ import Header from "@/app/components/Header";
 import { enforcePasswordChange } from "@/app/actions";
 import { requireHrAdmin } from "@/app/hr/actions";
 import { splitRecruitmentFields, fieldBadgeCls } from "@/lib/ui";
-import { getPostingForAdmin, listJudges, listExternalJudges } from "../actions";
+import { supabaseAdmin } from "@/lib/supabaseAdmin";
+import { normalizeExternalJudge } from "@/lib/supabase";
+import { getPostingForAdmin, listJudges } from "../actions";
 import JudgesAssignManager from "./JudgesAssignManager";
 
 export const dynamic = "force-dynamic";
@@ -21,11 +23,20 @@ export default async function JudgesAssignPage({
   const adm = await getPostingForAdmin(slug);
   if (!adm) notFound();
 
-  // 활성 외부위원 풀 + 본 공고의 현재 위원 배정 상태.
-  const [pool, judges] = await Promise.all([
-    listExternalJudges(),
+  // 외부위원 풀은 service_role(supabaseAdmin)로 직접 조회합니다.
+  //   * RLS 를 우회해야 하며 anon 으로는 빈 결과가 나옵니다.
+  //   * 페이지 상단 requireHrAdmin 으로 이미 권한 게이트되어 있습니다.
+  const [poolRes, judges] = await Promise.all([
+    supabaseAdmin
+      .from("external_judges_pool")
+      .select("*")
+      .order("created_at", { ascending: false }),
     listJudges(adm.posting.id),
   ]);
+  if (poolRes.error) throw new Error(poolRes.error.message);
+  const pool = (poolRes.data ?? []).map((r) =>
+    normalizeExternalJudge(r as Record<string, unknown>)
+  );
 
   const fields = splitRecruitmentFields(adm.posting.field);
 

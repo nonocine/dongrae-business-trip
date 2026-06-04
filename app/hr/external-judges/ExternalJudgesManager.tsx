@@ -171,9 +171,12 @@ function JudgeRow({
     setErr(null);
     startTransition(async () => {
       try {
-        await toggleExternalJudgeActive(judge.id);
-      } catch (e) {
-        setErr(e instanceof Error ? e.message : `${target} 실패`);
+        // 서버 액션은 실패 시 {ok:false,message} 를 반환(throw 아님) — 페이지가
+        // 깨지지 않고 안내 메시지를 그대로 인라인 표시합니다.
+        const res = await toggleExternalJudgeActive(judge.id);
+        if (!res.ok) setErr(res.message);
+      } catch {
+        setErr(`${target} 처리 중 오류가 발생했습니다. 잠시 후 다시 시도해주세요.`);
       }
     });
   }
@@ -188,9 +191,10 @@ function JudgeRow({
     setErr(null);
     startTransition(async () => {
       try {
-        await deleteExternalJudge(judge.id);
-      } catch (e) {
-        setErr(e instanceof Error ? e.message : "삭제 실패");
+        const res = await deleteExternalJudge(judge.id);
+        if (!res.ok) setErr(res.message);
+      } catch {
+        setErr("삭제 처리 중 오류가 발생했습니다. 잠시 후 다시 시도해주세요.");
       }
     });
   }

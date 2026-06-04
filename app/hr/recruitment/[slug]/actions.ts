@@ -1014,78 +1014,109 @@ export async function updateExternalJudge(
 //    비활성화 시: 어떤 공고에라도 활성 위원으로 배정돼 있으면 차단.
 //    (공고측 위원을 먼저 비활성화하라고 안내)
 // ---------------------------------------------------------------------
-export async function toggleExternalJudgeActive(id: string): Promise<void> {
-  await requireHrAdmin();
-  if (!id) throw new Error("외부위원 정보가 누락되었습니다.");
+// 결과를 {ok,message} 데이터로 반환합니다(throw 아님).
+//   * 서버 액션이 throw 하면 프로덕션에서 메시지가 마스킹되어 클라이언트는
+//     "참여 중 채용..." 같은 안내 대신 일반 오류만 받습니다.
+//   * 데이터로 반환하면 메시지가 그대로 클라이언트에 전달되어 인라인 표시 가능.
+export async function toggleExternalJudgeActive(
+  id: string
+): Promise<{ ok: true } | { ok: false; message: string }> {
+  try {
+    await requireHrAdmin();
+    if (!id) return { ok: false, message: "외부위원 정보가 누락되었습니다." };
 
-  const { data, error } = await supabaseAdmin
-    .from("external_judges_pool")
-    .select("is_active")
-    .eq("id", id)
-    .maybeSingle();
-  if (error) throw new Error(error.message);
-  if (!data) throw new Error("존재하지 않는 외부위원입니다.");
-  const current = (data as { is_active?: boolean }).is_active === true;
+    const { data, error } = await supabaseAdmin
+      .from("external_judges_pool")
+      .select("is_active")
+      .eq("id", id)
+      .maybeSingle();
+    if (error) throw new Error(error.message);
+    if (!data) return { ok: false, message: "존재하지 않는 외부위원입니다." };
+    const current = (data as { is_active?: boolean }).is_active === true;
 
-  // 활성 → 비활성으로 가는 경우에만 참여 중 채용 체크.
-  // 단, 이미 종료(closed/archived)된 공고는 카운트에서 제외 — 풀 정리를 막을 이유 없음.
-  if (current) {
-    const { data: rows, error: cErr } = await supabaseAdmin
-      .from("recruitment_judges")
-      .select("id, posting:recruitment_postings!inner(status)")
-      .eq("external_pool_id", id)
-      .eq("is_active", true);
-    if (cErr) throw new Error(cErr.message);
-    const activeRows = (rows ?? []).filter((r) => {
-      const p = (r as { posting?: { status?: string } | { status?: string }[] })
-        .posting;
-      const status = Array.isArray(p) ? p[0]?.status : p?.status;
-      return status !== "closed" && status !== "archived";
-    });
-    const n = activeRows.length;
-    if (n > 0) {
-      throw new Error(
-        `현재 ${n}건의 진행 중 채용에 참여 중입니다. 먼저 공고측 위원을 비활성화하세요.`
-      );
+    // 활성 → 비활성으로 가는 경우에만 참여 중 채용 체크.
+    // 단, 이미 종료(closed/archived)된 공고는 카운트에서 제외 — 풀 정리를 막을 이유 없음.
+    if (current) {
+      const { data: rows, error: cErr } = await supabaseAdmin
+        .from("recruitment_judges")
+        .select("id, posting:recruitment_postings!inner(status)")
+        .eq("external_pool_id", id)
+        .eq("is_active", true);
+      if (cErr) throw new Error(cErr.message);
+      const activeRows = (rows ?? []).filter((r) => {
+        const p = (
+          r as { posting?: { status?: string } | { status?: string }[] }
+        ).posting;
+        const status = Array.isArray(p) ? p[0]?.status : p?.status;
+        return status !== "closed" && status !== "archived";
+      });
+      const n = activeRows.length;
+      if (n > 0) {
+        return {
+          ok: false,
+          message: `현재 ${n}건의 진행 중 채용에 참여 중입니다. 먼저 공고측 위원을 비활성화하세요.`,
+        };
+      }
     }
+
+    const { error: upErr } = await supabaseAdmin
+      .from("external_judges_pool")
+      .update({ is_active: !current })
+      .eq("id", id);
+    if (upErr) throw new Error(upErr.message);
+
+    revalidatePath("/hr/recruitment");
+    return { ok: true };
+  } catch (e) {
+    return {
+      ok: false,
+      message:
+        e instanceof Error
+          ? e.message
+          : "외부위원 상태 변경 중 오류가 발생했습니다.",
+    };
   }
-
-  const { error: upErr } = await supabaseAdmin
-    .from("external_judges_pool")
-    .update({ is_active: !current })
-    .eq("id", id);
-  if (upErr) throw new Error(upErr.message);
-
-  revalidatePath("/hr/recruitment");
 }
 
 // ---------------------------------------------------------------------
 // E5) 풀에서 외부위원 삭제 — 어떤 공고에라도 사용 이력이 있으면 차단.
 // ---------------------------------------------------------------------
-export async function deleteExternalJudge(id: string): Promise<void> {
-  await requireHrAdmin();
-  if (!id) throw new Error("외부위원 정보가 누락되었습니다.");
+export async function deleteExternalJudge(
+  id: string
+): Promise<{ ok: true } | { ok: false; message: string }> {
+  try {
+    await requireHrAdmin();
+    if (!id) return { ok: false, message: "외부위원 정보가 누락되었습니다." };
 
-  // 사용 이력(활성/비활성 무관) 체크.
-  const { count, error: cErr } = await supabaseAdmin
-    .from("recruitment_judges")
-    .select("id", { count: "exact", head: true })
-    .eq("external_pool_id", id);
-  if (cErr) throw new Error(cErr.message);
-  const n = count ?? 0;
-  if (n > 0) {
-    throw new Error(
-      `이 외부위원은 이미 ${n}건의 채용에 사용되었습니다. 비활성화를 권장합니다.`
-    );
+    // 사용 이력(활성/비활성 무관) 체크.
+    const { count, error: cErr } = await supabaseAdmin
+      .from("recruitment_judges")
+      .select("id", { count: "exact", head: true })
+      .eq("external_pool_id", id);
+    if (cErr) throw new Error(cErr.message);
+    const n = count ?? 0;
+    if (n > 0) {
+      return {
+        ok: false,
+        message: `이 외부위원은 이미 ${n}건의 채용에 사용되었습니다. 비활성화를 권장합니다.`,
+      };
+    }
+
+    const { error } = await supabaseAdmin
+      .from("external_judges_pool")
+      .delete()
+      .eq("id", id);
+    if (error) throw new Error(error.message);
+
+    revalidatePath("/hr/recruitment");
+    return { ok: true };
+  } catch (e) {
+    return {
+      ok: false,
+      message:
+        e instanceof Error ? e.message : "외부위원 삭제 중 오류가 발생했습니다.",
+    };
   }
-
-  const { error } = await supabaseAdmin
-    .from("external_judges_pool")
-    .delete()
-    .eq("id", id);
-  if (error) throw new Error(error.message);
-
-  revalidatePath("/hr/recruitment");
 }
 
 // =====================================================================
