@@ -243,11 +243,27 @@ function JudgeRow({
           </button>
           <button
             type="button"
+            role="switch"
+            aria-checked={judge.is_active}
+            aria-label={
+              judge.is_active ? `${judge.name} 비활성화` : `${judge.name} 활성화`
+            }
+            title={
+              judge.is_active
+                ? "활성 (클릭 시 비활성화)"
+                : "비활성 (클릭 시 활성화)"
+            }
             onClick={handleToggle}
             disabled={pending}
-            className="rounded-md border border-line bg-card px-2.5 py-1 text-xs font-medium text-ink-body hover:bg-surface disabled:opacity-60"
+            className={`relative inline-flex h-6 w-11 shrink-0 items-center rounded-full transition disabled:opacity-50 ${
+              judge.is_active ? "bg-brand-blue" : "bg-line"
+            }`}
           >
-            {judge.is_active ? "비활성화" : "활성화"}
+            <span
+              className={`inline-block h-5 w-5 transform rounded-full bg-white shadow transition ${
+                judge.is_active ? "translate-x-[22px]" : "translate-x-0.5"
+              }`}
+            />
           </button>
           <button
             type="button"
