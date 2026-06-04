@@ -34,16 +34,20 @@ function formatPhone(phone: string): string {
   return `${phone.slice(0, 3)}-${phone.slice(3, 7)}-${phone.slice(7)}`;
 }
 
+// 등록일 표시 — KST(UTC+9, 한국은 DST 없음) 기준으로 결정적으로 포맷합니다.
+//   * toLocaleDateString(locale) 은 서버(Vercel Node)·브라우저의 ICU 차이로
+//     같은 날짜를 다른 구분자(예: 일반 공백 vs NBSP)로 렌더해 SSR↔CSR
+//     하이드레이션 불일치(렌더 에러)를 일으킬 수 있어 사용하지 않습니다.
+//   * 순수 산술 + padStart 로 어느 런타임에서도 동일한 문자열을 보장합니다.
 function formatDate(iso: string): string {
   if (!iso) return "-";
   const d = new Date(iso);
   if (Number.isNaN(d.getTime())) return "-";
-  return d.toLocaleDateString("ko-KR", {
-    timeZone: "Asia/Seoul",
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-  });
+  const kst = new Date(d.getTime() + 9 * 60 * 60 * 1000);
+  const y = kst.getUTCFullYear();
+  const m = String(kst.getUTCMonth() + 1).padStart(2, "0");
+  const day = String(kst.getUTCDate()).padStart(2, "0");
+  return `${y}. ${m}. ${day}.`;
 }
 
 export default function ExternalJudgesManager({
