@@ -19,7 +19,7 @@ export function RecruitmentHeader({
   children?: ReactNode;
 }) {
   return (
-    <header className="mb-6 overflow-hidden rounded-2xl bg-gradient-to-br from-navy to-navy-strong shadow-md sm:mb-8">
+    <header className="mb-6 overflow-hidden rounded-2xl bg-gradient-to-br from-brand-blue via-[#2f6fc4] to-navy shadow-md sm:mb-8">
       {backHref && (
         <div className="px-5 pt-4 sm:px-6">
           <Link
@@ -30,16 +30,16 @@ export function RecruitmentHeader({
           </Link>
         </div>
       )}
-      <div className="flex items-center gap-4 px-5 py-5 sm:px-6">
+      <div className="flex items-start gap-4 px-5 py-6 sm:px-6">
         <div className="shrink-0 rounded-xl bg-white p-1.5 shadow-sm">
           {/* eslint-disable-next-line @next/next/no-img-element */}
           <img
             src="/images/dongrae-logo.png"
             alt="동래구청소년센터"
-            className="h-11 w-auto object-contain sm:h-14"
+            className="h-11 w-auto object-contain sm:h-12"
           />
         </div>
-        <div className="min-w-0">
+        <div className="min-w-0 flex-1">
           <span className="inline-flex items-center gap-1.5 rounded-full bg-white/15 px-2.5 py-0.5 text-[11px] font-bold tracking-[0.15em] text-white sm:text-xs">
             <span className="flex gap-0.5" aria-hidden>
               <span className="h-1.5 w-1.5 rounded-full bg-brand-red" />
@@ -49,7 +49,8 @@ export function RecruitmentHeader({
             </span>
             직원채용공고
           </span>
-          <h1 className="mt-1.5 text-lg font-extrabold leading-tight text-white sm:text-2xl">
+          {/* 한글 어절 단위로 줄바꿈(break-keep) — 길어도 박스 안에서 자연스럽게 감김 */}
+          <h1 className="mt-1.5 break-keep text-base font-extrabold leading-snug text-white sm:text-xl">
             {title}
           </h1>
         </div>
