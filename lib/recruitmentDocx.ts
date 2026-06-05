@@ -127,6 +127,14 @@ export function dataCell(
   });
 }
 
+// 이름 마스킹 — 가운데 글자를 ○ 로. 김민호→김○호, 이수→이○, 남궁민수→남○○수.
+export function maskName(name: string): string {
+  const n = (name ?? "").trim();
+  if (n.length <= 1) return n;
+  if (n.length === 2) return n[0] + "○";
+  return n[0] + "○".repeat(n.length - 2) + n[n.length - 1];
+}
+
 // KST 기준 'YYYY년 M월 D일' 문자열.
 export function kstDateLabel(d: Date): string {
   const fmt = new Intl.DateTimeFormat("ko-KR", {

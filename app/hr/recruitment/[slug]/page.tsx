@@ -33,14 +33,14 @@ export default async function RecruitmentAdminPage({
     <>
       <Header />
       <main className="mx-auto w-full max-w-6xl flex-1 px-4 py-6">
-        <div className="mb-4 flex items-center justify-between">
+        <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
           <Link
             href="/hr"
             className="text-sm text-ink-muted hover:underline"
           >
             ← 인사 관리
           </Link>
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2">
             <a
               href={`/hr/recruitment/${slug}/export`}
               className="inline-flex items-center gap-1 rounded-lg border border-brand-blue bg-card px-3 py-1.5 text-xs font-semibold text-brand-blue hover:bg-brand-blue-soft"
@@ -58,6 +58,12 @@ export default async function RecruitmentAdminPage({
               className="inline-flex items-center gap-1 rounded-lg border border-navy bg-card px-3 py-1.5 text-xs font-semibold text-navy hover:bg-navy-soft"
             >
               📄 최종심사 총괄표
+            </a>
+            <a
+              href={`/hr/recruitment/${slug}/interview-notice`}
+              className="inline-flex items-center gap-1 rounded-lg border border-navy bg-card px-3 py-1.5 text-xs font-semibold text-navy hover:bg-navy-soft"
+            >
+              📄 면접 대상자 공고
             </a>
             <Link
               href={`/hr/recruitment/${slug}/judges`}
