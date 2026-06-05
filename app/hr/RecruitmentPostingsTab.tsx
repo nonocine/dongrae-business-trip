@@ -231,6 +231,12 @@ function PostingRow({
           >
             지원자 관리
           </Link>
+          <Link
+            href={`/hr/recruitment/${posting.slug}/judges`}
+            className="rounded-md border border-navy bg-card px-2.5 py-1 text-xs font-semibold text-navy hover:bg-navy-soft"
+          >
+            위원 배정
+          </Link>
           <button
             type="button"
             onClick={onEdit}
