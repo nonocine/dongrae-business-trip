@@ -222,8 +222,9 @@ export async function saveInterviewScore(
       {
         application_id: applicationId,
         stage: "interview",
-        // (4) 중복 채점 방지 — (application_id, stage, reviewer_name) 충돌 시 update.
-        //     reviewer_name 은 세션의 위원명, reviewer_id 로 위원 식별 강화.
+        // (4) 중복 채점 방지 — 충돌 키는 (application_id, stage, reviewer_id).
+        //     reviewer_id = judgeId 로 동명이인 위원도 구분(서로 덮어쓰지 않음).
+        //     reviewer_name 은 표시용으로 계속 저장(충돌 키에서는 제외).
         reviewer_name: reviewerName,
         reviewer_id: session.judgeId,
         scores: {
@@ -240,7 +241,7 @@ export async function saveInterviewScore(
         submitted_at: new Date().toISOString(),
         updated_at: new Date().toISOString(),
       },
-      { onConflict: "application_id,stage,reviewer_name" }
+      { onConflict: "application_id,stage,reviewer_id" }
     );
     if (error) throw new Error(error.message);
 

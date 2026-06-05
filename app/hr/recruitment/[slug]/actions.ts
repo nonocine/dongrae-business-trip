@@ -382,7 +382,10 @@ export async function saveScreeningScore(
       {
         application_id: applicationId,
         stage: "screening",
+        // 충돌 키는 (application_id, stage, reviewer_id). 서류 채점자는 관장/부장
+        // 이므로 reviewer_id = me.name(안정적 식별자). reviewer_name 은 표시용.
         reviewer_name: me.name,
+        reviewer_id: me.name,
         scores: { q1_expertise: q1, q2_license: q2, q3_statement: q3 },
         total_score: total,
         max_score: 35,
@@ -391,7 +394,7 @@ export async function saveScreeningScore(
         submitted_at: new Date().toISOString(),
         updated_at: new Date().toISOString(),
       },
-      { onConflict: "application_id,stage,reviewer_name" }
+      { onConflict: "application_id,stage,reviewer_id" }
     );
     if (error) throw new Error(error.message);
 
