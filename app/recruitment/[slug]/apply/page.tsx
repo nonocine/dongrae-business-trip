@@ -1,4 +1,3 @@
-import Link from "next/link";
 import { notFound } from "next/navigation";
 import {
   getApplyPosting,
@@ -6,8 +5,8 @@ import {
   getApplicationDraft,
 } from "./actions";
 import ApplyForm from "./ApplyForm";
+import { RecruitmentHeader } from "@/app/recruitment/[slug]/PublicUi";
 import {
-  cardCls,
   noticeWarning,
   splitRecruitmentFields,
   fieldBadgeCls,
@@ -42,7 +41,17 @@ export default async function RecruitmentApplyPage({
 
   // 서버 컴포넌트(force-dynamic)는 요청마다 1회 렌더되므로 Date.now() 가 안전.
   // eslint-disable-next-line react-hooks/purity
-  const closed = new Date(posting.application_end).getTime() < Date.now();
+  const now = Date.now();
+  const endTime = new Date(posting.application_end).getTime();
+  const closed = endTime < now;
+  // D-Day — KST 달력일 기준.
+  const kstDay = (ms: number) => Math.floor((ms + 9 * 3600 * 1000) / 86400000);
+  const daysLeft = kstDay(endTime) - kstDay(now);
+  const ddayLabel = closed
+    ? null
+    : daysLeft <= 0
+      ? "오늘 마감"
+      : `D-${daysLeft}`;
 
   const session = await getKakaoSession();
   // 로그인 된 경우에만 기존 지원서를 미리 불러옵니다.
@@ -50,42 +59,24 @@ export default async function RecruitmentApplyPage({
 
   return (
     <main className="mx-auto w-full max-w-4xl flex-1 px-4 py-6 sm:px-6 sm:py-8 lg:px-8 lg:py-10">
-      {/* 상단 헤더 — 센터 로고 + "직원채용공고" + 공고 제목 */}
-      <header className="mb-6 border-b border-line pb-5 sm:mb-8 sm:pb-6">
-        <Link
-          href={`/recruitment/${slug}`}
-          className="text-xs text-ink-muted hover:underline sm:text-sm"
-        >
-          ← 공고로 돌아가기
-        </Link>
-        <div className="mt-3 flex items-center gap-4">
-          {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img
-            src="/images/dongrae-logo.png"
-            alt="동래구청소년센터"
-            className="h-12 w-auto shrink-0 object-contain sm:h-14 lg:h-16"
-          />
-          <div className="min-w-0 border-l border-line pl-4">
-            <p className="text-sm font-bold tracking-[0.2em] text-brand-blue sm:text-base lg:text-lg">
-              직원채용공고
-            </p>
-            <h1 className="mt-1 truncate text-base font-semibold leading-tight text-ink sm:text-lg lg:text-xl">
-              {posting.title}
-            </h1>
-          </div>
-        </div>
-        <div className="mt-3 flex flex-wrap items-center gap-1.5 text-xs text-ink-muted sm:text-sm">
-          {splitRecruitmentFields(posting.field).map((f, i) => (
-            <span key={`${f}-${i}`} className={fieldBadgeCls(i)}>
-              {f}
-            </span>
-          ))}
-          <span>마감 {fmtKST(posting.application_end)}</span>
-        </div>
-      </header>
+      <RecruitmentHeader title={posting.title} backHref={`/recruitment/${slug}`}>
+        {splitRecruitmentFields(posting.field).map((f, i) => (
+          <span key={`${f}-${i}`} className={fieldBadgeCls(i)}>
+            {f}
+          </span>
+        ))}
+        <span className="rounded-full bg-white/15 px-2.5 py-0.5 text-xs font-medium text-white/90">
+          마감 {fmtKST(posting.application_end)}
+        </span>
+        {ddayLabel && (
+          <span className="rounded-full bg-stamp px-2.5 py-0.5 text-xs font-bold text-white shadow-sm">
+            {ddayLabel}
+          </span>
+        )}
+      </RecruitmentHeader>
 
       {closed ? (
-        <section className={cardCls}>
+        <section className="rounded-xl border border-line border-l-4 border-l-stamp bg-card p-5 shadow-sm">
           <p className={noticeWarning}>접수가 마감되었습니다.</p>
           <p className="mt-3 text-xs text-ink-muted sm:text-sm">
             마감 시각 이후에는 새 지원서를 접수할 수 없습니다. 이미 임시저장된
@@ -112,7 +103,7 @@ export default async function RecruitmentApplyPage({
 function KakaoLoginGate({ slug }: { slug: string }) {
   const href = `/api/auth/kakao?slug=${encodeURIComponent(slug)}`;
   return (
-    <section className={cardCls}>
+    <section className="rounded-xl border border-line border-l-4 border-l-brand-blue bg-card p-5 shadow-sm sm:p-6">
       <h2 className="text-base font-bold text-ink sm:text-lg">
         지원하려면 본인 확인이 필요합니다
       </h2>

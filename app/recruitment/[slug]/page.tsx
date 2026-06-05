@@ -2,13 +2,15 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { getRecruitmentPosting } from "./actions";
 import {
-  cardCls,
-  badgeNeutral,
-  badgeSuccess,
   noticeWarning,
   splitRecruitmentFields,
   fieldBadgeCls,
 } from "@/lib/ui";
+import {
+  RecruitmentHeader,
+  SectionCard,
+  type SectionAccent,
+} from "@/app/recruitment/[slug]/PublicUi";
 
 // DB 조회 기반이므로 매 요청마다 최신 공고를 렌더링합니다.
 export const dynamic = "force-dynamic";
@@ -41,93 +43,101 @@ export default async function RecruitmentPostingPage({
   // 마감 여부는 status 가 아니라 application_end 시각으로 판정합니다.
   // 서버 컴포넌트(force-dynamic)는 요청마다 1회 렌더되므로 Date.now() 가 안전.
   // eslint-disable-next-line react-hooks/purity
-  const closed = new Date(posting.application_end).getTime() < Date.now();
+  const now = Date.now();
+  const endTime = new Date(posting.application_end).getTime();
+  const closed = endTime < now;
+  // D-Day — KST 달력일 기준(UTC+9 고정). 0이면 오늘 마감.
+  const kstDay = (ms: number) => Math.floor((ms + 9 * 3600 * 1000) / 86400000);
+  const daysLeft = kstDay(endTime) - kstDay(now);
+  const ddayLabel = closed
+    ? null
+    : daysLeft <= 0
+      ? "오늘 마감"
+      : `D-${daysLeft}`;
 
-  // 값이 있는 항목만 순서대로 표시.
-  const sections: { title: string; body: string | null }[] = [
-    { title: "자격요건", body: posting.qualifications },
-    { title: "우대사항", body: posting.preferred },
-    { title: "임금조건", body: posting.salary_info },
-    { title: "채용절차", body: posting.process_info },
-    { title: "유의사항", body: posting.notice },
-  ];
+  // 값이 있는 항목만 순서대로 표시 — 디자인 지정 색상 매핑.
+  const sections: { title: string; body: string | null; accent: SectionAccent }[] =
+    [
+      { title: "자격요건", body: posting.qualifications, accent: "green" },
+      { title: "우대사항", body: posting.preferred, accent: "orange" },
+      { title: "임금조건", body: posting.salary_info, accent: "violet" },
+      { title: "채용절차", body: posting.process_info, accent: "red" },
+      { title: "유의사항", body: posting.notice, accent: "navy" },
+    ];
 
   return (
     <main className="mx-auto w-full max-w-3xl flex-1 px-4 py-6 sm:px-6 sm:py-8 lg:px-8">
-      {/* 제목 — 센터 로고 + "직원채용공고" + 공고 제목 */}
-      <header className="mb-6 border-b border-line pb-5 sm:mb-8 sm:pb-6">
-        <div className="flex items-center gap-4">
-          {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img
-            src="/images/dongrae-logo.png"
-            alt="동래구청소년센터"
-            className="h-12 w-auto shrink-0 object-contain sm:h-14 lg:h-16"
-          />
-          <div className="min-w-0 border-l border-line pl-4">
-            <p className="text-sm font-bold tracking-[0.2em] text-brand-blue sm:text-base lg:text-lg">
-              직원채용공고
-            </p>
-            <h1 className="mt-1 truncate text-base font-semibold leading-tight text-ink sm:text-lg lg:text-xl">
-              {posting.title}
-            </h1>
-          </div>
-        </div>
-        <div className="mt-3 flex flex-wrap items-center gap-1.5">
-          {splitRecruitmentFields(posting.field).map((f, i) => (
-            <span key={`${f}-${i}`} className={fieldBadgeCls(i)}>
-              {f}
-            </span>
-          ))}
-          <span className={badgeNeutral}>
-            모집 {posting.recruit_count}명
+      <RecruitmentHeader title={posting.title}>
+        {splitRecruitmentFields(posting.field).map((f, i) => (
+          <span key={`${f}-${i}`} className={fieldBadgeCls(i)}>
+            {f}
           </span>
-          <span className={closed ? badgeNeutral : badgeSuccess}>
-            {closed ? "접수마감" : "접수중"}
+        ))}
+        <span className="rounded-full bg-white/15 px-2.5 py-0.5 text-xs font-semibold text-white">
+          모집 {posting.recruit_count}명
+        </span>
+        <span
+          className={`rounded-full px-2.5 py-0.5 text-xs font-bold ${
+            closed ? "bg-white/15 text-white/70" : "bg-brand-green text-white"
+          }`}
+        >
+          {closed ? "접수마감" : "접수중"}
+        </span>
+        {ddayLabel && (
+          <span className="rounded-full bg-stamp px-2.5 py-0.5 text-xs font-bold text-white shadow-sm">
+            {ddayLabel}
           </span>
-        </div>
-      </header>
+        )}
+      </RecruitmentHeader>
 
-      {/* 접수기간 */}
-      <section className={`${cardCls} mb-4`}>
-        <h2 className="text-xs font-semibold tracking-wide text-navy">
-          접수기간
-        </h2>
-        <dl className="mt-2 space-y-1 text-sm text-ink-body">
+      {/* 접수기간 — 파랑 포인트 + 마감 강조 */}
+      <SectionCard
+        title="접수기간"
+        accent="blue"
+        action={
+          ddayLabel ? (
+            <span className="rounded-full bg-stamp-soft px-2.5 py-1 text-xs font-bold text-stamp">
+              {ddayLabel}
+            </span>
+          ) : undefined
+        }
+      >
+        <dl className="space-y-1.5 text-sm text-ink-body">
           <div className="flex gap-2">
             <dt className="w-10 shrink-0 text-ink-muted">시작</dt>
             <dd>{fmtKST(posting.application_start)}</dd>
           </div>
           <div className="flex gap-2">
             <dt className="w-10 shrink-0 text-ink-muted">마감</dt>
-            <dd>{fmtKST(posting.application_end)}</dd>
+            <dd className="font-bold text-stamp">
+              {fmtKST(posting.application_end)}
+            </dd>
           </div>
         </dl>
-      </section>
+      </SectionCard>
 
       {/* 상세 항목 — 값이 있는 것만 */}
       {sections.map((s) =>
         s.body ? (
-          <section key={s.title} className={`${cardCls} mb-4`}>
-            <h2 className="text-xs font-semibold tracking-wide text-navy">
-              {s.title}
-            </h2>
-            <p className="mt-2 whitespace-pre-wrap text-sm leading-relaxed text-ink-body">
+          <SectionCard key={s.title} title={s.title} accent={s.accent}>
+            <p className="whitespace-pre-wrap text-[15px] leading-relaxed text-ink-body">
               {s.body}
             </p>
-          </section>
+          </SectionCard>
         ) : null
       )}
 
       {/* 지원 액션 */}
-      <div className="mt-5">
+      <div className="mt-6">
         {closed ? (
           <p className={noticeWarning}>접수가 마감되었습니다.</p>
         ) : (
           <Link
             href={`/recruitment/${posting.slug}/apply`}
-            className="flex h-12 w-full items-center justify-center rounded-lg bg-navy text-sm font-semibold text-white shadow-sm transition hover:bg-navy-strong"
+            className="flex w-full items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-brand-blue to-navy py-3.5 text-base font-bold text-white shadow-md transition-all duration-200 hover:-translate-y-0.5 hover:shadow-lg active:translate-y-0"
           >
             지원하기
+            <span aria-hidden>→</span>
           </Link>
         )}
       </div>
