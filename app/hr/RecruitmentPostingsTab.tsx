@@ -16,6 +16,7 @@ import {
   splitRecruitmentFields,
   fieldBadgeCls,
 } from "@/lib/ui";
+import { fmtKstDateTime } from "@/lib/datetime";
 import {
   saveRecruitmentPosting,
   deleteRecruitmentPosting,
@@ -43,18 +44,9 @@ function isoToKstLocal(iso: string): string {
   return `${get("year")}-${get("month")}-${get("day")}T${hour}:${get("minute")}`;
 }
 
+// 결정적 KST 포맷(SSR↔CSR 하이드레이션 불일치 방지). "YYYY.MM.DD HH:mm"
 function fmtKst(iso: string): string {
-  if (!iso) return "-";
-  const d = new Date(iso);
-  if (Number.isNaN(d.getTime())) return "-";
-  return d.toLocaleString("ko-KR", {
-    timeZone: "Asia/Seoul",
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-    hour: "2-digit",
-    minute: "2-digit",
-  });
+  return fmtKstDateTime(iso);
 }
 
 type EditingState =

@@ -18,6 +18,7 @@ import {
   splitRecruitmentFields,
   fieldBadgeCls,
 } from "@/lib/ui";
+import { fmtKstDateTime } from "@/lib/datetime";
 import {
   saveScreeningScore,
   updateApplicationStatus,
@@ -219,17 +220,9 @@ function fmtScore(n: number | null): string {
   return n.toFixed(1).replace(/\.0$/, "");
 }
 
+// 접수일시 — 결정적 KST 포맷(SSR↔CSR 하이드레이션 불일치 방지). "MM.DD HH:mm"
 function fmtKstShort(iso: string | null): string {
-  if (!iso) return "-";
-  const d = new Date(iso);
-  if (Number.isNaN(d.getTime())) return "-";
-  return d.toLocaleString("ko-KR", {
-    timeZone: "Asia/Seoul",
-    month: "2-digit",
-    day: "2-digit",
-    hour: "2-digit",
-    minute: "2-digit",
-  });
+  return fmtKstDateTime(iso, { year: false });
 }
 
 function statusBadgeOf(status: AppStatus): string {

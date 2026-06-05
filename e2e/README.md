@@ -28,10 +28,11 @@ npm run test:e2e:ui               # UI 모드(디버깅)
 - `public-pages.spec.ts` — 무인증 공개 페이지(공고/지원/면접 진입)가 브라우저에서
   하이드레이션 에러 없이 마운트되는지. (lint 리팩터한 클라이언트 컴포넌트 회귀 감지)
 - `recruitment-docs.spec.ts` — HR 세션으로 문서 4종(ERP xlsx, 서류/최종/면접 docx)을
-  실제 다운로드하고 확장자를 검증. 채용 관리 탭의 공고·상태 배지 렌더 확인.
+  실제 다운로드하고 확장자를 검증. 채용 관리 탭의 공고·상태 배지 렌더, 심사 대시보드
+  하이드레이션 무에러(접수일시 포맷) 확인.
 
-## 알려진 이슈
+## 날짜/시간 포맷 주의
 
-- `/hr/recruitment/[slug]` 의 `ScreeningDashboard` 접수일시 표시(`toLocaleString`)에서
-  서버/클라이언트 로케일 차이로 하이드레이션 mismatch 경고가 발생합니다
-  (예: 서버 "오후 05:38" vs 클라이언트 "PM 05:38"). 기능에는 영향 없으나 별도 수정 권장.
+클라이언트 컴포넌트에서 시각을 렌더할 때 `Date#toLocaleString` 은 서버/브라우저 ICU
+차이로 하이드레이션 mismatch(오후 vs PM, 공백 vs NBSP)를 일으킵니다. 대신 결정적
+포맷터 `lib/datetime.ts`(`fmtKstDateTime`/`fmtKstDate`)를 사용하세요.

@@ -1,4 +1,5 @@
 import { test, expect } from "@playwright/test";
+import { collectErrors } from "./helpers";
 
 // HR(관장·부장) 세션 쿠키는 직원 이름 평문이므로 위조 가능.
 //   E2E_HR_NAME 을 .env.local 에 두면(저장소 미커밋) 아래 테스트가 활성화됩니다.
@@ -47,5 +48,15 @@ test.describe("HR 채용 문서 다운로드", () => {
     await expect(page.locator("body")).toContainText(SLUG);
     // PostingRow 상태 배지(공개/마감/종료/비공개) 중 하나는 존재 — closed 계산 구동 확인.
     await expect(page.getByText(/공개|마감|종료|비공개/).first()).toBeVisible();
+  });
+
+  test("심사 대시보드가 하이드레이션 에러 없이 렌더된다(접수일시 포맷)", async ({
+    page,
+  }) => {
+    const errors = collectErrors(page);
+    await page.goto(`/hr/recruitment/${SLUG}`);
+    await expect(page.locator("body")).toContainText("채용 심사");
+    await page.waitForTimeout(800); // 하이드레이션 여유(dev HMR로 networkidle 불가)
+    expect(errors, errors.join("\n")).toHaveLength(0);
   });
 });
