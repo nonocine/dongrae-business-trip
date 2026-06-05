@@ -231,6 +231,27 @@ async function run() {
     else fail++;
   }
 
+  // 심사항목 파싱 — 번호 제목은 왼쪽 열, "·" 줄은 직전 항목 세부로.
+  const { parseCriteria } = await import("../lib/recruitmentDocBuilders");
+  console.log("\n[단위] 심사항목 파싱");
+  const parsed = parseCriteria(
+    "1. 사업에 대한 이해\n· 센터 사업에 대한 이해\n2. 전문성\n· 경력 · 자격증"
+  );
+  const pcOk =
+    parsed.length === 2 &&
+    parsed[0].item === "1. 사업에 대한 이해" &&
+    parsed[1].item === "2. 전문성" &&
+    parsed[0].details.length === 1;
+  console.log(`  ${pcOk ? "✓" : "✗"} 번호 항목 2개 분리 + 세부 묶음`);
+  if (pcOk) pass++;
+  else fail++;
+  // "·"만(면접) → 빈 item 1행으로 병합.
+  const ivParsed = parseCriteria("· 직무 능력\n· 인성");
+  const ivOk = ivParsed.length === 1 && ivParsed[0].item === "";
+  console.log(`  ${ivOk ? "✓" : "✗"} 번호 없는 "·"만 → 빈 항목 1행`);
+  if (ivOk) pass++;
+  else fail++;
+
   console.log(`\n결과: ${pass} 통과 / ${fail} 실패`);
   if (fail > 0) process.exit(1);
 }

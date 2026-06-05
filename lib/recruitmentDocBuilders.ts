@@ -628,20 +628,52 @@ function aSubHeading(text: string): Paragraph {
   return para(text, { bold: true, size: 11, spacing: { before: 140, after: 60 } });
 }
 
-// "항목 | 세부내용" 멀티라인 파싱.
-function parseCriteria(
+// 심사항목 파싱 — 실제 입력 형식:
+//   "1. 사업에 대한 이해"   → 새 심사항목(왼쪽 열). "숫자." 접두 그대로 유지.
+//   "· 센터 사업에 대한 이해" → 직전 심사항목의 세부항목(오른쪽 열).
+//   같은 항목의 세부 줄이 여러 개면 줄바꿈으로 묶어 한 셀에.
+//   첫 줄이 "·" 등으로 시작해 앞 항목이 없으면 심사항목 빈칸 + 세부만.
+//   빈 줄은 무시. (면접처럼 "숫자." 없이 "·"만 있는 경우 → item 빈 행들)
+export function parseCriteria(
   text: string | null | undefined
-): { item: string; detail: string }[] {
+): { item: string; details: string[] }[] {
   if (!text) return [];
-  return text
-    .split(/\r?\n/)
-    .map((l) => l.trim())
-    .filter((l) => l.length > 0)
-    .map((l) => {
-      const i = l.indexOf("|");
-      if (i >= 0) return { item: l.slice(0, i).trim(), detail: l.slice(i + 1).trim() };
-      return { item: "", detail: l };
+  const numbered = /^\s*\d+\.\s*/;
+  const rows: { item: string; details: string[] }[] = [];
+  let current: { item: string; details: string[] } | null = null;
+  for (const raw of text.split(/\r?\n/)) {
+    const line = raw.trim();
+    if (line.length === 0) continue;
+    if (numbered.test(line)) {
+      current = { item: line, details: [] };
+      rows.push(current);
+    } else {
+      // "·" 줄이거나 그 외 줄 → 직전 항목의 세부로. 없으면 빈 항목 생성.
+      if (!current) {
+        current = { item: "", details: [] };
+        rows.push(current);
+      }
+      current.details.push(line);
+    }
+  }
+  return rows;
+}
+
+// 파싱된 심사항목 1건 → 표 행. 심사항목이 있으면 2열, 없으면 두 열 병합.
+function criteriaRow(c: { item: string; details: string[] }): TableRow {
+  const detailParas =
+    c.details.length > 0 ? c.details.map((d) => aCellPara(d)) : [aCellPara("-")];
+  if (c.item) {
+    return new TableRow({
+      children: [
+        aBodyCell([aCellPara(c.item, { bold: true })], { widthPct: 30 }),
+        aBodyCell(detailParas, { widthPct: 70 }),
+      ],
     });
+  }
+  return new TableRow({
+    children: [aBodyCell(detailParas, { columnSpan: 2 })],
+  });
 }
 
 // 공통 지원자격 — 항상 고정 텍스트.
@@ -779,14 +811,7 @@ export async function buildAnnouncementDoc(
   ];
   if (screening.length > 0) {
     for (const c of screening) {
-      procRows.push(
-        new TableRow({
-          children: [
-            aBodyCell(c.item || "-", { align: AlignmentType.CENTER }),
-            aBodyCell(c.detail),
-          ],
-        })
-      );
+      procRows.push(criteriaRow(c));
     }
   } else {
     procRows.push(
@@ -807,14 +832,7 @@ export async function buildAnnouncementDoc(
   );
   if (interview.length > 0) {
     for (const c of interview) {
-      procRows.push(
-        new TableRow({
-          children: [
-            aBodyCell(c.item || "-", { align: AlignmentType.CENTER }),
-            aBodyCell(c.detail),
-          ],
-        })
-      );
+      procRows.push(criteriaRow(c));
     }
   } else {
     procRows.push(
