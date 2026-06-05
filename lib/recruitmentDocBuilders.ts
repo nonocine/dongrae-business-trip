@@ -465,6 +465,12 @@ export type AnnouncementPosting = {
   application_end: string;
   screening_criteria: string | null;
   interview_criteria: string | null;
+  // 합격자 발표 일정 (자유 텍스트, 비어있을 수 있음)
+  interview_candidate_announce_date: string | null;
+  interview_datetime: string | null;
+  interview_location: string | null;
+  final_result_announce_date: string | null;
+  appointment_date: string | null;
   notice: string | null;
   origin: string; // 온라인 지원 URL 구성용(요청 origin)
 };
@@ -791,6 +797,36 @@ export async function buildAnnouncementDoc(
     }),
   ]);
 
+  // 2-나. 합격자 발표 — 값 없으면 빈칸(에러 없이).
+  const fmtDateDot = (iso: string) => {
+    const d = fmtKstDate(iso);
+    return d === "-" ? "" : `${d}.`; // "YYYY.MM.DD."
+  };
+  const scheduleRow = (label: string, value: string | null) =>
+    new TableRow({
+      children: [
+        aBodyCell(label, {
+          fill: G_LIGHT,
+          bold: true,
+          align: AlignmentType.CENTER,
+        }),
+        // 배열 형태로 넘겨 빈 값일 때 "-" 대신 빈 셀이 되도록.
+        aBodyCell([aCellPara(value ?? "")]),
+      ],
+    });
+  const scheduleTable = aTable([
+    new TableRow({
+      tableHeader: true,
+      children: [aHeadCell("구분", 30), aHeadCell("내용", 70)],
+    }),
+    scheduleRow("서류 마감일", fmtDateDot(p.application_end)),
+    scheduleRow("면접 대상자 발표일", p.interview_candidate_announce_date),
+    scheduleRow("면접일시", p.interview_datetime),
+    scheduleRow("면접 장소", p.interview_location),
+    scheduleRow("최종합격자 발표일", p.final_result_announce_date),
+    scheduleRow("임용일", p.appointment_date),
+  ]);
+
   // 3-가. 단계별 절차
   const screening = parseCriteria(p.screening_criteria);
   const interview = parseCriteria(p.interview_criteria);
@@ -880,7 +916,15 @@ export async function buildAnnouncementDoc(
     ...aMultiline(p.salary_info, "공고 내용을 참고하시기 바랍니다."),
 
     aSectionHeader("2. 채용공고 및 지원방법"),
+    aSubHeading("가. 공고 및 지원방법"),
     applyTable,
+    aSubHeading("나. 합격자 발표"),
+    scheduleTable,
+    para("※ 최종합격자 발표 및 임용일은 센터 사정에 따라 변경될 수 있음", {
+      size: 9,
+      color: GRAY,
+      spacing: { before: 80, after: 120 },
+    }),
 
     aSectionHeader("3. 채용절차"),
     aSubHeading("가. 단계별 절차"),

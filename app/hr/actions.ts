@@ -313,6 +313,11 @@ export type RecruitmentPostingAdmin = {
   process_info: string | null;
   screening_criteria: string | null;
   interview_criteria: string | null;
+  interview_candidate_announce_date: string | null;
+  interview_datetime: string | null;
+  interview_location: string | null;
+  final_result_announce_date: string | null;
+  appointment_date: string | null;
   notice: string | null;
   status: "draft" | "published" | "closed";
   require_certificate_copy: boolean;
@@ -345,6 +350,13 @@ function normalizeRecruitmentPostingAdmin(
     process_info: (raw.process_info as string | null) ?? null,
     screening_criteria: (raw.screening_criteria as string | null) ?? null,
     interview_criteria: (raw.interview_criteria as string | null) ?? null,
+    interview_candidate_announce_date:
+      (raw.interview_candidate_announce_date as string | null) ?? null,
+    interview_datetime: (raw.interview_datetime as string | null) ?? null,
+    interview_location: (raw.interview_location as string | null) ?? null,
+    final_result_announce_date:
+      (raw.final_result_announce_date as string | null) ?? null,
+    appointment_date: (raw.appointment_date as string | null) ?? null,
     notice: (raw.notice as string | null) ?? null,
     status: safeStatus,
     // 컬럼이 없으면(마이그레이션 전) undefined → 기본 true.
@@ -442,6 +454,13 @@ export async function saveRecruitmentPosting(
       process_info: trimToNull("process_info"),
       screening_criteria: trimToNull("screening_criteria"),
       interview_criteria: trimToNull("interview_criteria"),
+      interview_candidate_announce_date: trimToNull(
+        "interview_candidate_announce_date"
+      ),
+      interview_datetime: trimToNull("interview_datetime"),
+      interview_location: trimToNull("interview_location"),
+      final_result_announce_date: trimToNull("final_result_announce_date"),
+      appointment_date: trimToNull("appointment_date"),
       notice: trimToNull("notice"),
       status: safeStatus,
       // 자격증 사본 필수 여부 — 미지정이면 기본 true.

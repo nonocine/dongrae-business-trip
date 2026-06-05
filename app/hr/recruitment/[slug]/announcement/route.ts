@@ -49,6 +49,11 @@ export async function GET(
     application_end: String(r.application_end ?? ""),
     screening_criteria: s(r.screening_criteria),
     interview_criteria: s(r.interview_criteria),
+    interview_candidate_announce_date: s(r.interview_candidate_announce_date),
+    interview_datetime: s(r.interview_datetime),
+    interview_location: s(r.interview_location),
+    final_result_announce_date: s(r.final_result_announce_date),
+    appointment_date: s(r.appointment_date),
     notice: s(r.notice),
     origin: new URL(request.url).origin,
   };

@@ -304,6 +304,21 @@ function PostingForm({
   const [interviewCriteria, setInterviewCriteria] = useState(
     initial?.interview_criteria ?? ""
   );
+  // 합격자 발표 일정 (전부 선택 입력, 자유 텍스트)
+  const [interviewCandidateAnnounceDate, setInterviewCandidateAnnounceDate] =
+    useState(initial?.interview_candidate_announce_date ?? "");
+  const [interviewDatetime, setInterviewDatetime] = useState(
+    initial?.interview_datetime ?? ""
+  );
+  const [interviewLocation, setInterviewLocation] = useState(
+    initial?.interview_location ?? ""
+  );
+  const [finalResultAnnounceDate, setFinalResultAnnounceDate] = useState(
+    initial?.final_result_announce_date ?? ""
+  );
+  const [appointmentDate, setAppointmentDate] = useState(
+    initial?.appointment_date ?? ""
+  );
   const [published, setPublished] = useState(initial?.status === "published");
   // 자격증 사본 필수 여부 — 기존 공고는 값(기본 true) 사용, 신규는 true.
   const [requireCert, setRequireCert] = useState(
@@ -337,6 +352,14 @@ function PostingForm({
         fd.set("process_info", processInfo);
         fd.set("screening_criteria", screeningCriteria);
         fd.set("interview_criteria", interviewCriteria);
+        fd.set(
+          "interview_candidate_announce_date",
+          interviewCandidateAnnounceDate
+        );
+        fd.set("interview_datetime", interviewDatetime);
+        fd.set("interview_location", interviewLocation);
+        fd.set("final_result_announce_date", finalResultAnnounceDate);
+        fd.set("appointment_date", appointmentDate);
         fd.set("notice", notice);
         fd.set("status", published ? "published" : "draft");
         fd.set("require_certificate_copy", requireCert ? "true" : "false");
@@ -548,6 +571,61 @@ function PostingForm({
             rows={4}
             placeholder="면접전형 심사기준 및 배점..."
             className={`${inputCls} resize-y`}
+          />
+        </div>
+
+        {/* 합격자 발표 일정 — 전부 선택 입력, 자유 텍스트 */}
+        <div className="mt-1 border-t border-line pt-3 text-xs font-bold text-navy sm:col-span-2">
+          합격자 발표 일정
+        </div>
+        <div>
+          <label className={labelCls}>면접 대상자 발표일</label>
+          <input
+            type="text"
+            value={interviewCandidateAnnounceDate}
+            onChange={(e) => setInterviewCandidateAnnounceDate(e.target.value)}
+            placeholder="예: 2026.07.10.(금)"
+            className={inputCls}
+          />
+        </div>
+        <div>
+          <label className={labelCls}>면접일시</label>
+          <input
+            type="text"
+            value={interviewDatetime}
+            onChange={(e) => setInterviewDatetime(e.target.value)}
+            placeholder="예: 2026.07.15.(화) 14:00"
+            className={inputCls}
+          />
+        </div>
+        <div>
+          <label className={labelCls}>면접 장소</label>
+          <input
+            type="text"
+            value={interviewLocation}
+            onChange={(e) => setInterviewLocation(e.target.value)}
+            placeholder="예: 동래구청소년센터 3층"
+            className={inputCls}
+          />
+        </div>
+        <div>
+          <label className={labelCls}>최종합격자 발표일</label>
+          <input
+            type="text"
+            value={finalResultAnnounceDate}
+            onChange={(e) => setFinalResultAnnounceDate(e.target.value)}
+            placeholder="예: 2026.07.20.(월)"
+            className={inputCls}
+          />
+        </div>
+        <div className="sm:col-span-2">
+          <label className={labelCls}>임용일</label>
+          <input
+            type="text"
+            value={appointmentDate}
+            onChange={(e) => setAppointmentDate(e.target.value)}
+            placeholder="예: 최종합격자 발표 후 협의"
+            className={inputCls}
           />
         </div>
 
