@@ -340,6 +340,24 @@ export async function saveScreeningScore(
     if (!applicationId)
       return { ok: false, message: "application_id가 누락되었습니다." };
 
+    // 지원자-공고 소속 검증 — application_id 가 이 공고(slug)의 지원서인지 확인.
+    //   requireHrAdmin 직후·저장 전. (saveInterviewScore 와 동일 패턴)
+    const adm = await getPostingForAdmin(slug);
+    if (!adm) return { ok: false, message: "공고를 찾을 수 없습니다." };
+    const { data: appRow, error: appErr } = await supabaseAdmin
+      .from("recruitment_applications")
+      .select("id, posting_id")
+      .eq("id", applicationId)
+      .maybeSingle();
+    if (appErr) throw new Error(appErr.message);
+    if (
+      !appRow ||
+      String((appRow as { posting_id?: unknown }).posting_id) !==
+        adm.posting.id
+    ) {
+      return { ok: false, message: "이 공고의 지원자가 아닙니다." };
+    }
+
     const q1 = Number(formData.get("q1_expertise") ?? NaN);
     const q2 = Number(formData.get("q2_license") ?? NaN);
     const q3 = Number(formData.get("q3_statement") ?? NaN);
