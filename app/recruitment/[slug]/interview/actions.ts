@@ -126,20 +126,61 @@ export async function saveInterviewScore(
     const applicationId = String(
       formData.get("application_id") ?? ""
     ).trim();
-    const reviewerName = String(formData.get("reviewer_name") ?? "").trim();
     const signature = String(formData.get("signature") ?? "").trim();
 
     if (!slug) return { ok: false, message: "공고 정보가 누락되었습니다." };
     if (!applicationId)
       return { ok: false, message: "지원자가 선택되지 않았습니다." };
-    if (!reviewerName)
-      return { ok: false, message: "심사위원 이름이 필요합니다." };
     if (!signature || !signature.startsWith("data:image/")) {
       return { ok: false, message: "서명이 필요합니다." };
     }
 
+    // (1) 외부위원 세션 확인 — dongrae_external_judge 쿠키 파싱 + DB 재검증.
+    //     requireExternalJudge 가 위원 is_active·공고 status 까지 재확인하므로
+    //     쿠키 없음/위원 비활성/공고 종료면 throw → 명확한 메시지로 거부.
+    //     service_role 전환 후 RLS 가 없으므로 이 액션이 유일한 방어선입니다.
+    let session: Awaited<ReturnType<typeof requireExternalJudge>>;
+    try {
+      session = await requireExternalJudge();
+    } catch (e) {
+      return {
+        ok: false,
+        message:
+          e instanceof Error
+            ? e.message
+            : "외부위원 로그인이 필요합니다. 다시 로그인해주세요.",
+      };
+    }
+
     const p = await getInterviewPosting(slug);
     if (!p) return { ok: false, message: "공고를 찾을 수 없습니다." };
+
+    // (3) 위원 배정 검증 — 로그인 세션의 공고와 제출 대상 공고가 일치해야 함.
+    //     (requireExternalJudge 가 session.judgeId 의 is_active=true 를 이미
+    //      확인하므로, 공고 일치까지 보장되면 "이 공고에 배정된 활성 위원".)
+    if (session.postingId !== p.id) {
+      return {
+        ok: false,
+        message: "현재 로그인한 공고의 지원자만 채점할 수 있습니다.",
+      };
+    }
+
+    // (2) 지원자 검증 — application_id 가 이 공고에 실제로 속한 지원서인지 확인.
+    const { data: appRow, error: appErr } = await supabaseAdmin
+      .from("recruitment_applications")
+      .select("id, posting_id")
+      .eq("id", applicationId)
+      .maybeSingle();
+    if (appErr) throw new Error(appErr.message);
+    if (
+      !appRow ||
+      String((appRow as { posting_id?: unknown }).posting_id) !== p.id
+    ) {
+      return { ok: false, message: "이 공고의 지원자가 아닙니다." };
+    }
+
+    // 채점 주체는 세션의 위원(클라이언트가 보낸 이름은 신뢰하지 않음).
+    const reviewerName = session.name;
 
     const isAbsent = String(formData.get("is_absent") ?? "") === "true";
 
@@ -181,7 +222,10 @@ export async function saveInterviewScore(
       {
         application_id: applicationId,
         stage: "interview",
+        // (4) 중복 채점 방지 — (application_id, stage, reviewer_name) 충돌 시 update.
+        //     reviewer_name 은 세션의 위원명, reviewer_id 로 위원 식별 강화.
         reviewer_name: reviewerName,
+        reviewer_id: session.judgeId,
         scores: {
           q1,
           q2,
