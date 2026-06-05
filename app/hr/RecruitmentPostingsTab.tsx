@@ -229,7 +229,7 @@ function PostingRow({
             href={`/hr/recruitment/${posting.slug}`}
             className="rounded-md border border-brand-green bg-card px-2.5 py-1 text-xs font-semibold text-brand-green hover:bg-brand-green/10"
           >
-            지원자 관리
+            채용 관리
           </Link>
           <Link
             href={`/hr/recruitment/${posting.slug}/judges`}

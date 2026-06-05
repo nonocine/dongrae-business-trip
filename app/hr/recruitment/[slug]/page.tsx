@@ -38,7 +38,7 @@ export default async function RecruitmentAdminPage({
             href="/hr"
             className="text-sm text-ink-muted hover:underline"
           >
-            ← 인사 관리
+            ← 채용 관리
           </Link>
           <div className="flex flex-wrap items-center gap-2">
             <a
