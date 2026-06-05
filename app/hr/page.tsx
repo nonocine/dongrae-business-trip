@@ -1,6 +1,6 @@
 import Link from "next/link";
 import Header from "@/app/components/Header";
-import HrDashboard from "@/app/hr/HrDashboard";
+import HrDashboard, { type TabKey } from "@/app/hr/HrDashboard";
 import {
   requireHrAdmin,
   listDriversForHrProfile,
@@ -11,11 +11,27 @@ import { enforcePasswordChange } from "@/app/actions";
 
 export const dynamic = "force-dynamic";
 
-export default async function HrPage() {
+const VALID_TABS: TabKey[] = [
+  "records",
+  "contracts",
+  "certificates",
+  "recruitment",
+];
+
+export default async function HrPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ tab?: string }>;
+}) {
   // 임시 비밀번호 사용자는 비번 변경 페이지로 강제 이동
   await enforcePasswordChange();
   // 관장·부장 직원 세션이 아니면 / 로 redirect
   await requireHrAdmin();
+
+  const { tab } = await searchParams;
+  const initialTab: TabKey = VALID_TABS.includes(tab as TabKey)
+    ? (tab as TabKey)
+    : "records";
 
   const [drivers, profiles, recruitmentPostings] = await Promise.all([
     listDriversForHrProfile(),
@@ -44,6 +60,7 @@ export default async function HrPage() {
           drivers={drivers}
           profiles={profiles}
           recruitmentPostings={recruitmentPostings}
+          initialTab={initialTab}
         />
       </main>
     </>

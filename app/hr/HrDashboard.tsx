@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useMemo, useState } from "react";
 import EmployeeProfileForm from "@/app/hr/EmployeeProfileForm";
 import RecruitmentPostingsTab from "@/app/hr/RecruitmentPostingsTab";
@@ -7,21 +8,24 @@ import type { Driver, EmployeeProfile } from "@/lib/supabase";
 import type { RecruitmentPostingAdmin } from "@/app/hr/actions";
 import { cardCls, inputCls, tabBarCls, tabNavCls, tabItemCls } from "@/lib/ui";
 
-type TabKey = "records" | "contracts" | "certificates" | "recruitment";
+export type TabKey = "records" | "contracts" | "certificates" | "recruitment";
 
 export default function HrDashboard({
   drivers,
   profiles,
   recruitmentPostings,
+  initialTab = "records",
 }: {
   drivers: Driver[];
   profiles: EmployeeProfile[];
   recruitmentPostings: RecruitmentPostingAdmin[];
+  initialTab?: TabKey;
 }) {
-  const [tab, setTab] = useState<TabKey>("records");
+  const [tab, setTab] = useState<TabKey>(initialTab);
 
   return (
     <div className="space-y-6">
+      <QuickAccess onTab={setTab} />
       <Tabs current={tab} onChange={setTab} />
 
       {tab === "records" && (
@@ -78,6 +82,59 @@ function Tabs({
           </button>
         ))}
       </nav>
+    </div>
+  );
+}
+
+// =====================================================================
+// 빠른 진입 카드 — HR 관리 핵심 기능 바로가기
+// =====================================================================
+function QuickAccess({ onTab }: { onTab: (t: TabKey) => void }) {
+  const base =
+    "flex items-start gap-3 rounded-xl border border-line bg-card p-4 text-left shadow-sm transition hover:border-navy hover:bg-navy-soft/40";
+  return (
+    <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+      <button type="button" onClick={() => onTab("recruitment")} className={base}>
+        <span aria-hidden className="text-2xl">
+          📢
+        </span>
+        <span>
+          <span className="block text-sm font-semibold text-ink">
+            채용 공고 관리
+          </span>
+          <span className="mt-0.5 block text-xs text-ink-muted">
+            공고 작성·게시, 지원자 전형 관리
+          </span>
+        </span>
+      </button>
+
+      <Link href="/hr/external-judges" className={base}>
+        <span aria-hidden className="text-2xl">
+          👥
+        </span>
+        <span>
+          <span className="block text-sm font-semibold text-ink">
+            외부 심사위원 등록
+          </span>
+          <span className="mt-0.5 block text-xs text-ink-muted">
+            심사위원 명단 관리·채용별 배정
+          </span>
+        </span>
+      </Link>
+
+      <button type="button" onClick={() => onTab("records")} className={base}>
+        <span aria-hidden className="text-2xl">
+          🗂
+        </span>
+        <span>
+          <span className="block text-sm font-semibold text-ink">
+            직원 인사 관리
+          </span>
+          <span className="mt-0.5 block text-xs text-ink-muted">
+            인사기록카드 입력·열람
+          </span>
+        </span>
+      </button>
     </div>
   );
 }

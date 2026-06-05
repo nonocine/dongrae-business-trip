@@ -6,7 +6,8 @@ import { logoutCurrent } from "@/app/actions";
 
 type SessionKind = "admin" | "employee" | null;
 
-type NavLink = { href: string; label: string };
+type NavChild = { href: string; label: string };
+type NavItem = { href: string; label: string; children?: NavChild[] };
 
 export default function HeaderClient({
   kind,
@@ -25,12 +26,21 @@ export default function HeaderClient({
   const displayName = isAdmin ? "관리자" : name ?? "";
 
   // 좌측 네비게이션 (권한별)
-  const navLinks: NavLink[] = [];
+  const navItems: NavItem[] = [];
   if (loggedIn) {
-    navLinks.push({ href: "/", label: "메인" });
-    navLinks.push({ href: "/new", label: "활동 작성" });
-    if (canAccessHr) navLinks.push({ href: "/hr", label: "인사 모듈" });
-    if (isAdmin) navLinks.push({ href: "/admin", label: "관리자" });
+    navItems.push({ href: "/", label: "메인" });
+    navItems.push({ href: "/new", label: "활동 작성" });
+    if (canAccessHr)
+      navItems.push({
+        href: "/hr",
+        label: "HR 관리",
+        children: [
+          { href: "/hr?tab=recruitment", label: "채용 관리" },
+          { href: "/hr/external-judges", label: "외부 심사위원" },
+          { href: "/hr?tab=records", label: "직원 관리" },
+        ],
+      });
+    if (isAdmin) navItems.push({ href: "/admin", label: "관리자" });
   }
 
   return (
@@ -69,15 +79,19 @@ export default function HeaderClient({
         {/* 데스크톱 가로 네비 */}
         {loggedIn && (
           <nav className="ml-3 hidden items-center gap-0.5 md:flex">
-            {navLinks.map((l) => (
-              <Link
-                key={l.href}
-                href={l.href}
-                className="rounded-md px-3 py-1.5 text-sm font-medium text-ink-muted transition hover:bg-surface hover:text-ink"
-              >
-                {l.label}
-              </Link>
-            ))}
+            {navItems.map((item) =>
+              item.children ? (
+                <DesktopNavMenu key={item.href} item={item} />
+              ) : (
+                <Link
+                  key={item.href}
+                  href={item.href}
+                  className="rounded-md px-3 py-1.5 text-sm font-medium text-ink-muted transition hover:bg-surface hover:text-ink"
+                >
+                  {item.label}
+                </Link>
+              )
+            )}
           </nav>
         )}
 
@@ -185,16 +199,40 @@ export default function HeaderClient({
             </div>
 
             <nav className="flex flex-1 flex-col gap-0.5 overflow-y-auto p-2">
-              {navLinks.map((l) => (
-                <Link
-                  key={l.href}
-                  href={l.href}
-                  onClick={() => setMobileOpen(false)}
-                  className="rounded-md px-3 py-2.5 text-sm font-medium text-ink-body hover:bg-surface"
-                >
-                  {l.label}
-                </Link>
-              ))}
+              {navItems.map((item) =>
+                item.children ? (
+                  <div key={item.href} className="flex flex-col gap-0.5">
+                    <Link
+                      href={item.href}
+                      onClick={() => setMobileOpen(false)}
+                      className="rounded-md px-3 py-2.5 text-sm font-semibold text-ink hover:bg-surface"
+                    >
+                      {item.label}
+                    </Link>
+                    <div className="ml-3 flex flex-col gap-0.5 border-l border-line pl-2">
+                      {item.children.map((c) => (
+                        <Link
+                          key={c.href}
+                          href={c.href}
+                          onClick={() => setMobileOpen(false)}
+                          className="rounded-md px-3 py-2 text-sm text-ink-body hover:bg-surface"
+                        >
+                          {c.label}
+                        </Link>
+                      ))}
+                    </div>
+                  </div>
+                ) : (
+                  <Link
+                    key={item.href}
+                    href={item.href}
+                    onClick={() => setMobileOpen(false)}
+                    className="rounded-md px-3 py-2.5 text-sm font-medium text-ink-body hover:bg-surface"
+                  >
+                    {item.label}
+                  </Link>
+                )
+              )}
 
               <div className="my-1 border-t border-line" />
 
@@ -238,5 +276,41 @@ export default function HeaderClient({
         </div>
       )}
     </header>
+  );
+}
+
+// 데스크톱 네비 드롭다운 — children 이 있는 상위 메뉴(HR 관리)용.
+function DesktopNavMenu({ item }: { item: NavItem }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <div className="relative">
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        className="inline-flex items-center gap-1 rounded-md px-3 py-1.5 text-sm font-medium text-ink-muted transition hover:bg-surface hover:text-ink"
+      >
+        {item.label}
+        <span aria-hidden className="text-[10px]">
+          ▾
+        </span>
+      </button>
+      {open && (
+        <>
+          <div className="fixed inset-0 z-30" onClick={() => setOpen(false)} />
+          <div className="absolute left-0 z-40 mt-1 w-44 overflow-hidden rounded-lg border border-line bg-card py-1 shadow-lg">
+            {item.children?.map((c) => (
+              <Link
+                key={c.href}
+                href={c.href}
+                onClick={() => setOpen(false)}
+                className="block px-3 py-2 text-sm text-ink-body hover:bg-surface"
+              >
+                {c.label}
+              </Link>
+            ))}
+          </div>
+        </>
+      )}
+    </div>
   );
 }
