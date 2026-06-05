@@ -421,7 +421,7 @@ function ApplicantDetailView({
   return (
     <div className="grid grid-cols-1 gap-5 lg:grid-cols-[1fr_400px]">
       {/* 좌측: 지원서 전체 */}
-      <ApplicantSummary applicant={applicant} />
+      <ApplicantSummary applicant={applicant} slug={posting.slug} />
       {/* 우측: 서류 채점 + 상태 변경 */}
       <div className="space-y-4">
         <ScreeningScoreCard
@@ -447,7 +447,13 @@ function ApplicantDetailView({
   );
 }
 
-function ApplicantSummary({ applicant: a }: { applicant: AdminApplicant }) {
+function ApplicantSummary({
+  applicant: a,
+  slug,
+}: {
+  applicant: AdminApplicant;
+  slug: string;
+}) {
   return (
     <section className={cardCls}>
       <div className="flex items-start gap-4">
@@ -466,10 +472,20 @@ function ApplicantSummary({ applicant: a }: { applicant: AdminApplicant }) {
           )}
         </div>
         <div className="min-w-0 flex-1">
-          <h3 className="text-lg font-bold text-ink">{a.name}</h3>
-          <p className="mt-0.5 font-mono text-xs text-ink-muted">
-            접수번호 {a.applicant_number}
-          </p>
+          <div className="flex flex-wrap items-start justify-between gap-2">
+            <div className="min-w-0">
+              <h3 className="text-lg font-bold text-ink">{a.name}</h3>
+              <p className="mt-0.5 font-mono text-xs text-ink-muted">
+                접수번호 {a.applicant_number}
+              </p>
+            </div>
+            <a
+              href={`/hr/recruitment/${slug}/applicant/${a.applicant_id}/document`}
+              className="inline-flex shrink-0 items-center gap-1 rounded-lg border border-navy bg-card px-3 py-1.5 text-xs font-semibold text-navy hover:bg-navy-soft"
+            >
+              📄 지원서 다운로드
+            </a>
+          </div>
           <dl className="mt-3 grid grid-cols-1 gap-1 text-xs text-ink-body sm:grid-cols-2">
             <Field label="생년월일" value={a.birth_date || "-"} />
             <Field
