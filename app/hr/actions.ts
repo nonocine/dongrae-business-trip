@@ -309,6 +309,7 @@ export type RecruitmentPostingAdmin = {
   process_info: string | null;
   notice: string | null;
   status: "draft" | "published" | "closed";
+  require_certificate_copy: boolean;
   created_at: string;
   updated_at: string;
   created_by: string | null;
@@ -334,6 +335,8 @@ function normalizeRecruitmentPostingAdmin(
     process_info: (raw.process_info as string | null) ?? null,
     notice: (raw.notice as string | null) ?? null,
     status: safeStatus,
+    // 컬럼이 없으면(마이그레이션 전) undefined → 기본 true.
+    require_certificate_copy: raw.require_certificate_copy !== false,
     created_at: String(raw.created_at ?? ""),
     updated_at: String(raw.updated_at ?? ""),
     created_by: (raw.created_by as string | null) ?? null,
@@ -344,11 +347,10 @@ export async function listRecruitmentPostings(): Promise<
   RecruitmentPostingAdmin[]
 > {
   await requireHrAdmin();
+  // select("*") — require_certificate_copy 등 신규 컬럼이 없어도 안전.
   const { data, error } = await supabase
     .from("recruitment_postings")
-    .select(
-      "id,slug,title,field,recruit_count,application_start,application_end,qualifications,preferred,salary_info,process_info,notice,status,created_at,updated_at,created_by"
-    )
+    .select("*")
     .order("created_at", { ascending: false });
   if (error) throw new Error(error.message);
   return (data ?? []).map((row) =>
@@ -424,6 +426,9 @@ export async function saveRecruitmentPosting(
       process_info: trimToNull("process_info"),
       notice: trimToNull("notice"),
       status: safeStatus,
+      // 자격증 사본 필수 여부 — 미지정이면 기본 true.
+      require_certificate_copy:
+        formData.get("require_certificate_copy") !== "false",
       updated_at: new Date().toISOString(),
     };
 

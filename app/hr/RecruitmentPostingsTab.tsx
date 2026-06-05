@@ -285,6 +285,10 @@ function PostingForm({
   const [processInfo, setProcessInfo] = useState(initial?.process_info ?? "");
   const [notice, setNotice] = useState(initial?.notice ?? "");
   const [published, setPublished] = useState(initial?.status === "published");
+  // 자격증 사본 필수 여부 — 기존 공고는 값(기본 true) 사용, 신규는 true.
+  const [requireCert, setRequireCert] = useState(
+    initial?.require_certificate_copy ?? true
+  );
 
   const [pending, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
@@ -309,6 +313,7 @@ function PostingForm({
         fd.set("process_info", processInfo);
         fd.set("notice", notice);
         fd.set("status", published ? "published" : "draft");
+        fd.set("require_certificate_copy", requireCert ? "true" : "false");
 
         const res = await saveRecruitmentPosting(fd);
         if (res.ok) {
@@ -478,6 +483,25 @@ function PostingForm({
               {published
                 ? "외부 지원자가 공고를 열람·지원할 수 있습니다."
                 : "비공개(draft) — 외부에서 보이지 않습니다."}
+            </span>
+          </label>
+        </div>
+
+        <div className="sm:col-span-2">
+          <label className="inline-flex cursor-pointer items-center gap-2 rounded-lg border border-line bg-surface px-3 py-2">
+            <input
+              type="checkbox"
+              checked={requireCert}
+              onChange={(e) => setRequireCert(e.target.checked)}
+              className="h-4 w-4 rounded border-line text-brand-blue focus:ring-brand-blue"
+            />
+            <span className="text-sm font-semibold text-ink">
+              자격증 사본 필수
+            </span>
+            <span className="text-xs text-ink-muted">
+              {requireCert
+                ? "ON — 지원자에게 자격증 사본이 필수 서류로 표시됩니다."
+                : "OFF — 자격증 사본이 선택 서류로 표시됩니다."}
             </span>
           </label>
         </div>

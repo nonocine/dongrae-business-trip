@@ -88,7 +88,7 @@ const APPLY_TABS: { key: ApplyTabKey; label: string }[] = [
 
 const TAB_ORDER: ApplyTabKey[] = APPLY_TABS.map((t) => t.key);
 
-const STATEMENT_MAX = 500;
+const STATEMENT_MAX = 1500;
 
 // 글자 수 카운트 — 단순 character length(코드포인트 차이 무시).
 function len(s: string): number {
@@ -663,7 +663,7 @@ export default function ApplyForm({
           {/* 7) 자기소개서 */}
           <div className={tab === "statement" ? "" : "hidden"}>
             <p className="mb-2 text-xs text-ink-muted">
-              각 항목은 500자 이내로 작성해주세요.
+              각 항목은 1500자 이내로 작성해주세요.
             </p>
             <StatementField
               label="지원 동기 및 입사 후 포부"
