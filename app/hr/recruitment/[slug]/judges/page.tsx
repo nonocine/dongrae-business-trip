@@ -8,6 +8,7 @@ import { supabaseAdmin } from "@/lib/supabaseAdmin";
 import { normalizeExternalJudge } from "@/lib/supabase";
 import { getPostingForAdmin, listJudges } from "../actions";
 import JudgesAssignManager from "./JudgesAssignManager";
+import JudgeLoginShare from "./JudgeLoginShare";
 
 export const dynamic = "force-dynamic";
 
@@ -72,6 +73,8 @@ export default async function JudgesAssignPage({
             ← 채용 관리
           </Link>
         </div>
+
+        <JudgeLoginShare slug={slug} />
 
         <JudgesAssignManager slug={slug} pool={pool} judges={judges} />
       </main>
