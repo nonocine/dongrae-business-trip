@@ -56,14 +56,27 @@ export default async function RecruitmentPostingPage({
       : `D-${daysLeft}`;
 
   // 값이 있는 항목만 순서대로 표시 — 디자인 지정 색상 매핑.
-  const sections: { title: string; body: string | null; accent: SectionAccent }[] =
-    [
-      { title: "자격요건", body: posting.qualifications, accent: "green" },
-      { title: "우대사항", body: posting.preferred, accent: "orange" },
-      { title: "임금조건", body: posting.salary_info, accent: "violet" },
-      { title: "채용절차", body: posting.process_info, accent: "red" },
-      { title: "유의사항", body: posting.notice, accent: "navy" },
-    ];
+  type Section = { title: string; body: string | null; accent: SectionAccent };
+  // 근무조건 카드 앞쪽(자격·우대·임금) / 뒤쪽(채용절차·심사항목·유의) 으로 분리.
+  const beforeWork: Section[] = [
+    { title: "자격요건", body: posting.qualifications, accent: "green" },
+    { title: "우대사항", body: posting.preferred, accent: "orange" },
+    { title: "임금조건", body: posting.salary_info, accent: "violet" },
+  ];
+  const afterWork: Section[] = [
+    { title: "채용절차", body: posting.process_info, accent: "red" },
+    { title: "서류전형 심사항목", body: posting.screening_criteria, accent: "orange" },
+    { title: "면접전형 심사항목", body: posting.interview_criteria, accent: "green" },
+    { title: "유의사항", body: posting.notice, accent: "navy" },
+  ];
+
+  // 근무조건 — 2열 그리드 텍스트 + 주요업무.
+  const workFields = [
+    { label: "계약기간", value: posting.work_contract_period },
+    { label: "근무지", value: posting.work_location },
+    { label: "근무시간", value: posting.work_hours },
+  ].filter((f) => f.value);
+  const hasWork = workFields.length > 0 || !!posting.work_duties;
 
   return (
     <main className="mx-auto w-full max-w-3xl flex-1 px-4 py-6 sm:px-6 sm:py-8 lg:px-8">
@@ -116,8 +129,53 @@ export default async function RecruitmentPostingPage({
         </dl>
       </SectionCard>
 
-      {/* 상세 항목 — 값이 있는 것만 */}
-      {sections.map((s) =>
+      {/* 자격·우대·임금 */}
+      {beforeWork.map((s) =>
+        s.body ? (
+          <SectionCard key={s.title} title={s.title} accent={s.accent}>
+            <p className="whitespace-pre-wrap text-[15px] leading-relaxed text-ink-body">
+              {s.body}
+            </p>
+          </SectionCard>
+        ) : null
+      )}
+
+      {/* 근무조건 — 2열 그리드 */}
+      {hasWork && (
+        <SectionCard title="근무조건" accent="blue">
+          {workFields.length > 0 && (
+            <dl className="grid grid-cols-1 gap-x-5 gap-y-2 sm:grid-cols-2">
+              {workFields.map((f) => (
+                <div key={f.label} className="flex gap-2 text-sm">
+                  <dt className="w-16 shrink-0 font-semibold text-ink-muted">
+                    {f.label}
+                  </dt>
+                  <dd className="min-w-0 break-words text-ink-body">
+                    {f.value}
+                  </dd>
+                </div>
+              ))}
+            </dl>
+          )}
+          {posting.work_duties && (
+            <div
+              className={
+                workFields.length > 0
+                  ? "mt-3 border-t border-line pt-3"
+                  : undefined
+              }
+            >
+              <p className="text-xs font-semibold text-ink-muted">주요업무</p>
+              <p className="mt-1 whitespace-pre-wrap text-[15px] leading-relaxed text-ink-body">
+                {posting.work_duties}
+              </p>
+            </div>
+          )}
+        </SectionCard>
+      )}
+
+      {/* 채용절차·심사항목·유의사항 */}
+      {afterWork.map((s) =>
         s.body ? (
           <SectionCard key={s.title} title={s.title} accent={s.accent}>
             <p className="whitespace-pre-wrap text-[15px] leading-relaxed text-ink-body">

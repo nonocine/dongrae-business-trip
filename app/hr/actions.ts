@@ -306,7 +306,13 @@ export type RecruitmentPostingAdmin = {
   qualifications: string | null;
   preferred: string | null;
   salary_info: string | null;
+  work_contract_period: string | null;
+  work_location: string | null;
+  work_hours: string | null;
+  work_duties: string | null;
   process_info: string | null;
+  screening_criteria: string | null;
+  interview_criteria: string | null;
   notice: string | null;
   status: "draft" | "published" | "closed";
   require_certificate_copy: boolean;
@@ -332,7 +338,13 @@ function normalizeRecruitmentPostingAdmin(
     qualifications: (raw.qualifications as string | null) ?? null,
     preferred: (raw.preferred as string | null) ?? null,
     salary_info: (raw.salary_info as string | null) ?? null,
+    work_contract_period: (raw.work_contract_period as string | null) ?? null,
+    work_location: (raw.work_location as string | null) ?? null,
+    work_hours: (raw.work_hours as string | null) ?? null,
+    work_duties: (raw.work_duties as string | null) ?? null,
     process_info: (raw.process_info as string | null) ?? null,
+    screening_criteria: (raw.screening_criteria as string | null) ?? null,
+    interview_criteria: (raw.interview_criteria as string | null) ?? null,
     notice: (raw.notice as string | null) ?? null,
     status: safeStatus,
     // 컬럼이 없으면(마이그레이션 전) undefined → 기본 true.
@@ -423,7 +435,13 @@ export async function saveRecruitmentPosting(
       qualifications: trimToNull("qualifications"),
       preferred: trimToNull("preferred"),
       salary_info: trimToNull("salary_info"),
+      work_contract_period: trimToNull("work_contract_period"),
+      work_location: trimToNull("work_location"),
+      work_hours: trimToNull("work_hours"),
+      work_duties: trimToNull("work_duties"),
       process_info: trimToNull("process_info"),
+      screening_criteria: trimToNull("screening_criteria"),
+      interview_criteria: trimToNull("interview_criteria"),
       notice: trimToNull("notice"),
       status: safeStatus,
       // 자격증 사본 필수 여부 — 미지정이면 기본 true.

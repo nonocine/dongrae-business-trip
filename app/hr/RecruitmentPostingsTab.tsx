@@ -284,6 +284,20 @@ function PostingForm({
   const [salaryInfo, setSalaryInfo] = useState(initial?.salary_info ?? "");
   const [processInfo, setProcessInfo] = useState(initial?.process_info ?? "");
   const [notice, setNotice] = useState(initial?.notice ?? "");
+  // 근무조건
+  const [workContractPeriod, setWorkContractPeriod] = useState(
+    initial?.work_contract_period ?? ""
+  );
+  const [workLocation, setWorkLocation] = useState(initial?.work_location ?? "");
+  const [workHours, setWorkHours] = useState(initial?.work_hours ?? "");
+  const [workDuties, setWorkDuties] = useState(initial?.work_duties ?? "");
+  // 채용절차 세부 심사항목
+  const [screeningCriteria, setScreeningCriteria] = useState(
+    initial?.screening_criteria ?? ""
+  );
+  const [interviewCriteria, setInterviewCriteria] = useState(
+    initial?.interview_criteria ?? ""
+  );
   const [published, setPublished] = useState(initial?.status === "published");
   // 자격증 사본 필수 여부 — 기존 공고는 값(기본 true) 사용, 신규는 true.
   const [requireCert, setRequireCert] = useState(
@@ -310,7 +324,13 @@ function PostingForm({
         fd.set("qualifications", qualifications);
         fd.set("preferred", preferred);
         fd.set("salary_info", salaryInfo);
+        fd.set("work_contract_period", workContractPeriod);
+        fd.set("work_location", workLocation);
+        fd.set("work_hours", workHours);
+        fd.set("work_duties", workDuties);
         fd.set("process_info", processInfo);
+        fd.set("screening_criteria", screeningCriteria);
+        fd.set("interview_criteria", interviewCriteria);
         fd.set("notice", notice);
         fd.set("status", published ? "published" : "draft");
         fd.set("require_certificate_copy", requireCert ? "true" : "false");
@@ -448,12 +468,79 @@ function PostingForm({
           />
         </div>
 
+        {/* 근무조건 */}
+        <div className="mt-1 border-t border-line pt-3 text-xs font-bold text-navy sm:col-span-2">
+          근무조건
+        </div>
+        <div>
+          <label className={labelCls}>계약기간</label>
+          <input
+            type="text"
+            value={workContractPeriod}
+            onChange={(e) => setWorkContractPeriod(e.target.value)}
+            placeholder="예: 2026.7.1. ~ 2027.6.30. (1년)"
+            className={inputCls}
+          />
+        </div>
+        <div>
+          <label className={labelCls}>근무지</label>
+          <input
+            type="text"
+            value={workLocation}
+            onChange={(e) => setWorkLocation(e.target.value)}
+            placeholder="예: 동래구청소년센터"
+            className={inputCls}
+          />
+        </div>
+        <div>
+          <label className={labelCls}>근무시간</label>
+          <input
+            type="text"
+            value={workHours}
+            onChange={(e) => setWorkHours(e.target.value)}
+            placeholder="예: 주 5일 09:00~18:00"
+            className={inputCls}
+          />
+        </div>
+        <div className="sm:col-span-2">
+          <label className={labelCls}>주요업무</label>
+          <textarea
+            value={workDuties}
+            onChange={(e) => setWorkDuties(e.target.value)}
+            rows={3}
+            placeholder="담당 업무를 입력하세요."
+            className={`${inputCls} resize-y`}
+          />
+        </div>
+
         <div className="sm:col-span-2">
           <label className={labelCls}>채용절차</label>
           <textarea
             value={processInfo}
             onChange={(e) => setProcessInfo(e.target.value)}
             rows={3}
+            className={`${inputCls} resize-y`}
+          />
+        </div>
+
+        <div className="sm:col-span-2">
+          <label className={labelCls}>서류전형 심사항목</label>
+          <textarea
+            value={screeningCriteria}
+            onChange={(e) => setScreeningCriteria(e.target.value)}
+            rows={4}
+            placeholder={"심사항목 | 세부내용 형태로 입력\n사업이해도 | 센터 사업에 대한 이해\n전문성 | 관련 자격증, 경력..."}
+            className={`${inputCls} resize-y`}
+          />
+        </div>
+
+        <div className="sm:col-span-2">
+          <label className={labelCls}>면접전형 심사항목</label>
+          <textarea
+            value={interviewCriteria}
+            onChange={(e) => setInterviewCriteria(e.target.value)}
+            rows={4}
+            placeholder="면접전형 심사기준 및 배점..."
             className={`${inputCls} resize-y`}
           />
         </div>

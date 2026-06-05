@@ -16,7 +16,13 @@ export type RecruitmentPosting = {
   qualifications: string | null;
   preferred: string | null;
   salary_info: string | null;
+  work_contract_period: string | null;
+  work_location: string | null;
+  work_hours: string | null;
+  work_duties: string | null;
   process_info: string | null;
+  screening_criteria: string | null;
+  interview_criteria: string | null;
   notice: string | null;
 };
 
@@ -34,7 +40,13 @@ function normalizeRecruitmentPosting(
     qualifications: (raw.qualifications as string | null) ?? null,
     preferred: (raw.preferred as string | null) ?? null,
     salary_info: (raw.salary_info as string | null) ?? null,
+    work_contract_period: (raw.work_contract_period as string | null) ?? null,
+    work_location: (raw.work_location as string | null) ?? null,
+    work_hours: (raw.work_hours as string | null) ?? null,
+    work_duties: (raw.work_duties as string | null) ?? null,
     process_info: (raw.process_info as string | null) ?? null,
+    screening_criteria: (raw.screening_criteria as string | null) ?? null,
+    interview_criteria: (raw.interview_criteria as string | null) ?? null,
     notice: (raw.notice as string | null) ?? null,
   };
 }
