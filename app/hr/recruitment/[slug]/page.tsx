@@ -42,6 +42,12 @@ export default async function RecruitmentAdminPage({
           </Link>
           <div className="flex flex-wrap items-center gap-2">
             <a
+              href={`/hr/recruitment/${slug}/announcement`}
+              className="inline-flex items-center gap-1 rounded-lg border border-navy bg-card px-3 py-1.5 text-xs font-semibold text-navy hover:bg-navy-soft"
+            >
+              📄 공고문 다운로드
+            </a>
+            <a
               href={`/hr/recruitment/${slug}/export`}
               className="inline-flex items-center gap-1 rounded-lg border border-brand-blue bg-card px-3 py-1.5 text-xs font-semibold text-brand-blue hover:bg-brand-blue-soft"
             >

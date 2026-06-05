@@ -8,11 +8,20 @@ import ExcelJS from "exceljs";
 import {
   Document,
   Packer,
+  Paragraph,
+  TextRun,
   Table,
   TableRow,
+  TableCell,
   WidthType,
   AlignmentType,
   TableLayoutType,
+  VerticalAlign,
+  BorderStyle,
+  ShadingType,
+  HeightRule,
+  Header,
+  convertMillimetersToTwip,
 } from "docx";
 import {
   type ReportData,
@@ -32,8 +41,10 @@ import {
   dataCell,
   maskName,
   kstDateLabel,
+  DOC_FONT,
   GRAY,
 } from "./recruitmentDocx";
+import { fmtKstDate, fmtKstDateTime } from "./datetime";
 
 // 휴대전화 11자리면 010-1234-5678 형태로. 그 외는 원문.
 function fmtPhone(raw: string): string {
@@ -428,6 +439,471 @@ export async function buildInterviewNoticeDoc(
             align: AlignmentType.RIGHT,
           }),
         ],
+      },
+    ],
+  });
+
+  return Packer.toBuffer(doc);
+}
+
+// =====================================================================
+// 채용 공고문(announcement) docx — 실제 공문 양식.
+//   * A4 세로, 맑은 고딕 기본 11pt, 초록 헤더(#4CAF50)·연초록 셀(#E8F5E9).
+//   * 입력은 recruitment_postings 실제 컬럼 기준(라우트에서 매핑해 전달).
+// =====================================================================
+
+export type AnnouncementPosting = {
+  slug: string;
+  title: string;
+  field: string; // 지원분야
+  recruit_count: number;
+  qualifications: string | null; // 필수
+  preferred: string | null; // 우대
+  salary_grade: string | null; // 기준급수(없으면 빈칸)
+  work_contract_period: string | null;
+  work_location: string | null;
+  work_hours: string | null;
+  work_duties: string | null;
+  salary_info: string | null; // 임금
+  application_start: string;
+  application_end: string;
+  screening_criteria: string | null;
+  interview_criteria: string | null;
+  notice: string | null;
+  origin: string; // 온라인 지원 URL 구성용(요청 origin)
+};
+
+const G_HEADER = "4CAF50"; // 초록 헤더
+const G_LIGHT = "E8F5E9"; // 연초록 셀
+const STRIP_COLORS = ["E84040", "2563EB", "4CAF50", "F0C030"]; // 빨강·파랑·초록·노랑
+
+const A_THIN = { style: BorderStyle.SINGLE, size: 4, color: "BBBBBB" } as const;
+const A_TABLE_BORDERS = {
+  top: A_THIN,
+  bottom: A_THIN,
+  left: A_THIN,
+  right: A_THIN,
+  insideHorizontal: A_THIN,
+  insideVertical: A_THIN,
+};
+const A_NONE = { style: BorderStyle.NONE, size: 0, color: "FFFFFF" } as const;
+const A_NO_BORDERS = {
+  top: A_NONE,
+  bottom: A_NONE,
+  left: A_NONE,
+  right: A_NONE,
+  insideHorizontal: A_NONE,
+  insideVertical: A_NONE,
+};
+
+type Align = (typeof AlignmentType)[keyof typeof AlignmentType];
+
+// 셀 본문 문단(10pt).
+function aCellPara(
+  text: string,
+  opts: { bold?: boolean; align?: Align; color?: string } = {}
+): Paragraph {
+  return new Paragraph({
+    alignment: opts.align,
+    spacing: { before: 20, after: 20 },
+    children: [
+      new TextRun({
+        text,
+        bold: opts.bold,
+        size: 20,
+        color: opts.color,
+        font: DOC_FONT,
+      }),
+    ],
+  });
+}
+
+// 여러 줄 텍스트 → 문단 배열(빈 입력이면 대체 문구).
+function aMultiline(
+  text: string | null | undefined,
+  fallback: string
+): Paragraph[] {
+  const lines = (text ?? "")
+    .split(/\r?\n/)
+    .map((l) => l.trim())
+    .filter((l) => l.length > 0);
+  if (lines.length === 0) return [aCellPara(fallback)];
+  return lines.map((l) => aCellPara(l));
+}
+
+// 초록 헤더 셀.
+function aHeadCell(text: string, widthPct?: number): TableCell {
+  return new TableCell({
+    width: widthPct ? { size: widthPct, type: WidthType.PERCENTAGE } : undefined,
+    shading: { type: ShadingType.CLEAR, color: "auto", fill: G_HEADER },
+    verticalAlign: VerticalAlign.CENTER,
+    borders: A_TABLE_BORDERS,
+    margins: { top: 50, bottom: 50, left: 80, right: 80 },
+    children: [
+      new Paragraph({
+        alignment: AlignmentType.CENTER,
+        children: [
+          new TextRun({ text, bold: true, size: 20, color: "FFFFFF", font: DOC_FONT }),
+        ],
+      }),
+    ],
+  });
+}
+
+// 본문 셀(string 또는 Paragraph[] 허용).
+function aBodyCell(
+  content: string | Paragraph[],
+  opts: {
+    fill?: string;
+    align?: Align;
+    bold?: boolean;
+    widthPct?: number;
+    columnSpan?: number;
+  } = {}
+): TableCell {
+  const paras = Array.isArray(content)
+    ? content
+    : [aCellPara(content || "-", { align: opts.align, bold: opts.bold })];
+  return new TableCell({
+    width: opts.widthPct
+      ? { size: opts.widthPct, type: WidthType.PERCENTAGE }
+      : undefined,
+    columnSpan: opts.columnSpan,
+    shading: opts.fill
+      ? { type: ShadingType.CLEAR, color: "auto", fill: opts.fill }
+      : undefined,
+    verticalAlign: VerticalAlign.CENTER,
+    borders: A_TABLE_BORDERS,
+    margins: { top: 50, bottom: 50, left: 80, right: 80 },
+    children: paras,
+  });
+}
+
+function aTable(rows: TableRow[]): Table {
+  return new Table({
+    width: { size: 100, type: WidthType.PERCENTAGE },
+    layout: TableLayoutType.FIXED,
+    rows,
+  });
+}
+
+// 4색 선(빨강·파랑·초록·노랑).
+function aColorStrip(): Table {
+  return new Table({
+    width: { size: 100, type: WidthType.PERCENTAGE },
+    layout: TableLayoutType.FIXED,
+    borders: A_NO_BORDERS,
+    rows: [
+      new TableRow({
+        height: { value: 90, rule: HeightRule.ATLEAST },
+        children: STRIP_COLORS.map(
+          (c) =>
+            new TableCell({
+              width: { size: 25, type: WidthType.PERCENTAGE },
+              shading: { type: ShadingType.CLEAR, color: "auto", fill: c },
+              borders: A_NO_BORDERS,
+              margins: { top: 0, bottom: 0, left: 0, right: 0 },
+              children: [
+                new Paragraph({ children: [new TextRun({ text: "", size: 2 })] }),
+              ],
+            })
+        ),
+      }),
+    ],
+  });
+}
+
+// 초록 섹션 헤더(전체폭 초록 바).
+function aSectionHeader(text: string): Paragraph {
+  return new Paragraph({
+    shading: { type: ShadingType.CLEAR, color: "auto", fill: G_HEADER },
+    spacing: { before: 260, after: 120 },
+    children: [
+      new TextRun({ text, bold: true, size: 24, color: "FFFFFF", font: DOC_FONT }),
+    ],
+  });
+}
+
+function aSubHeading(text: string): Paragraph {
+  return para(text, { bold: true, size: 11, spacing: { before: 140, after: 60 } });
+}
+
+// "항목 | 세부내용" 멀티라인 파싱.
+function parseCriteria(
+  text: string | null | undefined
+): { item: string; detail: string }[] {
+  if (!text) return [];
+  return text
+    .split(/\r?\n/)
+    .map((l) => l.trim())
+    .filter((l) => l.length > 0)
+    .map((l) => {
+      const i = l.indexOf("|");
+      if (i >= 0) return { item: l.slice(0, i).trim(), detail: l.slice(i + 1).trim() };
+      return { item: "", detail: l };
+    });
+}
+
+// 공통 지원자격 — 항상 고정 텍스트.
+const COMMON_QUALIFICATIONS = [
+  "· 지방공무원법 결격사유에 해당하지 아니한 자",
+  "· 해외여행에 결격사유가 없는 자",
+  "· 아동·청소년의 성보호에 관한 법률에 해당하지 아니한 자",
+  "· 동료 및 청소년과 의사소통과 네트워킹이 원활한 자",
+  "· 남자의 경우 병역의무를 이행하였거나 면제된 자",
+  "· 아동·청소년대상 성범죄 경력이 없는 자",
+  "※ 결격사유 해당 시 합격 및 채용 취소",
+];
+
+export async function buildAnnouncementDoc(
+  p: AnnouncementPosting
+): Promise<Buffer> {
+  const field = p.field || "직원";
+
+  // 1-가. 분야 및 계획
+  const detailQualParas = [
+    aCellPara("[필수]", { bold: true }),
+    ...aMultiline(p.qualifications, "공고 내용을 참고하시기 바랍니다."),
+    aCellPara("[우대]", { bold: true }),
+    ...aMultiline(p.preferred, "해당 없음"),
+  ];
+  const planTable = aTable([
+    new TableRow({
+      tableHeader: true,
+      children: [
+        aHeadCell("분야", 22),
+        aHeadCell("채용인원", 18),
+        aHeadCell("세부 지원자격", 60),
+      ],
+    }),
+    new TableRow({
+      children: [
+        aBodyCell(field, { align: AlignmentType.CENTER }),
+        aBodyCell(`${p.recruit_count}명`, { align: AlignmentType.CENTER }),
+        aBodyCell(detailQualParas),
+      ],
+    }),
+    new TableRow({
+      children: [
+        aBodyCell("공통 지원자격", {
+          fill: G_LIGHT,
+          bold: true,
+          align: AlignmentType.CENTER,
+        }),
+        aBodyCell(
+          COMMON_QUALIFICATIONS.map((t) => aCellPara(t)),
+          { columnSpan: 2 }
+        ),
+      ],
+    }),
+  ]);
+
+  // 1-나. 근무조건
+  const workParas = [
+    aCellPara(`① 계약기간 : ${p.work_contract_period || "-"}`),
+    aCellPara(`② 근무지 : ${p.work_location || "-"}`),
+    aCellPara(`③ 근무시간 : ${p.work_hours || "-"}`),
+    aCellPara("④ 주요업무"),
+    ...aMultiline(p.work_duties, "공고 내용을 참고하시기 바랍니다."),
+  ];
+  const workTable = aTable([
+    new TableRow({
+      tableHeader: true,
+      children: [
+        aHeadCell("분야", 22),
+        aHeadCell("기준급수", 18),
+        aHeadCell("근무형태 및 근무지", 60),
+      ],
+    }),
+    new TableRow({
+      children: [
+        aBodyCell(field, { align: AlignmentType.CENTER }),
+        aBodyCell(p.salary_grade || "", { align: AlignmentType.CENTER }),
+        aBodyCell(workParas),
+      ],
+    }),
+  ]);
+
+  // 2. 채용공고 및 지원방법
+  const applyUrl = `${p.origin}/recruitment/${p.slug}`;
+  const noticePlaces =
+    "동래구청소년센터 홈페이지 / 부산광역시청소년수련시설협회 홈페이지 / 고용24 홈페이지";
+  const applyTable = aTable([
+    new TableRow({
+      tableHeader: true,
+      children: [aHeadCell("구분", 24), aHeadCell("내용", 76)],
+    }),
+    new TableRow({
+      children: [
+        aBodyCell("공고장소", { fill: G_LIGHT, bold: true, align: AlignmentType.CENTER }),
+        aBodyCell(noticePlaces),
+      ],
+    }),
+    new TableRow({
+      children: [
+        aBodyCell("공고일자", { fill: G_LIGHT, bold: true, align: AlignmentType.CENTER }),
+        aBodyCell(fmtKstDate(p.application_start)),
+      ],
+    }),
+    new TableRow({
+      children: [
+        aBodyCell("접수기간", { fill: G_LIGHT, bold: true, align: AlignmentType.CENTER }),
+        aBodyCell(
+          `${fmtKstDateTime(p.application_start)} ~ ${fmtKstDateTime(
+            p.application_end
+          )} (시간 엄수)`
+        ),
+      ],
+    }),
+    new TableRow({
+      children: [
+        aBodyCell("지원방법", { fill: G_LIGHT, bold: true, align: AlignmentType.CENTER }),
+        aBodyCell(`온라인 지원 : ${applyUrl}`),
+      ],
+    }),
+  ]);
+
+  // 3-가. 단계별 절차
+  const screening = parseCriteria(p.screening_criteria);
+  const interview = parseCriteria(p.interview_criteria);
+  const procRows: TableRow[] = [
+    new TableRow({
+      tableHeader: true,
+      children: [aHeadCell("심사항목", 30), aHeadCell("세부항목", 70)],
+    }),
+    new TableRow({
+      children: [
+        aBodyCell("서류전형 (1단계)", { fill: G_LIGHT, bold: true, columnSpan: 2 }),
+      ],
+    }),
+  ];
+  if (screening.length > 0) {
+    for (const c of screening) {
+      procRows.push(
+        new TableRow({
+          children: [
+            aBodyCell(c.item || "-", { align: AlignmentType.CENTER }),
+            aBodyCell(c.detail),
+          ],
+        })
+      );
+    }
+  } else {
+    procRows.push(
+      new TableRow({
+        children: [
+          aBodyCell("서류 심사", { align: AlignmentType.CENTER }),
+          aBodyCell("제출 서류를 바탕으로 자격요건·전문성·자기소개서 등을 종합 심사"),
+        ],
+      })
+    );
+  }
+  procRows.push(
+    new TableRow({
+      children: [
+        aBodyCell("면접전형 (2단계)", { fill: G_LIGHT, bold: true, columnSpan: 2 }),
+      ],
+    })
+  );
+  if (interview.length > 0) {
+    for (const c of interview) {
+      procRows.push(
+        new TableRow({
+          children: [
+            aBodyCell(c.item || "-", { align: AlignmentType.CENTER }),
+            aBodyCell(c.detail),
+          ],
+        })
+      );
+    }
+  } else {
+    procRows.push(
+      new TableRow({
+        children: [
+          aBodyCell("면접 심사", { align: AlignmentType.CENTER }),
+          aBodyCell("면접을 통해 직무 수행 능력·인성·의사소통 능력 등을 종합 평가"),
+        ],
+      })
+    );
+  }
+  const procTable = aTable(procRows);
+
+  const children: (Paragraph | Table)[] = [
+    aColorStrip(),
+    new Paragraph({
+      alignment: AlignmentType.CENTER,
+      spacing: { before: 160, after: 160 },
+      children: [
+        new TextRun({
+          text: "동래구청소년센터 직원 채용 공고문",
+          bold: true,
+          size: 40,
+          color: "1A1A1A",
+          font: DOC_FONT,
+        }),
+      ],
+    }),
+    aColorStrip(),
+
+    para(`동래구청소년센터에서는 ${field} 직원을 모집합니다.`, {
+      size: 11,
+      spacing: { before: 240, after: 200 },
+    }),
+    para(kstDateLabel(new Date()), { align: AlignmentType.RIGHT, size: 11 }),
+    para("동래구청소년센터장", {
+      align: AlignmentType.RIGHT,
+      bold: true,
+      size: 13,
+      spacing: { after: 80 },
+    }),
+
+    aSectionHeader("1. 채용개요"),
+    aSubHeading("가. 채용 공고 채용분야 및 계획"),
+    planTable,
+    aSubHeading("나. 근무조건"),
+    workTable,
+    aSubHeading("다. 임금"),
+    ...aMultiline(p.salary_info, "공고 내용을 참고하시기 바랍니다."),
+
+    aSectionHeader("2. 채용공고 및 지원방법"),
+    applyTable,
+
+    aSectionHeader("3. 채용절차"),
+    aSubHeading("가. 단계별 절차"),
+    procTable,
+    aSubHeading("나. 유의사항"),
+    ...aMultiline(p.notice, "공고 내용을 참고하시기 바랍니다."),
+  ];
+
+  const doc = new Document({
+    sections: [
+      {
+        properties: {
+          page: {
+            size: {
+              width: convertMillimetersToTwip(210),
+              height: convertMillimetersToTwip(297),
+            },
+          },
+        },
+        headers: {
+          default: new Header({
+            children: [
+              new Paragraph({
+                alignment: AlignmentType.CENTER,
+                children: [
+                  new TextRun({
+                    text: "동래구청소년센터 직원 채용 공고문",
+                    size: 16,
+                    color: GRAY,
+                    font: DOC_FONT,
+                  }),
+                ],
+              }),
+            ],
+          }),
+        },
+        children,
       },
     ],
   });
