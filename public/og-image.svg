@@ -1,0 +1,57 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="630" viewBox="0 0 1200 630">
+  <defs>
+    <linearGradient id="bgGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#1e3a5f"/><stop offset="100%" stop-color="#0f2237"/>
+    </linearGradient>
+    <linearGradient id="glowLeft" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#2563eb" stop-opacity="0.2"/><stop offset="100%" stop-color="#1e3a5f" stop-opacity="0"/>
+    </linearGradient>
+  </defs>
+  <rect width="1200" height="630" fill="url(#bgGrad)"/>
+  <ellipse cx="160" cy="315" rx="420" ry="360" fill="url(#glowLeft)"/>
+  <rect x="580" y="0" width="1" height="630" fill="#ffffff" fill-opacity="0.08"/>
+  <rect x="581" y="0" width="619" height="630" fill="#000000" fill-opacity="0.06"/>
+  <text x="1050" y="500" font-family="sans-serif" font-size="480" font-weight="700" fill="#ffffff" fill-opacity="0.025" text-anchor="middle">동</text>
+  <rect x="64" y="56" width="30" height="30" rx="6" fill="#2563eb"/>
+  <rect x="100" y="56" width="30" height="30" rx="6" fill="#e84040"/>
+  <rect x="64" y="92" width="30" height="30" rx="6" fill="#f0c030"/>
+  <rect x="100" y="92" width="30" height="30" rx="6" fill="#3ab54a"/>
+  <text x="64" y="170" font-family="sans-serif" font-size="20" fill="#6090a8">동래구청소년센터</text>
+  <text x="64" y="278" font-family="sans-serif" font-size="106" font-weight="700" fill="#ffffff">동업자씨</text>
+  <text x="64" y="322" font-family="sans-serif" font-size="22">
+    <tspan fill="#2563eb" font-weight="700">동</tspan><tspan fill="#5a8ab0">래  </tspan>
+    <tspan fill="#e84040" font-weight="700">업</tspan><tspan fill="#5a8ab0">무  </tspan>
+    <tspan fill="#f0c030" font-weight="700">자</tspan><tspan fill="#5a8ab0">동화  </tspan>
+    <tspan fill="#3ab54a" font-weight="700">씨</tspan><tspan fill="#5a8ab0">스템</tspan>
+  </text>
+  <rect x="64" y="348" width="460" height="1" fill="#ffffff" fill-opacity="0.12"/>
+  <rect x="64" y="368" width="88" height="32" rx="16" fill="#2563eb" fill-opacity="0.18"/>
+  <text x="108" y="389" font-family="sans-serif" font-size="15" fill="#70a0e8" text-anchor="middle">채용관리</text>
+  <rect x="162" y="368" width="88" height="32" rx="16" fill="#e84040" fill-opacity="0.18"/>
+  <text x="206" y="389" font-family="sans-serif" font-size="15" fill="#e88070" text-anchor="middle">인사관리</text>
+  <rect x="260" y="368" width="88" height="32" rx="16" fill="#f0c030" fill-opacity="0.18"/>
+  <text x="304" y="389" font-family="sans-serif" font-size="15" fill="#f0c860" text-anchor="middle">출장기록</text>
+  <rect x="358" y="368" width="100" height="32" rx="16" fill="#3ab54a" fill-opacity="0.18"/>
+  <text x="408" y="389" font-family="sans-serif" font-size="15" fill="#70d080" text-anchor="middle">증명서발급</text>
+  <text x="64" y="558" font-family="monospace" font-size="17" fill="#3a6888">dongrae-business-trip.vercel.app</text>
+  <rect x="630" y="70" width="528" height="100" rx="10" fill="#ffffff" fill-opacity="0.04"/>
+  <rect x="630" y="70" width="4" height="100" rx="2" fill="#2563eb"/>
+  <text x="654" y="116" font-family="sans-serif" font-size="18" font-weight="600" fill="#c8d8f0">채용 시스템</text>
+  <text x="654" y="144" font-family="sans-serif" font-size="14" fill="#5a88a8">공고 · 온라인 지원 · 서류/면접 심사 · 문서 자동생성</text>
+  <rect x="630" y="188" width="528" height="100" rx="10" fill="#ffffff" fill-opacity="0.04"/>
+  <rect x="630" y="188" width="4" height="100" rx="2" fill="#e84040"/>
+  <text x="654" y="234" font-family="sans-serif" font-size="18" font-weight="600" fill="#c8d8f0">인사 관리</text>
+  <text x="654" y="262" font-family="sans-serif" font-size="14" fill="#5a88a8">직원 인사기록 · 계약서 · 재직증명서 발급</text>
+  <rect x="630" y="306" width="528" height="100" rx="10" fill="#ffffff" fill-opacity="0.04"/>
+  <rect x="630" y="306" width="4" height="100" rx="2" fill="#f0c030"/>
+  <text x="654" y="352" font-family="sans-serif" font-size="18" font-weight="600" fill="#c8d8f0">업무 자동화</text>
+  <text x="654" y="380" font-family="sans-serif" font-size="14" fill="#5a88a8">출장·외근 신청 · 승인 · 활동 이력 관리</text>
+  <rect x="630" y="424" width="528" height="100" rx="10" fill="#ffffff" fill-opacity="0.04"/>
+  <rect x="630" y="424" width="4" height="100" rx="2" fill="#3ab54a"/>
+  <text x="654" y="470" font-family="sans-serif" font-size="18" font-weight="600" fill="#c8d8f0">씨스템 · 보안</text>
+  <text x="654" y="498" font-family="sans-serif" font-size="14" fill="#5a88a8">구글 워크스페이스 로그인 · RLS 데이터 보호</text>
+  <rect x="0" y="606" width="300" height="24" fill="#2563eb"/>
+  <rect x="300" y="606" width="300" height="24" fill="#e84040"/>
+  <rect x="600" y="606" width="300" height="24" fill="#f0c030"/>
+  <rect x="900" y="606" width="300" height="24" fill="#3ab54a"/>
+</svg>
