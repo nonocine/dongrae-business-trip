@@ -107,6 +107,8 @@ export type RecruitmentApplicant = {
   agreed_privacy: boolean;
   agreed_criminal_check: boolean;
   agreed_truth: boolean;
+  consent_signature: string | null;
+  consent_signature_type: "drawn" | "typed" | null;
 };
 
 export type RecruitmentApplicationStatus =
@@ -176,6 +178,12 @@ function normalizeApplicant(raw: Record<string, unknown>): RecruitmentApplicant 
     agreed_privacy: raw.agreed_privacy === true,
     agreed_criminal_check: raw.agreed_criminal_check === true,
     agreed_truth: raw.agreed_truth === true,
+    consent_signature: (raw.consent_signature as string | null) ?? null,
+    consent_signature_type:
+      raw.consent_signature_type === "drawn" ||
+      raw.consent_signature_type === "typed"
+        ? raw.consent_signature_type
+        : null,
   };
 }
 
@@ -318,12 +326,42 @@ function generateApplicantNumber(): string {
   return `A-${ts}-${rnd}`;
 }
 
+// 동의 스냅샷(consent_snapshot) 파싱 — 클라이언트가 만든 JSON 을 그대로 받아
+//   kakao_id 만 서버 세션 값으로 덮어씁니다(클라이언트는 kakao_id 를 모름).
+//   형식이 깨졌으면 null 로 떨어뜨려 저장하지 않습니다.
+function parseConsentSnapshot(
+  raw: string | null,
+  kakaoId: string | null
+): Record<string, unknown> | null {
+  if (!raw) return null;
+  try {
+    const parsed: unknown = JSON.parse(raw);
+    if (parsed == null || typeof parsed !== "object" || Array.isArray(parsed)) {
+      return null;
+    }
+    const obj = parsed as Record<string, unknown>;
+    const applicant =
+      obj.applicant != null &&
+      typeof obj.applicant === "object" &&
+      !Array.isArray(obj.applicant)
+        ? (obj.applicant as Record<string, unknown>)
+        : {};
+    return { ...obj, applicant: { ...applicant, kakao_id: kakaoId } };
+  } catch {
+    return null;
+  }
+}
+
 // 폼에서 지원자 입력값을 뽑아 row 모양으로 만듭니다.
 //   * draft / submit 공통 사용. 미입력 텍스트 필드는 null 로 둡니다.
 //   * draft 는 어떤 필드도 필수 아님 — 호출 쪽에서 별도 검증 없음.
 //   * submit 은 호출 쪽에서 필수값(이름·생년월일·이메일·전화·동의 3종) 사전 검증.
 //   * 따라서 컬럼 NOT NULL 제약은 DB 에서 해제되어 있어야 합니다.
-function buildApplicantRow(formData: FormData): Record<string, unknown> {
+//   * 동의 서명/스냅샷은 입력돼 있을 때만 채웁니다(서명 시각 = 저장 시각).
+function buildApplicantRow(
+  formData: FormData,
+  kakaoId: string | null
+): Record<string, unknown> {
   const genderRaw = strOrNull(formData, "gender");
   const gender =
     genderRaw === "M" || genderRaw === "F" ? genderRaw : null;
@@ -333,6 +371,17 @@ function buildApplicantRow(formData: FormData): Record<string, unknown> {
   const career = parseCareerInput(strOrNull(formData, "career"));
   const awards = parseAwardInput(strOrNull(formData, "awards"));
   const trainings = parseTrainingInput(strOrNull(formData, "trainings"));
+
+  const consentSignature = strOrNull(formData, "consent_signature");
+  const consentTypeRaw = strOrNull(formData, "consent_signature_type");
+  const consentSignatureType =
+    consentTypeRaw === "drawn" || consentTypeRaw === "typed"
+      ? consentTypeRaw
+      : null;
+  const consentSnapshot = parseConsentSnapshot(
+    strOrNull(formData, "consent_snapshot"),
+    kakaoId
+  );
 
   return {
     name: strOrNull(formData, "name"),
@@ -353,6 +402,11 @@ function buildApplicantRow(formData: FormData): Record<string, unknown> {
     agreed_privacy: boolOn(formData, "agreed_privacy"),
     agreed_criminal_check: boolOn(formData, "agreed_criminal_check"),
     agreed_truth: boolOn(formData, "agreed_truth"),
+    consent_signature: consentSignature,
+    consent_signature_type: consentSignatureType,
+    consent_snapshot: consentSnapshot,
+    // 서명이 들어온 경우에만 동의 시각을 기록(제출 시 = 제출 시각).
+    consent_at: consentSignature ? new Date().toISOString() : null,
     updated_at: new Date().toISOString(),
   };
 }
@@ -424,7 +478,7 @@ export async function saveApplicationDraft(
       }
     }
 
-    const row = buildApplicantRow(formData);
+    const row = buildApplicantRow(formData, kakaoId);
 
     if (applicantId) {
       const { error: upErr } = await supabaseAdmin
@@ -543,7 +597,7 @@ export async function submitApplication(
       }
     }
 
-    const row = buildApplicantRow(formData);
+    const row = buildApplicantRow(formData, kakaoId);
 
     if (applicantId) {
       const { error: upErr } = await supabaseAdmin

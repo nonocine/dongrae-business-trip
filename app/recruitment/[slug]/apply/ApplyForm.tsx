@@ -28,6 +28,7 @@ import {
   noticeSuccess,
   noticeWarning,
 } from "@/lib/ui";
+import SignaturePad from "@/app/components/SignaturePad";
 import {
   saveApplicationDraft,
   submitApplication,
@@ -94,6 +95,59 @@ const STATEMENT_MAX = 1500;
 function len(s: string): number {
   return s.length;
 }
+
+// =====================================================================
+// 동의 전문 — 3분리 동의문(전부 필수). 화면 렌더 + consent_snapshot 의
+//   consent_texts 가 모두 이 한 곳에서 나오도록 단일 출처로 둡니다.
+// =====================================================================
+type ConsentKey = "privacy" | "criminal_check" | "truth";
+
+const CONSENT_ITEMS: {
+  key: ConsentKey;
+  title: string;
+  bullets: string[];
+}[] = [
+  {
+    key: "privacy",
+    title: "[필수] 개인정보 수집·이용 동의",
+    bullets: [
+      "수집 항목: 성명, 생년월일, 증명사진, 주소, 휴대폰번호, 전화번호, 이메일, 학력사항, 경력사항, 자격증, 근무경력사항, 자기소개 및 이력 등",
+      "수집·이용 목적: 서류전형·면접전형 등 입사지원 및 채용 관련 정보 제공, 본인 확인, 지원자와의 의사소통 및 합격자 발표·통지",
+      "보유·이용 기간: 채용절차 종료 시 즉시 파기. 단, 최종 합격자는 입사 후 인사·복무 관리를 위해 관련 법령 및 센터 규정에 따라 보유",
+      "동의 거부 시 채용전형 진행이 불가능합니다.",
+    ],
+  },
+  {
+    key: "criminal_check",
+    title: "[필수] 민감정보 처리 동의",
+    bullets: [
+      "수집·이용 목적: 채용관리 및 결격사유 확인(아동·청소년대상 성범죄 경력 조회 등)",
+      "보유·이용 기간: 채용절차 종료 시 즉시 파기. 최종 합격자는 입사 후 관련 법령에 따라 보유",
+      "동의 거부 시 채용전형 진행이 불가능합니다.",
+    ],
+  },
+  {
+    key: "truth",
+    title: "[필수] 기재사항 사실 확인",
+    bullets: [
+      "본인은 위 기재 내용이 사실과 다름없음을 확인하며, 허위사실이 있을 경우 합격 또는 임용이 취소될 수 있음에 동의합니다.",
+    ],
+  },
+];
+
+// 한 항목의 전문 텍스트(제목 + 불릿) — 스냅샷 보존용.
+function consentItemFullText(item: (typeof CONSENT_ITEMS)[number]): string {
+  return [item.title, ...item.bullets.map((b) => `· ${b}`)].join("\n");
+}
+
+// { privacy, criminal_check, truth } → 전문 문자열 맵(스냅샷에 그대로 저장).
+const CONSENT_TEXTS_MAP: Record<ConsentKey, string> = CONSENT_ITEMS.reduce(
+  (acc, item) => {
+    acc[item.key] = consentItemFullText(item);
+    return acc;
+  },
+  {} as Record<ConsentKey, string>
+);
 
 export default function ApplyForm({
   posting,
@@ -177,6 +231,31 @@ export default function ApplyForm({
     initialApplicant?.agreed_truth === true
   );
 
+  // 서명 — "직접 서명"(손글씨 dataURL) 또는 "이름 입력"(타이핑) 자유 선택.
+  //   초안 재방문 시 저장된 방식/값으로 복원합니다.
+  const [signatureType, setSignatureType] = useState<"drawn" | "typed">(
+    initialApplicant?.consent_signature_type === "typed" ? "typed" : "drawn"
+  );
+  const [drawnSig, setDrawnSig] = useState<string | null>(
+    initialApplicant?.consent_signature_type === "drawn"
+      ? (initialApplicant?.consent_signature ?? null)
+      : null
+  );
+  const [typedSig, setTypedSig] = useState<string>(
+    initialApplicant?.consent_signature_type === "typed"
+      ? (initialApplicant?.consent_signature ?? "")
+      : ""
+  );
+
+  // 실제 저장될 서명 값 — 손글씨는 dataURL, 타이핑은 이름. 비어있으면 null.
+  const consentSignature =
+    signatureType === "drawn"
+      ? drawnSig
+      : typedSig.trim().length > 0
+        ? typedSig.trim()
+        : null;
+  const signatureValid = !!consentSignature;
+
   // 사진 (Private 버킷 → 1시간 임시 URL)
   const [photoUrl, setPhotoUrl] = useState<string | null>(null);
   const [photoError, setPhotoError] = useState<string | null>(null);
@@ -230,7 +309,34 @@ export default function ApplyForm({
     if (agreedPrivacy) fd.set("agreed_privacy", "on");
     if (agreedCriminal) fd.set("agreed_criminal_check", "on");
     if (agreedTruth) fd.set("agreed_truth", "on");
+    // 동의 서명 + 스냅샷 — 서명이 있을 때만 본문 전송(빈 dataURL/이름 방지).
+    fd.set("consent_signature_type", signatureType);
+    if (consentSignature) fd.set("consent_signature", consentSignature);
+    fd.set("consent_snapshot", JSON.stringify(buildConsentSnapshot()));
     return fd;
+  }
+
+  // 제출 시점의 동의 상태를 통째로 보존하는 스냅샷.
+  //   kakao_id 는 클라이언트가 모르므로 서버(buildApplicantRow)에서 채웁니다.
+  function buildConsentSnapshot() {
+    return {
+      agreed: {
+        privacy: agreedPrivacy,
+        criminal_check: agreedCriminal,
+        truth: agreedTruth,
+      },
+      consent_texts: CONSENT_TEXTS_MAP,
+      applicant: {
+        name,
+        birth_date: birthDate,
+        phone,
+        email,
+        kakao_id: null,
+      },
+      signature_type: signatureType,
+      submitted_at: new Date().toISOString(),
+      posting_slug: posting.slug,
+    };
   }
 
   function handleSaveDraft() {
@@ -261,6 +367,10 @@ export default function ApplyForm({
     if (alreadySubmitted) return;
     if (!agreedPrivacy || !agreedCriminal || !agreedTruth) {
       setError("모든 동의 항목에 체크해주세요.");
+      return;
+    }
+    if (!signatureValid) {
+      setError("서명(직접 서명 또는 이름 입력)을 완료해주세요.");
       return;
     }
     if (!confirm("제출 후에는 수정할 수 없습니다. 제출하시겠습니까?")) return;
@@ -413,6 +523,16 @@ export default function ApplyForm({
   }
 
   const readOnly = alreadySubmitted;
+
+  // 동의 항목 key → 체크 상태/세터 바인딩(CONSENT_ITEMS 순서대로 렌더).
+  const consentChecks: Record<
+    ConsentKey,
+    { checked: boolean; onChange: (next: boolean) => void }
+  > = {
+    privacy: { checked: agreedPrivacy, onChange: setAgreedPrivacy },
+    criminal_check: { checked: agreedCriminal, onChange: setAgreedCriminal },
+    truth: { checked: agreedTruth, onChange: setAgreedTruth },
+  };
 
   // 첨부서류 — 필수 항목 누락 체크(제출 탭 표시용)
   const missingRequiredDocs = posting.required_documents.filter(
@@ -720,29 +840,88 @@ export default function ApplyForm({
 
           {/* 9) 동의 및 제출 */}
           <div className={tab === "agree" ? "" : "hidden"}>
+            <p className="mb-2 text-xs text-ink-muted">
+              아래 3개 항목은 모두 필수입니다. 각 항목의 전문을 확인한 뒤
+              체크해주세요.
+            </p>
             <ul className="space-y-2">
-              <AgreeRow
-                checked={agreedPrivacy}
-                onChange={setAgreedPrivacy}
-                readOnly={readOnly}
-                label="개인정보 수집·이용 동의"
-                desc="제출하신 지원서의 개인정보는 채용 절차 진행 및 합격자 통보 목적으로만 이용되며, 관계법령에 따라 보관 후 안전하게 파기됩니다."
-              />
-              <AgreeRow
-                checked={agreedCriminal}
-                onChange={setAgreedCriminal}
-                readOnly={readOnly}
-                label="범죄경력 조회 동의"
-                desc="청소년 보호법 등 관계법령에 따라 최종 합격 시 범죄경력 조회가 진행될 수 있으며, 이에 동의합니다."
-              />
-              <AgreeRow
-                checked={agreedTruth}
-                onChange={setAgreedTruth}
-                readOnly={readOnly}
-                label="허위 기재 시 합격 취소 동의"
-                desc="지원서에 기재된 사항이 사실과 다를 경우 합격이 취소될 수 있음에 동의합니다."
-              />
+              {CONSENT_ITEMS.map((item) => (
+                <ConsentBox
+                  key={item.key}
+                  item={item}
+                  checked={consentChecks[item.key].checked}
+                  onChange={consentChecks[item.key].onChange}
+                  readOnly={readOnly}
+                />
+              ))}
             </ul>
+
+            {/* 서명 — 직접 서명 / 이름 입력 자유 선택 */}
+            <div className="mt-3 rounded-lg border border-line bg-card p-3 shadow-sm">
+              <p className="text-sm font-semibold text-ink">서명 *</p>
+              <p className="mt-1 text-xs text-ink-muted">
+                위 동의 내용을 확인하였으며, 본인이 직접 서명합니다.
+              </p>
+
+              <div className="mt-2 inline-flex rounded-lg border border-line bg-surface p-0.5">
+                <button
+                  type="button"
+                  onClick={() => setSignatureType("drawn")}
+                  disabled={readOnly}
+                  className={signatureModeCls(signatureType === "drawn")}
+                >
+                  직접 서명
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setSignatureType("typed")}
+                  disabled={readOnly}
+                  className={signatureModeCls(signatureType === "typed")}
+                >
+                  이름 입력
+                </button>
+              </div>
+
+              {signatureType === "drawn" ? (
+                // 손글씨 패드는 탭이 보일 때만 마운트해야 캔버스 폭이 0이
+                // 되지 않습니다(숨김 div 의 clientWidth=0 회피).
+                tab === "agree" ? (
+                  <SignatureField
+                    value={drawnSig}
+                    onChange={setDrawnSig}
+                    readOnly={readOnly}
+                  />
+                ) : null
+              ) : (
+                <input
+                  type="text"
+                  value={typedSig}
+                  onChange={(e) => setTypedSig(e.target.value)}
+                  readOnly={readOnly}
+                  placeholder="이름을 입력하세요"
+                  className={`${baseInputCls} mt-2`}
+                />
+              )}
+
+              <p
+                className={`mt-1.5 text-[11px] ${
+                  signatureValid ? "text-brand-green" : "text-ink-hint"
+                }`}
+              >
+                {signatureValid
+                  ? "✓ 서명 완료"
+                  : "서명 또는 이름을 입력해주세요"}
+              </p>
+            </div>
+
+            {/* 하단 안내(작게) */}
+            <div className="mt-3 space-y-0.5 text-[11px] leading-relaxed text-ink-hint">
+              <p>· 동의한 목적 외로 활용되지 않으며, 변경 시 사전 고지합니다.</p>
+              <p>
+                · 개인정보 열람·정정·삭제 문의: 동래구청소년센터
+                (051-988-0924)
+              </p>
+            </div>
 
             {missingRequiredDocs.length > 0 && (
               <p className={`${noticeWarning} mt-3`}>
@@ -760,6 +939,7 @@ export default function ApplyForm({
                   !agreedPrivacy ||
                   !agreedCriminal ||
                   !agreedTruth ||
+                  !signatureValid ||
                   missingRequiredDocs.length > 0
                 }
                 className={`${applyBtnPrimary} mt-4 w-full sm:w-auto sm:px-10`}
@@ -949,36 +1129,124 @@ function ProgressBar({ current, total }: { current: number; total: number }) {
 }
 
 // =====================================================================
-// 동의 한 줄
+// 동의 박스 — 체크박스 + "전문 펼쳐보기" 토글. 전부 필수.
 // =====================================================================
-function AgreeRow({
+function ConsentBox({
+  item,
   checked,
   onChange,
   readOnly,
-  label,
-  desc,
 }: {
+  item: (typeof CONSENT_ITEMS)[number];
   checked: boolean;
   onChange: (next: boolean) => void;
   readOnly: boolean;
-  label: string;
-  desc: string;
 }) {
+  const [open, setOpen] = useState(false);
+  const checkboxId = `consent-${item.key}`;
   return (
-    <li className="rounded-lg border border-line bg-card p-3 shadow-sm">
-      <label className="flex items-start gap-2">
+    <li className="rounded-lg border border-line bg-card shadow-sm">
+      <div className="flex items-start gap-2 p-3">
         <input
+          id={checkboxId}
           type="checkbox"
           checked={checked}
           onChange={(e) => onChange(e.target.checked)}
           disabled={readOnly}
           className="mt-0.5 h-4 w-4 rounded border-line text-brand-blue focus:ring-brand-blue"
         />
-        <div className="min-w-0">
-          <p className="text-sm font-semibold text-ink">{label}</p>
-          <p className="mt-1 text-xs leading-relaxed text-ink-muted">{desc}</p>
+        <div className="min-w-0 flex-1">
+          <label
+            htmlFor={checkboxId}
+            className="block cursor-pointer text-sm font-semibold text-ink"
+          >
+            {item.title}
+          </label>
+          <button
+            type="button"
+            onClick={() => setOpen((o) => !o)}
+            className="mt-1 text-xs font-medium text-brand-blue hover:underline"
+          >
+            {open ? "전문 접기 ▲" : "전문 펼쳐보기 ▼"}
+          </button>
+          {open && (
+            <ul className="mt-2 space-y-1.5 border-t border-line pt-2">
+              {item.bullets.map((b, i) => (
+                <li
+                  key={i}
+                  className="text-xs leading-relaxed text-ink-muted"
+                >
+                  · {b}
+                </li>
+              ))}
+            </ul>
+          )}
         </div>
-      </label>
+      </div>
     </li>
   );
+}
+
+// 서명 방식 토글 버튼 스타일.
+function signatureModeCls(active: boolean): string {
+  const base =
+    "rounded-md px-3 py-1.5 text-xs font-semibold transition disabled:opacity-60";
+  return active
+    ? `${base} bg-brand-blue text-white shadow-sm`
+    : `${base} text-ink-muted hover:text-brand-blue`;
+}
+
+// =====================================================================
+// 손글씨 서명 필드 — 이미 서명한 값이 있으면 미리보기 + "다시 서명",
+//   없으면 SignaturePad 노출. (읽기전용이면 이미지만 표시.)
+// =====================================================================
+function SignatureField({
+  value,
+  onChange,
+  readOnly,
+}: {
+  value: string | null;
+  onChange: (next: string | null) => void;
+  readOnly: boolean;
+}) {
+  const [redraw, setRedraw] = useState(false);
+
+  if (readOnly) {
+    return value ? (
+      // eslint-disable-next-line @next/next/no-img-element
+      <img
+        src={value}
+        alt="서명"
+        className="mt-2 h-[120px] w-full rounded-xl border-2 border-line bg-white object-contain"
+      />
+    ) : (
+      <p className="mt-2 text-xs text-ink-hint">서명 없음</p>
+    );
+  }
+
+  // 저장된 서명이 있고 다시 그리기 전이면 미리보기 + 재서명 버튼.
+  if (value && !redraw) {
+    return (
+      <div className="mt-2">
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        <img
+          src={value}
+          alt="서명"
+          className="h-[120px] w-full rounded-xl border-2 border-line bg-white object-contain"
+        />
+        <button
+          type="button"
+          onClick={() => {
+            setRedraw(true);
+            onChange(null);
+          }}
+          className="mt-1.5 rounded-lg border border-line bg-card px-3 py-1.5 text-xs font-semibold text-ink-muted hover:bg-surface"
+        >
+          다시 서명
+        </button>
+      </div>
+    );
+  }
+
+  return <SignaturePad value={value} onChange={onChange} />;
 }
