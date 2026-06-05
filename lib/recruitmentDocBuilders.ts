@@ -32,7 +32,6 @@ import {
   fmtScore,
   avgScoreKey,
   screeningResultLabel,
-  joinMemos,
 } from "./recruitmentScore";
 import {
   titlePara,
@@ -264,14 +263,13 @@ export async function buildScreeningSummaryDoc(
   const headerRow = new TableRow({
     tableHeader: true,
     children: [
-      headCell("번호", 6),
-      headCell("이름", 12),
-      headCell("전문성(학위) /15", 10),
-      headCell("자격증 /5", 8),
-      headCell("자기소개서 /15", 10),
-      headCell(`득점 /${SCREENING_MAX}`, 10),
-      headCell("결과", 9),
-      headCell("정성평가 · 사유", 35),
+      headCell("번호", 8),
+      headCell("이름", 16),
+      headCell("전문성(학위) (15점)", 18),
+      headCell("자격증 (5점)", 12),
+      headCell("자기소개서 (15점)", 18),
+      headCell(`득점 (${SCREENING_MAX}점)`, 16),
+      headCell("결과", 12),
     ],
   });
 
@@ -279,7 +277,6 @@ export async function buildScreeningSummaryDoc(
     const q1 = avgScoreKey(a.screeningByReviewer, "q1_expertise");
     const q2 = avgScoreKey(a.screeningByReviewer, "q2_license");
     const q3 = avgScoreKey(a.screeningByReviewer, "q3_statement");
-    const memo = joinMemos(a.screeningByReviewer);
     return new TableRow({
       children: [
         dataCell(String(i + 1)),
@@ -289,7 +286,6 @@ export async function buildScreeningSummaryDoc(
         dataCell(fmtScore(q3)),
         dataCell(fmtScore(a.screeningAvg), { bold: true }),
         dataCell(screeningResultLabel(a.status)),
-        dataCell(memo || "—", { align: AlignmentType.LEFT }),
       ],
     });
   });
