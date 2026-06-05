@@ -40,6 +40,11 @@ export default async function JudgesAssignPage({
   );
 
   const fields = splitRecruitmentFields(adm.posting.field);
+  // 이 공고 로그인 QR 의 대상 — 배정된 활성 외부위원 명단.
+  const judgeNames = judges
+    .filter((j) => j.is_active && j.judge_type === "external")
+    .map((j) => j.name)
+    .filter((n) => n.trim().length > 0);
 
   return (
     <>
@@ -74,7 +79,7 @@ export default async function JudgesAssignPage({
           </Link>
         </div>
 
-        <JudgeLoginShare slug={slug} />
+        <JudgeLoginShare slug={slug} judgeNames={judgeNames} />
 
         <JudgesAssignManager slug={slug} pool={pool} judges={judges} />
       </main>

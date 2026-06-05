@@ -9,7 +9,14 @@ import { cardCls, btnPrimary, btnSecondary } from "@/lib/ui";
 //   * URL 은 클라이언트의 실제 origin 기준으로 구성(로컬/배포 일관).
 //   * QR 은 qrcode 패키지로 data URL 생성(브라우저).
 // =====================================================================
-export default function JudgeLoginShare({ slug }: { slug: string }) {
+export default function JudgeLoginShare({
+  slug,
+  judgeNames = [],
+}: {
+  slug: string;
+  judgeNames?: string[];
+}) {
+  const judgeLabel = judgeNames.join(", ");
   const [url, setUrl] = useState("");
   const [copied, setCopied] = useState(false);
   const [modalOpen, setModalOpen] = useState(false);
@@ -63,12 +70,17 @@ export default function JudgeLoginShare({ slug }: { slug: string }) {
       window.alert("팝업이 차단되었습니다. 팝업 허용 후 다시 시도해주세요.");
       return;
     }
+    const esc = (s: string) =>
+      s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
     w.document.write(
       `<!DOCTYPE html><html lang="ko"><head><meta charset="utf-8"/>` +
         `<title>외부위원 로그인 QR</title></head>` +
         `<body style="margin:0;height:100vh;display:flex;flex-direction:column;align-items:center;justify-content:center;font-family:'Malgun Gothic',sans-serif;color:#1e3a5f">` +
         `<img src="${qrDataUrl}" alt="QR" style="width:300px;height:300px"/>` +
         `<p style="margin:16px 0 4px;font-size:15px;font-weight:700">외부위원 로그인</p>` +
+        (judgeLabel
+          ? `<p style="margin:0 0 4px;font-size:13px;color:#1e3a5f">대상 위원: ${esc(judgeLabel)}</p>`
+          : "") +
         `<p style="margin:0;font-size:12px;color:#888;word-break:break-all;text-align:center;padding:0 24px">${url}</p>` +
         `</body></html>`
     );
@@ -124,6 +136,14 @@ export default function JudgeLoginShare({ slug }: { slug: string }) {
             onClick={(e) => e.stopPropagation()}
           >
             <h4 className="text-sm font-bold text-ink">외부위원 로그인 QR</h4>
+            {judgeLabel && (
+              <p className="mt-1.5 text-xs font-medium text-ink-body">
+                대상 위원{" "}
+                <span className="text-ink-muted">({judgeNames.length}명)</span>
+                <br />
+                <span className="font-semibold text-navy">{judgeLabel}</span>
+              </p>
+            )}
             <div className="mt-3 flex items-center justify-center">
               {qrError ? (
                 <p className="py-16 text-sm text-stamp">{qrError}</p>
