@@ -1,5 +1,4 @@
 import { NextResponse } from "next/server";
-import { GOOGLE_WORKSPACE_DOMAIN } from "@/lib/googleAuth";
 
 // Google Workspace 로그인 시작 — /api/auth/google/login?next=/hr 진입 시
 // Google 인가 페이지로 302 redirect. 로그인 후 이동 경로는 state 로 전달.
@@ -41,8 +40,7 @@ export async function GET(request: Request) {
   auth.searchParams.set("client_id", clientId);
   auth.searchParams.set("redirect_uri", callbackUri(request));
   auth.searchParams.set("scope", "openid email profile");
-  // 도메인 힌트 — Workspace 계정 선택을 onnainna.kr 로 유도(서버에서 재검증함).
-  auth.searchParams.set("hd", GOOGLE_WORKSPACE_DOMAIN);
+  // [DEBUG] hd 파라미터 임시 제거 테스트 — 진단 후 원복 예정.
   auth.searchParams.set("prompt", "select_account");
   auth.searchParams.set("state", next);
 
