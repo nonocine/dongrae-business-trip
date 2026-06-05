@@ -44,6 +44,7 @@ export type ReviewerScore = {
   reviewer_name: string;
   total: number | null;
   is_absent: boolean;
+  memo: string | null;
   scores: Record<string, number>;
 };
 
@@ -192,7 +193,7 @@ export async function loadReportData(
   const { data: scoreRows, error: sErr } = await supabaseAdmin
     .from("recruitment_scores")
     .select(
-      "application_id, stage, reviewer_name, total_score, is_absent, scores"
+      "application_id, stage, reviewer_name, total_score, is_absent, memo, scores"
     )
     .in("application_id", appIds);
   if (sErr) throw new Error(sErr.message);
@@ -206,10 +207,15 @@ export async function loadReportData(
     if (!a) continue;
     const reviewer = String(r.reviewer_name ?? "").trim();
     if (!reviewer) continue;
+    const memoRaw = r.memo;
     const entry: ReviewerScore = {
       reviewer_name: reviewer,
       total: numOrNull(r.total_score),
       is_absent: r.is_absent === true,
+      memo:
+        typeof memoRaw === "string" && memoRaw.trim().length > 0
+          ? memoRaw.trim()
+          : null,
       scores: normScores(r.scores),
     };
     const stage = String(r.stage ?? "");
@@ -256,4 +262,42 @@ export async function loadReportData(
 export function fmtScore(n: number | null | undefined): string {
   if (n == null) return "—";
   return n.toFixed(1).replace(/\.0$/, "");
+}
+
+// 특정 채점 항목(q1_expertise 등)을 심사위원 평균으로. 없으면 null.
+export function avgScoreKey(
+  reviewers: Map<string, ReviewerScore>,
+  key: string
+): number | null {
+  const vals: number[] = [];
+  for (const r of reviewers.values()) {
+    const v = r.scores[key];
+    if (typeof v === "number" && Number.isFinite(v)) vals.push(v);
+  }
+  if (vals.length === 0) return null;
+  return vals.reduce((a, b) => a + b, 0) / vals.length;
+}
+
+// 서류전형 결과 — status 로부터 합격/불합격/미정.
+export function screeningResultLabel(status: ReportStatus): string {
+  if (status === "screening_failed") return "불합격";
+  if (
+    status === "screening_passed" ||
+    status === "interview_passed" ||
+    status === "interview_failed" ||
+    status === "final_passed" ||
+    status === "final_rejected"
+  ) {
+    return "합격";
+  }
+  return "미정";
+}
+
+// 사유 — 심사위원 메모를 "이름: 메모" 로 취합. 없으면 빈 문자열.
+export function joinMemos(reviewers: Map<string, ReviewerScore>): string {
+  const parts: string[] = [];
+  for (const r of reviewers.values()) {
+    if (r.memo) parts.push(`${r.reviewer_name}: ${r.memo}`);
+  }
+  return parts.join(" / ");
 }
