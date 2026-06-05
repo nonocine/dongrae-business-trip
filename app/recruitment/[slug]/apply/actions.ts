@@ -290,11 +290,6 @@ function strOrNull(formData: FormData, key: string): string | null {
   return s.length > 0 ? s : null;
 }
 
-function strOrEmpty(formData: FormData, key: string): string {
-  const v = formData.get(key);
-  return v == null ? "" : String(v).trim();
-}
-
 function boolOn(formData: FormData, key: string): boolean {
   const v = formData.get(key);
   return v === "on" || v === "true";

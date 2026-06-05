@@ -152,9 +152,11 @@ function PostingRow({
 }) {
   const [deleting, deleteTransition] = useTransition();
   const [err, setErr] = useState<string | null>(null);
+  // 마운트 시각을 1회 캡처 — 렌더를 순수하게 유지(react-hooks/purity).
+  const [now] = useState(() => Date.now());
 
   const closed =
-    new Date(posting.application_end).getTime() < Date.now() &&
+    new Date(posting.application_end).getTime() < now &&
     posting.status === "published";
 
   const statusBadge =

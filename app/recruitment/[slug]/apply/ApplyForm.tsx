@@ -190,13 +190,12 @@ export default function ApplyForm({
   const [docBusyKey, setDocBusyKey] = useState<string | null>(null);
 
   // 사진 임시 URL 발급 — applicant 로드 시 1회. 실패해도 페이지는 살아남게 catch.
+  //   path 가 없으면 그냥 종료 — photoUrl 초기값이 이미 null 이므로 동기 setState
+  //   (연쇄 렌더 유발)는 불필요합니다.
   useEffect(() => {
     let alive = true;
     const path = initialApplicant?.photo_url ?? null;
-    if (!path) {
-      setPhotoUrl(null);
-      return;
-    }
+    if (!path) return;
     signApplicantStoragePath(path)
       .then((url) => {
         if (alive) setPhotoUrl(url);

@@ -56,10 +56,6 @@ export default function ActivityForm({
     kind === "business_trip" ||
     kind === "domestic_training" ||
     kind === "overseas_training";
-  const showLocation =
-    kind !== "overseas_training" &&
-    kind !== "domestic_training" || // 국내연수는 별도 라벨
-    false; // we'll handle below
   const showOrganization =
     kind === "domestic_training" || kind === "overseas_training";
   const showCourseName =

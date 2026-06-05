@@ -40,8 +40,9 @@ export default async function RecruitmentApplyPage({
   // published 가 아니거나 존재하지 않는 공고는 404.
   if (!posting) notFound();
 
-  const closed =
-    new Date(posting.application_end).getTime() < Date.now();
+  // 서버 컴포넌트(force-dynamic)는 요청마다 1회 렌더되므로 Date.now() 가 안전.
+  // eslint-disable-next-line react-hooks/purity
+  const closed = new Date(posting.application_end).getTime() < Date.now();
 
   const session = await getKakaoSession();
   // 로그인 된 경우에만 기존 지원서를 미리 불러옵니다.

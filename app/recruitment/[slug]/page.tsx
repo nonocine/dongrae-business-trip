@@ -39,8 +39,9 @@ export default async function RecruitmentPostingPage({
   if (!posting) notFound();
 
   // 마감 여부는 status 가 아니라 application_end 시각으로 판정합니다.
-  const closed =
-    new Date(posting.application_end).getTime() < Date.now();
+  // 서버 컴포넌트(force-dynamic)는 요청마다 1회 렌더되므로 Date.now() 가 안전.
+  // eslint-disable-next-line react-hooks/purity
+  const closed = new Date(posting.application_end).getTime() < Date.now();
 
   // 값이 있는 항목만 순서대로 표시.
   const sections: { title: string; body: string | null }[] = [

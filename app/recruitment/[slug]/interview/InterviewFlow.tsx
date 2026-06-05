@@ -592,6 +592,7 @@ function ScoreStep({
         {/* 좌측: 지원서 (페이지와 함께 스크롤) */}
         <div className={`${tab === "app" ? "block" : "hidden"} lg:block`}>
           <ApplicantDetailPanel
+            key={candidate.application_id}
             slug={posting.slug}
             applicationId={candidate.application_id}
           />
@@ -719,11 +720,11 @@ function ApplicantDetailPanel({
   const [err, setErr] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
 
+  // 부모가 applicationId 를 key 로 주어 지원자가 바뀌면 이 패널이 리마운트됩니다.
+  //   → 초기 state(loading=true, err/detail=null)가 그대로 적용되므로 effect 안에서
+  //     동기 setState 로 리셋할 필요가 없습니다(react-hooks/set-state-in-effect).
   useEffect(() => {
     let cancelled = false;
-    setLoading(true);
-    setErr(null);
-    setDetail(null);
     getInterviewApplicantDetail(applicationId)
       .then((res) => {
         if (cancelled) return;
