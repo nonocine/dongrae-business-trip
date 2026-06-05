@@ -41,7 +41,20 @@ function RecruitmentBanner({
   );
 }
 
-export default async function Home() {
+// 구글 로그인 콜백 실패 코드 → 사용자 안내 문구.
+function googleErrorMessage(code: string | undefined): string | null {
+  if (!code) return null;
+  if (code === "domain_not_allowed") {
+    return "onnainna.kr 워크스페이스 계정으로만 로그인할 수 있습니다.";
+  }
+  return "구글 로그인에 실패했습니다. 다시 시도해주세요.";
+}
+
+export default async function Home({
+  searchParams,
+}: {
+  searchParams: Promise<{ google_error?: string }>;
+}) {
   // 임시 비밀번호 사용자는 비번 변경 페이지로 강제 이동
   await enforcePasswordChange();
   const session = await getSession();
@@ -56,12 +69,18 @@ export default async function Home() {
     } catch {
       // drivers 테이블이 아직 없으면 빈 목록
     }
+    const googleError = googleErrorMessage((await searchParams).google_error);
     return (
       <>
         <Header />
         <main className="mx-auto w-full max-w-md flex-1 space-y-3 px-4 py-8">
           {banner && (
             <RecruitmentBanner slug={banner.slug} title={banner.title} />
+          )}
+          {googleError && (
+            <p className="rounded-lg bg-stamp-soft px-3 py-2 text-sm text-stamp">
+              {googleError}
+            </p>
           )}
           <LoginForm employees={employees} />
         </main>

@@ -2,7 +2,7 @@
 
 import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
-import { getSession, isAdmin } from "@/app/actions";
+import { getSession, isAdmin, getGoogleSession } from "@/app/actions";
 import {
   supabase,
   HR_ADMIN_RANKS,
@@ -31,10 +31,30 @@ import { supabaseAdmin } from "@/lib/supabaseAdmin";
 //   * 관리자 세션(ADMIN_COOKIE)은 rank 개념이 없어 거부.
 //   * 미통과 시 / 로 redirect.
 // =====================================================================
+// HR 영역 접근 게이트 — 다음 중 하나라도 통과하면 허용:
+//   1) ADMIN_PASSWORD 세션(isAdmin) — 관장 비상용
+//   2) Google Workspace(onnainna.kr) 세션 — 도메인 자체가 신뢰 경계
+//   3) 직원 비번 로그인 + drivers.rank ∈ (관장·부장)
+// 반환의 name 은 감사/작성자(reviewer_name·created_by) 식별에 쓰입니다.
+// (rank 는 게이트 식별용이며 호출처에서 소비하지 않습니다.)
 export async function requireHrAdmin(): Promise<{
   name: string;
   rank: HrAdminRank;
 }> {
+  // 1) ADMIN_PASSWORD
+  if (await isAdmin()) return { name: "관리자", rank: "관장" };
+
+  // 2) Google Workspace — 매칭된 직원명/직급 우선, 없으면 구글 이름.
+  const g = await getGoogleSession();
+  if (g) {
+    const r =
+      g.rank && (HR_ADMIN_RANKS as readonly string[]).includes(g.rank)
+        ? (g.rank as HrAdminRank)
+        : "관장";
+    return { name: g.driverName ?? g.name, rank: r };
+  }
+
+  // 3) 직원 비번 로그인 + 관장·부장 rank
   const session = await getSession();
   if (!session || session.kind !== "employee") {
     redirect("/");

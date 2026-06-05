@@ -123,6 +123,23 @@ export default function LoginForm({ employees }: { employees: string[] }) {
         <div className="h-px flex-1 bg-line" />
       </div>
 
+      {/* 구글 워크스페이스 로그인 — onnainna.kr 계정 전용(서버에서 도메인 검증) */}
+      <a
+        href="/api/auth/google/login?next=/hr"
+        className="flex items-center justify-center gap-2 rounded-xl border border-line bg-card px-4 py-3 text-sm font-semibold text-ink shadow-sm transition hover:bg-surface"
+      >
+        <span
+          aria-hidden
+          className="inline-flex h-5 w-5 items-center justify-center rounded-full bg-navy text-xs font-bold text-white"
+        >
+          G
+        </span>
+        구글 워크스페이스로 로그인
+      </a>
+      <p className="-mt-3 text-center text-[11px] text-ink-hint">
+        @onnainna.kr 계정만 가능합니다.
+      </p>
+
       <Link
         href="/admin/login"
         className="flex items-center justify-center gap-2 rounded-xl border border-line bg-surface px-4 py-3 text-sm font-semibold text-navy transition hover:bg-navy-soft"

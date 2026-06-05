@@ -1,13 +1,14 @@
-import { getSession } from "@/app/actions";
+import { getSession, isAdmin, isGoogleAuth } from "@/app/actions";
 import { supabase, canAccessHr, type EmployeeRank } from "@/lib/supabase";
 import HeaderClient from "@/app/components/HeaderClient";
 
 export default async function Header() {
   const session = await getSession();
 
-  // 인사 모듈 진입 권한(관장·부장) 판정 — 직원 세션일 때만 조회.
-  let hrAccess = false;
-  if (session?.kind === "employee") {
+  // HR 메뉴 노출 권한 — requireHrAdmin 과 동일 기준:
+  //   ADMIN_PASSWORD · Google Workspace · 관장/부장 직원 중 하나.
+  let hrAccess = (await isAdmin()) || (await isGoogleAuth());
+  if (!hrAccess && session?.kind === "employee") {
     try {
       const { data } = await supabase
         .from("drivers")

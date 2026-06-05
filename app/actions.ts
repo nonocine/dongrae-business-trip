@@ -28,6 +28,11 @@ import {
   type TransportType,
 } from "@/lib/supabase";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
+import {
+  GOOGLE_SESSION_COOKIE,
+  parseGoogleSession,
+  type GoogleSession,
+} from "@/lib/googleAuth";
 
 const ADMIN_COOKIE = "dongrae_admin";
 const EMPLOYEE_COOKIE = "dongrae_employee";
@@ -56,7 +61,22 @@ export async function getSession(): Promise<Session | null> {
   const store = await cookies();
   const name = store.get(EMPLOYEE_COOKIE)?.value;
   if (name && name.length > 0) return { kind: "employee", name };
+  // Google Workspace 세션 — 직원 비번 로그인과 동등하게 취급.
+  //   이름은 매칭된 직원명 우선(없으면 구글 표시 이름).
+  const g = parseGoogleSession(store.get(GOOGLE_SESSION_COOKIE)?.value);
+  if (g) return { kind: "employee", name: g.driverName ?? g.name };
   return null;
+}
+
+// Google Workspace 세션 원본(이메일·프로필 매칭 정보 포함). 쿠키만 신뢰.
+export async function getGoogleSession(): Promise<GoogleSession | null> {
+  const store = await cookies();
+  return parseGoogleSession(store.get(GOOGLE_SESSION_COOKIE)?.value);
+}
+
+// Google Workspace 로그인 통과 여부 — HR 접근 게이트(isAdmin 과 병렬).
+export async function isGoogleAuth(): Promise<boolean> {
+  return (await getGoogleSession()) !== null;
 }
 
 async function requireAdmin() {
@@ -151,6 +171,7 @@ export async function logoutCurrent() {
   const store = await cookies();
   store.delete(ADMIN_COOKIE);
   store.delete(EMPLOYEE_COOKIE);
+  store.delete(GOOGLE_SESSION_COOKIE);
   redirect("/");
 }
 
