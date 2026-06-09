@@ -6,6 +6,7 @@ import {
   GOOGLE_SESSION_MAX_AGE,
   GOOGLE_WORKSPACE_DOMAIN,
   isAllowedGoogleEmail,
+  isMasterEmail,
   serializeGoogleSession,
   type GoogleSession,
 } from "@/lib/googleAuth";
@@ -121,7 +122,10 @@ export async function GET(request: Request) {
     return fail("domain_not_allowed");
   }
 
-  // 4) employee_profiles 매칭(이메일) → drivers(이름·직급). 없으면 프로필 없음.
+  // 4) 마스터 계정 — employee_profiles 매핑 없이도 무조건 관장 권한.
+  const isMaster = isMasterEmail(email);
+
+  // 5) employee_profiles 매칭(이메일) → drivers(이름·직급). 없으면 프로필 없음.
   let driverId: string | null = null;
   let driverName: string | null = null;
   let rank: string | null = null;
@@ -145,7 +149,12 @@ export async function GET(request: Request) {
       rank = ((drv as { rank?: unknown } | null)?.rank as string | null) ?? null;
     }
   } catch {
-    // 매칭 실패는 치명적이지 않음 — 프로필 없음 상태로 로그인 허용.
+    // 조회 실패는 매칭 실패와 동일하게 취급 — 아래 정책에서 거부될 수 있음.
+  }
+
+  // 6) 등록 정책 — 매칭 실패 AND 마스터 아님 → 세션 발급 없이 거부.
+  if (!isMaster && driverId === null) {
+    return fail("not_registered");
   }
 
   const session: GoogleSession = {
@@ -153,11 +162,13 @@ export async function GET(request: Request) {
     name: driverName ?? googleName,
     driverId,
     driverName,
-    rank,
+    // 마스터는 매핑/직급과 무관하게 관장으로 고정.
+    rank: isMaster ? "관장" : rank,
     hasProfile: driverId !== null,
+    isMaster,
   };
 
-  // 5) 쿠키 발급 — 다른 세션과의 우선순위 혼선을 막기 위해 기존 세션 정리.
+  // 7) 쿠키 발급 — 다른 세션과의 우선순위 혼선을 막기 위해 기존 세션 정리.
   const store = await cookies();
   store.delete(ADMIN_COOKIE);
   store.delete(EMPLOYEE_COOKIE);

@@ -41,6 +41,9 @@ function googleErrorMessage(code: string | undefined): string | null {
   if (code === "domain_not_allowed") {
     return "onnainna.kr 워크스페이스 계정으로만 로그인할 수 있습니다.";
   }
+  if (code === "not_registered") {
+    return "등록되지 않은 계정입니다. 관리자에게 문의하세요.";
+  }
   return "구글 로그인에 실패했습니다. 다시 시도해주세요.";
 }
 

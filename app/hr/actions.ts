@@ -44,14 +44,19 @@ export async function requireHrAdmin(): Promise<{
   // 1) ADMIN_PASSWORD
   if (await isAdmin()) return { name: "관리자", rank: "관장" };
 
-  // 2) Google Workspace — 매칭된 직원명/직급 우선, 없으면 구글 이름.
+  // 2) Google Workspace — 비번 로그인 경로와 대칭으로 rank 게이팅.
+  //    · 마스터 → 관장으로 통과.
+  //    · rank ∈ (관장·부장) → 그 rank 로 통과.
+  //    · 그 외(팀장·팀원·rank null) → HR 접근 거부, "/" 로 redirect.
   const g = await getGoogleSession();
   if (g) {
-    const r =
-      g.rank && (HR_ADMIN_RANKS as readonly string[]).includes(g.rank)
-        ? (g.rank as HrAdminRank)
-        : "관장";
-    return { name: g.driverName ?? g.name, rank: r };
+    if (g.isMaster) {
+      return { name: g.driverName ?? g.name, rank: "관장" };
+    }
+    if (g.rank && (HR_ADMIN_RANKS as readonly string[]).includes(g.rank)) {
+      return { name: g.driverName ?? g.name, rank: g.rank as HrAdminRank };
+    }
+    redirect("/");
   }
 
   // 3) 직원 비번 로그인 + 관장·부장 rank
