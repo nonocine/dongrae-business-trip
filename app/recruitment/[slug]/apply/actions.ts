@@ -75,13 +75,9 @@ export type ApplyPosting = {
   application_start: string;
   application_end: string;
   status: string;
+  // 제출 서류 5종 필수/선택 — recruitment_postings.required_documents jsonb 그대로.
   required_documents: RequiredDoc[];
-  // 자격증 사본 필수 여부 — required_documents 의 license 항목 required 에 반영됨.
-  require_certificate_copy: boolean;
 };
-
-// 자격증 사본 문서 key — 이 항목의 필수 여부를 require_certificate_copy 로 제어.
-const CERTIFICATE_DOC_KEY = "license";
 
 // 외부 지원자
 export type RecruitmentApplicant = {
@@ -219,8 +215,6 @@ export async function getApplyPosting(
   slug: string
 ): Promise<ApplyPosting | null> {
   if (!slug) return null;
-  // select("*") — require_certificate_copy 컬럼이 아직 없어도(마이그레이션 전)
-  // 에러 없이 동작하도록(없으면 undefined → 기본 true).
   const { data, error } = await supabase
     .from("recruitment_postings")
     .select("*")
@@ -231,12 +225,8 @@ export async function getApplyPosting(
   if (!data) return null;
   const r = data as Record<string, unknown>;
 
-  // 자격증 사본 필수 여부 — 컬럼 기본값 true. license 문서의 required 에 반영.
-  const requireCert = r.require_certificate_copy !== false;
-  const requiredDocuments = normalizeRequiredDocs(r.required_documents).map(
-    (d) =>
-      d.key === CERTIFICATE_DOC_KEY ? { ...d, required: requireCert } : d
-  );
+  // 제출 서류 필수/선택은 required_documents jsonb 의 값(목록형)을 그대로 사용.
+  const requiredDocuments = normalizeRequiredDocs(r.required_documents);
 
   return {
     id: String(r.id ?? ""),
@@ -247,7 +237,6 @@ export async function getApplyPosting(
     application_end: String(r.application_end ?? ""),
     status: String(r.status ?? ""),
     required_documents: requiredDocuments,
-    require_certificate_copy: requireCert,
   };
 }
 

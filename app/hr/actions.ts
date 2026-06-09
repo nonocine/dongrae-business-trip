@@ -25,6 +25,12 @@ import {
   type GenderType,
 } from "@/lib/supabase";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
+import {
+  RECRUITMENT_DOC_SLOTS,
+  buildRequiredDocuments,
+  requiredMapFromDocuments,
+  type RecruitmentDocItem,
+} from "@/lib/recruitmentDocs";
 
 // =====================================================================
 // 인사 모듈 권한 — drivers.rank IN ('관장', '부장') 인 직원 세션만 통과.
@@ -309,7 +315,7 @@ export async function listCertificates(): Promise<CertificateIssued[]> {
 // 채용공고 관리 (recruitment_postings)
 //   * HR 권한자(관장·부장)만 사용 가능.
 //   * 상태 (draft / published / closed) 는 HR 가 직접 토글합니다.
-//   * required_documents jsonb 는 DB 기본값 사용 — 폼에서는 편집하지 않습니다.
+//   * required_documents jsonb(제출 서류 5종 필수/선택)는 폼에서 편집·저장합니다.
 // =====================================================================
 export type RecruitmentPostingAdmin = {
   id: string;
@@ -336,7 +342,7 @@ export type RecruitmentPostingAdmin = {
   appointment_date: string | null;
   notice: string | null;
   status: "draft" | "published" | "closed";
-  require_certificate_copy: boolean;
+  required_documents: RecruitmentDocItem[];
   created_at: string;
   updated_at: string;
   created_by: string | null;
@@ -375,8 +381,10 @@ function normalizeRecruitmentPostingAdmin(
     appointment_date: (raw.appointment_date as string | null) ?? null,
     notice: (raw.notice as string | null) ?? null,
     status: safeStatus,
-    // 컬럼이 없으면(마이그레이션 전) undefined → 기본 true.
-    require_certificate_copy: raw.require_certificate_copy !== false,
+    // 제출 서류 5종 — 저장된 jsonb 의 required 를 반영(누락 슬롯은 기본값).
+    required_documents: buildRequiredDocuments(
+      requiredMapFromDocuments(raw.required_documents)
+    ),
     created_at: String(raw.created_at ?? ""),
     updated_at: String(raw.updated_at ?? ""),
     created_by: (raw.created_by as string | null) ?? null,
@@ -446,6 +454,15 @@ export async function saveRecruitmentPosting(
     const safeStatus =
       status === "published" || status === "closed" ? status : "draft";
 
+    // 제출 서류 5종 — 각 슬롯의 필수/선택을 폼에서 받아 jsonb 배열로 저장.
+    //   필드가 없으면(구버전 클라이언트) 슬롯 기본값을 사용.
+    const requiredByKey: Record<string, boolean> = {};
+    for (const s of RECRUITMENT_DOC_SLOTS) {
+      const v = formData.get(`doc_required_${s.key}`);
+      requiredByKey[s.key] = v == null ? s.defaultRequired : v === "true";
+    }
+    const requiredDocuments = buildRequiredDocuments(requiredByKey);
+
     const trimToNull = (k: string): string | null => {
       const v = formData.get(k);
       if (v == null) return null;
@@ -479,9 +496,8 @@ export async function saveRecruitmentPosting(
       appointment_date: trimToNull("appointment_date"),
       notice: trimToNull("notice"),
       status: safeStatus,
-      // 자격증 사본 필수 여부 — 미지정이면 기본 true.
-      require_certificate_copy:
-        formData.get("require_certificate_copy") !== "false",
+      // 제출 서류 5종 필수/선택 — 목록형 jsonb 로 일원화 저장.
+      required_documents: requiredDocuments,
       updated_at: new Date().toISOString(),
     };
 

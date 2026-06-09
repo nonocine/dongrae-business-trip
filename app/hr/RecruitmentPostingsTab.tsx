@@ -24,6 +24,10 @@ import {
   type RecruitmentPostingAdmin,
 } from "@/app/hr/actions";
 import RecruitmentShareButton from "@/app/hr/RecruitmentShareButton";
+import {
+  RECRUITMENT_DOC_SLOTS,
+  requiredMapFromDocuments,
+} from "@/lib/recruitmentDocs";
 
 // KST(+09:00) 로 timestamptz → datetime-local 입력값(YYYY-MM-DDTHH:mm).
 function isoToKstLocal(iso: string): string {
@@ -49,6 +53,15 @@ function isoToKstLocal(iso: string): string {
 // 결정적 KST 포맷(SSR↔CSR 하이드레이션 불일치 방지). "YYYY.MM.DD HH:mm"
 function fmtKst(iso: string): string {
   return fmtKstDateTime(iso);
+}
+
+// 제출 서류 필수/선택 토글 버튼 스타일 — 활성 쪽만 파랑 채움.
+function docToggleCls(active: boolean): string {
+  const base =
+    "rounded-md px-3 py-1 text-xs font-semibold transition";
+  return active
+    ? `${base} bg-brand-blue text-white shadow-sm`
+    : `${base} text-ink-muted hover:text-brand-blue`;
 }
 
 type EditingState =
@@ -361,9 +374,10 @@ function PostingForm({
     initial?.appointment_date ?? ""
   );
   const [published, setPublished] = useState(initial?.status === "published");
-  // 자격증 사본 필수 여부 — 기존 공고는 값(기본 true) 사용, 신규는 true.
-  const [requireCert, setRequireCert] = useState(
-    initial?.require_certificate_copy ?? true
+  // 제출 서류 5종 필수/선택 — 기존 공고는 저장된 required_documents 값,
+  //   신규는 슬롯 기본값(졸업·성적·자격증=필수, 경력·수상=선택).
+  const [docRequired, setDocRequired] = useState<Record<string, boolean>>(() =>
+    requiredMapFromDocuments(initial?.required_documents ?? null)
   );
 
   const [pending, startTransition] = useTransition();
@@ -403,7 +417,12 @@ function PostingForm({
         fd.set("appointment_date", appointmentDate);
         fd.set("notice", notice);
         fd.set("status", published ? "published" : "draft");
-        fd.set("require_certificate_copy", requireCert ? "true" : "false");
+        for (const s of RECRUITMENT_DOC_SLOTS) {
+          fd.set(
+            `doc_required_${s.key}`,
+            docRequired[s.key] ? "true" : "false"
+          );
+        }
 
         const res = await saveRecruitmentPosting(fd);
         if (res.ok) {
@@ -700,22 +719,46 @@ function PostingForm({
         </div>
 
         <div className="sm:col-span-2">
-          <label className="inline-flex cursor-pointer items-center gap-2 rounded-lg border border-line bg-surface px-3 py-2">
-            <input
-              type="checkbox"
-              checked={requireCert}
-              onChange={(e) => setRequireCert(e.target.checked)}
-              className="h-4 w-4 rounded border-line text-brand-blue focus:ring-brand-blue"
-            />
-            <span className="text-sm font-semibold text-ink">
-              자격증 사본 필수
-            </span>
-            <span className="text-xs text-ink-muted">
-              {requireCert
-                ? "ON — 지원자에게 자격증 사본이 필수 서류로 표시됩니다."
-                : "OFF — 자격증 사본이 선택 서류로 표시됩니다."}
-            </span>
-          </label>
+          <p className="mb-2 text-xs font-bold text-navy">제출 서류 (필수/선택)</p>
+          <ul className="space-y-2">
+            {RECRUITMENT_DOC_SLOTS.map((s) => {
+              const req = docRequired[s.key] ?? s.defaultRequired;
+              return (
+                <li
+                  key={s.key}
+                  className="flex items-center justify-between gap-2 rounded-lg border border-line bg-surface px-3 py-2"
+                >
+                  <span className="text-sm font-medium text-ink">
+                    {s.label}
+                  </span>
+                  <div className="inline-flex shrink-0 rounded-lg border border-line bg-card p-0.5">
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setDocRequired((m) => ({ ...m, [s.key]: true }))
+                      }
+                      className={docToggleCls(req)}
+                    >
+                      필수
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setDocRequired((m) => ({ ...m, [s.key]: false }))
+                      }
+                      className={docToggleCls(!req)}
+                    >
+                      선택
+                    </button>
+                  </div>
+                </li>
+              );
+            })}
+          </ul>
+          <p className="mt-1.5 text-[11px] text-ink-hint">
+            지원자의 “첨부서류” 탭에 위 설정대로 필수/선택이 표시되고, 제출 시
+            필수 항목 누락이 검증됩니다.
+          </p>
         </div>
       </div>
 
