@@ -69,7 +69,10 @@ export async function getRecruitmentPosting(
   return normalizeRecruitmentPosting(data as Record<string, unknown>);
 }
 
-// 공개 목록/메인 배너용 — published 공고를 마감일 가까운 순으로.
+// 공개 목록/메인 배너용 — "진행 중"(접수중) 공고만 마감 임박순으로.
+//   * 진행 중 기준 = status='published' AND application_end >= now.
+//     → 마감된 published 공고는 목록/배너에서 제외(헛지원 방지),
+//       draft/closed 는 status 조건에서 제외.
 //   * 공개 카드에 필요한 요약 필드만 반환. 에러 시 빈 배열(목록/배너 숨김).
 //   * 메인 배너(app/page.tsx)는 건수(length)만, 공개 목록(/recruitment)은
 //     분야·기간·인원까지 사용합니다.
@@ -90,6 +93,7 @@ export async function listPublishedRecruitmentSummaries(): Promise<
       .from("recruitment_postings")
       .select("slug,title,field,recruit_count,application_start,application_end")
       .eq("status", "published")
+      .gte("application_end", new Date().toISOString())
       .order("application_end", { ascending: true });
     if (error || !Array.isArray(data)) return [];
     return data.map((r) => {

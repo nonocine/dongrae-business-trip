@@ -20,6 +20,7 @@ import { fmtKstDateTime } from "@/lib/datetime";
 import {
   saveRecruitmentPosting,
   deleteRecruitmentPosting,
+  setRecruitmentPostingStatus,
   type RecruitmentPostingAdmin,
 } from "@/app/hr/actions";
 import RecruitmentShareButton from "@/app/hr/RecruitmentShareButton";
@@ -144,9 +145,13 @@ function PostingRow({
   onEdit: () => void;
 }) {
   const [deleting, deleteTransition] = useTransition();
+  const [toggling, toggleTransition] = useTransition();
   const [err, setErr] = useState<string | null>(null);
   // 마운트 시각을 1회 캡처 — 렌더를 순수하게 유지(react-hooks/purity).
   const [now] = useState(() => Date.now());
+
+  // published 가 아니면(draft/closed) "공개 전환", published 면 "비공개 전환".
+  const willPublish = posting.status !== "published";
 
   const closed =
     new Date(posting.application_end).getTime() < now &&
@@ -171,6 +176,24 @@ function PostingRow({
         : "비공개";
 
   const isEditing = editingId === posting.id;
+
+  function handleToggle() {
+    if (
+      !willPublish &&
+      !confirm(
+        `"${posting.title}" 공고를 비공개로 전환하시겠습니까?\n공개 목록·메인 배너·상세 페이지에서 빠집니다. (접수된 지원서는 보존됩니다)`
+      )
+    )
+      return;
+    setErr(null);
+    toggleTransition(async () => {
+      const res = await setRecruitmentPostingStatus(
+        posting.id,
+        willPublish ? "published" : "closed"
+      );
+      if (!res.ok) setErr(res.message);
+    });
+  }
 
   function handleDelete() {
     if (
@@ -245,6 +268,22 @@ function PostingRow({
             className="rounded-md border border-brand-blue bg-card px-2.5 py-1 text-xs font-semibold text-brand-blue hover:bg-brand-blue-soft"
           >
             편집
+          </button>
+          <button
+            type="button"
+            onClick={handleToggle}
+            disabled={toggling}
+            className={`rounded-md border bg-card px-2.5 py-1 text-xs font-semibold disabled:opacity-60 ${
+              willPublish
+                ? "border-brand-green text-brand-green hover:bg-brand-green/10"
+                : "border-warning text-warning hover:bg-warning-soft"
+            }`}
+          >
+            {toggling
+              ? "전환 중…"
+              : willPublish
+                ? "공개 전환"
+                : "비공개 전환"}
           </button>
           <button
             type="button"

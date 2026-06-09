@@ -550,3 +550,39 @@ export async function deleteRecruitmentPosting(
     };
   }
 }
+
+// 공고 공개/비공개 전환 — 삭제 불가(지원서 접수)인 공고도 공개에서 뺄 수 있게.
+//   * published → closed("비공개 전환"): 공개 목록/배너/상세에서 빠지고 지원서는 보존.
+//   * draft|closed → published("공개 전환"): 다시 공개.
+export async function setRecruitmentPostingStatus(
+  id: string,
+  status: "published" | "closed"
+): Promise<{ ok: true } | { ok: false; message: string }> {
+  try {
+    await requireHrAdmin();
+    if (!id) return { ok: false, message: "공고 ID가 없습니다." };
+    if (status !== "published" && status !== "closed") {
+      return { ok: false, message: "허용되지 않는 상태입니다." };
+    }
+
+    const { data, error } = await supabase
+      .from("recruitment_postings")
+      .update({ status, updated_at: new Date().toISOString() })
+      .eq("id", id)
+      .select("slug")
+      .single();
+    if (error) throw new Error(error.message);
+
+    revalidatePath("/hr");
+    revalidatePath("/recruitment");
+    const slug = String((data as { slug: unknown }).slug ?? "");
+    if (slug) revalidatePath(`/recruitment/${slug}`);
+    return { ok: true };
+  } catch (e) {
+    return {
+      ok: false,
+      message:
+        e instanceof Error ? e.message : "상태 전환 중 오류가 발생했습니다.",
+    };
+  }
+}
