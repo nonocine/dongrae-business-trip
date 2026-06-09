@@ -82,21 +82,43 @@ export default async function Home({
         />
 
         <div className="relative z-10 w-full max-w-md">
-          {/* 히어로 — 4색 로고 마크(흰 타일) + 또렷한 흰색 타이틀 */}
+          {/* 히어로 — 4색 로고 마크(흰 타일) + 동업자씨 약자 강조 */}
           <div className="flex flex-col items-center text-center">
             <div className="rounded-3xl bg-white p-3 shadow-2xl ring-1 ring-white/20">
               {/* eslint-disable-next-line @next/next/no-img-element */}
               <img
                 src="/images/logo3.png"
-                alt="동래구청소년센터"
+                alt="동래구청소년센터 로고"
                 className="h-16 w-16 object-contain sm:h-20 sm:w-20"
               />
             </div>
-            <h1 className="mt-5 text-2xl font-extrabold tracking-tight text-white sm:text-3xl">
-              동래구청소년센터
+
+            {/* 브랜드명 — 네 글자를 로고 색감으로 강조 */}
+            <h1 className="mt-5 text-4xl font-extrabold tracking-[0.04em] sm:text-5xl">
+              <span style={{ color: "#e84040" }}>동</span>
+              <span style={{ color: "#3ab54a" }}>업</span>
+              <span style={{ color: "#2f7be0" }}>자</span>
+              <span style={{ color: "#f0c030" }}>씨</span>
             </h1>
-            <p className="mt-1.5 text-sm font-medium text-[#9fc1e0]">
-              동업자씨 · 업무 자동화 시스템
+
+            {/* 풀네임 전개 — 앞글자 4개를 같은 색으로 매칭(= 동업자씨) */}
+            <p className="mt-3 text-[13px] leading-relaxed text-white/65 sm:text-sm">
+              <b className="font-bold" style={{ color: "#ff6b66" }}>
+                동
+              </b>
+              래구청소년센터{" "}
+              <b className="font-bold" style={{ color: "#5fd06a" }}>
+                업
+              </b>
+              무{" "}
+              <b className="font-bold" style={{ color: "#7ab3f5" }}>
+                자
+              </b>
+              동화{" "}
+              <b className="font-bold" style={{ color: "#f5cf5e" }}>
+                씨
+              </b>
+              스템
             </p>
           </div>
 
@@ -147,9 +169,27 @@ export default async function Home({
             >
               <span
                 aria-hidden
-                className="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl bg-white text-xl font-black text-navy shadow"
+                className="flex h-12 w-12 shrink-0 items-center justify-center rounded-full bg-white shadow"
               >
-                G
+                {/* 구글 G 4색 로고 (인라인 SVG) */}
+                <svg viewBox="0 0 48 48" className="h-6 w-6">
+                  <path
+                    fill="#4285F4"
+                    d="M45.12 24.5c0-1.56-.14-3.06-.4-4.5H24v8.51h11.84c-.51 2.75-2.06 5.08-4.39 6.64v5.52h7.11c4.16-3.83 6.56-9.47 6.56-16.17z"
+                  />
+                  <path
+                    fill="#34A853"
+                    d="M24 46c5.94 0 10.92-1.97 14.56-5.33l-7.11-5.52c-1.97 1.32-4.49 2.1-7.45 2.1-5.73 0-10.58-3.87-12.31-9.07H4.34v5.7C7.96 41.07 15.4 46 24 46z"
+                  />
+                  <path
+                    fill="#FBBC05"
+                    d="M11.69 28.18C11.25 26.86 11 25.45 11 24s.25-2.86.69-4.18v-5.7H4.34C2.85 17.09 2 20.45 2 24s.85 6.91 2.34 9.88l7.35-5.7z"
+                  />
+                  <path
+                    fill="#EA4335"
+                    d="M24 9.5c3.23 0 6.13 1.11 8.41 3.29l6.31-6.31C34.91 2.69 29.93 0 24 0 15.4 0 7.96 4.93 4.34 12.12l7.35 5.7C13.42 12.62 18.27 9.5 24 9.5z"
+                  />
+                </svg>
               </span>
               <span className="min-w-0 flex-1">
                 <span className="block text-base font-bold text-white">
