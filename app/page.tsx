@@ -1,12 +1,10 @@
 import Link from "next/link";
 import Header from "@/app/components/Header";
-import LoginForm from "@/app/components/LoginForm";
 import ActivityList from "@/app/components/ActivityList";
 import {
   enforcePasswordChange,
   getSession,
   listActivities,
-  listDriverNames,
 } from "@/app/actions";
 import { listPublishedRecruitmentSummaries } from "@/app/recruitment/[slug]/actions";
 import { cardCls } from "@/lib/ui";
@@ -59,29 +57,99 @@ export default async function Home({
   const published = await listPublishedRecruitmentSummaries();
   const recruitmentCount = published.length;
 
+  // 비로그인 → 공개 관문(landing). 누구나 접근 가능, 내부 데이터 비노출.
+  //   ① 채용 공고: 공개(지원자용) → /recruitment
+  //   ② 직원 업무 시스템: 구글 로그인 후 직원 메인(/)으로 복귀.
   if (!session) {
-    let employees: string[] = [];
-    try {
-      employees = await listDriverNames();
-    } catch {
-      // drivers 테이블이 아직 없으면 빈 목록
-    }
     const googleError = googleErrorMessage((await searchParams).google_error);
     return (
-      <>
-        <Header />
-        <main className="mx-auto w-full max-w-md flex-1 space-y-3 px-4 py-8">
-          {recruitmentCount > 0 && (
-            <RecruitmentBanner count={recruitmentCount} />
-          )}
-          {googleError && (
-            <p className="rounded-lg bg-stamp-soft px-3 py-2 text-sm text-stamp">
-              {googleError}
-            </p>
-          )}
-          <LoginForm employees={employees} />
-        </main>
-      </>
+      <main className="mx-auto flex w-full max-w-md flex-1 flex-col justify-center px-5 py-12 sm:py-16">
+        <div className="text-center">
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img
+            src="/images/dongrae-logo.png"
+            alt="동래구청소년센터"
+            className="mx-auto h-16 w-auto object-contain sm:h-20"
+          />
+          <h1 className="mt-4 text-xl font-extrabold tracking-tight text-ink sm:text-2xl">
+            동래구청소년센터
+          </h1>
+          <p className="mt-1 text-sm text-ink-muted">
+            동업자씨 · 업무 자동화 시스템
+          </p>
+        </div>
+
+        {googleError && (
+          <p className="mt-6 rounded-lg bg-stamp-soft px-3 py-2 text-center text-sm text-stamp">
+            {googleError}
+          </p>
+        )}
+
+        <div className="mt-8 space-y-3">
+          {/* ① 채용 공고 — 공개(지원자용) */}
+          <Link
+            href="/recruitment"
+            className="group flex items-center gap-4 rounded-2xl border border-line bg-card p-5 shadow-sm transition hover:-translate-y-0.5 hover:border-brand-blue hover:shadow-md"
+          >
+            <span
+              aria-hidden
+              className="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl bg-brand-blue-soft text-2xl"
+            >
+              📢
+            </span>
+            <span className="min-w-0 flex-1">
+              <span className="flex items-center gap-2">
+                <span className="text-base font-bold text-ink">채용 공고</span>
+                {recruitmentCount > 0 && (
+                  <span className="rounded-full bg-brand-green/15 px-2 py-0.5 text-[10px] font-bold text-brand-green">
+                    진행 중 {recruitmentCount}건
+                  </span>
+                )}
+              </span>
+              <span className="mt-0.5 block text-xs text-ink-muted">
+                지원자용 · 채용 공고 확인 및 지원
+              </span>
+            </span>
+            <span
+              aria-hidden
+              className="shrink-0 text-lg text-brand-blue transition group-hover:translate-x-0.5"
+            >
+              →
+            </span>
+          </Link>
+
+          {/* ② 직원 업무 시스템 — 구글 워크스페이스 로그인 */}
+          <a
+            href="/api/auth/google/login?next=/"
+            className="group flex items-center gap-4 rounded-2xl border border-navy/20 bg-navy p-5 shadow-sm transition hover:-translate-y-0.5 hover:bg-navy-strong hover:shadow-md"
+          >
+            <span
+              aria-hidden
+              className="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl bg-white/15 text-xl font-bold text-white"
+            >
+              G
+            </span>
+            <span className="min-w-0 flex-1">
+              <span className="block text-base font-bold text-white">
+                직원 업무 시스템
+              </span>
+              <span className="mt-0.5 block text-xs text-white/70">
+                직원 전용 · 구글 워크스페이스로 로그인
+              </span>
+            </span>
+            <span
+              aria-hidden
+              className="shrink-0 text-lg text-white/80 transition group-hover:translate-x-0.5"
+            >
+              →
+            </span>
+          </a>
+        </div>
+
+        <p className="mt-4 text-center text-[11px] text-ink-hint">
+          직원 업무는 @onnainna.kr 구글 계정 로그인이 필요합니다.
+        </p>
+      </main>
     );
   }
 
