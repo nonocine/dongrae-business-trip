@@ -69,11 +69,16 @@ export async function getRecruitmentPosting(
   return normalizeRecruitmentPosting(data as Record<string, unknown>);
 }
 
-// 메인 화면 배너용 — published 공고를 마감일 가까운 순으로.
-//   * 공개 정보(슬러그/제목/마감)만 반환. 에러 시 빈 배열(배너는 숨김).
+// 공개 목록/메인 배너용 — published 공고를 마감일 가까운 순으로.
+//   * 공개 카드에 필요한 요약 필드만 반환. 에러 시 빈 배열(목록/배너 숨김).
+//   * 메인 배너(app/page.tsx)는 건수(length)만, 공개 목록(/recruitment)은
+//     분야·기간·인원까지 사용합니다.
 export type PublishedRecruitmentSummary = {
   slug: string;
   title: string;
+  field: string;
+  recruit_count: number;
+  application_start: string;
   application_end: string;
 };
 
@@ -83,7 +88,7 @@ export async function listPublishedRecruitmentSummaries(): Promise<
   try {
     const { data, error } = await supabase
       .from("recruitment_postings")
-      .select("slug,title,application_end")
+      .select("slug,title,field,recruit_count,application_start,application_end")
       .eq("status", "published")
       .order("application_end", { ascending: true });
     if (error || !Array.isArray(data)) return [];
@@ -92,6 +97,9 @@ export async function listPublishedRecruitmentSummaries(): Promise<
       return {
         slug: String(row.slug ?? ""),
         title: String(row.title ?? ""),
+        field: String(row.field ?? ""),
+        recruit_count: Number(row.recruit_count ?? 0),
+        application_start: String(row.application_start ?? ""),
         application_end: String(row.application_end ?? ""),
       };
     });

@@ -22,6 +22,7 @@ import {
   deleteRecruitmentPosting,
   type RecruitmentPostingAdmin,
 } from "@/app/hr/actions";
+import RecruitmentShareButton from "@/app/hr/RecruitmentShareButton";
 
 // KST(+09:00) 로 timestamptz → datetime-local 입력값(YYYY-MM-DDTHH:mm).
 function isoToKstLocal(iso: string): string {
@@ -225,6 +226,7 @@ function PostingRow({
           >
             공고 보기 ↗
           </Link>
+          <RecruitmentShareButton slug={posting.slug} title={posting.title} />
           <Link
             href={`/hr/recruitment/${posting.slug}`}
             className="rounded-md border border-brand-green bg-card px-2.5 py-1 text-xs font-semibold text-brand-green hover:bg-brand-green/10"

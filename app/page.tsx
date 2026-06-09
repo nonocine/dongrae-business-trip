@@ -13,18 +13,12 @@ import { cardCls } from "@/lib/ui";
 
 export const dynamic = "force-dynamic";
 
-// 메인 화면 배너 — published 공고가 있을 때만 노출.
-//   * 가장 마감이 임박한 공고 1건의 slug 로 이동.
-function RecruitmentBanner({
-  slug,
-  title,
-}: {
-  slug: string;
-  title: string;
-}) {
+// 메인 화면 배너 — published 공고가 1건 이상일 때만 노출.
+//   * 건수(N)만 요약해 공개 목록 페이지(/recruitment)로 보냄.
+function RecruitmentBanner({ count }: { count: number }) {
   return (
     <Link
-      href={`/recruitment/${slug}`}
+      href="/recruitment"
       className="flex items-center justify-between gap-2 rounded-lg border border-brand-blue bg-brand-blue-soft/40 px-4 py-2.5 text-sm font-semibold text-brand-blue shadow-sm transition hover:bg-brand-blue-soft"
     >
       <span className="flex min-w-0 items-center gap-2">
@@ -34,7 +28,7 @@ function RecruitmentBanner({
         >
           채용
         </span>
-        <span className="truncate">직원 채용 안내 — {title}</span>
+        <span className="truncate">채용 진행 중 {count}건 보기</span>
       </span>
       <span aria-hidden className="shrink-0">→</span>
     </Link>
@@ -60,7 +54,7 @@ export default async function Home({
   const session = await getSession();
 
   const published = await listPublishedRecruitmentSummaries();
-  const banner = published[0] ?? null;
+  const recruitmentCount = published.length;
 
   if (!session) {
     let employees: string[] = [];
@@ -74,8 +68,8 @@ export default async function Home({
       <>
         <Header />
         <main className="mx-auto w-full max-w-md flex-1 space-y-3 px-4 py-8">
-          {banner && (
-            <RecruitmentBanner slug={banner.slug} title={banner.title} />
+          {recruitmentCount > 0 && (
+            <RecruitmentBanner count={recruitmentCount} />
           )}
           {googleError && (
             <p className="rounded-lg bg-stamp-soft px-3 py-2 text-sm text-stamp">
@@ -94,8 +88,8 @@ export default async function Home({
     <>
       <Header />
       <main className="mx-auto w-full max-w-3xl flex-1 space-y-4 px-4 py-5 sm:py-6">
-        {banner && (
-          <RecruitmentBanner slug={banner.slug} title={banner.title} />
+        {recruitmentCount > 0 && (
+          <RecruitmentBanner count={recruitmentCount} />
         )}
         <section className={cardCls}>
           <h2 className="text-lg font-bold tracking-tight text-ink">
