@@ -11,6 +11,7 @@ import {
   splitRecruitmentFields,
   fieldBadgeCls,
 } from "@/lib/ui";
+import { recruitmentTiming } from "@/lib/recruitmentStatus";
 
 // 임시저장 후 페이지 재방문 시 최신 상태가 반영되도록 동적 렌더.
 export const dynamic = "force-dynamic";
@@ -42,18 +43,22 @@ export default async function RecruitmentApplyPage({
   // 서버 컴포넌트(force-dynamic)는 요청마다 1회 렌더되므로 Date.now() 가 안전.
   // eslint-disable-next-line react-hooks/purity
   const now = Date.now();
+  const timing = recruitmentTiming(
+    posting.application_start,
+    posting.application_end,
+    now
+  );
+  const upcoming = timing === "upcoming";
+  const closed = timing === "closed";
   const endTime = new Date(posting.application_end).getTime();
-  const closed = endTime < now;
-  // D-Day — KST 달력일 기준.
+  // D-Day — KST 달력일 기준. 접수중일 때만 노출.
   const kstDay = (ms: number) => Math.floor((ms + 9 * 3600 * 1000) / 86400000);
   const daysLeft = kstDay(endTime) - kstDay(now);
-  const ddayLabel = closed
-    ? null
-    : daysLeft <= 0
-      ? "오늘 마감"
-      : `D-${daysLeft}`;
+  const ddayLabel =
+    timing !== "open" ? null : daysLeft <= 0 ? "오늘 마감" : `D-${daysLeft}`;
 
-  const session = await getKakaoSession();
+  // 접수 시작 전이면 본인 인증/지원서 조회 없이 안내만 노출.
+  const session = upcoming ? null : await getKakaoSession();
   // 로그인 된 경우에만 기존 지원서를 미리 불러옵니다.
   const draft = session ? await getApplicationDraft(slug) : null;
 
@@ -75,7 +80,17 @@ export default async function RecruitmentApplyPage({
         )}
       </RecruitmentHeader>
 
-      {closed ? (
+      {upcoming ? (
+        <section className="rounded-xl border border-line border-l-4 border-l-brand-blue bg-card p-5 shadow-sm">
+          <p className="text-base font-bold text-ink">
+            아직 접수 기간이 아닙니다.
+          </p>
+          <p className="mt-2 text-xs text-ink-muted sm:text-sm">
+            {fmtKST(posting.application_start)} 접수 시작 예정입니다. 접수 시작
+            후에 지원서를 작성할 수 있습니다.
+          </p>
+        </section>
+      ) : closed ? (
         <section className="rounded-xl border border-line border-l-4 border-l-stamp bg-card p-5 shadow-sm">
           <p className={noticeWarning}>접수가 마감되었습니다.</p>
           <p className="mt-3 text-xs text-ink-muted sm:text-sm">

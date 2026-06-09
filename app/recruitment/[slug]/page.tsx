@@ -6,6 +6,7 @@ import {
   splitRecruitmentFields,
   fieldBadgeCls,
 } from "@/lib/ui";
+import { recruitmentTiming } from "@/lib/recruitmentStatus";
 import {
   RecruitmentHeader,
   SectionCard,
@@ -40,20 +41,23 @@ export default async function RecruitmentPostingPage({
   // 공고가 없거나 비공개(draft/closed)면 404.
   if (!posting) notFound();
 
-  // 마감 여부는 status 가 아니라 application_end 시각으로 판정합니다.
+  // 접수 상태는 status 가 아니라 application_start/end 시각으로 판정합니다.
   // 서버 컴포넌트(force-dynamic)는 요청마다 1회 렌더되므로 Date.now() 가 안전.
   // eslint-disable-next-line react-hooks/purity
   const now = Date.now();
+  const timing = recruitmentTiming(
+    posting.application_start,
+    posting.application_end,
+    now
+  );
+  const upcoming = timing === "upcoming";
+  const closed = timing === "closed";
   const endTime = new Date(posting.application_end).getTime();
-  const closed = endTime < now;
-  // D-Day — KST 달력일 기준(UTC+9 고정). 0이면 오늘 마감.
+  // D-Day — KST 달력일 기준(UTC+9 고정). 접수중일 때만 노출. 0이면 오늘 마감.
   const kstDay = (ms: number) => Math.floor((ms + 9 * 3600 * 1000) / 86400000);
   const daysLeft = kstDay(endTime) - kstDay(now);
-  const ddayLabel = closed
-    ? null
-    : daysLeft <= 0
-      ? "오늘 마감"
-      : `D-${daysLeft}`;
+  const ddayLabel =
+    timing !== "open" ? null : daysLeft <= 0 ? "오늘 마감" : `D-${daysLeft}`;
 
   // 값이 있는 항목만 순서대로 표시 — 디자인 지정 색상 매핑.
   type Section = { title: string; body: string | null; accent: SectionAccent };
@@ -91,10 +95,14 @@ export default async function RecruitmentPostingPage({
         </span>
         <span
           className={`rounded-full px-2.5 py-0.5 text-xs font-bold ${
-            closed ? "bg-white/15 text-white/70" : "bg-brand-green text-white"
+            upcoming
+              ? "bg-brand-blue text-white"
+              : closed
+                ? "bg-white/15 text-white/70"
+                : "bg-brand-green text-white"
           }`}
         >
-          {closed ? "접수마감" : "접수중"}
+          {upcoming ? "접수예정" : closed ? "접수마감" : "접수중"}
         </span>
         {ddayLabel && (
           <span className="rounded-full bg-stamp px-2.5 py-0.5 text-xs font-bold text-white shadow-sm">
@@ -187,7 +195,16 @@ export default async function RecruitmentPostingPage({
 
       {/* 지원 액션 */}
       <div className="mt-6">
-        {closed ? (
+        {upcoming ? (
+          <div className="rounded-xl border border-line border-l-4 border-l-brand-blue bg-card p-4 shadow-sm">
+            <p className="text-sm font-bold text-ink">
+              아직 접수 기간이 아닙니다.
+            </p>
+            <p className="mt-1 text-xs text-ink-muted sm:text-sm">
+              {fmtKST(posting.application_start)} 접수 시작
+            </p>
+          </div>
+        ) : closed ? (
           <p className={noticeWarning}>접수가 마감되었습니다.</p>
         ) : (
           <Link

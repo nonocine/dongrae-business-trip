@@ -72,6 +72,7 @@ export type ApplyPosting = {
   slug: string;
   title: string;
   field: string;
+  application_start: string;
   application_end: string;
   status: string;
   required_documents: RequiredDoc[];
@@ -242,6 +243,7 @@ export async function getApplyPosting(
     slug: String(r.slug ?? ""),
     title: String(r.title ?? ""),
     field: String(r.field ?? ""),
+    application_start: String(r.application_start ?? ""),
     application_end: String(r.application_end ?? ""),
     status: String(r.status ?? ""),
     required_documents: requiredDocuments,
@@ -411,11 +413,16 @@ function buildApplicantRow(
   };
 }
 
-// posting 조회 + 마감/제출 상태 검증. 통과하면 posting 반환.
+// posting 조회 + 접수 기간(시작 전/마감) 검증. 통과하면 posting 반환.
+//   * 클라이언트 우회로 기간 밖 지원·임시저장·업로드가 들어와도 서버에서 차단.
 async function loadOpenPosting(slug: string): Promise<ApplyPosting> {
   const posting = await getApplyPosting(slug);
   if (!posting) throw new Error("공고를 찾을 수 없습니다.");
-  if (new Date(posting.application_end).getTime() < Date.now()) {
+  const now = Date.now();
+  if (new Date(posting.application_start).getTime() > now) {
+    throw new Error("아직 접수 기간이 아닙니다.");
+  }
+  if (new Date(posting.application_end).getTime() < now) {
     throw new Error("접수가 마감된 공고입니다.");
   }
   return posting;
