@@ -2,7 +2,7 @@
 
 import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
-import { getSession, isAdmin, getGoogleSession } from "@/app/actions";
+import { getSession, getGoogleSession } from "@/app/actions";
 import {
   supabase,
   HR_ADMIN_RANKS,
@@ -32,19 +32,16 @@ import { supabaseAdmin } from "@/lib/supabaseAdmin";
 //   * 미통과 시 / 로 redirect.
 // =====================================================================
 // HR 영역 접근 게이트 — 다음 중 하나라도 통과하면 허용:
-//   1) ADMIN_PASSWORD 세션(isAdmin) — 관장 비상용
-//   2) Google Workspace(onnainna.kr) 세션 — 도메인 자체가 신뢰 경계
-//   3) 직원 비번 로그인 + drivers.rank ∈ (관장·부장)
+//   1) Google Workspace 세션 — master 또는 rank ∈ (관장·부장)
+//   2) 직원 비번 로그인 + drivers.rank ∈ (관장·부장)
 // 반환의 name 은 감사/작성자(reviewer_name·created_by) 식별에 쓰입니다.
 // (rank 는 게이트 식별용이며 호출처에서 소비하지 않습니다.)
+//   * 공유비번(ADMIN_PASSWORD) 경로는 제거되었습니다.
 export async function requireHrAdmin(): Promise<{
   name: string;
   rank: HrAdminRank;
 }> {
-  // 1) ADMIN_PASSWORD
-  if (await isAdmin()) return { name: "관리자", rank: "관장" };
-
-  // 2) Google Workspace — 비번 로그인 경로와 대칭으로 rank 게이팅.
+  // 1) Google Workspace — 비번 로그인 경로와 대칭으로 rank 게이팅.
   //    · 마스터 → 관장으로 통과.
   //    · rank ∈ (관장·부장) → 그 rank 로 통과.
   //    · 그 외(팀장·팀원·rank null) → HR 접근 거부, "/" 로 redirect.
@@ -59,7 +56,7 @@ export async function requireHrAdmin(): Promise<{
     redirect("/");
   }
 
-  // 3) 직원 비번 로그인 + 관장·부장 rank
+  // 2) 직원 비번 로그인 + 관장·부장 rank
   const session = await getSession();
   if (!session || session.kind !== "employee") {
     redirect("/");
@@ -83,12 +80,26 @@ export async function requireHrAdmin(): Promise<{
   return { name: session.name, rank: rank as HrAdminRank };
 }
 
-// 인사기록카드 삭제 권한 — ADMIN 또는 관장·부장만 통과.
+// 인사기록카드 삭제 권한 — master/관장·부장만 통과.
 //   * requireHrAdmin 과 달리 redirect 가 아니라 throw 합니다
 //     (클라이언트에서 에러 메시지를 표시할 수 있도록).
+//   * 공유비번 경로 제거. master 는 employee_profiles 매핑이 없어도 관장으로 통과.
 async function requireHrManagerOrAdmin(): Promise<void> {
-  if (await isAdmin()) return;
+  // 1) Google Workspace — master 또는 rank ∈ (관장·부장).
+  const g = await getGoogleSession();
+  if (g) {
+    if (
+      g.isMaster ||
+      (g.rank && (HR_ADMIN_RANKS as readonly string[]).includes(g.rank))
+    ) {
+      return;
+    }
+    throw new Error(
+      "삭제 권한이 없습니다. 관리자 또는 관장·부장만 삭제할 수 있습니다."
+    );
+  }
 
+  // 2) 직원 비번 로그인 + 관장·부장 rank.
   const session = await getSession();
   if (!session || session.kind !== "employee") {
     throw new Error("삭제 권한이 없습니다.");

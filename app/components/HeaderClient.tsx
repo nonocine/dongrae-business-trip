@@ -13,16 +13,19 @@ export default function HeaderClient({
   kind,
   name,
   canAccessHr,
+  canAccessAdmin,
 }: {
   kind: SessionKind;
   name: string | null;
   canAccessHr: boolean;
+  canAccessAdmin: boolean;
 }) {
   const [mobileOpen, setMobileOpen] = useState(false);
   const [userMenuOpen, setUserMenuOpen] = useState(false);
 
   const loggedIn = kind !== null;
-  const isAdmin = kind === "admin";
+  // 관리자 표기/진입은 관장 권한(canAccessAdmin) 기준 — 구글 master/관장 포함.
+  const isAdmin = canAccessAdmin;
   const displayName = isAdmin ? "관리자" : name ?? "";
 
   // 좌측 네비게이션 (권한별)

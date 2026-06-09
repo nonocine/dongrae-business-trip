@@ -5,7 +5,7 @@ import AdminDashboard from "@/app/admin/AdminDashboard";
 import {
   enforcePasswordChange,
   getActivityAdminStats,
-  isAdmin,
+  isManagerAdmin,
   listActivities,
   listDrivers,
 } from "@/app/actions";
@@ -14,8 +14,9 @@ export const dynamic = "force-dynamic";
 
 export default async function AdminPage() {
   await enforcePasswordChange();
-  if (!(await isAdmin())) {
-    redirect("/admin/login");
+  // 구글 관장(master 포함)만 진입. 아니면 홈으로.
+  if (!(await isManagerAdmin())) {
+    redirect("/");
   }
 
   const [employees, stats, activities] = await Promise.all([

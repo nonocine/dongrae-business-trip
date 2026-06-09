@@ -1,6 +1,5 @@
 "use client";
 
-import Link from "next/link";
 import { useState, useTransition } from "react";
 import { loginEmployee } from "@/app/actions";
 import {
@@ -139,14 +138,6 @@ export default function LoginForm({ employees }: { employees: string[] }) {
       <p className="-mt-3 text-center text-[11px] text-ink-hint">
         @onnainna.kr 계정만 가능합니다.
       </p>
-
-      <Link
-        href="/admin/login"
-        className="flex items-center justify-center gap-2 rounded-xl border border-line bg-surface px-4 py-3 text-sm font-semibold text-navy transition hover:bg-navy-soft"
-      >
-        <span aria-hidden>⚙</span>
-        관리자 로그인
-      </Link>
     </div>
   );
 }

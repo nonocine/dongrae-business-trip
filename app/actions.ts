@@ -79,9 +79,18 @@ export async function isGoogleAuth(): Promise<boolean> {
   return (await getGoogleSession()) !== null;
 }
 
+// 관장(최고관리자) 권한 — 구글 세션이 마스터이거나 rank==='관장' 이면 true.
+//   * /admin 및 관리자 전용 기능의 단일 권한 기준.
+//   * 구버전 공유비번(ADMIN_PASSWORD)은 더 이상 이 판정에 사용하지 않습니다.
+export async function isManagerAdmin(): Promise<boolean> {
+  const g = await getGoogleSession();
+  return !!g && (g.isMaster || g.rank === "관장");
+}
+
 async function requireAdmin() {
-  if (!(await isAdmin())) {
-    throw new Error("관리자 권한이 필요합니다.");
+  // 공유비번 검사 제거 — 구글 관장 권한만 통과, 아니면 홈으로.
+  if (!(await isManagerAdmin())) {
+    redirect("/");
   }
 }
 
