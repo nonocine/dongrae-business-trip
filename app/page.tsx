@@ -63,42 +63,41 @@ export default async function Home({
   if (!session) {
     const googleError = googleErrorMessage((await searchParams).google_error);
     return (
-      <main className="relative flex min-h-[100dvh] flex-1 flex-col items-center justify-center overflow-hidden px-5 py-12 text-white">
-        {/* 브랜드 배경 — 스플래시(#0f2644)와 동일 톤의 딥네이비 그라데이션 */}
+      <main
+        className="relative flex min-h-[100dvh] flex-1 flex-col items-center justify-center overflow-hidden px-5 py-12"
+        style={{
+          // 화면 전체를 딥네이비~블루로 채움(OG/아이콘 톤). 배경은 main 자체에 직접.
+          background:
+            "linear-gradient(160deg, #0f2547 0%, #16314f 50%, #1a3a5c 100%)",
+        }}
+      >
+        {/* 은은한 글로우 — 스플래시와 동일한 라디얼(콘텐츠 아래) */}
         <div
           aria-hidden
-          className="absolute inset-0 -z-10"
+          className="pointer-events-none absolute -top-1/4 left-1/2 h-[120vmin] w-[120vmin] -translate-x-1/2 rounded-full"
           style={{
             background:
-              "linear-gradient(160deg, #0f2644 0%, #16314f 55%, #1e3a5f 100%)",
-          }}
-        />
-        {/* 은은한 글로우 — 스플래시와 동일한 라디얼 */}
-        <div
-          aria-hidden
-          className="pointer-events-none absolute -top-1/4 left-1/2 -z-10 h-[120vmin] w-[120vmin] -translate-x-1/2 rounded-full"
-          style={{
-            background:
-              "radial-gradient(circle, rgba(37,99,235,0.22) 0%, rgba(15,38,68,0) 60%)",
+              "radial-gradient(circle, rgba(37,99,235,0.20) 0%, rgba(15,38,68,0) 60%)",
           }}
         />
 
-        <div className="w-full max-w-md">
-          {/* 히어로 — 스플래시 아이콘·타이포를 그대로 이어받아 진입 연속성 */}
+        <div className="relative z-10 w-full max-w-md">
+          {/* 히어로 — 4색 로고 마크(흰 타일) + 또렷한 흰색 타이틀 */}
           <div className="flex flex-col items-center text-center">
-            {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img
-              src="/icon-192.png"
-              alt="동업자씨"
-              className="h-20 w-20 rounded-[22px] shadow-2xl ring-1 ring-white/10 sm:h-24 sm:w-24"
-            />
-            <h1 className="mt-5 text-3xl font-extrabold tracking-tight sm:text-4xl">
-              동업자씨
-            </h1>
-            <p className="mt-2 text-sm font-medium tracking-[0.18em] text-[#7aa8d0]">
+            <div className="rounded-3xl bg-white p-3 shadow-2xl ring-1 ring-white/20">
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img
+                src="/images/logo3.png"
+                alt="동래구청소년센터"
+                className="h-16 w-16 object-contain sm:h-20 sm:w-20"
+              />
+            </div>
+            <h1 className="mt-5 text-2xl font-extrabold tracking-tight text-white sm:text-3xl">
               동래구청소년센터
+            </h1>
+            <p className="mt-1.5 text-sm font-medium text-[#9fc1e0]">
+              동업자씨 · 업무 자동화 시스템
             </p>
-            <p className="mt-1 text-xs text-white/45">업무 자동화 씨스템</p>
           </div>
 
           {googleError && (
@@ -107,44 +106,44 @@ export default async function Home({
             </p>
           )}
 
-          {/* 진입 카드 2개 — OG 의 색상 보더 글래스 카드 언어 재사용 */}
+          {/* 진입 카드 2개 */}
           <div className="mt-9 space-y-3.5">
-            {/* ① 채용 공고 — 공개(지원자용). 글래스 + 블루 포인트 */}
+            {/* ① 채용 공고 — 공개(지원자용). 흰 카드 + 어두운 글자 */}
             <Link
               href="/recruitment"
-              className="group flex items-center gap-4 rounded-2xl border border-white/15 border-l-4 border-l-brand-blue bg-white/[0.08] p-5 shadow-lg backdrop-blur-md transition duration-200 hover:-translate-y-1 hover:bg-white/[0.14] hover:shadow-xl"
+              className="group flex items-center gap-4 rounded-2xl bg-white p-5 shadow-lg ring-1 ring-black/5 transition duration-200 hover:-translate-y-1 hover:shadow-2xl"
             >
               <span
                 aria-hidden
-                className="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl bg-brand-blue text-2xl shadow-inner"
+                className="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl bg-brand-blue-soft text-2xl"
               >
                 📢
               </span>
               <span className="min-w-0 flex-1">
                 <span className="flex flex-wrap items-center gap-x-2 gap-y-1">
-                  <span className="text-base font-bold">채용 공고</span>
+                  <span className="text-base font-bold text-ink">채용 공고</span>
                   {recruitmentCount > 0 && (
-                    <span className="rounded-full bg-brand-green/20 px-2 py-0.5 text-[10px] font-bold text-brand-green ring-1 ring-brand-green/40">
+                    <span className="rounded-full bg-brand-green/15 px-2 py-0.5 text-[10px] font-bold text-brand-green">
                       진행 중 {recruitmentCount}건
                     </span>
                   )}
                 </span>
-                <span className="mt-0.5 block text-xs text-white/55">
-                  지원자용 · 공고 확인 및 온라인 지원
+                <span className="mt-0.5 block text-xs text-ink-muted">
+                  지원자용 · 채용 공고 확인 및 지원
                 </span>
               </span>
               <span
                 aria-hidden
-                className="shrink-0 text-lg text-white/50 transition group-hover:translate-x-0.5 group-hover:text-white"
+                className="shrink-0 text-lg text-brand-blue transition group-hover:translate-x-0.5"
               >
                 →
               </span>
             </Link>
 
-            {/* ② 직원 업무 시스템 — 구글 로그인. 솔리드 네이비·블루 */}
+            {/* ② 직원 업무 시스템 — 구글 로그인. 진한 네이비·블루 + 흰 글자 */}
             <a
               href="/api/auth/google/login?next=/"
-              className="group flex items-center gap-4 rounded-2xl border border-white/10 bg-gradient-to-br from-brand-blue-strong to-navy-strong p-5 shadow-lg transition duration-200 hover:-translate-y-1 hover:shadow-xl"
+              className="group flex items-center gap-4 rounded-2xl bg-gradient-to-br from-brand-blue-strong to-navy-strong p-5 shadow-lg ring-1 ring-white/15 transition duration-200 hover:-translate-y-1 hover:shadow-2xl"
             >
               <span
                 aria-hidden
@@ -153,25 +152,25 @@ export default async function Home({
                 G
               </span>
               <span className="min-w-0 flex-1">
-                <span className="block text-base font-bold">
+                <span className="block text-base font-bold text-white">
                   직원 업무 시스템
                 </span>
-                <span className="mt-0.5 block text-xs text-white/65">
+                <span className="mt-0.5 block text-xs text-white/70">
                   직원 전용 · 구글 워크스페이스로 로그인
                 </span>
               </span>
               <span
                 aria-hidden
-                className="shrink-0 text-lg text-white/60 transition group-hover:translate-x-0.5 group-hover:text-white"
+                className="shrink-0 text-lg text-white/70 transition group-hover:translate-x-0.5 group-hover:text-white"
               >
                 →
               </span>
             </a>
           </div>
 
-          <p className="mt-5 text-center text-[11px] text-white/40">
+          <p className="mt-5 text-center text-[11px] text-white/45">
             직원 업무는{" "}
-            <span className="text-white/60">@onnainna.kr</span> 구글 계정
+            <span className="text-white/70">@onnainna.kr</span> 구글 계정
             로그인이 필요합니다.
           </p>
         </div>
