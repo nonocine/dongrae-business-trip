@@ -1,5 +1,6 @@
 import Link from "next/link";
 import Header from "@/app/components/Header";
+import GateIntro from "@/app/components/GateIntro";
 import ActivityList from "@/app/components/ActivityList";
 import {
   enforcePasswordChange,
@@ -71,6 +72,9 @@ export default async function Home({
             "linear-gradient(160deg, #0f2547 0%, #16314f 50%, #1a3a5c 100%)",
         }}
       >
+        {/* 첫 진입 인트로 — 서류가 스마트폰으로 빨려 들어가 정리되는 모션 */}
+        <GateIntro />
+
         {/* 은은한 글로우 — 스플래시와 동일한 라디얼(콘텐츠 아래) */}
         <div
           aria-hidden
@@ -82,14 +86,14 @@ export default async function Home({
         />
 
         <div className="relative z-10 w-full max-w-md">
-          {/* 히어로 — 4색 로고 마크(흰 타일) + 동업자씨 약자 강조 */}
+          {/* 히어로 — 세로형 센터 로고(흰 타일) + 동업자씨 약자 강조 */}
           <div className="flex flex-col items-center text-center">
-            <div className="rounded-3xl bg-white p-3 shadow-2xl ring-1 ring-white/20">
+            <div className="rounded-2xl bg-white px-5 py-4 shadow-2xl ring-1 ring-white/20">
               {/* eslint-disable-next-line @next/next/no-img-element */}
               <img
-                src="/images/logo3.png"
+                src="/images/logo2.png"
                 alt="동래구청소년센터 로고"
-                className="h-16 w-16 object-contain sm:h-20 sm:w-20"
+                className="h-28 w-auto object-contain sm:h-32"
               />
             </div>
 
