@@ -813,6 +813,12 @@ export default function ApplyForm({
 
           {/* 8) 첨부서류 */}
           <div className={tab === "documents" ? "" : "hidden"}>
+            {/* 파일 1개 병합 안내 — 모바일에서도 잘 보이도록 눈에 띄는 info 박스 */}
+            <div className="mb-3 rounded-lg border border-brand-blue/40 bg-brand-yellow/20 p-3 text-xs leading-relaxed text-ink-body sm:text-sm">
+              📌 각 서류는 <b className="text-brand-blue">파일 1개</b>만 첨부할 수
+              있습니다. 여러 장(예: 자격증 여러 개, 양면 등)인 경우 하나의 파일(PDF
+              또는 이미지)로 스캔·병합하여 올려주세요.
+            </div>
             <p className="text-xs text-ink-muted">
               PDF, JPG, PNG, WEBP — 파일당 16MB 이하.
             </p>
@@ -1065,6 +1071,9 @@ function DocumentRow({
           </div>
           <p className="mt-0.5 text-[11px] text-ink-hint">
             {uploaded ? "업로드됨" : "파일을 선택해주세요"}
+          </p>
+          <p className="mt-0.5 text-[11px] text-ink-hint">
+            여러 장이면 1개 파일로 합쳐 첨부
           </p>
         </div>
         <div className="flex shrink-0 items-center gap-1.5">
