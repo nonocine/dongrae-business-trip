@@ -94,10 +94,10 @@ export default function RecruitmentPostingsTab({
               {sorted.length}건
             </span>
           </h3>
-          <div className="flex flex-wrap items-center gap-2">
+          <div className="flex w-full flex-wrap items-center gap-2 sm:w-auto">
             <Link
               href="/hr/external-judges"
-              className="inline-flex h-[38px] items-center justify-center gap-1.5 rounded-lg border border-navy bg-card px-4 text-sm font-semibold text-navy shadow-sm transition hover:bg-navy-soft"
+              className="inline-flex h-[38px] grow items-center justify-center gap-1.5 rounded-lg border border-navy bg-card px-4 text-sm font-semibold text-navy shadow-sm transition hover:bg-navy-soft sm:grow-0"
             >
               👥 외부 심사위원 관리
             </Link>
@@ -105,7 +105,7 @@ export default function RecruitmentPostingsTab({
               <button
                 type="button"
                 onClick={() => setEditing({ kind: "new" })}
-                className={btnPrimary}
+                className={`${btnPrimary} grow sm:grow-0`}
               >
                 ＋ 새 공고
               </button>
@@ -230,15 +230,17 @@ function PostingRow({
           : "border-line"
       }`}
     >
-      <div className="flex flex-wrap items-start justify-between gap-2">
+      <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-start sm:justify-between">
         <div className="min-w-0">
-          <div className="flex items-center gap-1.5">
+          <div className="flex flex-wrap items-center gap-1.5">
             <span className={statusBadge}>{statusLabel}</span>
-            <span className="font-mono text-[11px] text-ink-muted">
+            <span className="break-all font-mono text-[11px] text-ink-muted">
               {posting.slug}
             </span>
           </div>
-          <p className="mt-1 text-sm font-semibold text-ink">{posting.title}</p>
+          <p className="mt-1 break-keep text-sm font-semibold text-ink">
+            {posting.title}
+          </p>
           <div className="mt-1 flex flex-wrap items-center gap-1">
             {splitRecruitmentFields(posting.field).map((f, i) => (
               <span key={`${f}-${i}`} className={fieldBadgeCls(i)}>
@@ -253,32 +255,32 @@ function PostingRow({
             {fmtKst(posting.application_start)} ~ {fmtKst(posting.application_end)}
           </p>
         </div>
-        <div className="flex shrink-0 flex-wrap items-center gap-1.5">
+        <div className="flex w-full flex-wrap items-center gap-1.5 sm:w-auto sm:shrink-0">
           <Link
             href={`/recruitment/${posting.slug}`}
             target="_blank"
             rel="noreferrer"
-            className="rounded-md border border-line bg-card px-2.5 py-1 text-xs font-medium text-ink-body hover:bg-surface"
+            className="inline-flex grow items-center justify-center rounded-md border border-line bg-card px-2.5 py-1.5 text-xs font-medium text-ink-body hover:bg-surface sm:grow-0 sm:py-1"
           >
             공고 보기 ↗
           </Link>
           <RecruitmentShareButton slug={posting.slug} title={posting.title} />
           <Link
             href={`/hr/recruitment/${posting.slug}`}
-            className="rounded-md border border-brand-green bg-card px-2.5 py-1 text-xs font-semibold text-brand-green hover:bg-brand-green/10"
+            className="inline-flex grow items-center justify-center rounded-md border border-brand-green bg-card px-2.5 py-1.5 text-xs font-semibold text-brand-green hover:bg-brand-green/10 sm:grow-0 sm:py-1"
           >
             채용 관리
           </Link>
           <Link
             href={`/hr/recruitment/${posting.slug}/judges`}
-            className="rounded-md border border-navy bg-card px-2.5 py-1 text-xs font-semibold text-navy hover:bg-navy-soft"
+            className="inline-flex grow items-center justify-center rounded-md border border-navy bg-card px-2.5 py-1.5 text-xs font-semibold text-navy hover:bg-navy-soft sm:grow-0 sm:py-1"
           >
             위원 배정
           </Link>
           <button
             type="button"
             onClick={onEdit}
-            className="rounded-md border border-brand-blue bg-card px-2.5 py-1 text-xs font-semibold text-brand-blue hover:bg-brand-blue-soft"
+            className="inline-flex grow items-center justify-center rounded-md border border-brand-blue bg-card px-2.5 py-1.5 text-xs font-semibold text-brand-blue hover:bg-brand-blue-soft sm:grow-0 sm:py-1"
           >
             편집
           </button>
@@ -286,7 +288,7 @@ function PostingRow({
             type="button"
             onClick={handleToggle}
             disabled={toggling}
-            className={`rounded-md border bg-card px-2.5 py-1 text-xs font-semibold disabled:opacity-60 ${
+            className={`inline-flex grow items-center justify-center rounded-md border bg-card px-2.5 py-1.5 text-xs font-semibold disabled:opacity-60 sm:grow-0 sm:py-1 ${
               willPublish
                 ? "border-brand-green text-brand-green hover:bg-brand-green/10"
                 : "border-warning text-warning hover:bg-warning-soft"
@@ -302,7 +304,7 @@ function PostingRow({
             type="button"
             onClick={handleDelete}
             disabled={deleting}
-            className="rounded-md border border-stamp bg-card px-2.5 py-1 text-xs font-medium text-stamp hover:bg-stamp-soft disabled:opacity-60"
+            className="inline-flex grow items-center justify-center rounded-md border border-stamp bg-card px-2.5 py-1.5 text-xs font-medium text-stamp hover:bg-stamp-soft disabled:opacity-60 sm:grow-0 sm:py-1"
           >
             {deleting ? "삭제 중…" : "삭제"}
           </button>

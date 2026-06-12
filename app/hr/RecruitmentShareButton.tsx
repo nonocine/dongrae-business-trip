@@ -97,7 +97,7 @@ export default function RecruitmentShareButton({
       <button
         type="button"
         onClick={() => setOpen(true)}
-        className="rounded-md border border-brand-blue bg-card px-2.5 py-1 text-xs font-semibold text-brand-blue hover:bg-brand-blue-soft"
+        className="inline-flex grow items-center justify-center rounded-md border border-brand-blue bg-card px-2.5 py-1.5 text-xs font-semibold text-brand-blue hover:bg-brand-blue-soft sm:grow-0 sm:py-1"
       >
         🔗 공유 / QR
       </button>
