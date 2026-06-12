@@ -343,6 +343,7 @@ export type RecruitmentPostingAdmin = {
   notice: string | null;
   status: "draft" | "published" | "closed";
   required_documents: RecruitmentDocItem[];
+  view_count: number;
   created_at: string;
   updated_at: string;
   created_by: string | null;
@@ -385,6 +386,7 @@ function normalizeRecruitmentPostingAdmin(
     required_documents: buildRequiredDocuments(
       requiredMapFromDocuments(raw.required_documents)
     ),
+    view_count: Number(raw.view_count ?? 0),
     created_at: String(raw.created_at ?? ""),
     updated_at: String(raw.updated_at ?? ""),
     created_by: (raw.created_by as string | null) ?? null,

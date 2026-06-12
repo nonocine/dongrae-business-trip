@@ -12,6 +12,7 @@ import {
   SectionCard,
   type SectionAccent,
 } from "@/app/recruitment/[slug]/PublicUi";
+import RecruitmentViewTracker from "@/app/recruitment/[slug]/RecruitmentViewTracker";
 
 // DB 조회 기반이므로 매 요청마다 최신 공고를 렌더링합니다.
 export const dynamic = "force-dynamic";
@@ -84,6 +85,8 @@ export default async function RecruitmentPostingPage({
 
   return (
     <main className="mx-auto w-full max-w-3xl flex-1 px-4 py-6 sm:px-6 sm:py-8 lg:px-8">
+      {/* 외부 지원자 조회수 집계 — 마운트 시 1회(세션/중복은 서버에서 판정) */}
+      <RecruitmentViewTracker slug={posting.slug} />
       <RecruitmentHeader title={posting.title}>
         {splitRecruitmentFields(posting.field).map((f, i) => (
           <span key={`${f}-${i}`} className={fieldBadgeCls(i)}>

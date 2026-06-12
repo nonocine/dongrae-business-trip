@@ -1,6 +1,9 @@
 "use server";
 
+import { cookies } from "next/headers";
 import { supabase } from "@/lib/supabase";
+import { supabaseAdmin } from "@/lib/supabaseAdmin";
+import { getSession } from "@/app/actions";
 
 // 채용 공고 — 조회 페이지가 사용하는 필드만 정의(스코프 최소화).
 // 첨부서류(required_documents) 등 지원 단계 필드는 지원 페이지 작업 시
@@ -84,6 +87,51 @@ export type PublishedRecruitmentSummary = {
   application_start: string;
   application_end: string;
 };
+
+// 공고 조회수 +1 — 공개 상세 페이지(/recruitment/[slug])의 클라이언트에서 1회 호출.
+//   * 외부 지원자 조회만 집계: 직원/관장/구글 로그인 세션이면 카운트하지 않음.
+//   * status='published' 인 공고만 집계(비공개/마감 draft·closed 는 제외).
+//   * 가벼운 중복방지: 같은 공고를 6시간 내 재조회하면 쿠키로 1회만 집계.
+//   * supabaseAdmin(service_role)로 view_count = view_count + 1.
+//   * 부가 기능이므로 어떤 실패도 페이지 렌더에 영향을 주지 않도록 조용히 무시.
+export async function recordRecruitmentView(slug: string): Promise<void> {
+  try {
+    if (!slug) return;
+    // 로그인된 직원·관장·구글 사용자(=관리자측)의 조회는 집계 제외.
+    if (await getSession()) return;
+
+    const store = await cookies();
+    const cookieName = `rv_${slug}`;
+    // 짧은 시간 내 같은 공고 재조회는 1회만 — 새로고침 무한 증가 방지.
+    if (store.get(cookieName)) return;
+
+    const { data, error } = await supabaseAdmin
+      .from("recruitment_postings")
+      .select("id,view_count")
+      .eq("slug", slug)
+      .eq("status", "published")
+      .maybeSingle();
+    if (error || !data) return;
+
+    const row = data as Record<string, unknown>;
+    const current = Number(row.view_count ?? 0);
+    const { error: upErr } = await supabaseAdmin
+      .from("recruitment_postings")
+      .update({ view_count: current + 1 })
+      .eq("id", String(row.id ?? ""));
+    if (upErr) return;
+
+    store.set(cookieName, "1", {
+      httpOnly: true,
+      sameSite: "lax",
+      path: "/",
+      maxAge: 60 * 60 * 6, // 6시간
+      secure: process.env.NODE_ENV === "production",
+    });
+  } catch {
+    // 조회수 집계 실패는 무시(페이지 동작에 영향 없음).
+  }
+}
 
 export async function listPublishedRecruitmentSummaries(): Promise<
   PublishedRecruitmentSummary[]

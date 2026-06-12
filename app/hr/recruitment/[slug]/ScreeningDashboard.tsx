@@ -92,6 +92,9 @@ export default function ScreeningDashboard({
           ))}
           <span>모집 {posting.recruit_count}명</span>
           <span>· 접수 {applicants.length}건</span>
+          <span className="font-medium text-navy">
+            · 👁 조회 {posting.view_count.toLocaleString()}회
+          </span>
         </div>
       </header>
 

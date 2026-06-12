@@ -53,6 +53,7 @@ export type AdminPosting = {
   recruit_count: number;
   status: string;
   application_end: string;
+  view_count: number;
 };
 
 export type RequiredDoc = {
@@ -178,7 +179,7 @@ export async function getPostingForAdmin(slug: string): Promise<
   const { data, error } = await supabase
     .from("recruitment_postings")
     .select(
-      "id,slug,title,field,recruit_count,status,application_end,required_documents"
+      "id,slug,title,field,recruit_count,status,application_end,view_count,required_documents"
     )
     .eq("slug", slug)
     .maybeSingle();
@@ -194,6 +195,7 @@ export async function getPostingForAdmin(slug: string): Promise<
       recruit_count: Number(r.recruit_count ?? 0),
       status: String(r.status ?? ""),
       application_end: String(r.application_end ?? ""),
+      view_count: Number(r.view_count ?? 0),
     },
     requiredDocs: normalizeRequiredDocs(r.required_documents),
   };

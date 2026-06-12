@@ -250,6 +250,9 @@ function PostingRow({
             <span className="text-xs text-ink-muted">
               · 모집 {posting.recruit_count}명
             </span>
+            <span className="text-xs font-medium text-navy">
+              · 👁 조회 {posting.view_count.toLocaleString()}회
+            </span>
           </div>
           <p className="mt-1 text-[11px] text-ink-hint">
             {fmtKst(posting.application_start)} ~ {fmtKst(posting.application_end)}
