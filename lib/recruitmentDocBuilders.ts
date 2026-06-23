@@ -36,6 +36,7 @@ import {
 } from "./recruitmentScore";
 import {
   titlePara,
+  docNumberPara,
   para,
   headCell,
   dataCell,
@@ -207,6 +208,7 @@ export async function buildFinalSummaryDoc(data: ReportData): Promise<Buffer> {
     sections: [
       {
         children: [
+          docNumberPara(posting.slug, "최종심사 총괄표"),
           titlePara("최종 심사 총괄표"),
           para(`채용분야 : ${posting.field || "-"}`, {
             bold: true,
@@ -324,6 +326,7 @@ export async function buildScreeningSummaryDoc(
     sections: [
       {
         children: [
+          docNumberPara(posting.slug, "서류전형 결과 공고"),
           titlePara("1차 서류전형 심사 총괄표"),
           para(`채용분야 : ${posting.field || "-"}`, {
             bold: true,
@@ -428,6 +431,7 @@ export async function buildInterviewNoticeDoc(
     sections: [
       {
         children: [
+          docNumberPara(posting.slug, "면접대상자 공고"),
           titlePara("면접심사 대상자 공고"),
           para(`1. 채용분야 : ${posting.field || "-"}`, {
             size: 11.5,
@@ -467,6 +471,139 @@ export async function buildInterviewNoticeDoc(
             size: 14,
             align: AlignmentType.RIGHT,
           }),
+        ],
+      },
+    ],
+  });
+
+  return Packer.toBuffer(doc);
+}
+
+// =====================================================================
+// [5] 최종 합격자 공고 docx — 외부 공개 공고문.
+//   * 최종합격(final_passed) 처리된 지원자만. 이름 가운데 마스킹 + 접수번호 뒷4자리.
+//   * 이름 가나다순 정렬·번호 재부여. 임용일/출근예정일은 공고 appointment_date 활용.
+//   * 2. 임용 예정자 등록 안내는 양식 기본 텍스트(추후 공고 편집으로 커스텀 확장 예정).
+// =====================================================================
+export async function buildFinalNoticeDoc(data: ReportData): Promise<Buffer> {
+  const { posting, applicants } = data;
+
+  // 최종합격자 — 이름 가나다순 고정, 번호는 정렬 순서대로 재부여.
+  const finals = applicants
+    .filter((a) => a.status === "final_passed")
+    .sort((a, b) => a.name.localeCompare(b.name, "ko"));
+
+  const apptLabel = posting.appointment_date
+    ? fmtKstDate(posting.appointment_date)
+    : "추후 개별 안내";
+
+  // 1. 최종 합격자 명단 표 — 번호 | 채용분야 | 이름 | 임용일(출근일).
+  const headerRow = new TableRow({
+    tableHeader: true,
+    children: [
+      headCell("번호", 10),
+      headCell("채용분야", 28),
+      headCell("이름", 30),
+      headCell("임용일(출근일)", 32),
+    ],
+  });
+  const bodyRows = finals.map((a, i) => {
+    const last4 = a.applicant_number.slice(-4);
+    return new TableRow({
+      children: [
+        dataCell(String(i + 1)),
+        dataCell(posting.field || "-"),
+        // 외부 공개 — 가운데 마스킹 + 접수번호 뒷4자리 병기(예: 정○준(7841)).
+        dataCell(`${maskName(a.name)}(${last4})`),
+        dataCell(apptLabel),
+      ],
+    });
+  });
+  const rosterTable = new Table({
+    width: { size: 100, type: WidthType.PERCENTAGE },
+    layout: TableLayoutType.FIXED,
+    rows: [headerRow, ...bodyRows],
+  });
+
+  // 2. 임용 예정자 등록 안내 — 양식 기본 제출서류 목록.
+  const submitDocs = [
+    "① 임용신청서(센터 양식) 1부",
+    "② 채용신체검사서 1부",
+    "③ 기본증명서·주민등록등본 각 1부",
+    "④ 최종학력 졸업(성적)증명서 1부",
+    "⑤ 경력증명서(해당자에 한함)",
+    "⑥ 자격증 사본(해당자에 한함)",
+  ];
+
+  const doc = new Document({
+    sections: [
+      {
+        children: [
+          docNumberPara(posting.slug, "최종합격자 공고"),
+          para("동래구청소년센터 직원 채용", {
+            bold: true,
+            size: 13,
+            align: AlignmentType.CENTER,
+            spacing: { after: 40 },
+          }),
+          titlePara("최종 합격자 공고"),
+          para(
+            "동래구청소년센터 직원 채용에 따른 최종 합격자를 다음과 같이 공고합니다.",
+            { size: 11.5, spacing: { after: 160 } }
+          ),
+          para(`작성일 : ${kstDateLabel(new Date())}`, {
+            size: 11,
+            align: AlignmentType.RIGHT,
+          }),
+          para("동래구청소년센터장", {
+            bold: true,
+            size: 13,
+            align: AlignmentType.RIGHT,
+            spacing: { after: 240 },
+          }),
+
+          para("1. 최종 합격자 명단", {
+            bold: true,
+            size: 12,
+            spacing: { after: 80 },
+          }),
+          rosterTable,
+          finals.length === 0
+            ? para("※ 최종 합격자가 없습니다.", {
+                size: 10,
+                color: GRAY,
+                spacing: { before: 80, after: 240 },
+              })
+            : para(
+                "※ 응시자 보호를 위해 성명 일부를 비공개 처리하였습니다. 본인 여부는 접수번호 뒷 4자리로 확인하시기 바랍니다.",
+                { size: 9, color: GRAY, spacing: { before: 120, after: 240 } }
+              ),
+
+          para("2. 임용 예정자 등록 안내", {
+            bold: true,
+            size: 12,
+            spacing: { after: 80 },
+          }),
+          para("가. 제출기간 : 최종 합격자 발표일로부터 7일 이내 (공휴일 제외)", {
+            size: 11,
+            spacing: { after: 40 },
+          }),
+          para(`나. 임용예정일 : ${apptLabel}`, {
+            size: 11,
+            spacing: { after: 40 },
+          }),
+          para(`다. 출근예정일 : ${apptLabel}`, {
+            size: 11,
+            spacing: { after: 40 },
+          }),
+          para(
+            "라. 제출방법 : 동래구청소년센터 방문 제출 또는 등기우편 (사전 연락 후 제출)",
+            { size: 11, spacing: { after: 40 } }
+          ),
+          para("마. 제출서류", { size: 11, spacing: { after: 40 } }),
+          ...submitDocs.map((t) =>
+            para(`    ${t}`, { size: 11, spacing: { after: 20 } })
+          ),
         ],
       },
     ],
@@ -912,6 +1049,7 @@ export async function buildAnnouncementDoc(
   const procTable = aTable(procRows);
 
   const children: (Paragraph | Table)[] = [
+    docNumberPara(p.slug, "채용 공고"),
     aColorStrip(),
     new Paragraph({
       alignment: AlignmentType.CENTER,

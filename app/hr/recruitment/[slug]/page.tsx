@@ -29,6 +29,11 @@ export default async function RecruitmentAdminPage({
     listScoresForPosting(slug),
   ]);
 
+  // 최종합격자(면접합격→최종합격 처리) 수 — 최종합격자 공고 버튼 활성 여부.
+  const finalPassedCount = applicants.filter(
+    (a) => a.status === "final_passed"
+  ).length;
+
   return (
     <>
       <Header />
@@ -77,6 +82,21 @@ export default async function RecruitmentAdminPage({
             >
               📄 면접 대상자 공고
             </a>
+            {finalPassedCount > 0 ? (
+              <a
+                href={`/hr/recruitment/${slug}/final-notice`}
+                className="inline-flex items-center gap-1 rounded-lg border border-navy bg-card px-3 py-1.5 text-xs font-semibold text-navy hover:bg-navy-soft"
+              >
+                📄 최종합격자 공고
+              </a>
+            ) : (
+              <span
+                title="최종합격자가 없습니다 (최종 집계 탭에서 최종 합격 처리 후 생성됩니다)"
+                className="inline-flex cursor-not-allowed items-center gap-1 rounded-lg border border-line bg-surface px-3 py-1.5 text-xs font-semibold text-ink-hint"
+              >
+                📄 최종합격자 공고 (없음)
+              </span>
+            )}
             <Link
               href={`/hr/recruitment/${slug}/judges`}
               className="inline-flex items-center gap-1 rounded-lg border border-navy bg-card px-3 py-1.5 text-xs font-semibold text-navy hover:bg-navy-soft"

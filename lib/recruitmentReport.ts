@@ -89,7 +89,7 @@ export async function loadReportData(
   const { data: postRow, error: pErr } = await supabaseAdmin
     .from("recruitment_postings")
     .select(
-      "id, slug, title, field, recruit_count, status, required_documents"
+      "id, slug, title, field, recruit_count, status, required_documents, appointment_date"
     )
     .eq("slug", s)
     .maybeSingle();
@@ -103,6 +103,7 @@ export async function loadReportData(
     field: String(pr.field ?? ""),
     recruit_count: Number(pr.recruit_count ?? 0),
     status: String(pr.status ?? ""),
+    appointment_date: (pr.appointment_date as string | null) ?? null,
   };
 
   // 필수 증빙서류 key 목록 — 지원자별 미제출 판정에 사용.

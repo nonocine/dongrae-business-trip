@@ -53,6 +53,23 @@ export function para(
   });
 }
 
+// 공고번호 문단 — 공식 공문처럼 좌상단에 작게.
+//   "동래구청소년센터 공고 제{slug}호 ({문서종류})"
+export function docNumberPara(slug: string, docType: string): Paragraph {
+  return new Paragraph({
+    alignment: AlignmentType.LEFT,
+    spacing: { after: 120 },
+    children: [
+      new TextRun({
+        text: `동래구청소년센터 공고 제${slug}호 (${docType})`,
+        size: 18, // 9pt
+        color: GRAY,
+        font: DOC_FONT,
+      }),
+    ],
+  });
+}
+
 // 제목 문단 (가운데, 큰 글씨, 자간 강조).
 export function titlePara(text: string): Paragraph {
   return new Paragraph({

@@ -186,6 +186,8 @@ export type ReportPosting = {
   field: string;
   recruit_count: number;
   status: string;
+  // 임용(예정)일 — 최종합격자 공고의 임용일·출근예정일 등에 사용. 없으면 null.
+  appointment_date: string | null;
 };
 
 export type ReportData = {

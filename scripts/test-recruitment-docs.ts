@@ -6,6 +6,7 @@ import {
   buildFinalSummaryDoc,
   buildScreeningSummaryDoc,
   buildInterviewNoticeDoc,
+  buildFinalNoticeDoc,
 } from "../lib/recruitmentDocBuilders";
 import type {
   ReportData,
@@ -65,6 +66,7 @@ const normal: ReportData = {
     field: "청소년활동, 청소년상담",
     recruit_count: 2,
     status: "published",
+    appointment_date: "2026-07-15",
   },
   screeningReviewers: ["관장", "부장"],
   interviewReviewers: ["김외부", "이심사"],
@@ -134,6 +136,7 @@ const empty: ReportData = {
     field: "행정",
     recruit_count: 1,
     status: "published",
+    appointment_date: null,
   },
   screeningReviewers: [],
   interviewReviewers: [],
@@ -149,6 +152,7 @@ const screeningOnly: ReportData = {
     field: "",
     recruit_count: 3,
     status: "published",
+    appointment_date: null,
   },
   screeningReviewers: ["관장"],
   interviewReviewers: [],
@@ -209,15 +213,17 @@ async function run() {
         time: "14:00",
         place: "본관 3층 회의실",
       });
+      const d4 = await buildFinalNoticeDoc(data);
       const results = [
         checkZip("ERP xlsx", xlsx),
         checkZip("최종 총괄표 docx", d1),
         checkZip("서류 총괄표 docx", d2),
         checkZip("면접 공고 docx", d3),
+        checkZip("최종합격자 공고 docx", d4),
       ];
       results.forEach((r) => (r ? pass++ : fail++));
     } catch (e) {
-      fail += 4;
+      fail += 5;
       console.log(`  ✗ throw: ${e instanceof Error ? e.stack : String(e)}`);
     }
   }
