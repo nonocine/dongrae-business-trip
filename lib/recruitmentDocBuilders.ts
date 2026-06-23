@@ -380,9 +380,21 @@ export async function buildInterviewNoticeDoc(
   const interviewPlace = (opts.place ?? "").trim();
   const blank = "                              ";
 
+  // 면접 대상자(서류 합격자) — 이름 가나다순(한글 오름차순)으로 항상 고정.
+  //   접수번호·비고는 같은 객체에서 함께 나열되므로 매칭이 어긋나지 않습니다.
   const targets = applicants
     .filter((a) => screeningResultLabel(a.status) === "합격")
-    .sort((a, b) => a.applicant_number.localeCompare(b.applicant_number));
+    .sort((a, b) => a.name.localeCompare(b.name, "ko"));
+
+  // 상단 요약 문장 — 1차 총괄표와 동일한 톤.
+  //   N=전체 지원자, M=증빙서류 미제출(정확히 0이면 괄호 생략), K=서류 합격자.
+  const totalCount = applicants.length;
+  const passedCount = targets.length;
+  const missingDocsCount = applicants.filter((a) => a.missingRequiredDocs).length;
+  const summarySentence =
+    missingDocsCount > 0
+      ? `본 채용 공고에 총 ${totalCount}명이 지원하였으며(증빙서류 미제출 ${missingDocsCount}명 포함), 서류전형 합격자 ${passedCount}명을 다음과 같이 공고합니다.`
+      : `본 채용 공고에 총 ${totalCount}명이 지원하였으며, 서류전형 합격자 ${passedCount}명을 다음과 같이 공고합니다.`;
 
   const headerRow = new TableRow({
     tableHeader: true,
@@ -425,10 +437,7 @@ export async function buildInterviewNoticeDoc(
             size: 11.5,
             spacing: { after: 160 },
           }),
-          para(
-            "위 채용의 1차 서류전형 합격자를 대상으로 아래와 같이 면접심사를 실시하오니, 해당 응시자께서는 시간에 맞추어 참석하여 주시기 바랍니다.",
-            { size: 11.5, spacing: { after: 200 } }
-          ),
+          para(summarySentence, { size: 11.5, spacing: { after: 200 } }),
           para(`■ 면접 일시 : ${interviewDate || blank}  ${interviewTime}`, {
             bold: true,
             size: 11.5,
