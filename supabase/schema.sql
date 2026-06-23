@@ -471,6 +471,8 @@ create table if not exists recruitment_applications (
     )),
   screening_total numeric,
   interview_total numeric,
+  -- 서류 불합격 사유(관장/부장이 입력). 합격으로 되돌려도 값은 보존하며 표시만 숨김.
+  screening_reject_reason text,
   hired_at date,
   converted_to_employee_id uuid
     references drivers(id) on delete set null,

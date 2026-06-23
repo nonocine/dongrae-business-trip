@@ -26,6 +26,7 @@ import {
 } from "@/lib/recruitmentScore";
 import {
   saveScreeningScore,
+  saveScreeningRejectReason,
   updateApplicationStatus,
   bulkAnonymizeApplicants,
   type AdminApplicant,
@@ -260,13 +261,16 @@ function ApplicantListView({
   aggregated: Map<string, Aggregate>;
   onOpen: (applicationId: string) => void;
 }) {
-  type SortKey = "submitted" | "screening" | "interview" | "total";
-  const [sort, setSort] = useState<SortKey>("submitted");
+  type SortKey = "name" | "submitted" | "screening" | "interview" | "total";
+  // 기본은 이름 가나다순(한글 오름차순) — 총괄표와 동일한 순서로 통일.
+  const [sort, setSort] = useState<SortKey>("name");
 
   const sorted = useMemo(() => {
     const arr = [...applicants];
     const ag = (id: string) => aggregated.get(id);
-    if (sort === "screening") {
+    if (sort === "name") {
+      arr.sort((a, b) => a.name.localeCompare(b.name, "ko"));
+    } else if (sort === "screening") {
       arr.sort((a, b) => {
         const av = ag(a.application_id)?.screeningAvg ?? -1;
         const bv = ag(b.application_id)?.screeningAvg ?? -1;
@@ -318,6 +322,7 @@ function ApplicantListView({
             onChange={(e) => setSort(e.target.value as SortKey)}
             className="rounded-md border border-line bg-card px-2 py-1 text-xs"
           >
+            <option value="name">이름(가나다순)</option>
             <option value="submitted">접수일시</option>
             <option value="screening">서류점수</option>
             <option value="interview">면접평균</option>
@@ -438,6 +443,7 @@ function ApplicantDetailView({
           slug={posting.slug}
           applicationId={applicant.application_id}
           currentStatus={applicant.status}
+          rejectReasonInitial={applicant.screening_reject_reason ?? ""}
         />
         <OtherReviewersCard
           scoresForApp={scoresForApp}
@@ -913,13 +919,22 @@ function StatusActionsCard({
   slug,
   applicationId,
   currentStatus,
+  rejectReasonInitial,
 }: {
   slug: string;
   applicationId: string;
   currentStatus: AppStatus;
+  rejectReasonInitial: string;
 }) {
   const [pending, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
+
+  // 불합격 사유 — 상태와 독립. 합격으로 바꿔도 입력값은 state 에 보존되어
+  // 다시 불합격하면 그대로 복원됩니다(DB 에도 별도 컬럼으로 보존).
+  const [reason, setReason] = useState(rejectReasonInitial);
+  const [reasonPending, startReasonTransition] = useTransition();
+  const [reasonError, setReasonError] = useState<string | null>(null);
+  const [reasonOk, setReasonOk] = useState<string | null>(null);
 
   function setStatus(next: AppStatus, confirmMsg?: string) {
     if (confirmMsg && !confirm(confirmMsg)) return;
@@ -936,6 +951,24 @@ function StatusActionsCard({
         setError(
           e instanceof Error
             ? `상태 변경 실패: ${e.message}`
+            : "알 수 없는 오류가 발생했습니다."
+        );
+      }
+    });
+  }
+
+  function saveReason() {
+    setReasonError(null);
+    setReasonOk(null);
+    startReasonTransition(async () => {
+      try {
+        const res = await saveScreeningRejectReason(applicationId, reason, slug);
+        if (res.ok) setReasonOk("사유가 저장되었습니다.");
+        else setReasonError(res.message);
+      } catch (e) {
+        setReasonError(
+          e instanceof Error
+            ? `사유 저장 실패: ${e.message}`
             : "알 수 없는 오류가 발생했습니다."
         );
       }
@@ -973,6 +1006,36 @@ function StatusActionsCard({
               서류 불합격
             </button>
           </div>
+          {/* 불합격일 때만 사유 입력란 노출. */}
+          {currentStatus === "screening_failed" && (
+            <div className="mt-2 rounded-lg border border-stamp/40 bg-stamp-soft/40 p-2.5">
+              <label className="text-[11px] font-semibold text-stamp">
+                불합격 사유
+              </label>
+              <textarea
+                value={reason}
+                onChange={(e) => {
+                  setReason(e.target.value);
+                  setReasonOk(null);
+                }}
+                rows={2}
+                placeholder="예: 필수 증빙서류 미제출, 자격요건 미달 등"
+                className={`${inputCls} mt-1 resize-y`}
+              />
+              {reasonError && (
+                <p className={`mt-1 ${noticeError}`}>{reasonError}</p>
+              )}
+              {reasonOk && <p className={`mt-1 ${noticeSuccess}`}>{reasonOk}</p>}
+              <button
+                type="button"
+                onClick={saveReason}
+                disabled={reasonPending}
+                className={`${btnSecondary} mt-2 w-full`}
+              >
+                {reasonPending ? "저장 중…" : "사유 저장"}
+              </button>
+            </div>
+          )}
         </div>
 
         <div>

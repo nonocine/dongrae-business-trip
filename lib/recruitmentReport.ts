@@ -88,7 +88,9 @@ export async function loadReportData(
   // 1) 공고.
   const { data: postRow, error: pErr } = await supabaseAdmin
     .from("recruitment_postings")
-    .select("id, slug, title, field, recruit_count, status")
+    .select(
+      "id, slug, title, field, recruit_count, status, required_documents"
+    )
     .eq("slug", s)
     .maybeSingle();
   if (pErr) throw new Error(pErr.message);
@@ -103,11 +105,23 @@ export async function loadReportData(
     status: String(pr.status ?? ""),
   };
 
+  // 필수 증빙서류 key 목록 — 지원자별 미제출 판정에 사용.
+  const requiredDocKeys: string[] = Array.isArray(pr.required_documents)
+    ? (pr.required_documents as unknown[])
+        .filter(
+          (x): x is Record<string, unknown> =>
+            x != null && typeof x === "object" && !Array.isArray(x)
+        )
+        .filter((x) => x.required === true)
+        .map((x) => String(x.key ?? "").trim())
+        .filter((k) => k.length > 0)
+    : [];
+
   // 2) 지원자(접수완료 이상). draft 제외.
   const { data: apps, error: aErr } = await supabaseAdmin
     .from("recruitment_applications")
     .select(
-      "id, status, submitted_at, applicant:recruitment_applicants(applicant_number, name, phone, birth_date, gender)"
+      "id, status, submitted_at, screening_reject_reason, applicant:recruitment_applicants(applicant_number, name, phone, birth_date, gender, documents)"
     )
     .eq("posting_id", posting.id)
     .neq("status", "draft")
@@ -120,6 +134,17 @@ export async function loadReportData(
     const r = row as Record<string, unknown>;
     const app = r.applicant as Record<string, unknown> | null;
     if (!app) continue;
+    // 필수서류 미제출 판정 — documents jsonb 에 필수 key 값이 비어있으면 미제출.
+    const docMap =
+      app.documents != null &&
+      typeof app.documents === "object" &&
+      !Array.isArray(app.documents)
+        ? (app.documents as Record<string, unknown>)
+        : {};
+    const missingRequiredDocs = requiredDocKeys.some((k) => {
+      const v = docMap[k];
+      return !(typeof v === "string" && v.trim().length > 0);
+    });
     const a: ReportApplicant = {
       application_id: String(r.id ?? ""),
       applicant_number: String(app.applicant_number ?? ""),
@@ -135,6 +160,12 @@ export async function loadReportData(
       interviewAvg: null,
       total: null,
       rank: 0,
+      screeningRejectReason:
+        typeof r.screening_reject_reason === "string" &&
+        r.screening_reject_reason.trim().length > 0
+          ? r.screening_reject_reason.trim()
+          : null,
+      missingRequiredDocs,
     };
     applicants.push(a);
     appIndex.set(a.application_id, a);

@@ -97,6 +97,7 @@ export type AdminApplicant = {
   documents: AdminDocLink[];
   status: AppStatus;
   submitted_at: string | null;
+  screening_reject_reason: string | null;
 };
 
 export type ScoreEntry = {
@@ -219,7 +220,7 @@ export async function listApplicantsForAdmin(
   const { data: apps, error: aErr } = await supabaseAdmin
     .from("recruitment_applications")
     .select(
-      "id, applicant_id, status, submitted_at, applicant:recruitment_applicants(*)"
+      "id, applicant_id, status, submitted_at, screening_reject_reason, applicant:recruitment_applicants(*)"
     )
     .eq("posting_id", posting.id)
     // 임시저장(draft) 상태는 노출하지 않음 — 접수 완료된 지원서만.
@@ -285,6 +286,8 @@ export async function listApplicantsForAdmin(
       documents,
       status: asAppStatus(r.status),
       submitted_at: (r.submitted_at as string | null) ?? null,
+      screening_reject_reason:
+        (r.screening_reject_reason as string | null) ?? null,
     });
   }
   return result;
@@ -456,6 +459,42 @@ export async function updateApplicationStatus(
       ok: false,
       message:
         e instanceof Error ? e.message : "상태 변경 중 오류가 발생했습니다.",
+    };
+  }
+}
+
+// =====================================================================
+// 서류 불합격 사유 저장 (recruitment_applications.screening_reject_reason)
+//   * 상태와 독립적으로 보존 — 합격으로 되돌려도 값은 남기고 화면 표시만 숨김
+//     (다시 불합격하면 그대로 복원). 빈 값이면 null 로 정리.
+// =====================================================================
+export async function saveScreeningRejectReason(
+  applicationId: string,
+  reason: string,
+  slug: string
+): Promise<{ ok: true } | { ok: false; message: string }> {
+  try {
+    await requireHrAdmin();
+    if (!applicationId)
+      return { ok: false, message: "application_id가 누락되었습니다." };
+
+    const trimmed = reason.trim();
+    const { error } = await supabaseAdmin
+      .from("recruitment_applications")
+      .update({
+        screening_reject_reason: trimmed.length > 0 ? trimmed : null,
+        updated_at: new Date().toISOString(),
+      })
+      .eq("id", applicationId);
+    if (error) throw new Error(error.message);
+
+    if (slug) revalidatePath(`/hr/recruitment/${slug}`);
+    return { ok: true };
+  } catch (e) {
+    return {
+      ok: false,
+      message:
+        e instanceof Error ? e.message : "사유 저장 중 오류가 발생했습니다.",
     };
   }
 }

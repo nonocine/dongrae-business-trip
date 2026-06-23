@@ -257,8 +257,9 @@ export async function buildScreeningSummaryDoc(
   data: ReportData
 ): Promise<Buffer> {
   const { posting, applicants } = data;
-  const ranked = [...applicants].sort(
-    (a, b) => (b.screeningAvg ?? -1) - (a.screeningAvg ?? -1)
+  // 지원자 순서는 이름 가나다순(한글 오름차순)으로 항상 고정 — 번호도 이 순서로 재부여.
+  const ranked = [...applicants].sort((a, b) =>
+    a.name.localeCompare(b.name, "ko")
   );
 
   // 그룹 만점(전문성 20 · 자기소개서 10 · 정성평가 5)은 기준표에서 파생.
@@ -268,13 +269,14 @@ export async function buildScreeningSummaryDoc(
   const headerRow = new TableRow({
     tableHeader: true,
     children: [
-      headCell("번호", 8),
-      headCell("이름", 16),
-      headCell(`전문성 (${gMax("expertise")}점)`, 16),
-      headCell(`자기소개서 (${gMax("statement")}점)`, 16),
-      headCell(`정성평가 (${gMax("qualitative")}점)`, 14),
-      headCell(`득점 (${SCREENING_MAX}점)`, 16),
-      headCell("결과", 12),
+      headCell("번호", 6),
+      headCell("이름", 12),
+      headCell(`전문성 (${gMax("expertise")}점)`, 13),
+      headCell(`자기소개서 (${gMax("statement")}점)`, 13),
+      headCell(`정성평가 (${gMax("qualitative")}점)`, 11),
+      headCell(`득점 (${SCREENING_MAX}점)`, 12),
+      headCell("결과", 9),
+      headCell("사유", 24),
     ],
   });
 
@@ -283,6 +285,9 @@ export async function buildScreeningSummaryDoc(
     const expertise = avgScreeningGroup(a.screeningByReviewer, "expertise");
     const statement = avgScreeningGroup(a.screeningByReviewer, "statement");
     const qualitative = avgScreeningGroup(a.screeningByReviewer, "qualitative");
+    const isFail = screeningResultLabel(a.status) === "불합격";
+    // 사유는 불합격자만 표시(합격/미정은 빈칸). 입력값 없으면 빈칸.
+    const reason = isFail ? (a.screeningRejectReason ?? "") : "";
     return new TableRow({
       children: [
         dataCell(String(i + 1)),
@@ -292,6 +297,7 @@ export async function buildScreeningSummaryDoc(
         dataCell(fmtScore(qualitative)),
         dataCell(fmtScore(a.screeningAvg), { bold: true }),
         dataCell(screeningResultLabel(a.status)),
+        dataCell(reason, { align: AlignmentType.LEFT }),
       ],
     });
   });
@@ -303,9 +309,16 @@ export async function buildScreeningSummaryDoc(
   });
 
   const reviewerNames = data.screeningReviewers.join(", ") || "-";
+  const totalCount = ranked.length;
   const passedCount = ranked.filter(
     (a) => screeningResultLabel(a.status) === "합격"
   ).length;
+  // 증빙서류 미제출 인원(M). 정확히 0이면 괄호 자체를 생략.
+  const missingDocsCount = ranked.filter((a) => a.missingRequiredDocs).length;
+  const summarySentence =
+    missingDocsCount > 0
+      ? `본 채용 공고에 총 ${totalCount}명이 지원하였으며(증빙서류 미제출 ${missingDocsCount}명 포함), 서류심사 결과 총 ${passedCount}명이 선정되었습니다.`
+      : `본 채용 공고에 총 ${totalCount}명이 지원하였으며, 서류심사 결과 총 ${passedCount}명이 선정되었습니다.`;
 
   const doc = new Document({
     sections: [
@@ -322,10 +335,15 @@ export async function buildScreeningSummaryDoc(
             color: GRAY,
             spacing: { after: 60 },
           }),
-          para(
-            `응시 ${ranked.length}명 · 서류합격 ${passedCount}명 · 심사위원 ${reviewerNames}`,
-            { size: 11, color: GRAY, spacing: { after: 200 } }
-          ),
+          para(summarySentence, {
+            size: 11,
+            spacing: { after: 60 },
+          }),
+          para(`심사위원 : ${reviewerNames}`, {
+            size: 11,
+            color: GRAY,
+            spacing: { after: 200 },
+          }),
           table,
           para("", { spacing: { after: 80 } }),
           para(

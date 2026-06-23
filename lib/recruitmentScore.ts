@@ -173,6 +173,10 @@ export type ReportApplicant = {
   interviewAvg: number | null;
   total: number | null;
   rank: number; // 1-based, 총점 내림차순
+  // 서류 불합격 사유(recruitment_applications.screening_reject_reason).
+  screeningRejectReason: string | null;
+  // 필수 증빙서류 중 하나라도 미제출이면 true(요약 문장의 M 집계용).
+  missingRequiredDocs: boolean;
 };
 
 export type ReportPosting = {

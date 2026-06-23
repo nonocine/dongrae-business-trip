@@ -51,6 +51,8 @@ function applicant(
     interviewAvg: partial.interviewAvg ?? null,
     total: partial.total ?? null,
     rank: partial.rank ?? 0,
+    screeningRejectReason: partial.screeningRejectReason ?? null,
+    missingRequiredDocs: partial.missingRequiredDocs ?? false,
   };
 }
 
@@ -107,6 +109,9 @@ const normal: ReportData = {
       name: "박철",
       applicant_number: "2026-0003",
       status: "screening_failed",
+      // 불합격 사유 + 증빙서류 미제출 → 요약문장 M 집계·사유열 표시 검증.
+      screeningRejectReason: "필수 증빙서류(자격증 사본) 미제출",
+      missingRequiredDocs: true,
       // 레거시(2026-1 옛 데이터) — 옛 키로 저장된 데이터가 총괄표에서 깨지지
       // 않고 그룹 합계로 매핑되는지 확인하는 호환 케이스.
       screeningByReviewer: new Map([
