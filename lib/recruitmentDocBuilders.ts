@@ -28,9 +28,10 @@ import {
   SCREENING_MAX,
   INTERVIEW_MAX,
   TOTAL_MAX,
+  SCREENING_GROUPS,
   STATUS_LABEL,
   fmtScore,
-  avgScoreKey,
+  avgScreeningGroup,
   screeningResultLabel,
 } from "./recruitmentScore";
 import {
@@ -260,30 +261,35 @@ export async function buildScreeningSummaryDoc(
     (a, b) => (b.screeningAvg ?? -1) - (a.screeningAvg ?? -1)
   );
 
+  // 그룹 만점(전문성 20 · 자기소개서 10 · 정성평가 5)은 기준표에서 파생.
+  const gMax = (key: string) =>
+    SCREENING_GROUPS.find((g) => g.key === key)?.max ?? 0;
+
   const headerRow = new TableRow({
     tableHeader: true,
     children: [
       headCell("번호", 8),
       headCell("이름", 16),
-      headCell("전문성(학위) (15점)", 18),
-      headCell("자격증 (5점)", 12),
-      headCell("자기소개서 (15점)", 18),
+      headCell(`전문성 (${gMax("expertise")}점)`, 16),
+      headCell(`자기소개서 (${gMax("statement")}점)`, 16),
+      headCell(`정성평가 (${gMax("qualitative")}점)`, 14),
       headCell(`득점 (${SCREENING_MAX}점)`, 16),
       headCell("결과", 12),
     ],
   });
 
   const bodyRows = ranked.map((a, i) => {
-    const q1 = avgScoreKey(a.screeningByReviewer, "q1_expertise");
-    const q2 = avgScoreKey(a.screeningByReviewer, "q2_license");
-    const q3 = avgScoreKey(a.screeningByReviewer, "q3_statement");
+    // 신·레거시 데이터 모두 그룹 합계로 정규화해 표시(avgScreeningGroup).
+    const expertise = avgScreeningGroup(a.screeningByReviewer, "expertise");
+    const statement = avgScreeningGroup(a.screeningByReviewer, "statement");
+    const qualitative = avgScreeningGroup(a.screeningByReviewer, "qualitative");
     return new TableRow({
       children: [
         dataCell(String(i + 1)),
         dataCell(a.name, { align: AlignmentType.LEFT }),
-        dataCell(fmtScore(q1)),
-        dataCell(fmtScore(q2)),
-        dataCell(fmtScore(q3)),
+        dataCell(fmtScore(expertise)),
+        dataCell(fmtScore(statement)),
+        dataCell(fmtScore(qualitative)),
         dataCell(fmtScore(a.screeningAvg), { bold: true }),
         dataCell(screeningResultLabel(a.status)),
       ],
@@ -323,7 +329,7 @@ export async function buildScreeningSummaryDoc(
           table,
           para("", { spacing: { after: 80 } }),
           para(
-            `※ 항목 점수는 심사위원 ${data.screeningReviewers.length || 0}인의 평균값입니다. (전문성 0~15 · 자격증 0~5 · 자기소개서 0~15)`,
+            `※ 항목 점수는 심사위원 ${data.screeningReviewers.length || 0}인의 평균값입니다. (전문성 ${gMax("expertise")} · 자기소개서 ${gMax("statement")} · 정성평가 ${gMax("qualitative")} = ${SCREENING_MAX}점)`,
             { size: 9, color: GRAY, spacing: { after: 200 } }
           ),
           para(`작성일 : ${kstDateLabel(new Date())}`, {

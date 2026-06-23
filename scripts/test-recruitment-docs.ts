@@ -71,9 +71,10 @@ const normal: ReportData = {
       name: "남궁민수",
       applicant_number: "2026-0001",
       status: "final_passed",
+      // 신 구조(기준표 6종) — 클릭 선택식 데이터.
       screeningByReviewer: new Map([
-        ["관장", rs("관장", 33, { q1_expertise: 14, q2_license: 5, q3_statement: 14 }, { memo: "전공 적합" })],
-        ["부장", rs("부장", 31, { q1_expertise: 13, q2_license: 4, q3_statement: 14 })],
+        ["관장", rs("관장", 33, { degree: 5, gpa: 3, youth_cert: 5, national_cert: 5, statement: 10, qualitative: 5 }, { memo: "전공 적합" })],
+        ["부장", rs("부장", 31, { degree: 5, gpa: 3, youth_cert: 4, national_cert: 4, statement: 10, qualitative: 5 })],
       ]),
       interviewByReviewer: new Map([
         ["김외부", rs("김외부", 60, { q1: 20, q2: 15, q3: 12, q4: 13 })],
@@ -90,8 +91,8 @@ const normal: ReportData = {
       status: "interview_failed",
       gender: "F",
       screeningByReviewer: new Map([
-        ["관장", rs("관장", 28, { q1_expertise: 12, q2_license: 4, q3_statement: 12 })],
-        ["부장", rs("부장", 30, { q1_expertise: 13, q2_license: 5, q3_statement: 12 })],
+        ["관장", rs("관장", 28, { degree: 3, gpa: 2, youth_cert: 4, national_cert: 4, statement: 10, qualitative: 5 })],
+        ["부장", rs("부장", 30, { degree: 5, gpa: 2, youth_cert: 4, national_cert: 4, statement: 10, qualitative: 5 })],
       ]),
       interviewByReviewer: new Map([
         ["김외부", rs("김외부", 0, { q1: 0, q2: 0, q3: 0, q4: 0 }, { is_absent: true })],
@@ -106,6 +107,8 @@ const normal: ReportData = {
       name: "박철",
       applicant_number: "2026-0003",
       status: "screening_failed",
+      // 레거시(2026-1 옛 데이터) — 옛 키로 저장된 데이터가 총괄표에서 깨지지
+      // 않고 그룹 합계로 매핑되는지 확인하는 호환 케이스.
       screeningByReviewer: new Map([
         ["관장", rs("관장", 18, { q1_expertise: 8, q2_license: 2, q3_statement: 8 }, { memo: "경력 부족" })],
       ]),

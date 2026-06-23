@@ -11,6 +11,122 @@ export const SCREENING_MAX = 35;
 export const INTERVIEW_MAX = 65;
 export const TOTAL_MAX = SCREENING_MAX + INTERVIEW_MAX;
 
+// =====================================================================
+// 서류 채점 기준표 — 클릭 선택식(택1) 세부항목 6종, 총 35점.
+//   * scores jsonb 키: degree, gpa, youth_cert, national_cert,
+//     statement, qualitative. 각 값은 선택된 보기 점수(미선택=0).
+//   * UI(ScreeningScoreCard)·서버 검증(saveScreeningScore)·문서 빌더가
+//     모두 이 한 곳을 진실로 삼습니다.
+// =====================================================================
+export type ScreeningGroupKey = "expertise" | "statement" | "qualitative";
+
+export type ScreeningOption = { label: string; value: number };
+
+export type ScreeningItem = {
+  key: string; // scores jsonb 키
+  group: ScreeningGroupKey;
+  title: string; // 예: "학위"
+  options: ScreeningOption[]; // 보기(택1). 최대 점수는 options 중 최댓값.
+};
+
+export const SCREENING_ITEMS: ScreeningItem[] = [
+  {
+    key: "degree",
+    group: "expertise",
+    title: "학위",
+    options: [
+      { label: "박사", value: 5 },
+      { label: "석사", value: 3 },
+      { label: "학사", value: 2 },
+      { label: "전문학사", value: 1 },
+    ],
+  },
+  {
+    key: "gpa",
+    group: "expertise",
+    title: "최종학위 성적",
+    options: [
+      { label: "4.5~4.0", value: 5 },
+      { label: "3.9~3.5", value: 3 },
+      { label: "3.4~3.0", value: 2 },
+      { label: "2.9~2.5", value: 1 },
+    ],
+  },
+  {
+    key: "youth_cert",
+    group: "expertise",
+    title: "청소년지도사",
+    options: [
+      { label: "1급", value: 5 },
+      { label: "2급", value: 4 },
+      { label: "3급", value: 2 },
+    ],
+  },
+  {
+    key: "national_cert",
+    group: "expertise",
+    title: "국가자격증 보유",
+    options: [
+      { label: "3개 이상", value: 5 },
+      { label: "2개 이상", value: 4 },
+      { label: "1개 이상", value: 2 },
+    ],
+  },
+  {
+    key: "statement",
+    group: "statement",
+    title: "자기소개서",
+    options: [
+      { label: "우수", value: 10 },
+      { label: "보통", value: 5 },
+      { label: "미흡", value: 3 },
+    ],
+  },
+  {
+    key: "qualitative",
+    group: "qualitative",
+    title: "정성평가",
+    options: [
+      { label: "우수", value: 5 },
+      { label: "보통", value: 3 },
+      { label: "미흡", value: 1 },
+    ],
+  },
+];
+
+// 한 항목의 최대 점수(보기 중 최댓값).
+export function screeningItemMax(item: ScreeningItem): number {
+  return item.options.reduce((m, o) => Math.max(m, o.value), 0);
+}
+
+// 그룹(전문성/자기소개서/정성평가) 표시 정보 + 만점.
+export const SCREENING_GROUPS: {
+  key: ScreeningGroupKey;
+  title: string;
+  max: number;
+}[] = (["expertise", "statement", "qualitative"] as ScreeningGroupKey[]).map(
+  (g) => ({
+    key: g,
+    title:
+      g === "expertise"
+        ? "전문성"
+        : g === "statement"
+          ? "자기소개서"
+          : "정성평가",
+    max: SCREENING_ITEMS.filter((it) => it.group === g).reduce(
+      (sum, it) => sum + screeningItemMax(it),
+      0
+    ),
+  })
+);
+
+// 한 항목 값이 유효한지(미선택=0 또는 정의된 보기 점수 중 하나).
+export function isValidScreeningValue(item: ScreeningItem, v: number): boolean {
+  if (!Number.isFinite(v)) return false;
+  if (v === 0) return true; // 미선택
+  return item.options.some((o) => o.value === v);
+}
+
 export type ReportStatus =
   | "draft"
   | "submitted"
@@ -90,6 +206,65 @@ export function avgScoreKey(
   for (const r of reviewers.values()) {
     const v = r.scores[key];
     if (typeof v === "number" && Number.isFinite(v)) vals.push(v);
+  }
+  if (vals.length === 0) return null;
+  return vals.reduce((a, b) => a + b, 0) / vals.length;
+}
+
+// 서류 점수(scores jsonb)를 신 구조 기준 그룹 합계로 정규화.
+//   * 신 구조(degree/gpa/... 키)면 그대로 그룹 합산.
+//   * 레거시(q1_expertise/q2_license/q3_statement 키만 있는 옛 데이터)면:
+//       전문성 = q1_expertise + q2_license(옛 자격증을 전문성에 흡수),
+//       자기소개서 = q3_statement, 정성평가 = 0.
+//     → 득점 합계는 옛 총점과 동일하게 보존되고, 총괄표 열도 깨지지 않습니다.
+export function normalizeScreeningScores(scores: Record<string, number>): {
+  expertise: number;
+  statement: number;
+  qualitative: number;
+  total: number;
+  legacy: boolean;
+} {
+  const num = (k: string) =>
+    typeof scores[k] === "number" && Number.isFinite(scores[k])
+      ? scores[k]
+      : 0;
+  const hasNew = SCREENING_ITEMS.some(
+    (it) =>
+      typeof scores[it.key] === "number" && Number.isFinite(scores[it.key])
+  );
+  if (hasNew) {
+    const expertise =
+      num("degree") + num("gpa") + num("youth_cert") + num("national_cert");
+    const statement = num("statement");
+    const qualitative = num("qualitative");
+    return {
+      expertise,
+      statement,
+      qualitative,
+      total: expertise + statement + qualitative,
+      legacy: false,
+    };
+  }
+  // 레거시 매핑.
+  const expertise = num("q1_expertise") + num("q2_license");
+  const statement = num("q3_statement");
+  return {
+    expertise,
+    statement,
+    qualitative: 0,
+    total: expertise + statement,
+    legacy: true,
+  };
+}
+
+// 그룹 점수를 심사위원 평균으로(신·레거시 혼재 모두 처리). 없으면 null.
+export function avgScreeningGroup(
+  reviewers: Map<string, ReviewerScore>,
+  group: ScreeningGroupKey
+): number | null {
+  const vals: number[] = [];
+  for (const r of reviewers.values()) {
+    vals.push(normalizeScreeningScores(r.scores)[group]);
   }
   if (vals.length === 0) return null;
   return vals.reduce((a, b) => a + b, 0) / vals.length;

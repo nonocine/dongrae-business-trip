@@ -20,6 +20,11 @@ import {
 } from "@/lib/ui";
 import { fmtKstDateTime } from "@/lib/datetime";
 import {
+  SCREENING_ITEMS,
+  SCREENING_GROUPS,
+  screeningItemMax,
+} from "@/lib/recruitmentScore";
+import {
   saveScreeningScore,
   updateApplicationStatus,
   bulkAnonymizeApplicants,
@@ -407,19 +412,14 @@ function ApplicantDetailView({
   scoresForApp: ScoreEntry[];
   myReviewerName: string;
 }) {
-  // 내 서류 채점 — 없으면 0/0/0 으로 시작.
+  // 내 서류 채점 — 없으면 빈 선택으로 시작.
   const myScreening =
     scoresForApp.find(
       (s) => s.stage === "screening" && s.reviewer_name === myReviewerName
     ) ?? null;
 
-  const screening = myScreening?.scores as
-    | {
-        q1_expertise?: number;
-        q2_license?: number;
-        q3_statement?: number;
-      }
-    | undefined;
+  const initialScores =
+    (myScreening?.scores as Record<string, number> | undefined) ?? {};
 
   return (
     <div className="grid grid-cols-1 gap-5 lg:grid-cols-[1fr_400px]">
@@ -430,9 +430,7 @@ function ApplicantDetailView({
         <ScreeningScoreCard
           slug={posting.slug}
           applicationId={applicant.application_id}
-          q1Initial={screening?.q1_expertise ?? 0}
-          q2Initial={screening?.q2_license ?? 0}
-          q3Initial={screening?.q3_statement ?? 0}
+          initialScores={initialScores}
           memoInitial={myScreening?.memo ?? ""}
           submittedAt={myScreening?.submitted_at ?? null}
         />
@@ -700,37 +698,50 @@ function StatementBlock({
 }
 
 // =====================================================================
-// 서류 채점 카드 (35점 만점)
+// 서류 채점 카드 (35점 만점) — 기준표 클릭 선택식.
+//   세부항목별 보기를 클릭해 점수 택1. 다시 누르면 해제(0점).
+//   심사위원이 한글 기준표 파일 없이 화면만 보고 채점할 수 있게 기준을 녹임.
 // =====================================================================
 function ScreeningScoreCard({
   slug,
   applicationId,
-  q1Initial,
-  q2Initial,
-  q3Initial,
+  initialScores,
   memoInitial,
   submittedAt,
 }: {
   slug: string;
   applicationId: string;
-  q1Initial: number;
-  q2Initial: number;
-  q3Initial: number;
+  initialScores: Record<string, number>;
   memoInitial: string;
   submittedAt: string | null;
 }) {
-  const [q1, setQ1] = useState(String(q1Initial));
-  const [q2, setQ2] = useState(String(q2Initial));
-  const [q3, setQ3] = useState(String(q3Initial));
+  // 항목 키 -> 선택 점수(0 = 미선택).
+  const [selected, setSelected] = useState<Record<string, number>>(() => {
+    const init: Record<string, number> = {};
+    for (const item of SCREENING_ITEMS) {
+      const v = initialScores[item.key];
+      init[item.key] = typeof v === "number" && Number.isFinite(v) ? v : 0;
+    }
+    return init;
+  });
   const [memo, setMemo] = useState(memoInitial);
   const [error, setError] = useState<string | null>(null);
   const [ok, setOk] = useState<string | null>(null);
   const [pending, startTransition] = useTransition();
 
-  const n1 = Number(q1) || 0;
-  const n2 = Number(q2) || 0;
-  const n3 = Number(q3) || 0;
-  const total = n1 + n2 + n3;
+  const total = useMemo(
+    () => SCREENING_ITEMS.reduce((sum, it) => sum + (selected[it.key] || 0), 0),
+    [selected]
+  );
+
+  function pick(key: string, value: number) {
+    setOk(null);
+    setSelected((prev) => ({
+      ...prev,
+      // 같은 보기를 다시 누르면 해제.
+      [key]: prev[key] === value ? 0 : value,
+    }));
+  }
 
   function handleSave() {
     setError(null);
@@ -740,9 +751,9 @@ function ScreeningScoreCard({
         const fd = new FormData();
         fd.set("slug", slug);
         fd.set("application_id", applicationId);
-        fd.set("q1_expertise", String(n1));
-        fd.set("q2_license", String(n2));
-        fd.set("q3_statement", String(n3));
+        for (const item of SCREENING_ITEMS) {
+          fd.set(item.key, String(selected[item.key] || 0));
+        }
         fd.set("memo", memo);
         const res = await saveScreeningScore(fd);
         if (res.ok) setOk("저장되었습니다.");
@@ -759,45 +770,57 @@ function ScreeningScoreCard({
 
   return (
     <section className="rounded-xl border-2 border-brand-blue bg-hr-bg p-4 shadow-sm sm:p-5">
-      <div className="flex items-center justify-between border-b border-brand-blue/30 pb-2">
+      <div className="flex items-center justify-between gap-2 border-b border-brand-blue/30 pb-2">
         <h3 className="text-sm font-bold tracking-wide text-brand-blue">
-          서류 채점 (총 {SCREENING_MAX}점)
+          서류 채점
         </h3>
-        {submittedAt && (
-          <span className="text-[11px] text-ink-muted">
-            최근 저장 {fmtKstShort(submittedAt)}
+        <div className="flex items-center gap-2">
+          <span className="text-sm font-bold text-brand-blue">
+            합계 {total} <span className="text-xs font-normal">/ {SCREENING_MAX}</span>
           </span>
-        )}
+          {submittedAt && (
+            <span className="text-[11px] text-ink-muted">
+              저장 {fmtKstShort(submittedAt)}
+            </span>
+          )}
+        </div>
       </div>
 
-      <div className="mt-3 space-y-3">
-        <ScoreInput
-          label="① 전문성(학위) 0~15"
-          max={15}
-          value={q1}
-          onChange={setQ1}
-        />
-        <ScoreInput
-          label="② 자격증 0~5"
-          max={5}
-          value={q2}
-          onChange={setQ2}
-        />
-        <ScoreInput
-          label="③ 자기소개서 0~15"
-          max={15}
-          value={q3}
-          onChange={setQ3}
-        />
-
-        <div className="rounded-lg bg-brand-blue-soft px-3 py-2">
-          <div className="flex items-center justify-between">
-            <span className="text-xs font-semibold text-brand-blue">합계</span>
-            <span className="text-lg font-bold text-brand-blue">
-              {total} <span className="text-xs">/ {SCREENING_MAX}</span>
-            </span>
-          </div>
-        </div>
+      <div className="mt-3 space-y-4">
+        {SCREENING_GROUPS.map((group) => {
+          const items = SCREENING_ITEMS.filter((it) => it.group === group.key);
+          const groupTotal = items.reduce(
+            (sum, it) => sum + (selected[it.key] || 0),
+            0
+          );
+          return (
+            <div key={group.key}>
+              <div className="flex items-baseline justify-between">
+                <h4 className="text-xs font-bold text-ink">
+                  {group.title}
+                  <span className="ml-1 font-normal text-ink-muted">
+                    ({group.max}점)
+                  </span>
+                </h4>
+                <span className="text-xs font-semibold text-brand-blue">
+                  {groupTotal} / {group.max}
+                </span>
+              </div>
+              <div className="mt-1.5 space-y-2">
+                {items.map((item) => (
+                  <ScreeningItemRow
+                    key={item.key}
+                    title={item.title}
+                    max={screeningItemMax(item)}
+                    options={item.options}
+                    value={selected[item.key] || 0}
+                    onPick={(v) => pick(item.key, v)}
+                  />
+                ))}
+              </div>
+            </div>
+          );
+        })}
 
         <div>
           <label className={labelCls}>메모</label>
@@ -813,6 +836,15 @@ function ScreeningScoreCard({
         {error && <p className={noticeError}>{error}</p>}
         {ok && <p className={noticeSuccess}>{ok}</p>}
 
+        <div className="rounded-lg bg-brand-blue-soft px-3 py-2">
+          <div className="flex items-center justify-between">
+            <span className="text-xs font-semibold text-brand-blue">합계</span>
+            <span className="text-lg font-bold text-brand-blue">
+              {total} <span className="text-xs">/ {SCREENING_MAX}</span>
+            </span>
+          </div>
+        </div>
+
         <button
           type="button"
           onClick={handleSave}
@@ -826,29 +858,50 @@ function ScreeningScoreCard({
   );
 }
 
-function ScoreInput({
-  label,
+// 한 세부항목 = 제목/배점 + 보기 버튼 그룹(택1, 토글).
+function ScreeningItemRow({
+  title,
   max,
+  options,
   value,
-  onChange,
+  onPick,
 }: {
-  label: string;
+  title: string;
   max: number;
-  value: string;
-  onChange: (v: string) => void;
+  options: { label: string; value: number }[];
+  value: number;
+  onPick: (v: number) => void;
 }) {
   return (
-    <div>
-      <label className={labelCls}>{label}</label>
-      <input
-        type="number"
-        min={0}
-        max={max}
-        step={1}
-        value={value}
-        onChange={(e) => onChange(e.target.value)}
-        className={inputCls}
-      />
+    <div className="rounded-lg border border-line bg-card px-2.5 py-2">
+      <div className="flex items-baseline justify-between">
+        <span className="text-xs font-semibold text-ink-body">{title}</span>
+        <span className="text-[11px] text-ink-hint">최대 {max}점</span>
+      </div>
+      <div className="mt-1.5 flex flex-wrap gap-1.5">
+        {options.map((opt) => {
+          const active = value === opt.value;
+          return (
+            <button
+              key={opt.label}
+              type="button"
+              onClick={() => onPick(opt.value)}
+              aria-pressed={active}
+              className={`inline-flex items-center gap-1 rounded-md border px-2.5 py-1.5 text-xs font-semibold transition ${
+                active
+                  ? "border-brand-blue bg-brand-blue text-white shadow-sm"
+                  : "border-line bg-card text-ink-body hover:border-brand-blue/50 hover:bg-brand-blue-soft"
+              }`}
+            >
+              {active && <span aria-hidden>✓</span>}
+              <span>{opt.label}</span>
+              <span className={active ? "text-white/90" : "text-ink-hint"}>
+                {opt.value}
+              </span>
+            </button>
+          );
+        })}
+      </div>
     </div>
   );
 }

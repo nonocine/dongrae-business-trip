@@ -25,6 +25,11 @@ import {
 } from "@/lib/supabase";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
 import { requireHrAdmin } from "@/app/hr/actions";
+import {
+  SCREENING_ITEMS,
+  SCREENING_MAX,
+  isValidScreeningValue,
+} from "@/lib/recruitmentScore";
 
 // =====================================================================
 // 채용 심사 관리 — /hr/recruitment/[slug]
@@ -329,7 +334,11 @@ export async function listScoresForPosting(
 }
 
 // =====================================================================
-// 서류 채점 저장 — 35점 만점 (15+5+15)
+// 서류 채점 저장 — 35점 만점, 기준표 클릭 선택식 세부항목 6종.
+//   * 항목 키: degree, gpa, youth_cert, national_cert, statement,
+//     qualitative (정의는 lib/recruitmentScore SCREENING_ITEMS).
+//   * 각 항목은 미선택(0) 또는 정의된 보기 점수만 허용. 합계는 클라이언트
+//     값을 신뢰하지 않고 서버에서 6개 합으로 재계산.
 //   * 로그인한 관장/부장 이름을 reviewer_name 으로 자동 채움.
 // =====================================================================
 export async function saveScreeningScore(
@@ -360,20 +369,22 @@ export async function saveScreeningScore(
       return { ok: false, message: "이 공고의 지원자가 아닙니다." };
     }
 
-    const q1 = Number(formData.get("q1_expertise") ?? NaN);
-    const q2 = Number(formData.get("q2_license") ?? NaN);
-    const q3 = Number(formData.get("q3_statement") ?? NaN);
-    if (!Number.isFinite(q1) || q1 < 0 || q1 > 15)
-      return { ok: false, message: "전문성 점수는 0~15 사이여야 합니다." };
-    if (!Number.isFinite(q2) || q2 < 0 || q2 > 5)
-      return { ok: false, message: "자격증 점수는 0~5 사이여야 합니다." };
-    if (!Number.isFinite(q3) || q3 < 0 || q3 > 15)
-      return {
-        ok: false,
-        message: "자기소개서 점수는 0~15 사이여야 합니다.",
-      };
+    // 6개 세부항목을 각각 검증(미선택=0 또는 정의된 보기 점수) 후 합산.
+    const scores: Record<string, number> = {};
+    let total = 0;
+    for (const item of SCREENING_ITEMS) {
+      const raw = formData.get(item.key);
+      const v = raw == null || raw === "" ? 0 : Number(raw);
+      if (!isValidScreeningValue(item, v)) {
+        return {
+          ok: false,
+          message: `'${item.title}' 항목의 점수 값이 올바르지 않습니다.`,
+        };
+      }
+      scores[item.key] = v;
+      total += v;
+    }
 
-    const total = q1 + q2 + q3;
     const memoRaw = formData.get("memo");
     const memo =
       typeof memoRaw === "string" && memoRaw.trim().length > 0
@@ -388,9 +399,9 @@ export async function saveScreeningScore(
         // 이므로 reviewer_id = me.name(안정적 식별자). reviewer_name 은 표시용.
         reviewer_name: me.name,
         reviewer_id: me.name,
-        scores: { q1_expertise: q1, q2_license: q2, q3_statement: q3 },
+        scores,
         total_score: total,
-        max_score: 35,
+        max_score: SCREENING_MAX,
         is_absent: false,
         memo,
         submitted_at: new Date().toISOString(),
