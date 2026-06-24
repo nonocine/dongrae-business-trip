@@ -847,33 +847,45 @@ export async function updateJudge(
 }
 
 // ---------------------------------------------------------------------
-// 채점 이력 카운트 — 배정 행 id(들) 기준으로 3개 채점 테이블을 모두 확인.
-//   * recruitment_document_scores / recruitment_interview_scores: judge_id 컬럼
-//   * recruitment_scores: reviewer_id 컬럼(text, 면접 stage 는 judgeId 가 들어감)
-//   judge_id/reviewer_id 모두 recruitment_judges.id 를 가리키므로 그 id 로 조회.
-//   (서류 stage 의 reviewer_id 는 관리자 이름이라 UUID 와 매칭되지 않음 — 오탐 없음.)
+// 채점 이력 카운트 — 배정 행 id(들)를 실제로 채점한 기록이 있는지 확인.
+//   권위 소스: recruitment_scores (단일 테이블). 서류/면접 모두 여기 저장되며,
+//     면접 stage 의 reviewer_id 에 recruitment_judges.id(=judgeId)가 들어간다.
+//     (서류 stage 의 reviewer_id 는 관리자 이름이라 UUID 와 매칭 안 됨 — 오탐 없음.)
+//   recruitment_document_scores / recruitment_interview_scores 는 분리 테이블
+//     계획이 폐기된 미사용 잔재(쓰기 코드 없음). 만약을 위한 보조 확인만 하되,
+//     테이블이 없거나 조회 실패하면 0 으로 간주(권위 소스는 recruitment_scores).
 // ---------------------------------------------------------------------
+async function legacyJudgeScoreCount(
+  table: string,
+  ids: string[]
+): Promise<number> {
+  try {
+    const { count, error } = await supabaseAdmin
+      .from(table)
+      .select("id", { count: "exact", head: true })
+      .in("judge_id", ids);
+    if (error) return 0; // 잔재 테이블 부재/오류는 무시.
+    return count ?? 0;
+  } catch {
+    return 0;
+  }
+}
+
 async function countJudgeScores(judgeIds: string[]): Promise<number> {
   const ids = judgeIds.filter(Boolean);
   if (ids.length === 0) return 0;
-  const [doc, intv, scr] = await Promise.all([
-    supabaseAdmin
-      .from("recruitment_document_scores")
-      .select("id", { count: "exact", head: true })
-      .in("judge_id", ids),
-    supabaseAdmin
-      .from("recruitment_interview_scores")
-      .select("id", { count: "exact", head: true })
-      .in("judge_id", ids),
-    supabaseAdmin
-      .from("recruitment_scores")
-      .select("id", { count: "exact", head: true })
-      .in("reviewer_id", ids),
+
+  const { count, error } = await supabaseAdmin
+    .from("recruitment_scores")
+    .select("id", { count: "exact", head: true })
+    .in("reviewer_id", ids);
+  if (error) throw new Error(error.message);
+
+  const [doc, intv] = await Promise.all([
+    legacyJudgeScoreCount("recruitment_document_scores", ids),
+    legacyJudgeScoreCount("recruitment_interview_scores", ids),
   ]);
-  if (doc.error) throw new Error(doc.error.message);
-  if (intv.error) throw new Error(intv.error.message);
-  if (scr.error) throw new Error(scr.error.message);
-  return (doc.count ?? 0) + (intv.count ?? 0) + (scr.count ?? 0);
+  return (count ?? 0) + doc + intv;
 }
 
 // ---------------------------------------------------------------------
