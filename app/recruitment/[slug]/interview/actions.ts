@@ -375,6 +375,7 @@ export type InterviewDoc = {
 export type InterviewApplicantDetail = {
   name: string;
   field: string;
+  photo_url: string | null; // 증명사진 signed URL(없으면 null)
   education: EmployeeEducation[];
   career: EmployeeCareer[];
   motivation: string | null;
@@ -440,7 +441,7 @@ export async function getInterviewApplicantDetail(
     const { data: appRow, error: aErr } = await supabaseAdmin
       .from("recruitment_applications")
       .select(
-        "id, posting_id, applicant:recruitment_applicants(name, education, career, motivation, self_development, career_summary, philosophy, documents)"
+        "id, posting_id, applicant:recruitment_applicants(name, photo_url, education, career, motivation, self_development, career_summary, philosophy, documents)"
       )
       .eq("id", appId)
       .maybeSingle();
@@ -491,11 +492,17 @@ export async function getInterviewApplicantDetail(
       }
     }
 
+    // 증명사진 — 서류 화면과 동일하게 signHrDocument 로 signed URL 발급.
+    const photo_url = await signHrDocument(
+      (applicant.photo_url as string | null) ?? null
+    );
+
     return {
       ok: true,
       detail: {
         name: String(applicant.name ?? ""),
         field,
+        photo_url,
         education: parseEducationInput(jsonbToString(applicant.education)),
         career: parseCareerInput(jsonbToString(applicant.career)),
         motivation: (applicant.motivation as string | null) ?? null,

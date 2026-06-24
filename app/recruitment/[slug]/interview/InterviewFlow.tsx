@@ -27,14 +27,14 @@ import {
   type InterviewDoc,
 } from "./actions";
 
-// 태블릿 친화 — 큰 글씨, 큰 버튼, 터치 친화.
+// 태블릿 친화 — 큰 글씨, 큰 버튼, 터치 친화(나이 있는 심사위원 가독성 우선).
 const tabletInputCls =
-  "block w-full rounded-lg border border-line bg-card px-3 py-2.5 text-base text-ink-body shadow-sm placeholder:text-ink-hint focus:border-brand-blue focus:outline-none focus:ring-2 focus:ring-brand-blue/30";
-const tabletLabelCls = "block text-sm font-bold text-brand-blue";
+  "block w-full rounded-lg border border-line bg-card px-3 py-3 text-lg text-ink-body shadow-sm placeholder:text-ink-hint focus:border-brand-blue focus:outline-none focus:ring-2 focus:ring-brand-blue/30";
+const tabletLabelCls = "block text-base font-bold text-brand-blue";
 const tabletBtnPrimary =
-  "inline-flex h-12 items-center justify-center gap-2 rounded-xl bg-brand-blue px-6 text-base font-bold text-white shadow-md transition hover:bg-brand-blue-strong disabled:opacity-60";
+  "inline-flex h-14 items-center justify-center gap-2 rounded-xl bg-brand-blue px-7 text-lg font-bold text-white shadow-md transition hover:bg-brand-blue-strong disabled:opacity-60";
 const tabletBtnSecondary =
-  "inline-flex h-12 items-center justify-center gap-2 rounded-xl border-2 border-line bg-card px-5 text-base font-semibold text-ink-body shadow-sm transition hover:bg-surface disabled:opacity-60";
+  "inline-flex h-14 items-center justify-center gap-2 rounded-xl border-2 border-line bg-card px-6 text-lg font-semibold text-ink-body shadow-sm transition hover:bg-surface disabled:opacity-60";
 
 // 점수 선택지 정의 — 카드형 라디오 버튼 렌더링에 사용.
 type Choice = { value: number; label: string };
@@ -702,14 +702,14 @@ function ScoreStep({
                 덮어쓰여요.
               </div>
             )}
-            <label className="flex items-center gap-3 rounded-xl border-2 border-line bg-card px-4 py-3">
+            <label className="flex items-center gap-3 rounded-xl border-2 border-line bg-card px-4 py-3.5">
               <input
                 type="checkbox"
                 checked={isAbsent}
                 onChange={(e) => setIsAbsent(e.target.checked)}
-                className="h-5 w-5 rounded border-line text-stamp focus:ring-stamp"
+                className="h-6 w-6 rounded border-line text-stamp focus:ring-stamp"
               />
-              <span className="text-base font-bold text-ink md:text-lg">
+              <span className="text-lg font-bold text-ink md:text-xl">
                 불참 처리 (전체 0점)
               </span>
             </label>
@@ -751,12 +751,12 @@ function ScoreStep({
               </div>
             )}
 
-            <div className="flex items-center justify-between rounded-xl bg-brand-blue-soft px-5 py-4">
-              <span className="text-base font-bold text-brand-blue md:text-lg">
+            <div className="flex items-center justify-between rounded-xl bg-brand-blue-soft px-5 py-5">
+              <span className="text-lg font-bold text-brand-blue md:text-xl">
                 합계
               </span>
-              <span className="text-2xl font-bold text-brand-blue md:text-3xl">
-                {total} <span className="text-base">/ 65</span>
+              <span className="text-3xl font-bold text-brand-blue md:text-4xl">
+                {total} <span className="text-lg">/ 65</span>
               </span>
             </div>
 
@@ -880,15 +880,34 @@ function ApplicantDetailPanel({
 
   return (
     <div className="space-y-4">
-      <div className="rounded-2xl border-2 border-line bg-card p-4 md:p-5">
-        <h3 className="text-xl font-bold text-ink md:text-2xl">{detail.name}</h3>
-        <div className="mt-2 flex flex-wrap items-center gap-1.5">
-          <span className="text-sm text-ink-muted">지원분야</span>
-          {splitRecruitmentFields(detail.field).map((f, i) => (
-            <span key={`${f}-${i}`} className={fieldBadgeCls(i)}>
-              {f}
-            </span>
-          ))}
+      <div className="flex items-start gap-4 rounded-2xl border-2 border-line bg-card p-4 md:p-5">
+        {/* 증명사진 — 서류 화면과 동일한 signed URL 방식 */}
+        <div className="h-28 w-[88px] shrink-0 overflow-hidden rounded-lg border border-line bg-surface md:h-36 md:w-28">
+          {detail.photo_url ? (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img
+              src={detail.photo_url}
+              alt={`${detail.name} 증명사진`}
+              className="h-full w-full object-cover"
+            />
+          ) : (
+            <div className="flex h-full w-full items-center justify-center text-4xl text-ink-hint">
+              👤
+            </div>
+          )}
+        </div>
+        <div className="min-w-0 flex-1">
+          <h3 className="text-2xl font-bold text-ink md:text-3xl">
+            {detail.name}
+          </h3>
+          <div className="mt-2 flex flex-wrap items-center gap-1.5">
+            <span className="text-sm text-ink-muted md:text-base">지원분야</span>
+            {splitRecruitmentFields(detail.field).map((f, i) => (
+              <span key={`${f}-${i}`} className={fieldBadgeCls(i)}>
+                {f}
+              </span>
+            ))}
+          </div>
         </div>
       </div>
 
@@ -984,7 +1003,7 @@ function DetailSection({
 }) {
   return (
     <div className="rounded-2xl border-2 border-line bg-card p-4 md:p-5">
-      <h4 className="text-sm font-bold tracking-wide text-brand-blue md:text-base">
+      <h4 className="text-base font-bold tracking-wide text-brand-blue md:text-lg">
         {title}
       </h4>
       <div className="mt-3">{children}</div>
@@ -1001,13 +1020,13 @@ function Statement({
 }) {
   return (
     <div>
-      <p className="text-xs font-bold text-ink-muted md:text-sm">{label}</p>
+      <p className="text-sm font-bold text-ink-muted md:text-base">{label}</p>
       {value && value.trim() ? (
-        <p className="mt-1 whitespace-pre-wrap rounded-lg bg-surface px-3 py-2 text-sm leading-relaxed text-ink-body">
+        <p className="mt-1 whitespace-pre-wrap rounded-lg bg-surface px-3 py-2.5 text-base leading-relaxed text-ink-body">
           {value}
         </p>
       ) : (
-        <p className="mt-1 text-xs text-ink-hint">작성된 내용이 없습니다.</p>
+        <p className="mt-1 text-sm text-ink-hint">작성된 내용이 없습니다.</p>
       )}
     </div>
   );
@@ -1082,10 +1101,10 @@ function ScoreItem({
     <div className="rounded-xl border-2 border-line bg-card p-4 md:p-5">
       <div className="flex items-start justify-between gap-2">
         <div className="min-w-0">
-          <p className="text-base font-bold text-ink md:text-lg">{title}</p>
-          <p className="mt-1 text-xs text-ink-muted md:text-sm">{sub}</p>
+          <p className="text-lg font-bold text-ink md:text-xl">{title}</p>
+          <p className="mt-1 text-sm text-ink-muted md:text-base">{sub}</p>
         </div>
-        <span className="shrink-0 rounded-full bg-brand-blue-soft px-2.5 py-0.5 text-xs font-semibold text-brand-blue md:text-sm">
+        <span className="shrink-0 rounded-full bg-brand-blue-soft px-3 py-1 text-sm font-semibold text-brand-blue md:text-base">
           {maxLabel}
         </span>
       </div>
@@ -1097,14 +1116,14 @@ function ScoreItem({
               key={c.value}
               type="button"
               onClick={() => onChange(c.value)}
-              className={`rounded-xl border-2 px-3 py-3 text-center font-bold shadow-sm transition active:scale-[0.97] md:py-4 ${
+              className={`rounded-xl border-2 px-3 py-4 text-center font-bold shadow-sm transition active:scale-[0.97] md:py-5 ${
                 active
                   ? "border-brand-blue bg-brand-blue text-white shadow-md"
                   : "border-line bg-card text-ink-body hover:border-brand-blue hover:bg-brand-blue-soft"
               }`}
             >
-              <span className="block text-lg md:text-xl">{c.value}</span>
-              <span className="mt-0.5 block text-xs font-semibold md:text-sm">
+              <span className="block text-2xl md:text-3xl">{c.value}</span>
+              <span className="mt-0.5 block text-sm font-semibold md:text-base">
                 {c.label}
               </span>
             </button>
