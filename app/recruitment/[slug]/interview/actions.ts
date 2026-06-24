@@ -266,6 +266,87 @@ export async function saveInterviewScore(
 }
 
 // =====================================================================
+// 본인 면접 채점 불러오기 — "다시 채점(수정)" 진입 시 폼 초기값 복원용.
+//   * 현재 인증된 위원(reviewer_id) 본인 점수만 반환. 타 위원 점수는 조회 불가.
+//   * 기존 점수가 없으면 score=null(신규 채점).
+//   * is_absent 인 경우 q 값은 null 로 비워 폼이 깔끔하게 시작되게 합니다.
+// =====================================================================
+export type MyInterviewScore = {
+  q1: number | null;
+  q2: number | null;
+  q3: number | null;
+  q4: number | null;
+  is_absent: boolean;
+  memo: string | null;
+};
+
+export async function getMyInterviewScore(
+  applicationId: string
+): Promise<
+  | { ok: true; score: MyInterviewScore | null }
+  | { ok: false; message: string }
+> {
+  try {
+    const appId = applicationId?.trim() ?? "";
+    if (!appId) return { ok: false, message: "지원서 정보가 누락되었습니다." };
+
+    // 지원서 → 소속 공고 확인.
+    const { data: appRow, error: aErr } = await supabaseAdmin
+      .from("recruitment_applications")
+      .select("id, posting_id")
+      .eq("id", appId)
+      .maybeSingle();
+    if (aErr) throw new Error(aErr.message);
+    if (!appRow) return { ok: false, message: "지원서를 찾을 수 없습니다." };
+    const postingId = String(
+      (appRow as { posting_id?: unknown }).posting_id ?? ""
+    );
+
+    // 인증 — 본인(위원) 신원 확인(외부 쿠키 OR 이 공고 활성 내부위원).
+    const judge = await requireInterviewJudge(postingId);
+
+    // 본인 reviewer_id 점수만 조회.
+    const { data: row, error: sErr } = await supabaseAdmin
+      .from("recruitment_scores")
+      .select("scores, is_absent, memo")
+      .eq("application_id", appId)
+      .eq("stage", "interview")
+      .eq("reviewer_id", judge.judgeId)
+      .maybeSingle();
+    if (sErr) throw new Error(sErr.message);
+    if (!row) return { ok: true, score: null };
+
+    const r = row as { scores?: unknown; is_absent?: unknown; memo?: unknown };
+    const s = (r.scores ?? {}) as Record<string, unknown>;
+    const isAbsent = r.is_absent === true;
+    const num = (v: unknown): number | null => {
+      const n = Number(v);
+      return Number.isFinite(n) ? n : null;
+    };
+    return {
+      ok: true,
+      score: {
+        q1: isAbsent ? null : num(s.q1),
+        q2: isAbsent ? null : num(s.q2),
+        q3: isAbsent ? null : num(s.q3),
+        q4: isAbsent ? null : num(s.q4),
+        is_absent: isAbsent,
+        memo:
+          typeof r.memo === "string" && r.memo.trim().length > 0
+            ? r.memo
+            : null,
+      },
+    };
+  } catch (e) {
+    return {
+      ok: false,
+      message:
+        e instanceof Error ? e.message : "기존 채점을 불러오지 못했습니다.",
+    };
+  }
+}
+
+// =====================================================================
 // 2-D-6) 면접 지원서 상세 — 좌측 패널용
 //   * requireInterviewJudge 로 인증(외부위원 쿠키 OR 이 공고의 활성 내부위원)
 //     + 해당 공고 소속 확인.

@@ -20,6 +20,7 @@ import {
   listInterviewCandidates,
   saveInterviewScore,
   getInterviewApplicantDetail,
+  getMyInterviewScore,
   type InterviewCandidate,
   type InterviewPosting,
   type InterviewApplicantDetail,
@@ -182,6 +183,7 @@ export default function InterviewFlow({
 
       {step === "score" && selected && (isInternal || signature) && (
         <ScoreStep
+          key={selected.application_id}
           posting={posting}
           reviewerName={reviewerName}
           signature={signature}
@@ -501,14 +503,21 @@ function ListStep({
                     {c.applicant_number}
                   </p>
                 </div>
-                <span
-                  className={
-                    c.scored
-                      ? `${badgeSuccess} text-xs md:text-sm`
-                      : `${badgeNeutral} text-xs md:text-sm`
-                  }
-                >
-                  {c.scored ? "채점 완료" : "미채점"}
+                <span className="flex shrink-0 flex-col items-end gap-1">
+                  <span
+                    className={
+                      c.scored
+                        ? `${badgeSuccess} text-xs md:text-sm`
+                        : `${badgeNeutral} text-xs md:text-sm`
+                    }
+                  >
+                    {c.scored ? "채점 완료" : "미채점"}
+                  </span>
+                  {c.scored && (
+                    <span className="text-xs font-semibold text-brand-blue">
+                      ✏️ 눌러서 수정
+                    </span>
+                  )}
                 </span>
               </button>
             </li>
@@ -548,6 +557,37 @@ function ScoreStep({
   const [pending, startTransition] = useTransition();
   // 모바일 탭 — 좁은 화면에서 지원서/채점 전환 (넓은 화면은 항상 2단).
   const [tab, setTab] = useState<"app" | "score">("app");
+  // 본인 기존 채점 로드 — 있으면 폼 초기값 복원("다시 채점"). 로드 전엔 입력 잠금.
+  const [loadingScore, setLoadingScore] = useState(true);
+  const [isEditing, setIsEditing] = useState(false);
+
+  // candidate.application_id 가 바뀌면 부모가 key 로 리마운트하므로,
+  //   이 effect 는 진입한 지원자 1명에 대해 1회만 본인 점수를 불러옵니다.
+  useEffect(() => {
+    let cancelled = false;
+    getMyInterviewScore(candidate.application_id)
+      .then((res) => {
+        if (cancelled) return;
+        if (res.ok && res.score) {
+          setQ1(res.score.q1);
+          setQ2(res.score.q2);
+          setQ3(res.score.q3);
+          setQ4(res.score.q4);
+          setIsAbsent(res.score.is_absent);
+          setMemo(res.score.memo ?? "");
+          setIsEditing(true);
+        }
+      })
+      .catch(() => {
+        // 로드 실패는 신규 채점(빈 폼)으로 진행 — 저장 자체는 가능.
+      })
+      .finally(() => {
+        if (!cancelled) setLoadingScore(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [candidate.application_id]);
 
   const total = isAbsent ? 0 : (q1 ?? 0) + (q2 ?? 0) + (q3 ?? 0) + (q4 ?? 0);
   const allChosen =
@@ -581,7 +621,7 @@ function ScoreStep({
           setError(res.message);
           return;
         }
-        setOk("저장되었습니다.");
+        setOk(isEditing ? "수정되었습니다." : "저장되었습니다.");
         // 잠시 메시지 보여주고 목록으로.
         setTimeout(async () => {
           await onSaved();
@@ -646,6 +686,18 @@ function ScoreStep({
         {/* 우측: 채점 폼 (넓은 화면에서 sticky) */}
         <div className={`${tab === "score" ? "block" : "hidden"} lg:block`}>
           <div className="space-y-5 lg:sticky lg:top-4">
+            {loadingScore ? (
+              <p className="py-10 text-center text-sm text-ink-muted">
+                기존 채점을 불러오는 중…
+              </p>
+            ) : (
+              <>
+            {isEditing && (
+              <div className="rounded-xl border-2 border-brand-blue/40 bg-brand-blue-soft px-4 py-3 text-sm font-semibold text-brand-blue-strong">
+                ✏️ 이미 채점한 지원자입니다. 점수를 고친 뒤 다시 저장하면
+                덮어쓰여요.
+              </div>
+            )}
             <label className="flex items-center gap-3 rounded-xl border-2 border-line bg-card px-4 py-3">
               <input
                 type="checkbox"
@@ -732,9 +784,15 @@ function ScoreStep({
                 disabled={pending || !allChosen}
                 className={`${tabletBtnPrimary} sm:px-10`}
               >
-                {pending ? "저장 중…" : "채점 완료 및 저장"}
+                {pending
+                  ? "저장 중…"
+                  : isEditing
+                    ? "수정 저장"
+                    : "채점 완료 및 저장"}
               </button>
             </div>
+              </>
+            )}
           </div>
         </div>
       </div>
