@@ -73,6 +73,9 @@ export default function ScreeningDashboard({
     [applicants, scores]
   );
 
+  // 공고에 등장한 심사위원 명단(단계별) — 위원별 분리 표시의 컬럼/순서.
+  const reviewers = useMemo(() => collectReviewers(scores), [scores]);
+
   function openDetail(applicationId: string) {
     setSelectedId(applicationId);
     setTab("detail");
@@ -134,6 +137,7 @@ export default function ScreeningDashboard({
         <ApplicantListView
           applicants={applicants}
           aggregated={aggregated}
+          reviewers={reviewers}
           onOpen={openDetail}
         />
       )}
@@ -157,6 +161,7 @@ export default function ScreeningDashboard({
           posting={posting}
           applicants={applicants}
           aggregated={aggregated}
+          reviewers={reviewers}
         />
       )}
 
@@ -169,6 +174,14 @@ export default function ScreeningDashboard({
 // =====================================================================
 // 점수 집계
 // =====================================================================
+// 심사위원 1명의 한 지원자에 대한 점수(표시용). 채점·저장 로직과 무관.
+type ReviewerScore = {
+  reviewer_name: string;
+  total: number | null;
+  is_absent: boolean;
+  max: number;
+};
+
 type Aggregate = {
   application_id: string;
   screeningAvg: number | null;
@@ -176,6 +189,9 @@ type Aggregate = {
   interviewAvg: number | null;
   interviewCount: number;
   totalAvg: number | null; // 평균 합산
+  // 심사위원별 점수(표시용) — reviewer_name → 점수.
+  screeningByReviewer: Map<string, ReviewerScore>;
+  interviewByReviewer: Map<string, ReviewerScore>;
 };
 
 function aggregateScores(
@@ -184,17 +200,12 @@ function aggregateScores(
 ): Map<string, Aggregate> {
   const result = new Map<string, Aggregate>();
   for (const a of applicants) {
-    const screening = scores.filter(
-      (s) =>
-        s.application_id === a.application_id &&
-        s.stage === "screening" &&
-        s.total_score != null
+    const mine = scores.filter((s) => s.application_id === a.application_id);
+    const screening = mine.filter(
+      (s) => s.stage === "screening" && s.total_score != null
     );
-    const interview = scores.filter(
-      (s) =>
-        s.application_id === a.application_id &&
-        s.stage === "interview" &&
-        s.total_score != null
+    const interview = mine.filter(
+      (s) => s.stage === "interview" && s.total_score != null
     );
     const sAvg =
       screening.length > 0
@@ -212,6 +223,23 @@ function aggregateScores(
         : sAvg != null
           ? sAvg
           : iAvg;
+
+    // 위원별 점수 맵 — 불참 포함 모든 행. 동일 위원 중복 시 마지막 행 사용.
+    const screeningByReviewer = new Map<string, ReviewerScore>();
+    const interviewByReviewer = new Map<string, ReviewerScore>();
+    for (const s of mine) {
+      const nm = s.reviewer_name.trim();
+      if (!nm) continue;
+      const entry: ReviewerScore = {
+        reviewer_name: nm,
+        total: s.total_score,
+        is_absent: s.is_absent,
+        max: s.max_score,
+      };
+      if (s.stage === "interview") interviewByReviewer.set(nm, entry);
+      else screeningByReviewer.set(nm, entry);
+    }
+
     result.set(a.application_id, {
       application_id: a.application_id,
       screeningAvg: sAvg,
@@ -219,9 +247,61 @@ function aggregateScores(
       interviewAvg: iAvg,
       interviewCount: interview.length,
       totalAvg: tAvg,
+      screeningByReviewer,
+      interviewByReviewer,
     });
   }
   return result;
+}
+
+// 공고 전체에서 등장한 심사위원 이름을 단계별로 수집(가나다순) — 표 컬럼/표시 순서용.
+function collectReviewers(scores: ScoreEntry[]): {
+  screening: string[];
+  interview: string[];
+} {
+  const s = new Set<string>();
+  const i = new Set<string>();
+  for (const sc of scores) {
+    const nm = sc.reviewer_name.trim();
+    if (!nm) continue;
+    if (sc.stage === "interview") i.add(nm);
+    else s.add(nm);
+  }
+  const sorted = (set: Set<string>) =>
+    [...set].sort((a, b) => a.localeCompare(b, "ko"));
+  return { screening: sorted(s), interview: sorted(i) };
+}
+
+// 위원별 셀 표시값 — 미채점 "—", 불참 "불참", 그 외 점수.
+function reviewerScoreText(rs: ReviewerScore | undefined): string {
+  if (!rs) return "—";
+  if (rs.is_absent) return "불참";
+  return String(rs.total ?? 0);
+}
+
+// 위원별 점수 인라인(목록 셀용) — "관장 29 · 부장 27 · 박용하 31".
+function ReviewerInline({
+  names,
+  byReviewer,
+  scoreCls,
+}: {
+  names: string[];
+  byReviewer: Map<string, ReviewerScore> | undefined;
+  scoreCls: string;
+}) {
+  if (names.length === 0) return null;
+  return (
+    <div className="mt-0.5 flex flex-wrap justify-end gap-x-1.5 text-[10px] font-normal leading-tight text-ink-hint">
+      {names.map((nm) => (
+        <span key={nm} className="whitespace-nowrap">
+          {nm}{" "}
+          <span className={`font-semibold ${scoreCls}`}>
+            {reviewerScoreText(byReviewer?.get(nm))}
+          </span>
+        </span>
+      ))}
+    </div>
+  );
 }
 
 function fmtScore(n: number | null): string {
@@ -255,10 +335,12 @@ function statusBadgeOf(status: AppStatus): string {
 function ApplicantListView({
   applicants,
   aggregated,
+  reviewers,
   onOpen,
 }: {
   applicants: AdminApplicant[];
   aggregated: Map<string, Aggregate>;
+  reviewers: { screening: string[]; interview: string[] };
   onOpen: (applicationId: string) => void;
 }) {
   type SortKey = "name" | "submitted" | "screening" | "interview" | "total";
@@ -363,11 +445,25 @@ function ApplicantListView({
                       {APPLICATION_STATUS_LABEL[a.status]}
                     </span>
                   </td>
-                  <td className="px-3 py-2 text-right font-semibold text-brand-blue">
-                    {fmtScore(ag?.screeningAvg ?? null)}
+                  <td className="px-3 py-2 text-right align-top">
+                    <div className="font-semibold text-brand-blue">
+                      {fmtScore(ag?.screeningAvg ?? null)}
+                    </div>
+                    <ReviewerInline
+                      names={reviewers.screening}
+                      byReviewer={ag?.screeningByReviewer}
+                      scoreCls="text-brand-blue"
+                    />
                   </td>
-                  <td className="px-3 py-2 text-right font-semibold text-brand-green">
-                    {fmtScore(ag?.interviewAvg ?? null)}
+                  <td className="px-3 py-2 text-right align-top">
+                    <div className="font-semibold text-brand-green">
+                      {fmtScore(ag?.interviewAvg ?? null)}
+                    </div>
+                    <ReviewerInline
+                      names={reviewers.interview}
+                      byReviewer={ag?.interviewByReviewer}
+                      scoreCls="text-brand-green"
+                    />
                   </td>
                   <td className="px-3 py-2 text-right">
                     <button
@@ -1144,10 +1240,12 @@ function FinalSummaryView({
   posting,
   applicants,
   aggregated,
+  reviewers,
 }: {
   posting: AdminPosting;
   applicants: AdminApplicant[];
   aggregated: Map<string, Aggregate>;
+  reviewers: { screening: string[]; interview: string[] };
 }) {
   const ranked = useMemo(() => {
     return [...applicants].sort((a, b) => {
@@ -1178,11 +1276,27 @@ function FinalSummaryView({
               <th className="px-3 py-2 text-left font-medium">순위</th>
               <th className="px-3 py-2 text-left font-medium">이름</th>
               <th className="px-3 py-2 text-left font-medium">상태</th>
+              {reviewers.screening.map((nm) => (
+                <th
+                  key={`hs-${nm}`}
+                  className="px-2 py-2 text-right font-medium normal-case text-brand-blue"
+                >
+                  {nm}
+                </th>
+              ))}
               <th className="px-3 py-2 text-right font-medium">
-                서류 (/{SCREENING_MAX})
+                서류 평균 (/{SCREENING_MAX})
               </th>
+              {reviewers.interview.map((nm) => (
+                <th
+                  key={`hi-${nm}`}
+                  className="px-2 py-2 text-right font-medium normal-case text-brand-green"
+                >
+                  {nm}
+                </th>
+              ))}
               <th className="px-3 py-2 text-right font-medium">
-                면접 (/{INTERVIEW_MAX})
+                면접 평균 (/{INTERVIEW_MAX})
               </th>
               <th className="px-3 py-2 text-right font-medium">
                 총점 (/{SCREENING_MAX + INTERVIEW_MAX})
@@ -1199,6 +1313,9 @@ function FinalSummaryView({
                   rank={idx + 1}
                   applicant={a}
                   slug={posting.slug}
+                  reviewers={reviewers}
+                  screeningByReviewer={ag?.screeningByReviewer}
+                  interviewByReviewer={ag?.interviewByReviewer}
                   screeningAvg={ag?.screeningAvg ?? null}
                   screeningCount={ag?.screeningCount ?? 0}
                   interviewAvg={ag?.interviewAvg ?? null}
@@ -1218,6 +1335,9 @@ function FinalRow({
   rank,
   applicant,
   slug,
+  reviewers,
+  screeningByReviewer,
+  interviewByReviewer,
   screeningAvg,
   screeningCount,
   interviewAvg,
@@ -1227,6 +1347,9 @@ function FinalRow({
   rank: number;
   applicant: AdminApplicant;
   slug: string;
+  reviewers: { screening: string[]; interview: string[] };
+  screeningByReviewer: Map<string, ReviewerScore> | undefined;
+  interviewByReviewer: Map<string, ReviewerScore> | undefined;
   screeningAvg: number | null;
   screeningCount: number;
   interviewAvg: number | null;
@@ -1275,6 +1398,14 @@ function FinalRow({
           {APPLICATION_STATUS_LABEL[applicant.status]}
         </span>
       </td>
+      {reviewers.screening.map((nm) => (
+        <td
+          key={`s-${nm}`}
+          className="px-2 py-2 text-right text-xs text-brand-blue"
+        >
+          {reviewerScoreText(screeningByReviewer?.get(nm))}
+        </td>
+      ))}
       <td className="px-3 py-2 text-right font-semibold text-brand-blue">
         {fmtScore(screeningAvg)}
         {screeningCount > 1 && (
@@ -1283,6 +1414,14 @@ function FinalRow({
           </span>
         )}
       </td>
+      {reviewers.interview.map((nm) => (
+        <td
+          key={`i-${nm}`}
+          className="px-2 py-2 text-right text-xs text-brand-green"
+        >
+          {reviewerScoreText(interviewByReviewer?.get(nm))}
+        </td>
+      ))}
       <td className="px-3 py-2 text-right font-semibold text-brand-green">
         {fmtScore(interviewAvg)}
         {interviewCount > 0 && (
