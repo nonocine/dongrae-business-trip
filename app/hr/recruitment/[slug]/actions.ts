@@ -30,6 +30,7 @@ import {
   SCREENING_MAX,
   isValidScreeningValue,
 } from "@/lib/recruitmentScore";
+import { getSession } from "@/app/actions";
 
 // =====================================================================
 // 채용 심사 관리 — /hr/recruitment/[slug]
@@ -1491,6 +1492,105 @@ export async function requireExternalJudge(): Promise<ExternalJudgeSession> {
 }
 
 // =====================================================================
+// requireInterviewJudge — 면접 채점 권한 일반화(외부위원 OR 내부위원).
+//   채점 화면의 서버 게이트(지원서 조회·점수 저장)에서 공용으로 사용합니다.
+//   * 통과 조건 (둘 중 하나):
+//     (A) 외부위원 쿠키(dongrae_external_judge)가 유효하고 이 공고에 배정됨.
+//         → 기존 requireExternalJudge 검증을 그대로 재사용(회귀 없음).
+//     (B) 구글/직원 로그인 세션(getSession)의 직원이 이 공고의
+//         recruitment_judges 에 judge_type='internal', is_active=true 로 배정됨.
+//   * 반환: 채점 주체 식별값(judgeId=recruitment_judges.id) + 표시명.
+//     외부·내부 모두 reviewer_id 에 judgeId(UUID)가 들어가 1인1채점이 됩니다.
+//   * 실패 시 throw — 메시지에 "로그인" 포함 여부로 화면이 외부위원 로그인
+//     버튼 노출을 결정하므로(아래 (C) 분기), 메시지 문구를 의도적으로 구분합니다.
+// =====================================================================
+export type InterviewJudgeAuth = {
+  judgeId: string;
+  name: string;
+  judgeType: "external" | "internal";
+  postingId: string;
+};
+
+export async function requireInterviewJudge(
+  postingId: string
+): Promise<InterviewJudgeAuth> {
+  const pid = postingId?.trim() ?? "";
+  if (!pid) throw new Error("공고 정보가 누락되었습니다.");
+
+  // (A) 외부위원 쿠키 경로 — 쿠키가 있으면 기존 검증을 그대로 통과시킵니다.
+  const extCookie = await getExternalJudgeSession();
+  if (extCookie) {
+    const session = await requireExternalJudge(); // is_active·공고 status 재검증
+    if (session.postingId !== pid) {
+      throw new Error("현재 로그인한 공고의 지원자만 채점할 수 있습니다.");
+    }
+    return {
+      judgeId: session.judgeId,
+      name: session.name,
+      judgeType: "external",
+      postingId: pid,
+    };
+  }
+
+  // (B) 내부위원 경로 — 로그인한 직원(이름) → drivers.id → 본 공고 내부위원 배정 확인.
+  const me = await getSession();
+  if (me && me.kind === "employee" && me.name.trim().length > 0) {
+    const empName = me.name.trim();
+    // drivers.name 은 UNIQUE 이므로 이름으로 직원을 안전하게 식별합니다.
+    const { data: driver, error: dErr } = await supabaseAdmin
+      .from("drivers")
+      .select("id")
+      .eq("name", empName)
+      .maybeSingle();
+    if (dErr) throw new Error("세션 검증 실패: " + dErr.message);
+
+    if (driver) {
+      const driverId = String((driver as { id?: unknown }).id ?? "");
+      const { data: judge, error: jErr } = await supabaseAdmin
+        .from("recruitment_judges")
+        .select("id")
+        .eq("posting_id", pid)
+        .eq("driver_id", driverId)
+        .eq("judge_type", "internal")
+        .eq("is_active", true)
+        .maybeSingle();
+      if (jErr) throw new Error("세션 검증 실패: " + jErr.message);
+
+      if (judge) {
+        // 공고 status 재검증 — 보관(archived) 공고는 차단(면접은 published/closed 허용).
+        const { data: posting, error: pErr } = await supabase
+          .from("recruitment_postings")
+          .select("status")
+          .eq("id", pid)
+          .maybeSingle();
+        if (pErr) throw new Error("세션 검증 실패: " + pErr.message);
+        const status = String(
+          (posting as { status?: string } | null)?.status ?? ""
+        );
+        if (status === "archived") {
+          throw new Error("이 채용은 종료되었습니다.");
+        }
+        return {
+          judgeId: String((judge as { id?: unknown }).id ?? ""),
+          name: empName,
+          judgeType: "internal",
+          postingId: pid,
+        };
+      }
+    }
+
+    // 로그인은 했으나 이 공고 내부위원으로 배정되지 않음.
+    //   (메시지에 "로그인" 미포함 → 화면은 외부위원 로그인 버튼을 띄우지 않음)
+    throw new Error(
+      "이 공고의 심사위원으로 배정되어 있지 않습니다. 채용 담당자에게 문의하세요."
+    );
+  }
+
+  // (C) 아무 세션도 없음 → 외부위원 로그인 안내(메시지에 "로그인" 포함).
+  throw new Error("외부위원 로그인이 필요합니다.");
+}
+
+// =====================================================================
 // 2-D-4) 공고별 외부위원 배정 토글 — /hr/recruitment/[slug]/judges
 //   * external_judges_pool 의 위원을 본 공고에 켜고(배정)/끄는(해제) 토글.
 //   * 배정 = recruitment_judges 에 is_active=true 스냅샷 행 생성/재활성화
@@ -1618,6 +1718,94 @@ export async function unassignJudgeFromPosting(
         e instanceof Error
           ? e.message
           : "위원 배정 해제 중 오류가 발생했습니다.",
+    };
+  }
+}
+
+// =====================================================================
+// 내부위원(직원) 배정 토글 — /hr/recruitment/[slug]/judges
+//   * 외부위원 assignJudgeToPosting 과 동일한 멱등 패턴(재활성화/insert).
+//   * 배정 = recruitment_judges 에 judge_type='internal', driver_id 로 행 생성/재활성화.
+//   * 해제 = 기존 unassignJudgeFromPosting(slug, judgeId) 로 소프트 비활성화(공용).
+//   * name 은 직원명 스냅샷, role 기본값은 직급(rank) 또는 "내부위원".
+//   * requireHrAdmin 게이트 + service_role(supabaseAdmin).
+// =====================================================================
+export async function assignInternalJudgeToPosting(
+  slug: string,
+  driverId: string
+): Promise<{ ok: true; judge: Judge } | { ok: false; message: string }> {
+  try {
+    const me = await requireHrAdmin();
+    const s = slug?.trim() ?? "";
+    const dId = driverId?.trim() ?? "";
+    if (!s) return { ok: false, message: "공고 정보가 누락되었습니다." };
+    if (!dId) return { ok: false, message: "직원을 선택해주세요." };
+
+    const adm = await getPostingForAdmin(s);
+    if (!adm) return { ok: false, message: "공고를 찾을 수 없습니다." };
+    const postingId = adm.posting.id;
+
+    // 직원 정보 — name 스냅샷 + rank → role 기본값.
+    const { data: driver, error: dErr } = await supabase
+      .from("drivers")
+      .select("id, name, rank")
+      .eq("id", dId)
+      .maybeSingle();
+    if (dErr) throw new Error(dErr.message);
+    if (!driver) return { ok: false, message: "존재하지 않는 직원입니다." };
+    const dRow = driver as { name?: string; rank?: string | null };
+    const role = (dRow.rank && String(dRow.rank).trim()) || "내부위원";
+
+    // 기존 (posting_id, driver_id) 행이 있으면 재활성화, 없으면 새로 insert.
+    const { data: existing, error: exErr } = await supabaseAdmin
+      .from("recruitment_judges")
+      .select("*")
+      .eq("posting_id", postingId)
+      .eq("driver_id", dId)
+      .maybeSingle();
+    if (exErr) throw new Error(exErr.message);
+
+    let judgeRow: Record<string, unknown>;
+    if (existing) {
+      const { data: updated, error: upErr } = await supabaseAdmin
+        .from("recruitment_judges")
+        .update({ is_active: true })
+        .eq("id", (existing as { id: unknown }).id)
+        .select("*")
+        .single();
+      if (upErr) throw new Error(upErr.message);
+      judgeRow = updated as Record<string, unknown>;
+    } else {
+      const order = await nextDisplayOrder(postingId);
+      const { data: inserted, error: insErr } = await supabaseAdmin
+        .from("recruitment_judges")
+        .insert({
+          posting_id: postingId,
+          name: String(dRow.name ?? "").trim(),
+          role,
+          affiliation: null,
+          judge_type: "internal",
+          driver_id: dId,
+          external_pool_id: null,
+          login_code: null,
+          is_active: true,
+          display_order: order,
+          created_by: me.name,
+        })
+        .select("*")
+        .single();
+      if (insErr) throw new Error(insErr.message);
+      judgeRow = inserted as Record<string, unknown>;
+    }
+
+    revalidatePath(`/hr/recruitment/${s}/judges`);
+    revalidatePath(`/hr/recruitment/${s}`);
+    return { ok: true, judge: normalizeJudge(judgeRow) };
+  } catch (e) {
+    return {
+      ok: false,
+      message:
+        e instanceof Error ? e.message : "위원 배정 중 오류가 발생했습니다.",
     };
   }
 }

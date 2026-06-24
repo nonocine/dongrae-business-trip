@@ -10,7 +10,7 @@ import {
   type EmployeeCareer,
 } from "@/lib/supabase";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
-import { requireExternalJudge } from "@/app/hr/recruitment/[slug]/actions";
+import { requireInterviewJudge } from "@/app/hr/recruitment/[slug]/actions";
 
 // =====================================================================
 // 면접 채점 — /recruitment/[slug]/interview
@@ -135,33 +135,23 @@ export async function saveInterviewScore(
       return { ok: false, message: "서명이 필요합니다." };
     }
 
-    // (1) 외부위원 세션 확인 — dongrae_external_judge 쿠키 파싱 + DB 재검증.
-    //     requireExternalJudge 가 위원 is_active·공고 status 까지 재확인하므로
-    //     쿠키 없음/위원 비활성/공고 종료면 throw → 명확한 메시지로 거부.
+    const p = await getInterviewPosting(slug);
+    if (!p) return { ok: false, message: "공고를 찾을 수 없습니다." };
+
+    // (1) 위원 권한 확인 — 외부위원 쿠키 OR 이 공고의 활성 내부위원(로그인 직원).
+    //     requireInterviewJudge 가 위원 활성·공고 일치·status 까지 재검증하므로
+    //     미인증/미배정/공고 종료면 throw → 명확한 메시지로 거부.
     //     service_role 전환 후 RLS 가 없으므로 이 액션이 유일한 방어선입니다.
-    let session: Awaited<ReturnType<typeof requireExternalJudge>>;
+    let judge: Awaited<ReturnType<typeof requireInterviewJudge>>;
     try {
-      session = await requireExternalJudge();
+      judge = await requireInterviewJudge(p.id);
     } catch (e) {
       return {
         ok: false,
         message:
           e instanceof Error
             ? e.message
-            : "외부위원 로그인이 필요합니다. 다시 로그인해주세요.",
-      };
-    }
-
-    const p = await getInterviewPosting(slug);
-    if (!p) return { ok: false, message: "공고를 찾을 수 없습니다." };
-
-    // (3) 위원 배정 검증 — 로그인 세션의 공고와 제출 대상 공고가 일치해야 함.
-    //     (requireExternalJudge 가 session.judgeId 의 is_active=true 를 이미
-    //      확인하므로, 공고 일치까지 보장되면 "이 공고에 배정된 활성 위원".)
-    if (session.postingId !== p.id) {
-      return {
-        ok: false,
-        message: "현재 로그인한 공고의 지원자만 채점할 수 있습니다.",
+            : "채점 권한이 없습니다. 다시 로그인해주세요.",
       };
     }
 
@@ -179,8 +169,9 @@ export async function saveInterviewScore(
       return { ok: false, message: "이 공고의 지원자가 아닙니다." };
     }
 
-    // 채점 주체는 세션의 위원(클라이언트가 보낸 이름은 신뢰하지 않음).
-    const reviewerName = session.name;
+    // 채점 주체는 인증된 위원(클라이언트가 보낸 이름은 신뢰하지 않음).
+    //   외부위원=세션명, 내부위원=로그인 직원명. 둘 다 reviewer_id 는 judge.id(UUID).
+    const reviewerName = judge.name;
 
     const isAbsent = String(formData.get("is_absent") ?? "") === "true";
 
@@ -226,7 +217,7 @@ export async function saveInterviewScore(
         //     reviewer_id = judgeId 로 동명이인 위원도 구분(서로 덮어쓰지 않음).
         //     reviewer_name 은 표시용으로 계속 저장(충돌 키에서는 제외).
         reviewer_name: reviewerName,
-        reviewer_id: session.judgeId,
+        reviewer_id: judge.judgeId,
         scores: {
           q1,
           q2,
@@ -259,8 +250,9 @@ export async function saveInterviewScore(
 
 // =====================================================================
 // 2-D-6) 면접 지원서 상세 — 좌측 패널용
-//   * requireExternalJudge 로 인증(로그인한 외부위원만) + 본인 공고 소속 확인.
-//   * supabaseAdmin(service_role)로 조회. 외부위원 화면이므로 연락처·이메일·
+//   * requireInterviewJudge 로 인증(외부위원 쿠키 OR 이 공고의 활성 내부위원)
+//     + 해당 공고 소속 확인.
+//   * supabaseAdmin(service_role)로 조회. 채점 화면이므로 연락처·이메일·
 //     주소·생년월일 등 민감정보는 반환하지 않습니다.
 // =====================================================================
 export type InterviewDoc = {
@@ -331,11 +323,10 @@ export async function getInterviewApplicantDetail(
   | { ok: false; message: string }
 > {
   try {
-    // 인증 — 로그인한 외부위원만(2-D-5 세션). 본인 공고 소속 확인에도 사용.
-    const session = await requireExternalJudge();
     const appId = applicationId?.trim() ?? "";
     if (!appId) return { ok: false, message: "지원서 정보가 누락되었습니다." };
 
+    // 지원서 행을 먼저 조회해 소속 공고를 확인합니다(데이터는 인증 통과 후에만 반환).
     const { data: appRow, error: aErr } = await supabaseAdmin
       .from("recruitment_applications")
       .select(
@@ -346,9 +337,13 @@ export async function getInterviewApplicantDetail(
     if (aErr) throw new Error(aErr.message);
     if (!appRow) return { ok: false, message: "지원서를 찾을 수 없습니다." };
     const row = appRow as Record<string, unknown>;
-    if (String(row.posting_id ?? "") !== session.postingId) {
-      return { ok: false, message: "이 공고의 지원자가 아닙니다." };
-    }
+    const postingId = String(row.posting_id ?? "");
+
+    // 인증 — 외부위원 쿠키 OR 이 공고의 활성 내부위원만. 권한 없으면 throw → catch.
+    //   해당 공고에 배정된 위원인지까지 requireInterviewJudge 가 검증하므로,
+    //   별도의 "이 공고의 지원자가 아닙니다" 체크는 여기에 포함됩니다.
+    await requireInterviewJudge(postingId);
+
     const applicant = row.applicant as Record<string, unknown> | null;
     if (!applicant) return { ok: false, message: "지원자 정보가 없습니다." };
 
@@ -356,7 +351,7 @@ export async function getInterviewApplicantDetail(
     const { data: posting } = await supabaseAdmin
       .from("recruitment_postings")
       .select("field, required_documents")
-      .eq("id", session.postingId)
+      .eq("id", postingId)
       .maybeSingle();
     const field = String((posting as { field?: unknown } | null)?.field ?? "");
     const requiredDocs = normalizeRequiredDocs(

@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import Header from "@/app/components/Header";
-import { enforcePasswordChange } from "@/app/actions";
+import { enforcePasswordChange, listDrivers } from "@/app/actions";
 import { requireHrAdmin } from "@/app/hr/actions";
 import { splitRecruitmentFields, fieldBadgeCls } from "@/lib/ui";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
@@ -27,12 +27,13 @@ export default async function JudgesAssignPage({
   // 외부위원 풀은 service_role(supabaseAdmin)로 직접 조회합니다.
   //   * RLS 를 우회해야 하며 anon 으로는 빈 결과가 나옵니다.
   //   * 페이지 상단 requireHrAdmin 으로 이미 권한 게이트되어 있습니다.
-  const [poolRes, judges] = await Promise.all([
+  const [poolRes, judges, drivers] = await Promise.all([
     supabaseAdmin
       .from("external_judges_pool")
       .select("*")
       .order("created_at", { ascending: false }),
     listJudges(adm.posting.id),
+    listDrivers(), // 활성 직원만 — 내부위원 배정 후보
   ]);
   if (poolRes.error) throw new Error(poolRes.error.message);
   const pool = (poolRes.data ?? []).map((r) =>
@@ -68,7 +69,7 @@ export default async function JudgesAssignPage({
               ) : (
                 <span className="text-xs text-ink-muted">모집분야 미지정</span>
               )}
-              <span className="text-xs text-ink-hint">· 외부위원 배정</span>
+              <span className="text-xs text-ink-hint">· 심사위원 배정</span>
             </div>
           </div>
           <Link
@@ -81,7 +82,16 @@ export default async function JudgesAssignPage({
 
         <JudgeLoginShare slug={slug} judgeNames={judgeNames} />
 
-        <JudgesAssignManager slug={slug} pool={pool} judges={judges} />
+        <JudgesAssignManager
+          slug={slug}
+          pool={pool}
+          judges={judges}
+          drivers={drivers.map((d) => ({
+            id: d.id,
+            name: d.name,
+            rank: d.rank,
+          }))}
+        />
       </main>
     </>
   );
