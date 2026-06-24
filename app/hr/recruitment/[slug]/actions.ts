@@ -847,25 +847,44 @@ export async function updateJudge(
 }
 
 // ---------------------------------------------------------------------
+// 채점 이력 카운트 — 배정 행 id(들) 기준으로 3개 채점 테이블을 모두 확인.
+//   * recruitment_document_scores / recruitment_interview_scores: judge_id 컬럼
+//   * recruitment_scores: reviewer_id 컬럼(text, 면접 stage 는 judgeId 가 들어감)
+//   judge_id/reviewer_id 모두 recruitment_judges.id 를 가리키므로 그 id 로 조회.
+//   (서류 stage 의 reviewer_id 는 관리자 이름이라 UUID 와 매칭되지 않음 — 오탐 없음.)
+// ---------------------------------------------------------------------
+async function countJudgeScores(judgeIds: string[]): Promise<number> {
+  const ids = judgeIds.filter(Boolean);
+  if (ids.length === 0) return 0;
+  const [doc, intv, scr] = await Promise.all([
+    supabaseAdmin
+      .from("recruitment_document_scores")
+      .select("id", { count: "exact", head: true })
+      .in("judge_id", ids),
+    supabaseAdmin
+      .from("recruitment_interview_scores")
+      .select("id", { count: "exact", head: true })
+      .in("judge_id", ids),
+    supabaseAdmin
+      .from("recruitment_scores")
+      .select("id", { count: "exact", head: true })
+      .in("reviewer_id", ids),
+  ]);
+  if (doc.error) throw new Error(doc.error.message);
+  if (intv.error) throw new Error(intv.error.message);
+  if (scr.error) throw new Error(scr.error.message);
+  return (doc.count ?? 0) + (intv.count ?? 0) + (scr.count ?? 0);
+}
+
+// ---------------------------------------------------------------------
 // 5) 위원 삭제 — 채점 이력이 있으면 차단 (비활성화 권장).
 // ---------------------------------------------------------------------
 export async function deleteJudge(judgeId: string): Promise<void> {
   await requireHrAdmin();
   if (!judgeId) throw new Error("심사위원 정보가 누락되었습니다.");
 
-  // 채점 이력 확인 — 서류·면접 양쪽 모두.
-  const { count: docCount, error: dErr } = await supabaseAdmin
-    .from("recruitment_document_scores")
-    .select("id", { count: "exact", head: true })
-    .eq("judge_id", judgeId);
-  if (dErr) throw new Error(dErr.message);
-  const { count: intCount, error: iErr } = await supabaseAdmin
-    .from("recruitment_interview_scores")
-    .select("id", { count: "exact", head: true })
-    .eq("judge_id", judgeId);
-  if (iErr) throw new Error(iErr.message);
-
-  const total = (docCount ?? 0) + (intCount ?? 0);
+  // 채점 이력 확인 — 서류·면접·점수 테이블 전부.
+  const total = await countJudgeScores([judgeId]);
   if (total > 0) {
     throw new Error(
       `이 심사위원은 이미 ${total}건의 채점을 했습니다. 비활성화를 권장합니다.`
@@ -1079,6 +1098,44 @@ export async function updateExternalJudge(
     throw new Error(error.message);
   }
 
+  // 풀의 name/affiliation 이 바뀌면, 이 풀을 참조하는 recruitment_judges 의
+  // 스냅샷(배정 시점 복사값)도 현재 값으로 동기화한다.
+  //   * is_active 무관 — 과거(비활성) 배정까지 정정해 드리프트를 완전히 제거.
+  //   * 이게 없으면 "배정 후 풀에서 이름 수정" 시 공고/QR/리포트에 옛 이름이 남음.
+  const snapshot: Record<string, unknown> = {};
+  if (update.name !== undefined) snapshot.name = update.name;
+  if (update.affiliation !== undefined) snapshot.affiliation = update.affiliation;
+  if (Object.keys(snapshot).length > 0) {
+    const { data: affected, error: syncErr } = await supabaseAdmin
+      .from("recruitment_judges")
+      .update(snapshot)
+      .eq("external_pool_id", id)
+      .select("posting_id");
+    if (syncErr) throw new Error(syncErr.message);
+
+    // 영향받은 공고 페이지(목록·위원 화면)를 재검증해 즉시 반영.
+    const postingIds = [
+      ...new Set(
+        (affected ?? [])
+          .map((r) => String((r as { posting_id?: string }).posting_id ?? ""))
+          .filter(Boolean)
+      ),
+    ];
+    if (postingIds.length > 0) {
+      const { data: posts } = await supabaseAdmin
+        .from("recruitment_postings")
+        .select("slug")
+        .in("id", postingIds);
+      for (const p of posts ?? []) {
+        const slug = String((p as { slug?: string }).slug ?? "");
+        if (slug) {
+          revalidatePath(`/hr/recruitment/${slug}`);
+          revalidatePath(`/hr/recruitment/${slug}/judges`);
+        }
+      }
+    }
+  }
+
   revalidatePath("/hr/recruitment");
 }
 
@@ -1152,7 +1209,10 @@ export async function toggleExternalJudgeActive(
 }
 
 // ---------------------------------------------------------------------
-// E5) 풀에서 외부위원 삭제 — 어떤 공고에라도 사용 이력이 있으면 차단.
+// E5) 풀에서 외부위원 삭제.
+//   * 실제 채점 이력(3개 채점 테이블)이 1건이라도 있으면 차단 → 비활성화 안내.
+//   * 채점이 0건이면 배정(recruitment_judges)만 한 테스트성 위원으로 보고,
+//     배정 행까지 함께 정리한 뒤 풀에서 삭제 허용.
 // ---------------------------------------------------------------------
 export async function deleteExternalJudge(
   id: string
@@ -1161,18 +1221,33 @@ export async function deleteExternalJudge(
     await requireHrAdmin();
     if (!id) return { ok: false, message: "외부위원 정보가 누락되었습니다." };
 
-    // 사용 이력(활성/비활성 무관) 체크.
-    const { count, error: cErr } = await supabaseAdmin
+    // 1) 이 풀 위원의 모든 배정 행(공고 무관) id 수집.
+    const { data: judgeRows, error: jErr } = await supabaseAdmin
       .from("recruitment_judges")
-      .select("id", { count: "exact", head: true })
+      .select("id")
       .eq("external_pool_id", id);
-    if (cErr) throw new Error(cErr.message);
-    const n = count ?? 0;
-    if (n > 0) {
+    if (jErr) throw new Error(jErr.message);
+    const judgeIds = (judgeRows ?? [])
+      .map((r) => String((r as { id?: string }).id ?? ""))
+      .filter(Boolean);
+
+    // 2) 실제 채점 이력 확인 — 배정만 했는지, 채점까지 했는지 구분.
+    //    채점이 1건이라도 있으면 데이터 무결성을 위해 삭제 금지(의도된 보호).
+    const scoreCount = await countJudgeScores(judgeIds);
+    if (scoreCount > 0) {
       return {
         ok: false,
-        message: `이 외부위원은 이미 ${n}건의 채용에 사용되었습니다. 비활성화를 권장합니다.`,
+        message: `이 위원은 ${scoreCount}건의 실제 채점 이력이 있어 삭제할 수 없습니다. 비활성화를 이용하세요.`,
       };
+    }
+
+    // 3) 채점 0건 → 배정만 한(테스트성) 위원. 배정 행을 먼저 정리한 뒤 풀에서 삭제.
+    if (judgeIds.length > 0) {
+      const { error: delJErr } = await supabaseAdmin
+        .from("recruitment_judges")
+        .delete()
+        .in("id", judgeIds);
+      if (delJErr) throw new Error(delJErr.message);
     }
 
     const { error } = await supabaseAdmin
@@ -1212,16 +1287,17 @@ export async function authenticateExternalJudge(input: {
   const phone = normalizePhone(input.phone ?? "");
   if (!slug || !name || !phone) return null;
 
-  // 1) 풀 인증 — 활성 외부위원만.
+  // 1) 풀 인증 — 활성 외부위원만. name/affiliation 도 함께 읽어 표시에 사용.
   const { data: pool, error: pErr } = await supabaseAdmin
     .from("external_judges_pool")
-    .select("id")
+    .select("id, name, affiliation")
     .eq("name", name)
     .eq("phone", phone)
     .eq("is_active", true)
     .maybeSingle();
   if (pErr || !pool) return null;
-  const poolId = String((pool as { id?: string }).id ?? "");
+  const poolRow = pool as { id?: string; name?: string; affiliation?: string };
+  const poolId = String(poolRow.id ?? "");
   if (!poolId) return null;
 
   // 2) 공고 조회.
@@ -1253,8 +1329,18 @@ export async function authenticateExternalJudge(input: {
     .maybeSingle();
   if (jErr || !judge) return null;
 
+  // 표시 이름/소속은 항상 풀의 현재 값으로 덮어쓴다(스냅샷이 어쩌다 어긋나도
+  // 위원 화면·QR 에는 최신 이름이 뜨도록 — 수정1의 동기화와 별개의 이중 안전장치).
+  const liveJudge = normalizeJudge(judge as Record<string, unknown>);
+  if (poolRow.name != null && String(poolRow.name).trim()) {
+    liveJudge.name = String(poolRow.name).trim();
+  }
+  if (poolRow.affiliation != null) {
+    liveJudge.affiliation = String(poolRow.affiliation).trim() || null;
+  }
+
   return {
-    judge: normalizeJudge(judge as Record<string, unknown>),
+    judge: liveJudge,
     posting: normalizeRecruitmentPosting(posting as Record<string, unknown>),
   };
 }

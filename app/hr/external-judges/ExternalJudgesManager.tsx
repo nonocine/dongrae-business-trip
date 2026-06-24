@@ -184,7 +184,7 @@ function JudgeRow({
   function handleDelete() {
     if (
       !confirm(
-        `${judge.name} 위원을 풀에서 삭제하시겠습니까?\n채용 이력이 있으면 삭제되지 않습니다 (대신 비활성화하세요).`
+        `${judge.name} 위원을 풀에서 삭제하시겠습니까?\n배정만 하고 채점하지 않았다면 배정 기록과 함께 삭제됩니다.\n실제 채점 이력이 있으면 삭제되지 않습니다 (대신 비활성화하세요).`
       )
     )
       return;
@@ -275,7 +275,21 @@ function JudgeRow({
           </button>
         </div>
       </div>
-      {err && <p className={`mt-2 ${noticeError}`}>{err}</p>}
+      {err && (
+        <div className="mt-2 space-y-1.5">
+          <p className={noticeError}>{err}</p>
+          {judge.is_active && (
+            <button
+              type="button"
+              onClick={handleToggle}
+              disabled={pending}
+              className="rounded-md border border-brand-blue bg-card px-2.5 py-1 text-xs font-semibold text-brand-blue hover:bg-brand-blue-soft disabled:opacity-60"
+            >
+              대신 비활성화하기
+            </button>
+          )}
+        </div>
+      )}
     </li>
   );
 }
