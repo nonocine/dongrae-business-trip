@@ -54,13 +54,19 @@ type Step = "intro" | "list" | "score";
 
 export default function InterviewFlow({
   posting,
+  internalJudge = null,
 }: {
   posting: InterviewPosting;
+  // 서버에서 내부위원(로그인 직원)으로 인증된 경우의 신원. null 이면 외부위원 흐름.
+  internalJudge?: { name: string } | null;
 }) {
-  // 단계 — intro(서명) → list(후보 선택) → score(채점)
-  const [step, setStep] = useState<Step>("intro");
+  const isInternal = internalJudge != null;
 
-  const [reviewerName, setReviewerName] = useState("");
+  // 단계 — intro(이름·서명) → list(후보 선택) → score(채점)
+  //   내부위원은 인트로를 건너뛰고 list 부터 시작합니다.
+  const [step, setStep] = useState<Step>(isInternal ? "list" : "intro");
+
+  const [reviewerName, setReviewerName] = useState(internalJudge?.name ?? "");
   const [signature, setSignature] = useState<string | null>(null);
 
   const [candidates, setCandidates] = useState<InterviewCandidate[]>([]);
@@ -68,6 +74,37 @@ export default function InterviewFlow({
 
   const [loadError, setLoadError] = useState<string | null>(null);
   const [loadingList, loadListTransition] = useTransition();
+  // 내부위원 자동 로드 중 여부(외부위원은 항상 false — 인트로에서 명시적으로 시작).
+  const [internalLoading, setInternalLoading] = useState(isInternal);
+
+  // 내부위원: 마운트 시 후보 목록을 자동으로 불러옵니다(인트로 단계 없음).
+  useEffect(() => {
+    if (!isInternal) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const list = await listInterviewCandidates(
+          posting.slug,
+          internalJudge?.name ?? ""
+        );
+        if (!cancelled) setCandidates(list);
+      } catch (e) {
+        if (!cancelled) {
+          setLoadError(
+            e instanceof Error
+              ? `목록을 불러오지 못했습니다: ${e.message}`
+              : "목록을 불러오지 못했습니다."
+          );
+        }
+      } finally {
+        if (!cancelled) setInternalLoading(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isInternal]);
 
   // 채점 시작 → 후보 목록 페치.
   function startScoring() {
@@ -126,17 +163,24 @@ export default function InterviewFlow({
         />
       )}
 
-      {step === "list" && (
-        <ListStep
-          posting={posting}
-          reviewerName={reviewerName}
-          candidates={candidates}
-          allScored={allScored}
-          onPick={pickCandidate}
-        />
-      )}
+      {step === "list" &&
+        (internalLoading ? (
+          <section className="rounded-2xl border-2 border-brand-blue bg-hr-bg p-8 text-center shadow-sm">
+            <p className="text-sm text-ink-muted md:text-base">
+              면접 대상자를 불러오는 중…
+            </p>
+          </section>
+        ) : (
+          <ListStep
+            posting={posting}
+            reviewerName={reviewerName}
+            candidates={candidates}
+            allScored={allScored}
+            onPick={pickCandidate}
+          />
+        ))}
 
-      {step === "score" && selected && signature && (
+      {step === "score" && selected && (isInternal || signature) && (
         <ScoreStep
           posting={posting}
           reviewerName={reviewerName}
@@ -488,7 +532,7 @@ function ScoreStep({
 }: {
   posting: InterviewPosting;
   reviewerName: string;
-  signature: string;
+  signature: string | null;
   candidate: InterviewCandidate;
   onBack: () => void;
   onSaved: () => Promise<void>;
@@ -522,7 +566,8 @@ function ScoreStep({
         fd.set("slug", posting.slug);
         fd.set("application_id", candidate.application_id);
         fd.set("reviewer_name", reviewerName);
-        fd.set("signature", signature);
+        // 서명은 외부위원만 전송(내부위원은 서명 화면을 건너뜀 → 서버에서도 선택).
+        if (signature) fd.set("signature", signature);
         fd.set("is_absent", isAbsent ? "true" : "false");
         if (!isAbsent) {
           fd.set("q1", String(q1 ?? 0));

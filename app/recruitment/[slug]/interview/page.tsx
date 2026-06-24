@@ -1,5 +1,6 @@
 import { notFound } from "next/navigation";
 import { getInterviewPosting } from "./actions";
+import { getInterviewJudgeContext } from "@/app/hr/recruitment/[slug]/actions";
 import InterviewFlow from "./InterviewFlow";
 
 // 매 진입 시 공고 상태(published/closed) 를 다시 확인합니다.
@@ -13,6 +14,12 @@ export default async function RecruitmentInterviewPage({
   const { slug } = await params;
   const posting = await getInterviewPosting(slug);
   if (!posting) notFound();
+
+  // 로그인한 직원이 이 공고의 활성 내부위원이면 이름·서명 화면을 건너뜁니다.
+  //   (외부위원 쿠키만 있는 경우엔 null → 기존 외부위원 인트로 흐름 유지)
+  const judge = await getInterviewJudgeContext(posting.id);
+  const internalJudge =
+    judge && judge.judgeType === "internal" ? { name: judge.name } : null;
 
   return (
     <main className="mx-auto w-full max-w-6xl flex-1 px-4 py-6 sm:px-6 sm:py-8 lg:py-10">
@@ -35,7 +42,7 @@ export default async function RecruitmentInterviewPage({
         </div>
       </header>
 
-      <InterviewFlow posting={posting} />
+      <InterviewFlow posting={posting} internalJudge={internalJudge} />
     </main>
   );
 }

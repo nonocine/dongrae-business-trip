@@ -10,7 +10,10 @@ import {
   type EmployeeCareer,
 } from "@/lib/supabase";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
-import { requireInterviewJudge } from "@/app/hr/recruitment/[slug]/actions";
+import {
+  requireInterviewJudge,
+  getInterviewJudgeContext,
+} from "@/app/hr/recruitment/[slug]/actions";
 
 // =====================================================================
 // 면접 채점 — /recruitment/[slug]/interview
@@ -85,19 +88,27 @@ export async function listInterviewCandidates(
 
   const appIds = apps.map((x) => String((x as { id: unknown }).id));
   let scoredSet = new Set<string>();
-  const rn = reviewerName.trim();
-  if (rn.length > 0 && appIds.length > 0) {
-    const { data: scored } = await supabaseAdmin
-      .from("recruitment_scores")
-      .select("application_id")
-      .eq("stage", "interview")
-      .eq("reviewer_name", rn)
-      .in("application_id", appIds);
-    scoredSet = new Set(
-      (scored ?? []).map((x) =>
-        String((x as { application_id: unknown }).application_id)
-      )
-    );
+  if (appIds.length > 0) {
+    // 채점 여부는 위원 신원(reviewer_id = recruitment_judges.id, UUID) 기준으로 판정.
+    //   외부·내부 위원 모두 reviewer_id 로 저장되므로 이름 표기 차이에 영향받지 않음.
+    //   신원 확인이 안 되는 경우(미인증)에만 입력 이름(reviewer_name)으로 폴백.
+    const judge = await getInterviewJudgeContext(p.id);
+    const rn = reviewerName.trim();
+    if (judge || rn.length > 0) {
+      const base = supabaseAdmin
+        .from("recruitment_scores")
+        .select("application_id")
+        .eq("stage", "interview")
+        .in("application_id", appIds);
+      const { data: scored } = await (judge
+        ? base.eq("reviewer_id", judge.judgeId)
+        : base.eq("reviewer_name", rn));
+      scoredSet = new Set(
+        (scored ?? []).map((x) =>
+          String((x as { application_id: unknown }).application_id)
+        )
+      );
+    }
   }
 
   return apps.map((row) => {
@@ -131,9 +142,6 @@ export async function saveInterviewScore(
     if (!slug) return { ok: false, message: "공고 정보가 누락되었습니다." };
     if (!applicationId)
       return { ok: false, message: "지원자가 선택되지 않았습니다." };
-    if (!signature || !signature.startsWith("data:image/")) {
-      return { ok: false, message: "서명이 필요합니다." };
-    }
 
     const p = await getInterviewPosting(slug);
     if (!p) return { ok: false, message: "공고를 찾을 수 없습니다." };
@@ -153,6 +161,15 @@ export async function saveInterviewScore(
             ? e.message
             : "채점 권한이 없습니다. 다시 로그인해주세요.",
       };
+    }
+
+    // 서명은 외부위원에게만 필수(인트로에서 수집). 내부위원은 로그인 직원이라
+    //   이름·서명 화면을 건너뛰므로 서명 없이 저장합니다.
+    if (
+      judge.judgeType === "external" &&
+      (!signature || !signature.startsWith("data:image/"))
+    ) {
+      return { ok: false, message: "서명이 필요합니다." };
     }
 
     // (2) 지원자 검증 — application_id 가 이 공고에 실제로 속한 지원서인지 확인.
@@ -223,7 +240,7 @@ export async function saveInterviewScore(
           q2,
           q3,
           q4,
-          signature_data_url: signature,
+          signature_data_url: signature || null,
         },
         total_score: total,
         max_score: 65,

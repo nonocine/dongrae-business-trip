@@ -1517,25 +1517,13 @@ export async function requireInterviewJudge(
   const pid = postingId?.trim() ?? "";
   if (!pid) throw new Error("공고 정보가 누락되었습니다.");
 
-  // (A) 외부위원 쿠키 경로 — 쿠키가 있으면 기존 검증을 그대로 통과시킵니다.
-  const extCookie = await getExternalJudgeSession();
-  if (extCookie) {
-    const session = await requireExternalJudge(); // is_active·공고 status 재검증
-    if (session.postingId !== pid) {
-      throw new Error("현재 로그인한 공고의 지원자만 채점할 수 있습니다.");
-    }
-    return {
-      judgeId: session.judgeId,
-      name: session.name,
-      judgeType: "external",
-      postingId: pid,
-    };
-  }
-
-  // (B) 내부위원 경로 — 로그인한 직원(이름) → drivers.id → 본 공고 내부위원 배정 확인.
+  // (A) 내부위원 우선 — 로그인 직원이 이 공고의 활성 내부위원이면 그 신원으로 인정.
+  //     같은 브라우저에 외부위원 쿠키가 남아 있어도 로그인 직원이 우선됩니다(혼선 방지).
   const me = await getSession();
-  if (me && me.kind === "employee" && me.name.trim().length > 0) {
-    const empName = me.name.trim();
+  const isEmployee =
+    !!me && me.kind === "employee" && me.name.trim().length > 0;
+  if (isEmployee) {
+    const empName = (me as { name: string }).name.trim();
     // drivers.name 은 UNIQUE 이므로 이름으로 직원을 안전하게 식별합니다.
     const { data: driver, error: dErr } = await supabaseAdmin
       .from("drivers")
@@ -1578,16 +1566,44 @@ export async function requireInterviewJudge(
         };
       }
     }
+    // 직원이지만 이 공고 내부위원으로 미배정 → 외부위원 쿠키도 확인(아래) 후 최종 판단.
+  }
 
-    // 로그인은 했으나 이 공고 내부위원으로 배정되지 않음.
-    //   (메시지에 "로그인" 미포함 → 화면은 외부위원 로그인 버튼을 띄우지 않음)
+  // (B) 외부위원 쿠키 경로 — 기존 검증을 그대로 재사용(회귀 없음).
+  const extCookie = await getExternalJudgeSession();
+  if (extCookie) {
+    const session = await requireExternalJudge(); // is_active·공고 status 재검증
+    if (session.postingId !== pid) {
+      throw new Error("현재 로그인한 공고의 지원자만 채점할 수 있습니다.");
+    }
+    return {
+      judgeId: session.judgeId,
+      name: session.name,
+      judgeType: "external",
+      postingId: pid,
+    };
+  }
+
+  // (C) 어느 경로도 아님 — 직원이면 미배정 안내, 아니면 외부위원 로그인 안내.
+  //     (메시지의 "로그인" 포함 여부로 화면이 외부위원 로그인 버튼 노출을 결정함)
+  if (isEmployee) {
     throw new Error(
       "이 공고의 심사위원으로 배정되어 있지 않습니다. 채용 담당자에게 문의하세요."
     );
   }
-
-  // (C) 아무 세션도 없음 → 외부위원 로그인 안내(메시지에 "로그인" 포함).
   throw new Error("외부위원 로그인이 필요합니다.");
+}
+
+// requireInterviewJudge 의 비예외 버전 — 화면/목록에서 현재 위원 신원을 조용히 조회.
+//   인증 안 됨/미배정이면 null 반환(throw 하지 않음). 진입 분기·집계에 사용.
+export async function getInterviewJudgeContext(
+  postingId: string
+): Promise<InterviewJudgeAuth | null> {
+  try {
+    return await requireInterviewJudge(postingId);
+  } catch {
+    return null;
+  }
 }
 
 // =====================================================================
