@@ -132,39 +132,40 @@ export default async function Home({
             </p>
           )}
 
-          {/* 진입 카드 2개 */}
+          {/* 진입 카드 — 진행 중 공고가 있으면 채용+직원, 0건이면 직원만 */}
           <div className="mt-9 space-y-3.5">
-            {/* ① 채용 공고 — 공개(지원자용). 흰 카드 + 어두운 글자 */}
-            <Link
-              href="/recruitment"
-              className="group flex items-center gap-4 rounded-2xl bg-white p-5 shadow-lg ring-1 ring-black/5 transition duration-200 hover:-translate-y-1 hover:shadow-2xl"
-            >
-              <span
-                aria-hidden
-                className="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl bg-brand-blue-soft text-2xl"
+            {/* ① 채용 공고 — 공개(지원자용). 진행 중 공고(N>=1)일 때만 노출.
+                마감 시각이 지나 N==0 이 되면 카드 자체를 숨겨 직원 업무만 남김. */}
+            {recruitmentCount > 0 && (
+              <Link
+                href="/recruitment"
+                className="group flex items-center gap-4 rounded-2xl bg-white p-5 shadow-lg ring-1 ring-black/5 transition duration-200 hover:-translate-y-1 hover:shadow-2xl"
               >
-                📢
-              </span>
-              <span className="min-w-0 flex-1">
-                <span className="flex flex-wrap items-center gap-x-2 gap-y-1">
-                  <span className="text-base font-bold text-ink">채용 공고</span>
-                  {recruitmentCount > 0 && (
+                <span
+                  aria-hidden
+                  className="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl bg-brand-blue-soft text-2xl"
+                >
+                  📢
+                </span>
+                <span className="min-w-0 flex-1">
+                  <span className="flex flex-wrap items-center gap-x-2 gap-y-1">
+                    <span className="text-base font-bold text-ink">채용 공고</span>
                     <span className="rounded-full bg-brand-green/15 px-2 py-0.5 text-[10px] font-bold text-brand-green">
                       진행 중 {recruitmentCount}건
                     </span>
-                  )}
+                  </span>
+                  <span className="mt-0.5 block text-xs text-ink-muted">
+                    지원자용 · 채용 공고 확인 및 지원
+                  </span>
                 </span>
-                <span className="mt-0.5 block text-xs text-ink-muted">
-                  지원자용 · 채용 공고 확인 및 지원
+                <span
+                  aria-hidden
+                  className="shrink-0 text-lg text-brand-blue transition group-hover:translate-x-0.5"
+                >
+                  →
                 </span>
-              </span>
-              <span
-                aria-hidden
-                className="shrink-0 text-lg text-brand-blue transition group-hover:translate-x-0.5"
-              >
-                →
-              </span>
-            </Link>
+              </Link>
+            )}
 
             {/* ② 직원 업무 시스템 — 구글 로그인. 진한 네이비·블루 + 흰 글자 */}
             <a
