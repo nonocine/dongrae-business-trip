@@ -1,14 +1,9 @@
 import Link from "next/link";
 import Header from "@/app/components/Header";
 import GateIntro from "@/app/components/GateIntro";
-import ActivityList from "@/app/components/ActivityList";
-import {
-  enforcePasswordChange,
-  getSession,
-  listActivities,
-} from "@/app/actions";
+import EmployeeDashboard from "@/app/components/EmployeeDashboard";
+import { enforcePasswordChange, getSession } from "@/app/actions";
 import { listPublishedRecruitmentSummaries } from "@/app/recruitment/[slug]/actions";
-import { cardCls } from "@/lib/ui";
 
 export const dynamic = "force-dynamic";
 
@@ -231,8 +226,8 @@ export default async function Home({
     );
   }
 
-  const activities = await listActivities();
-
+  // 직원 로그인 후 첫 화면 = 직원 대시보드(프로필 위젯).
+  //   * 활동일지(ActivityList)는 여기서 빼고 /activities 로 분리 — 헤더 네비로 접근.
   return (
     <>
       <Header />
@@ -240,26 +235,10 @@ export default async function Home({
         {recruitmentCount > 0 && (
           <RecruitmentBanner count={recruitmentCount} />
         )}
-        <section className={cardCls}>
-          <h2 className="text-lg font-bold tracking-tight text-ink">
-            {session.kind === "admin"
-              ? "전체 활동 일지"
-              : `${session.name} 님의 활동 일지`}
-          </h2>
-          <p className="mt-1 text-xs text-ink-muted">
-            외근 · 출장 · 국내연수 · 해외연수 · 교육 모두 한곳에서 관리하세요.
-          </p>
-        </section>
-
-        <Link
-          href="/new"
-          className="flex w-full items-center justify-center gap-2 rounded-xl bg-navy px-4 py-3 text-base font-semibold text-white shadow-sm transition hover:bg-navy-strong"
-        >
-          <span aria-hidden>＋</span>
-          활동 작성
-        </Link>
-
-        <ActivityList activities={activities} />
+        <EmployeeDashboard
+          kind={session.kind}
+          name={session.kind === "employee" ? session.name : null}
+        />
       </main>
     </>
   );

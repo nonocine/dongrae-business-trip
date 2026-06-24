@@ -32,6 +32,7 @@ export default function HeaderClient({
   const navItems: NavItem[] = [];
   if (loggedIn) {
     navItems.push({ href: "/", label: "메인" });
+    navItems.push({ href: "/activities", label: "활동일지" });
     navItems.push({ href: "/new", label: "활동 작성" });
     if (canAccessHr)
       navItems.push({
