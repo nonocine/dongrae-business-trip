@@ -35,7 +35,9 @@ export type InterviewCandidate = {
   applicant_number: string;
   name: string;
   birth_date: string;
-  scored: boolean; // 동일 reviewer_name 으로 이미 저장된 점수가 있는지
+  scored: boolean; // 본인(reviewer_id)이 이미 채점했는지
+  my_total: number | null; // 본인이 준 총점(미채점이면 null)
+  my_absent: boolean; // 본인이 불참 처리했는지
 };
 
 // 공고 조회 — published / closed 둘 다 허용 (마감 후에도 면접 진행 가능).
@@ -87,9 +89,10 @@ export async function listInterviewCandidates(
   if (!apps) return [];
 
   const appIds = apps.map((x) => String((x as { id: unknown }).id));
-  let scoredSet = new Set<string>();
+  // appId → 본인 점수(총점·불참). 채점 여부는 이 맵의 존재로 판정.
+  const myScores = new Map<string, { total: number | null; absent: boolean }>();
   if (appIds.length > 0) {
-    // 채점 여부는 위원 신원(reviewer_id = recruitment_judges.id, UUID) 기준으로 판정.
+    // 본인 점수는 위원 신원(reviewer_id = recruitment_judges.id, UUID) 기준으로 조회.
     //   외부·내부 위원 모두 reviewer_id 로 저장되므로 이름 표기 차이에 영향받지 않음.
     //   신원 확인이 안 되는 경우(미인증)에만 입력 이름(reviewer_name)으로 폴백.
     const judge = await getInterviewJudgeContext(p.id);
@@ -97,17 +100,23 @@ export async function listInterviewCandidates(
     if (judge || rn.length > 0) {
       const base = supabaseAdmin
         .from("recruitment_scores")
-        .select("application_id")
+        .select("application_id, total_score, is_absent")
         .eq("stage", "interview")
         .in("application_id", appIds);
       const { data: scored } = await (judge
         ? base.eq("reviewer_id", judge.judgeId)
         : base.eq("reviewer_name", rn));
-      scoredSet = new Set(
-        (scored ?? []).map((x) =>
-          String((x as { application_id: unknown }).application_id)
-        )
-      );
+      for (const x of scored ?? []) {
+        const r = x as {
+          application_id: unknown;
+          total_score: unknown;
+          is_absent: unknown;
+        };
+        myScores.set(String(r.application_id), {
+          total: r.total_score == null ? null : Number(r.total_score),
+          absent: r.is_absent === true,
+        });
+      }
     }
   }
 
@@ -115,13 +124,16 @@ export async function listInterviewCandidates(
     const r = row as Record<string, unknown>;
     const app = r.applicant as Record<string, unknown> | null;
     const appId = String(r.id ?? "");
+    const mine = myScores.get(appId);
     return {
       application_id: appId,
       applicant_id: String(r.applicant_id ?? ""),
       applicant_number: String(app?.applicant_number ?? ""),
       name: String(app?.name ?? ""),
       birth_date: String(app?.birth_date ?? ""),
-      scored: scoredSet.has(appId),
+      scored: mine != null,
+      my_total: mine ? mine.total : null,
+      my_absent: mine ? mine.absent : false,
     };
   });
 }

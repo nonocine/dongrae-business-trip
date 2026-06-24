@@ -511,7 +511,11 @@ function ListStep({
                         : `${badgeNeutral} text-xs md:text-sm`
                     }
                   >
-                    {c.scored ? "채점 완료" : "미채점"}
+                    {c.scored
+                      ? c.my_absent
+                        ? "채점 완료 · 불참"
+                        : `채점 완료 · ${c.my_total ?? 0}/65`
+                      : "미채점"}
                   </span>
                   {c.scored && (
                     <span className="text-xs font-semibold text-brand-blue">
