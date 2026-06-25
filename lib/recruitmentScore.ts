@@ -268,6 +268,9 @@ export type ReportPosting = {
   status: string;
   // 임용(예정)일 — 최종합격자 공고의 임용일·출근예정일 등에 사용. 없으면 null.
   appointment_date: string | null;
+  // 기준급수(직위/직급) — 공고문 빌더와 동일한 salary_grade 컬럼. 없으면 null.
+  //   면접 심사표 "모집분야 / 직위" 표기에 사용. (컬럼 자체가 없을 수도 있음)
+  salary_grade?: string | null;
 };
 
 export type ReportData = {

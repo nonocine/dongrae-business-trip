@@ -555,6 +555,14 @@ export async function buildInterviewResultDocx(
         ? `불참 / ${INTERVIEW_MAX}점`
         : `${entry.total ?? 0}점 / ${INTERVIEW_MAX}점`;
 
+      // 모집분야 표기 — "{모집분야} / {직위}". 직위는 공고 salary_grade(기준급수).
+      //   직위 값이 없으면 모집분야만 표기.
+      const fieldText = posting.field || "-";
+      const positionText = (posting.salary_grade ?? "").trim();
+      const fieldWithPosition = positionText
+        ? `${fieldText} / ${positionText}`
+        : fieldText;
+
       // 1. 지원자 표.
       const infoW = [1500, 3100, 1600, 2800];
       const infoTable = new Table({
@@ -576,7 +584,7 @@ export async function buildInterviewResultDocx(
           new TableRow({
             children: [
               irCell("모집분야", { dxa: infoW[0], bold: true, fill: "F2F4F7" }),
-              irCell(posting.field || "-", {
+              irCell(fieldWithPosition, {
                 dxa: infoW[1] + infoW[2] + infoW[3],
                 columnSpan: 3,
                 align: AlignmentType.LEFT,
@@ -647,17 +655,24 @@ export async function buildInterviewResultDocx(
           })
         );
       }
-      // 합계 행 — 앞 6칸(심사항목~구간) 병합 + 점수.
-      const sumLabelW = critW.slice(0, 6).reduce((p, c) => p + c, 0);
+      // 합계 행 — "합계"(심사항목+배점 병합) | 고정 총배점 "65 점"(구간 4칸 병합) | 점수.
+      const sumLabelW = critW[0] + critW[1];
+      const sumRangeW = critW[segStart] * 4;
       critRows.push(
         new TableRow({
           children: [
-            irCell(`합계  /  ${INTERVIEW_MAX}점`, {
+            irCell("합계", {
               dxa: sumLabelW,
-              columnSpan: 6,
+              columnSpan: 2,
               bold: true,
               fill: "F2F4F7",
               align: AlignmentType.RIGHT,
+            }),
+            irCell(`${INTERVIEW_MAX} 점`, {
+              dxa: sumRangeW,
+              columnSpan: 4,
+              bold: true,
+              fill: "F2F4F7",
             }),
             irCell(absent ? "불참" : String(entry.total ?? 0), {
               dxa: critW[6],
@@ -674,27 +689,25 @@ export async function buildInterviewResultDocx(
         rows: critRows,
       });
 
-      // 심사위원 확인란 — 도장 이미지가 있으면 (인) 자리에 삽입, 없으면 텍스트.
+      // 심사위원 확인란 — 도장 이미지가 있으면 이름 뒤에 삽입, 없으면 이름만.
+      //   ("(인)" 텍스트는 표기하지 않음. 도장 이미지 우선순위 로직은 그대로.)
       const stampBytes = stamps.get(reviewerName) ?? null;
       const stampType = detectImageType(stampBytes);
       const signRunChildren: (TextRun | ImageRun)[] = [
         new TextRun({
-          text: `심사위원 성명 : ${reviewerName}    `,
+          text: `심사위원 성명 : ${reviewerName}`,
           size: 22,
           font: DOC_FONT,
         }),
       ];
       if (stampBytes && stampType) {
         signRunChildren.push(
+          new TextRun({ text: "    ", size: 22, font: DOC_FONT }),
           new ImageRun({
             type: stampType,
             data: stampBytes,
             transformation: { width: 72, height: 72 },
           })
-        );
-      } else {
-        signRunChildren.push(
-          new TextRun({ text: "(인)", size: 22, font: DOC_FONT })
         );
       }
       const signPara = new Paragraph({

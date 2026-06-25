@@ -89,12 +89,11 @@ export async function loadReportData(
   const s = slug?.trim() ?? "";
   if (!s) return null;
 
-  // 1) 공고.
+  // 1) 공고. select("*") — salary_grade 등 스키마에 없을 수도 있는 컬럼을
+  //   안전하게 흡수(공고문 빌더와 동일 방식). 필요한 필드만 매핑합니다.
   const { data: postRow, error: pErr } = await supabaseAdmin
     .from("recruitment_postings")
-    .select(
-      "id, slug, title, field, recruit_count, status, required_documents, appointment_date"
-    )
+    .select("*")
     .eq("slug", s)
     .maybeSingle();
   if (pErr) throw new Error(pErr.message);
@@ -108,6 +107,7 @@ export async function loadReportData(
     recruit_count: Number(pr.recruit_count ?? 0),
     status: String(pr.status ?? ""),
     appointment_date: (pr.appointment_date as string | null) ?? null,
+    salary_grade: (pr.salary_grade as string | null) ?? null,
   };
 
   // 필수 증빙서류 key 목록 — 지원자별 미제출 판정에 사용.
