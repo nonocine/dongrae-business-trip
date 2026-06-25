@@ -222,12 +222,19 @@ export const STATUS_LABEL: Record<ReportStatus, string> = {
 };
 
 // 한 심사위원의 한 지원자에 대한 채점 1건.
+//   * scores 는 항목 숫자(q1~q4 등)만 보존. 서명(base64)·도장 식별정보는
+//     별도 선택 필드로 둡니다(면접 심사표 도장 자동삽입용, 읽기 전용 확장).
 export type ReviewerScore = {
   reviewer_name: string;
   total: number | null;
   is_absent: boolean;
   memo: string | null;
   scores: Record<string, number>;
+  // 면접 위원 도장(서명) 결정용 — loadReportData 가 면접 채점에 한해 채웁니다.
+  signature_data_url?: string | null; // 채점 시 그린 손서명(base64 png)
+  judge_type?: "internal" | "external" | null;
+  driver_id?: string | null; // 내부위원 → employee_profiles 조회 키
+  external_pool_id?: string | null; // 외부위원 → external_judges_pool 조회 키
 };
 
 export type ReportApplicant = {

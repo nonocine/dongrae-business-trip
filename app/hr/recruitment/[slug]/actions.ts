@@ -6,6 +6,8 @@ import {
   supabase,
   signHrDocument,
   removeHrDocuments,
+  uploadStampImage,
+  STAMP_IMAGE_MIME,
   parseEducationInput,
   parseLicenseInput,
   parseCareerInput,
@@ -1277,6 +1279,108 @@ export async function deleteExternalJudge(
         e instanceof Error ? e.message : "외부위원 삭제 중 오류가 발생했습니다.",
     };
   }
+}
+
+// ---------------------------------------------------------------------
+// E5) 외부위원 도장(서명) 이미지 — 업로드/삭제/미리보기.
+//   * path 컨벤션: stamps/external/{external_pool_id}.png (고정 → 재업로드 덮어쓰기).
+//   * png/jpg 만 허용(webp 금지 — docx 삽입 불가). DB엔 path 만 저장.
+// ---------------------------------------------------------------------
+export async function uploadExternalJudgeStamp(
+  formData: FormData
+): Promise<{ ok: true; stampUrl: string | null } | { ok: false; message: string }> {
+  try {
+    await requireHrAdmin();
+    const id = String(formData.get("id") ?? "").trim();
+    const file = formData.get("stamp");
+    if (!id) return { ok: false, message: "외부위원 정보가 누락되었습니다." };
+    if (!(file instanceof File) || file.size === 0) {
+      return { ok: false, message: "업로드할 도장 이미지를 선택해주세요." };
+    }
+    if (!STAMP_IMAGE_MIME[file.type]) {
+      return {
+        ok: false,
+        message: "PNG 또는 JPG 이미지만 업로드할 수 있습니다. (WEBP 불가)",
+      };
+    }
+    if (file.size > 4 * 1024 * 1024) {
+      return { ok: false, message: "도장 이미지는 4MB 이하여야 합니다." };
+    }
+
+    const { data: ej, error: exErr } = await supabaseAdmin
+      .from("external_judges_pool")
+      .select("id")
+      .eq("id", id)
+      .maybeSingle();
+    if (exErr) throw new Error(exErr.message);
+    if (!ej) return { ok: false, message: "외부위원을 찾을 수 없습니다." };
+
+    const path = `stamps/external/${id}.png`;
+    await uploadStampImage(path, file, file.type);
+    const { error } = await supabaseAdmin
+      .from("external_judges_pool")
+      .update({ stamp_path: path })
+      .eq("id", id);
+    if (error) throw new Error(error.message);
+
+    revalidatePath("/hr/external-judges");
+    return { ok: true, stampUrl: await signHrDocument(path) };
+  } catch (e) {
+    return {
+      ok: false,
+      message:
+        e instanceof Error ? e.message : "도장 업로드 중 오류가 발생했습니다.",
+    };
+  }
+}
+
+export async function deleteExternalJudgeStamp(
+  id: string
+): Promise<{ ok: true } | { ok: false; message: string }> {
+  try {
+    await requireHrAdmin();
+    if (!id) return { ok: false, message: "외부위원 정보가 누락되었습니다." };
+    const { data: ej, error: exErr } = await supabaseAdmin
+      .from("external_judges_pool")
+      .select("stamp_path")
+      .eq("id", id)
+      .maybeSingle();
+    if (exErr) throw new Error(exErr.message);
+    const old =
+      ((ej as { stamp_path?: unknown } | null)?.stamp_path as string | null) ??
+      null;
+    const { error } = await supabaseAdmin
+      .from("external_judges_pool")
+      .update({ stamp_path: null })
+      .eq("id", id);
+    if (error) throw new Error(error.message);
+    if (old) await removeHrDocuments([old]);
+    revalidatePath("/hr/external-judges");
+    return { ok: true };
+  } catch (e) {
+    return {
+      ok: false,
+      message:
+        e instanceof Error ? e.message : "도장 삭제 중 오류가 발생했습니다.",
+    };
+  }
+}
+
+// 외부위원 도장 미리보기 URL(1시간). 없으면 null.
+export async function getExternalJudgeStampUrl(
+  id: string
+): Promise<string | null> {
+  await requireHrAdmin();
+  if (!id) return null;
+  const { data } = await supabaseAdmin
+    .from("external_judges_pool")
+    .select("stamp_path")
+    .eq("id", id)
+    .maybeSingle();
+  return signHrDocument(
+    ((data as { stamp_path?: unknown } | null)?.stamp_path as string | null) ??
+      null
+  );
 }
 
 // =====================================================================

@@ -244,7 +244,7 @@ function range(a: string, b: string): string {
 }
 
 // PNG/JPEG/GIF/BMP 시그니처 판별. 그 외(webp 등)는 null → 삽입 생략.
-function detectImageType(
+export function detectImageType(
   bytes: Uint8Array | null
 ): "png" | "jpg" | "gif" | "bmp" | null {
   if (!bytes || bytes.length < 4) return null;

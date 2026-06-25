@@ -21,6 +21,10 @@ import type {
   ReportData,
 } from "@/lib/recruitmentScore";
 import { STATUS_LABEL } from "@/lib/recruitmentScore";
+import {
+  decodeDataUrl,
+  downloadHrImage,
+} from "@/lib/recruitmentApplicantDocData";
 
 // 순수 점수 모듈의 타입·상수·헬퍼를 그대로 re-export — 기존 import 경로
 // (@/lib/recruitmentReport) 를 유지하기 위함. 신규 코드는 둘 중 어느 쪽에서
@@ -186,10 +190,36 @@ export async function loadReportData(
   const { data: scoreRows, error: sErr } = await supabaseAdmin
     .from("recruitment_scores")
     .select(
-      "application_id, stage, reviewer_name, total_score, is_absent, memo, scores"
+      "application_id, stage, reviewer_name, reviewer_id, total_score, is_absent, memo, scores"
     )
     .in("application_id", appIds);
   if (sErr) throw new Error(sErr.message);
+
+  // 3-b) 면접 위원 식별정보 — 도장(서명) 결정에 필요(internal/external·조회키).
+  //   reviewer_id(=recruitment_judges.id) → 위원 종류·driver_id·external_pool_id.
+  const judgeById = new Map<
+    string,
+    {
+      judge_type: "internal" | "external" | null;
+      driver_id: string | null;
+      external_pool_id: string | null;
+    }
+  >();
+  const { data: judgeRows } = await supabaseAdmin
+    .from("recruitment_judges")
+    .select("id, judge_type, driver_id, external_pool_id")
+    .eq("posting_id", posting.id);
+  for (const jr of (judgeRows ?? []) as Record<string, unknown>[]) {
+    const jt = String(jr.judge_type ?? "");
+    judgeById.set(String(jr.id ?? ""), {
+      judge_type:
+        jt === "internal" || jt === "external"
+          ? (jt as "internal" | "external")
+          : null,
+      driver_id: (jr.driver_id as string | null) ?? null,
+      external_pool_id: (jr.external_pool_id as string | null) ?? null,
+    });
+  }
 
   const screeningReviewers = new Set<string>();
   const interviewReviewers = new Set<string>();
@@ -213,6 +243,17 @@ export async function loadReportData(
     };
     const stage = String(r.stage ?? "");
     if (stage === "interview") {
+      // 도장 결정용 — 손서명(base64) + 위원 식별정보를 entry 에 부착.
+      const rawScores =
+        r.scores != null && typeof r.scores === "object"
+          ? (r.scores as Record<string, unknown>)
+          : {};
+      const sig = rawScores.signature_data_url;
+      entry.signature_data_url = typeof sig === "string" ? sig : null;
+      const judge = judgeById.get(String(r.reviewer_id ?? ""));
+      entry.judge_type = judge?.judge_type ?? null;
+      entry.driver_id = judge?.driver_id ?? null;
+      entry.external_pool_id = judge?.external_pool_id ?? null;
       a.interviewByReviewer.set(reviewer, entry);
       interviewReviewers.add(reviewer);
     } else {
@@ -249,4 +290,96 @@ export async function loadReportData(
       a.localeCompare(b, "ko")
     ),
   };
+}
+
+// =====================================================================
+// loadInterviewStamps — 면접 위원별 도장(서명) 바이트를 결정해 반환.
+//   key = reviewer_name, value = 이미지 바이트(png/jpg 등). 우선순위:
+//     · 내부위원: employee_profiles.stamp_path → downloadHrImage
+//     · 외부위원: external_judges_pool.stamp_path → downloadHrImage,
+//                없으면 채점 시 그린 signature_data_url(base64) → decodeDataUrl
+//     · 그 외/없음: 미포함(빌더가 "(인)" 텍스트로 폴백)
+//   * 빌더는 순수 — 바이트 다운로드/디코딩은 이 로더에서 수행 후 주입.
+//   * loadReportData(미인증 시 redirect) 결과를 입력으로 받으므로 별도 게이트 불필요.
+// =====================================================================
+export async function loadInterviewStamps(
+  data: ReportData
+): Promise<Map<string, Uint8Array>> {
+  // 위원별 식별정보 1건씩 수집(이름 기준). 서명은 처음 발견된 비어있지 않은 값.
+  type Ident = {
+    judge_type: "internal" | "external" | null;
+    driver_id: string | null;
+    external_pool_id: string | null;
+    signature_data_url: string | null;
+  };
+  const byReviewer = new Map<string, Ident>();
+  for (const a of data.applicants) {
+    for (const [nm, e] of a.interviewByReviewer) {
+      const prev = byReviewer.get(nm);
+      if (!prev) {
+        byReviewer.set(nm, {
+          judge_type: e.judge_type ?? null,
+          driver_id: e.driver_id ?? null,
+          external_pool_id: e.external_pool_id ?? null,
+          signature_data_url: e.signature_data_url ?? null,
+        });
+      } else if (!prev.signature_data_url && e.signature_data_url) {
+        prev.signature_data_url = e.signature_data_url;
+      }
+    }
+  }
+  if (byReviewer.size === 0) return new Map();
+
+  // 조회 키 모으기.
+  const driverIds = new Set<string>();
+  const poolIds = new Set<string>();
+  for (const id of byReviewer.values()) {
+    if (id.driver_id) driverIds.add(id.driver_id);
+    if (id.external_pool_id) poolIds.add(id.external_pool_id);
+  }
+
+  // stamp_path 조회(내부=employee_profiles, 외부=external_judges_pool).
+  const profileStamp = new Map<string, string>();
+  if (driverIds.size > 0) {
+    const { data: rows } = await supabaseAdmin
+      .from("employee_profiles")
+      .select("driver_id, stamp_path")
+      .in("driver_id", [...driverIds]);
+    for (const r of (rows ?? []) as Record<string, unknown>[]) {
+      const p = r.stamp_path;
+      if (typeof p === "string" && p.trim())
+        profileStamp.set(String(r.driver_id ?? ""), p);
+    }
+  }
+  const poolStamp = new Map<string, string>();
+  if (poolIds.size > 0) {
+    const { data: rows } = await supabaseAdmin
+      .from("external_judges_pool")
+      .select("id, stamp_path")
+      .in("id", [...poolIds]);
+    for (const r of (rows ?? []) as Record<string, unknown>[]) {
+      const p = r.stamp_path;
+      if (typeof p === "string" && p.trim())
+        poolStamp.set(String(r.id ?? ""), p);
+    }
+  }
+
+  // 위원별 바이트 결정.
+  const out = new Map<string, Uint8Array>();
+  for (const [nm, id] of byReviewer) {
+    let bytes: Uint8Array | null = null;
+    if (id.judge_type === "internal" && id.driver_id) {
+      bytes = await downloadHrImage(profileStamp.get(id.driver_id) ?? null);
+    } else if (id.judge_type === "external" && id.external_pool_id) {
+      const path = poolStamp.get(id.external_pool_id) ?? null;
+      bytes = path
+        ? await downloadHrImage(path)
+        : decodeDataUrl(id.signature_data_url);
+    } else {
+      // 위원 식별 실패 시에도 손서명이 있으면 사용(외부위원 폴백과 동일).
+      bytes = decodeDataUrl(id.signature_data_url);
+    }
+    if (bytes) out.set(nm, bytes);
+  }
+  return out;
 }

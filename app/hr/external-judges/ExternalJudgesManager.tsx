@@ -18,6 +18,9 @@ import {
   updateExternalJudge,
   toggleExternalJudgeActive,
   deleteExternalJudge,
+  uploadExternalJudgeStamp,
+  deleteExternalJudgeStamp,
+  getExternalJudgeStampUrl,
 } from "@/app/hr/recruitment/[slug]/actions";
 import type { ExternalJudge } from "@/lib/supabase";
 
@@ -275,6 +278,7 @@ function JudgeRow({
           </button>
         </div>
       </div>
+      <StampControls judge={judge} />
       {err && (
         <div className="mt-2 space-y-1.5">
           <p className={noticeError}>{err}</p>
@@ -291,6 +295,131 @@ function JudgeRow({
         </div>
       )}
     </li>
+  );
+}
+
+// =====================================================================
+// 위원 도장(서명) 등록 — 면접 심사표 (인) 자리에 자동 삽입될 이미지.
+//   * png/jpg 만(webp 불가). 업로드 시 stamps/external/{id}.png 에 덮어쓰기.
+// =====================================================================
+function StampControls({ judge }: { judge: ExternalJudge }) {
+  const [hasStamp, setHasStamp] = useState(!!judge.stamp_path);
+  const [stampUrl, setStampUrl] = useState<string | null>(null);
+  const [pending, startTransition] = useTransition();
+  const [err, setErr] = useState<string | null>(null);
+
+  function handleUpload(file: File) {
+    setErr(null);
+    if (!["image/png", "image/jpeg"].includes(file.type)) {
+      setErr("PNG 또는 JPG 이미지만 업로드할 수 있습니다. (WEBP 불가)");
+      return;
+    }
+    startTransition(async () => {
+      try {
+        const fd = new FormData();
+        fd.set("id", judge.id);
+        fd.set("stamp", file);
+        const res = await uploadExternalJudgeStamp(fd);
+        if (res.ok) {
+          setHasStamp(true);
+          setStampUrl(res.stampUrl);
+        } else {
+          setErr(res.message);
+        }
+      } catch {
+        setErr("도장 업로드 중 오류가 발생했습니다.");
+      }
+    });
+  }
+
+  function handleView() {
+    setErr(null);
+    startTransition(async () => {
+      try {
+        const url = await getExternalJudgeStampUrl(judge.id);
+        setStampUrl(url);
+        if (!url) setErr("등록된 도장이 없습니다.");
+      } catch {
+        setErr("도장을 불러오지 못했습니다.");
+      }
+    });
+  }
+
+  function handleDelete() {
+    if (!confirm(`${judge.name} 위원의 도장을 삭제하시겠습니까?`)) return;
+    setErr(null);
+    startTransition(async () => {
+      try {
+        const res = await deleteExternalJudgeStamp(judge.id);
+        if (res.ok) {
+          setHasStamp(false);
+          setStampUrl(null);
+        } else {
+          setErr(res.message);
+        }
+      } catch {
+        setErr("도장 삭제 중 오류가 발생했습니다.");
+      }
+    });
+  }
+
+  return (
+    <div className="mt-2 flex flex-wrap items-center gap-2 border-t border-line pt-2">
+      <span className="text-xs font-semibold text-ink-muted">도장(서명)</span>
+      <span
+        className={`text-[11px] ${hasStamp ? "text-success" : "text-ink-hint"}`}
+      >
+        {hasStamp ? "● 등록됨" : "○ 미등록"}
+      </span>
+      <label
+        className={`cursor-pointer rounded-md border border-navy bg-card px-2.5 py-1 text-xs font-semibold text-navy hover:bg-navy-soft ${
+          pending ? "pointer-events-none opacity-60" : ""
+        }`}
+      >
+        {pending ? "처리 중…" : hasStamp ? "도장 변경" : "도장 등록"}
+        <input
+          type="file"
+          accept="image/png,image/jpeg"
+          className="sr-only"
+          disabled={pending}
+          onChange={(e) => {
+            const f = e.target.files?.[0];
+            e.target.value = "";
+            if (f) handleUpload(f);
+          }}
+        />
+      </label>
+      {hasStamp && (
+        <>
+          <button
+            type="button"
+            onClick={handleView}
+            disabled={pending}
+            className="rounded-md border border-line bg-card px-2.5 py-1 text-xs font-medium text-ink-muted hover:bg-surface disabled:opacity-60"
+          >
+            보기
+          </button>
+          <button
+            type="button"
+            onClick={handleDelete}
+            disabled={pending}
+            className="rounded-md border border-stamp bg-card px-2.5 py-1 text-xs font-medium text-stamp hover:bg-stamp-soft disabled:opacity-60"
+          >
+            삭제
+          </button>
+        </>
+      )}
+      <span className="text-[11px] text-ink-hint">PNG · JPG (WEBP 불가)</span>
+      {stampUrl && (
+        // eslint-disable-next-line @next/next/no-img-element
+        <img
+          src={stampUrl}
+          alt={`${judge.name} 도장`}
+          className="h-12 w-12 rounded border border-line bg-white object-contain"
+        />
+      )}
+      {err && <p className={`w-full ${noticeError}`}>{err}</p>}
+    </div>
   );
 }
 

@@ -1159,6 +1159,26 @@ export async function removeHrDocuments(paths: string[]): Promise<void> {
   await supabase.storage.from(HR_DOCUMENTS_BUCKET).remove(paths);
 }
 
+// 도장(서명) 이미지 허용 형식 — png/jpg 만. webp 는 docx(ImageRun) 삽입 불가라 금지.
+export const STAMP_IMAGE_MIME: Record<string, "png" | "jpg"> = {
+  "image/png": "png",
+  "image/jpeg": "jpg",
+};
+
+// 도장 이미지 업로드 — 고정 path 에 upsert(재등록 시 덮어쓰기). path 반환.
+//   data 는 File/Blob/ArrayBuffer/Uint8Array. contentType 은 image/png|image/jpeg.
+export async function uploadStampImage(
+  path: string,
+  data: Blob | ArrayBuffer | Uint8Array,
+  contentType: string
+): Promise<string> {
+  const { error } = await supabase.storage
+    .from(HR_DOCUMENTS_BUCKET)
+    .upload(path, data, { contentType, upsert: true });
+  if (error) throw new Error(`도장 업로드 실패: ${error.message}`);
+  return path;
+}
+
 // Private 버킷용 1시간 임시 열람 URL. path 가 없으면 null.
 export async function signHrDocument(
   path: string | null | undefined
@@ -1298,6 +1318,8 @@ export type ExternalJudge = {
   privacy_agreed_at: string | null;
   privacy_agreed_by: string | null;
   is_active: boolean;
+  // 도장(서명) 이미지 경로 — hr-documents 버킷 path(공개 URL 아님). 없으면 null.
+  stamp_path: string | null;
   created_at: string;
   updated_at: string | null;
   created_by: string | null;
@@ -1316,6 +1338,7 @@ export function normalizeExternalJudge(
     privacy_agreed_at: (raw.privacy_agreed_at as string | null) ?? null,
     privacy_agreed_by: (raw.privacy_agreed_by as string | null) ?? null,
     is_active: raw.is_active !== false,
+    stamp_path: (raw.stamp_path as string | null) ?? null,
     created_at: String(raw.created_at ?? ""),
     updated_at: (raw.updated_at as string | null) ?? null,
     created_by: (raw.created_by as string | null) ?? null,

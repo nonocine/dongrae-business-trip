@@ -213,6 +213,14 @@ const allAbsent: ReportData = {
   ],
 };
 
+// 1x1 PNG (도장 이미지 삽입 경로 검증용 — 실제 도장 바이트 대용).
+const PNG_1x1 = new Uint8Array(
+  Buffer.from(
+    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==",
+    "base64"
+  )
+);
+
 const SIG = [0x50, 0x4b, 0x03, 0x04]; // ZIP/OOXML 'PK\x03\x04'
 
 function checkZip(name: string, buf: ArrayBuffer | Buffer): boolean {
@@ -243,8 +251,18 @@ async function run() {
     try {
       const xlsx = await buildErpWorkbook(data);
       const xlsx2 = await buildInterviewDetailWorkbook(data);
+      // (c) 도장 전혀 없음 — stamps 미전달.
       const dIv = await buildInterviewResultDocx(data, {
         interviewDate: "2026. 6. 20.(금)",
+      });
+      // (a) 도장 있는 위원 / (b) 서명만 있는 외부위원 — 둘 다 빌더엔 바이트로 들어옴.
+      //   첫 면접위원에게 png 도장 바이트를 주입해 (인) 자리 ImageRun 삽입 경로 검증.
+      const stampMap = new Map<string, Uint8Array>();
+      if (data.interviewReviewers[0])
+        stampMap.set(data.interviewReviewers[0], PNG_1x1);
+      const dIvStamped = await buildInterviewResultDocx(data, {
+        interviewDate: "2026. 6. 20.(금)",
+        stamps: stampMap,
       });
       const d1 = await buildFinalSummaryDoc(data);
       const d2 = await buildScreeningSummaryDoc(data);
@@ -257,7 +275,8 @@ async function run() {
       const results = [
         checkZip("ERP xlsx", xlsx),
         checkZip("면접 세부평가 xlsx", xlsx2),
-        checkZip("면접전형 심사결과 docx", dIv),
+        checkZip("면접전형 심사결과 docx(도장없음)", dIv),
+        checkZip("면접전형 심사결과 docx(도장삽입)", dIvStamped),
         checkZip("최종 총괄표 docx", d1),
         checkZip("서류 총괄표 docx", d2),
         checkZip("면접 공고 docx", d3),
@@ -265,7 +284,7 @@ async function run() {
       ];
       results.forEach((r) => (r ? pass++ : fail++));
     } catch (e) {
-      fail += 7;
+      fail += 8;
       console.log(`  ✗ throw: ${e instanceof Error ? e.stack : String(e)}`);
     }
   }

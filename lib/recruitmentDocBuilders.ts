@@ -22,8 +22,10 @@ import {
   HeightRule,
   Header,
   PageBreak,
+  ImageRun,
   convertMillimetersToTwip,
 } from "docx";
+import { detectImageType } from "./applicantDocxBuilder";
 import {
   type ReportData,
   type ReviewerScore,
@@ -296,25 +298,24 @@ export async function buildInterviewDetailWorkbook(
 //   * 한 파일: (1) 2차 전형 심사 총괄표  →  PageBreak  →  (2) 지원자×위원 1장씩.
 //   * 점수의 진실은 recruitment_scores(stage='interview').scores jsonb(q1~q4),
 //     배점·항목 라벨은 INTERVIEW_ITEMS(lib) 단일 기준. 읽기 전용.
-//   * 견본 PDF 양식: 4색 머리막대 · 점수 구간표 · 위원별 확인란((인) 공란).
+//   * 양식: 제목 + 점수 구간표(보기별 칸 분리) + 위원별 확인란.
+//     확인란 (인) 자리에는 위원 도장(opts.stamps)이 있으면 ImageRun 으로 삽입.
 // =====================================================================
 
 // 총괄표 항목 헤더 — 견본 문구(업무능력·직업관·성실성·적극성)를 q1~q4 순서로.
 //   (개인별 심사표는 INTERVIEW_ITEMS 라벨·세부 불릿을 그대로 사용)
 const INTERVIEW_SUMMARY_HEADERS = ["업무능력", "직업관", "성실성", "적극성"];
 
-// 견본 근사 4색(빨강·파랑·초록·노랑).
-const RESULT_STRIP_COLORS = ["C0392B", "2E5C9E", "5FA83C", "F1C40F"];
-
 // 숫자 → 표시 문자열(없으면 빈칸).
 function numText(v: unknown): string {
   return typeof v === "number" && Number.isFinite(v) ? String(v) : "";
 }
 
-// DXA 폭 + rowSpan/columnSpan 지원 셀(헤더). half-point = pt*2.
-function irHeadCell(text: string, dxa: number): TableCell {
+// DXA 폭 + columnSpan 지원 셀(헤더). half-point = pt*2.
+function irHeadCell(text: string, dxa: number, columnSpan?: number): TableCell {
   return new TableCell({
     width: { size: dxa, type: WidthType.DXA },
+    columnSpan,
     shading: { type: ShadingType.CLEAR, color: "auto", fill: NAVY },
     verticalAlign: VerticalAlign.CENTER,
     borders: CELL_BORDERS,
@@ -384,45 +385,6 @@ function irCell(text: string, opts: IrCellOpts): TableCell {
   );
 }
 
-// 4색 머리막대 — 테두리 없는 4칸 표.
-function irColorStrip(): Table {
-  const none = { style: BorderStyle.NONE, size: 0, color: "FFFFFF" } as const;
-  return new Table({
-    width: { size: 100, type: WidthType.PERCENTAGE },
-    layout: TableLayoutType.FIXED,
-    borders: {
-      top: none,
-      bottom: none,
-      left: none,
-      right: none,
-      insideHorizontal: none,
-      insideVertical: none,
-    },
-    rows: [
-      new TableRow({
-        height: { value: 120, rule: HeightRule.ATLEAST },
-        children: RESULT_STRIP_COLORS.map(
-          (c) =>
-            new TableCell({
-              width: { size: 25, type: WidthType.PERCENTAGE },
-              shading: { type: ShadingType.CLEAR, color: "auto", fill: c },
-              borders: {
-                top: none,
-                bottom: none,
-                left: none,
-                right: none,
-              },
-              margins: { top: 0, bottom: 0, left: 0, right: 0 },
-              children: [
-                new Paragraph({ children: [new TextRun({ text: "", size: 2 })] }),
-              ],
-            })
-        ),
-      }),
-    ],
-  });
-}
-
 // 한 지원자의 면접 위원별 채점(가나다순 위원만, 채점 있는 것만).
 function interviewEntriesOf(
   a: ReportData["applicants"][number],
@@ -452,10 +414,11 @@ function rankByInterview(
 
 export async function buildInterviewResultDocx(
   data: ReportData,
-  opts: { interviewDate?: string } = {}
+  opts: { interviewDate?: string; stamps?: Map<string, Uint8Array> } = {}
 ): Promise<Buffer> {
   const { posting, applicants, interviewReviewers } = data;
   const interviewDate = (opts.interviewDate ?? "").trim();
+  const stamps = opts.stamps ?? new Map<string, Uint8Array>();
   const ranked = rankByInterview(applicants);
 
   // ---- (1) 총괄표 ----------------------------------------------------
@@ -623,15 +586,20 @@ export async function buildInterviewResultDocx(
         ],
       });
 
-      // 2. 심사표 — 항목 | 평가 구간 | 점수.
-      const critW = [4500, 3300, 1200];
+      // 2. 심사표 — 심사항목(넓게) | 배점 | 평가구간 4칸 | 점수.
+      //   견본처럼 보기(매우적합/적합/양호/보통)를 각각 별도 셀로 분리.
+      const SEG = 900; // 구간 4칸 동일 너비
+      const critW = [3800, 700, SEG, SEG, SEG, SEG, 900]; // 합계 9000
+      const segStart = 2; // 구간 칸 시작 인덱스
       const critRows: TableRow[] = [
         new TableRow({
           tableHeader: true,
           children: [
             irHeadCell("심사항목 (점수 분류를 기준으로 자유롭게 배점)", critW[0]),
-            irHeadCell("평가 구간", critW[1]),
-            irHeadCell("점수", critW[2]),
+            irHeadCell("배점", critW[1]),
+            // 평가 구간 4칸 묶음 헤더(가로 병합).
+            irHeadCell("평가 구간", critW[segStart] * 4, 4),
+            irHeadCell("점수", critW[6]),
           ],
         }),
       ];
@@ -641,7 +609,7 @@ export async function buildInterviewResultDocx(
             alignment: AlignmentType.LEFT,
             children: [
               new TextRun({
-                text: `${it.title}  (배점 ${it.max}점)`,
+                text: it.title,
                 bold: true,
                 size: 20,
                 font: DOC_FONT,
@@ -660,16 +628,18 @@ export async function buildInterviewResultDocx(
             ],
           }),
         ];
-        const rangeText = it.options
-          .map((o) => `${o.label} ${o.value}`)
-          .join("   ");
+        // 구간 4칸 — 각 보기 라벨(점수).
+        const segCells = it.options.map((o) =>
+          irCell(`${o.label}(${o.value})`, { dxa: SEG, size: 9 })
+        );
         critRows.push(
           new TableRow({
             children: [
               irCellBox(labelParas, { dxa: critW[0], align: AlignmentType.LEFT }),
-              irCell(rangeText, { dxa: critW[1], size: 9 }),
+              irCell(`${it.max}점`, { dxa: critW[1] }),
+              ...segCells,
               irCell(absent ? "불참" : numText(entry.scores[it.key]), {
-                dxa: critW[2],
+                dxa: critW[6],
                 bold: true,
                 size: 14,
               }),
@@ -677,19 +647,20 @@ export async function buildInterviewResultDocx(
           })
         );
       }
-      // 합계 행.
+      // 합계 행 — 앞 6칸(심사항목~구간) 병합 + 점수.
+      const sumLabelW = critW.slice(0, 6).reduce((p, c) => p + c, 0);
       critRows.push(
         new TableRow({
           children: [
-            irCell("합계", {
-              dxa: critW[0],
+            irCell(`합계  /  ${INTERVIEW_MAX}점`, {
+              dxa: sumLabelW,
+              columnSpan: 6,
               bold: true,
               fill: "F2F4F7",
-              align: AlignmentType.LEFT,
+              align: AlignmentType.RIGHT,
             }),
-            irCell(`/ ${INTERVIEW_MAX}점`, { dxa: critW[1], fill: "F2F4F7" }),
             irCell(absent ? "불참" : String(entry.total ?? 0), {
-              dxa: critW[2],
+              dxa: critW[6],
               bold: true,
               size: 14,
               fill: "F2F4F7",
@@ -703,10 +674,37 @@ export async function buildInterviewResultDocx(
         rows: critRows,
       });
 
-      // 페이지 분리(앞 내용과 항상 분리) + 머리막대 + 제목 + 표 + 확인란.
+      // 심사위원 확인란 — 도장 이미지가 있으면 (인) 자리에 삽입, 없으면 텍스트.
+      const stampBytes = stamps.get(reviewerName) ?? null;
+      const stampType = detectImageType(stampBytes);
+      const signRunChildren: (TextRun | ImageRun)[] = [
+        new TextRun({
+          text: `심사위원 성명 : ${reviewerName}    `,
+          size: 22,
+          font: DOC_FONT,
+        }),
+      ];
+      if (stampBytes && stampType) {
+        signRunChildren.push(
+          new ImageRun({
+            type: stampType,
+            data: stampBytes,
+            transformation: { width: 72, height: 72 },
+          })
+        );
+      } else {
+        signRunChildren.push(
+          new TextRun({ text: "(인)", size: 22, font: DOC_FONT })
+        );
+      }
+      const signPara = new Paragraph({
+        alignment: AlignmentType.RIGHT,
+        children: signRunChildren,
+      });
+
+      // 페이지 분리(앞 내용과 항상 분리) + 제목 + 표 + 확인란(도장).
       sheetChildren.push(
         new Paragraph({ children: [new PageBreak()] }),
-        irColorStrip(),
         para("2차 전형(면접전형) 심사표", {
           bold: true,
           size: 18,
@@ -731,10 +729,7 @@ export async function buildInterviewResultDocx(
           align: AlignmentType.CENTER,
           spacing: { after: 120 },
         }),
-        para(`심사위원 성명 : ${reviewerName}          (인)`, {
-          size: 11,
-          align: AlignmentType.RIGHT,
-        })
+        signPara
       );
     }
   }

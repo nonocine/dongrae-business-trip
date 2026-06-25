@@ -14,6 +14,7 @@ import {
   parseTrainingInput,
   parseAppointmentInput,
   uploadProfilePhoto,
+  uploadStampImage,
   removeHrDocuments,
   signHrDocument,
   type Driver,
@@ -22,6 +23,7 @@ import {
   type GenderType,
 } from "@/lib/supabase";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
+import { decodeDataUrl } from "@/lib/recruitmentApplicantDocData";
 
 // 세션의 직원 이름으로 drivers row 를 조회합니다.
 // 타 직원 카드 접근을 막기 위해 driver_id 는 항상 세션에서만 도출합니다.
@@ -273,6 +275,102 @@ export async function deleteMyProfilePhoto(): Promise<
       ok: false,
       message:
         e instanceof Error ? e.message : "사진 삭제 중 오류가 발생했습니다.",
+    };
+  }
+}
+
+// =====================================================================
+// 본인 도장(사인) — 면접 심사표 (인) 자리에 자동 삽입될 손도장.
+//   * SignaturePad 로 그린 png data URL 을 받아 hr-documents 에 저장.
+//   * path: stamps/employee/{driverId}.png (고정 → 다시 그리면 덮어쓰기).
+//   * employee_profiles.stamp_path 에 path 저장. 본인 driver_id 만 가능.
+// =====================================================================
+export async function getMyStampUrl(): Promise<string | null> {
+  const driver = await getMyDriver();
+  if (!driver) return null;
+  const { data, error } = await supabaseAdmin
+    .from("employee_profiles")
+    .select("stamp_path")
+    .eq("driver_id", driver.id)
+    .maybeSingle();
+  if (error || !data) return null;
+  return signHrDocument(
+    ((data as { stamp_path?: unknown }).stamp_path as string | null) ?? null
+  );
+}
+
+export async function uploadMyStamp(
+  formData: FormData
+): Promise<
+  { ok: true; stampUrl: string | null } | { ok: false; message: string }
+> {
+  try {
+    const driver = await getMyDriver();
+    if (!driver) throw new Error("직원 로그인이 필요합니다.");
+
+    const dataUrl = String(formData.get("stamp_data_url") ?? "");
+    if (!dataUrl.startsWith("data:image/png;base64,")) {
+      return { ok: false, message: "도장(사인) 이미지를 먼저 그려주세요." };
+    }
+    const bytes = decodeDataUrl(dataUrl);
+    if (!bytes || bytes.byteLength === 0) {
+      return { ok: false, message: "도장 이미지를 인식하지 못했습니다." };
+    }
+
+    const path = `stamps/employee/${driver.id}.png`;
+    await uploadStampImage(path, bytes, "image/png");
+    const { error } = await supabaseAdmin
+      .from("employee_profiles")
+      .upsert(
+        {
+          driver_id: driver.id,
+          stamp_path: path,
+          updated_at: new Date().toISOString(),
+        },
+        { onConflict: "driver_id" }
+      );
+    if (error) throw new Error(error.message);
+
+    revalidatePath("/profile/hr");
+    return { ok: true, stampUrl: await signHrDocument(path) };
+  } catch (e) {
+    return {
+      ok: false,
+      message:
+        e instanceof Error ? e.message : "도장 저장 중 오류가 발생했습니다.",
+    };
+  }
+}
+
+export async function deleteMyStamp(): Promise<
+  { ok: true } | { ok: false; message: string }
+> {
+  try {
+    const driver = await getMyDriver();
+    if (!driver) throw new Error("직원 로그인이 필요합니다.");
+    const { data: existing, error: exErr } = await supabaseAdmin
+      .from("employee_profiles")
+      .select("stamp_path")
+      .eq("driver_id", driver.id)
+      .maybeSingle();
+    if (exErr) throw new Error(exErr.message);
+    const old =
+      ((existing as { stamp_path?: unknown } | null)?.stamp_path as
+        | string
+        | null) ?? null;
+    const { error: upErr } = await supabaseAdmin
+      .from("employee_profiles")
+      .update({ stamp_path: null, updated_at: new Date().toISOString() })
+      .eq("driver_id", driver.id);
+    if (upErr) throw new Error(upErr.message);
+    if (old) await removeHrDocuments([old]);
+    revalidatePath("/profile/hr");
+    return { ok: true };
+  } catch (e) {
+    return {
+      ok: false,
+      message:
+        e instanceof Error ? e.message : "도장 삭제 중 오류가 발생했습니다.",
     };
   }
 }

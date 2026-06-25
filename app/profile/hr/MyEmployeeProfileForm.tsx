@@ -6,7 +6,11 @@ import {
   uploadMyProfilePhoto,
   deleteMyProfilePhoto,
   getMyPhotoUrl,
+  getMyStampUrl,
+  uploadMyStamp,
+  deleteMyStamp,
 } from "@/app/profile/hr/actions";
+import SignaturePad from "@/app/components/SignaturePad";
 import {
   parseResidentNumber,
   normalizeEducationList,
@@ -116,6 +120,13 @@ export default function MyEmployeeProfileForm({
   const [photoError, setPhotoError] = useState<string | null>(null);
   const [photoUploading, photoTransition] = useTransition();
 
+  // 도장(사인) — 면접 심사표 (인) 자리에 자동 삽입될 손도장.
+  const [stampUrl, setStampUrl] = useState<string | null>(null);
+  const [stampError, setStampError] = useState<string | null>(null);
+  const [stampPending, stampTransition] = useTransition();
+  const [stampModal, setStampModal] = useState(false);
+  const [stampDraw, setStampDraw] = useState<string | null>(null);
+
   const fieldCls = locked
     ? `${baseInputCls} cursor-not-allowed bg-surface text-ink-muted`
     : `${baseInputCls} bg-card`;
@@ -129,10 +140,43 @@ export default function MyEmployeeProfileForm({
     getMyPhotoUrl().then((url) => {
       if (alive) setPhotoUrl(url);
     });
+    getMyStampUrl().then((url) => {
+      if (alive) setStampUrl(url);
+    });
     return () => {
       alive = false;
     };
   }, []);
+
+  function handleStampSave() {
+    if (!stampDraw) {
+      setStampError("도장(사인)을 먼저 그려주세요.");
+      return;
+    }
+    setStampError(null);
+    stampTransition(async () => {
+      const fd = new FormData();
+      fd.set("stamp_data_url", stampDraw);
+      const res = await uploadMyStamp(fd);
+      if (res.ok) {
+        setStampUrl(res.stampUrl);
+        setStampModal(false);
+        setStampDraw(null);
+      } else {
+        setStampError(res.message);
+      }
+    });
+  }
+
+  function handleStampDelete() {
+    if (!confirm("등록된 도장(사인)을 삭제할까요?")) return;
+    setStampError(null);
+    stampTransition(async () => {
+      const res = await deleteMyStamp();
+      if (res.ok) setStampUrl(null);
+      else setStampError(res.message);
+    });
+  }
 
   function handlePhotoUpload(file: File) {
     setPhotoError(null);
@@ -292,6 +336,96 @@ export default function MyEmployeeProfileForm({
                 </div>
               )}
             </div>
+
+            {/* 도장(사인) — 면접 심사표 (인) 자리에 자동 삽입 */}
+            <div className="mb-4 flex items-start gap-4 rounded-lg border border-line bg-card p-3">
+              <div className="flex h-20 w-32 shrink-0 items-center justify-center overflow-hidden rounded-md border border-line bg-white">
+                {stampUrl ? (
+                  // eslint-disable-next-line @next/next/no-img-element
+                  <img
+                    src={stampUrl}
+                    alt="내 도장"
+                    className="h-full w-full object-contain"
+                  />
+                ) : (
+                  <span className="text-xs text-ink-hint">도장 없음</span>
+                )}
+              </div>
+              <div className="flex flex-col items-start gap-1.5">
+                <p className="text-xs font-bold text-navy">도장(사인)</p>
+                <p className="text-[11px] text-ink-hint">
+                  면접 심사표의 “(인)” 자리에 자동으로 들어갑니다.
+                </p>
+                <div className="flex flex-wrap gap-1.5">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setStampDraw(null);
+                      setStampError(null);
+                      setStampModal(true);
+                    }}
+                    disabled={stampPending}
+                    className="rounded-lg border border-navy bg-card px-3 py-1.5 text-xs font-semibold text-navy hover:bg-navy-soft disabled:opacity-60"
+                  >
+                    {stampUrl ? "다시 그리기" : "사인(도장) 넣기"}
+                  </button>
+                  {stampUrl && (
+                    <button
+                      type="button"
+                      onClick={handleStampDelete}
+                      disabled={stampPending}
+                      className="rounded-lg border border-stamp bg-card px-3 py-1.5 text-xs font-medium text-stamp hover:bg-stamp-soft disabled:opacity-60"
+                    >
+                      삭제
+                    </button>
+                  )}
+                </div>
+                {stampError && (
+                  <p className="text-xs text-stamp">{stampError}</p>
+                )}
+              </div>
+            </div>
+
+            {stampModal && (
+              <div
+                className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4"
+                onClick={() => !stampPending && setStampModal(false)}
+              >
+                <div
+                  className="w-full max-w-md rounded-xl border border-line bg-card p-5 shadow-xl"
+                  onClick={(e) => e.stopPropagation()}
+                >
+                  <h3 className="text-base font-bold text-ink">
+                    도장(사인) 그리기
+                  </h3>
+                  <p className="mt-1 text-xs text-ink-muted">
+                    마우스나 손가락으로 도장 대신 사용할 사인을 그려주세요.
+                  </p>
+                  <SignaturePad value={stampDraw} onChange={setStampDraw} />
+                  {stampError && (
+                    <p className={`mt-2 ${noticeError}`}>{stampError}</p>
+                  )}
+                  <div className="mt-4 flex justify-end gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setStampModal(false)}
+                      disabled={stampPending}
+                      className="rounded-lg border border-line bg-card px-4 py-2 text-sm font-medium text-ink-muted hover:bg-surface disabled:opacity-60"
+                    >
+                      취소
+                    </button>
+                    <button
+                      type="button"
+                      onClick={handleStampSave}
+                      disabled={stampPending || !stampDraw}
+                      className={`${btnPrimary} disabled:opacity-60`}
+                    >
+                      {stampPending ? "저장 중…" : "저장"}
+                    </button>
+                  </div>
+                </div>
+              </div>
+            )}
 
             <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
               <div>
