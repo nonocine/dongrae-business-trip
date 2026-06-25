@@ -26,6 +26,7 @@ import {
   type InterviewApplicantDetail,
   type InterviewDoc,
 } from "./actions";
+import { INTERVIEW_ITEMS } from "@/lib/recruitmentScore";
 
 // 태블릿 친화 — 큰 글씨, 큰 버튼, 터치 친화(나이 있는 심사위원 가독성 우선).
 const tabletInputCls =
@@ -37,19 +38,28 @@ const tabletBtnSecondary =
   "inline-flex h-14 items-center justify-center gap-2 rounded-xl border-2 border-line bg-card px-6 text-lg font-semibold text-ink-body shadow-sm transition hover:bg-surface disabled:opacity-60";
 
 // 점수 선택지 정의 — 카드형 라디오 버튼 렌더링에 사용.
+//   항목 제목·부제·배점·보기는 INTERVIEW_ITEMS(lib) 단일 기준에서 가져옵니다.
 type Choice = { value: number; label: string };
-const Q1_CHOICES: Choice[] = [
-  { value: 20, label: "매우적합" },
-  { value: 15, label: "적합" },
-  { value: 10, label: "양호" },
-  { value: 5, label: "보통" },
-];
-const Q_15_CHOICES: Choice[] = [
-  { value: 15, label: "매우적합" },
-  { value: 12, label: "적합" },
-  { value: 9, label: "양호" },
-  { value: 6, label: "보통" },
-];
+
+// 생년월일 + 만 나이 표시 — "1990-03-15 (만 36세)". 파싱 실패 시 원문만.
+//   브라우저 로컬 기준(채점 화면은 클라이언트 컴포넌트)으로 만 나이를 계산.
+function fmtBirthWithAge(birth: string | null | undefined): string {
+  const raw = (birth ?? "").trim();
+  if (!raw) return "-";
+  const m = raw.match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if (!m) return raw;
+  const y = Number(m[1]);
+  const mo = Number(m[2]);
+  const d = Number(m[3]);
+  const now = new Date();
+  let age = now.getFullYear() - y;
+  const beforeBirthday =
+    now.getMonth() + 1 < mo ||
+    (now.getMonth() + 1 === mo && now.getDate() < d);
+  if (beforeBirthday) age -= 1;
+  if (!Number.isFinite(age) || age < 0 || age > 120) return raw;
+  return `${raw} (만 ${age}세)`;
+}
 
 type Step = "intro" | "list" | "score";
 
@@ -716,38 +726,35 @@ function ScoreStep({
 
             {!isAbsent && (
               <div className="space-y-5">
-                <ScoreItem
-                  title="① 청소년활동 운영의 이해도 및 업무수행 능력"
-                  sub="업무관련 지식 · 의사소통 능력 · 관계형성 능력 · 운영계획"
-                  maxLabel="배점 20"
-                  choices={Q1_CHOICES}
-                  value={q1}
-                  onChange={setQ1}
-                />
-                <ScoreItem
-                  title="② 교육자적 자질과 인생·직업·사회관"
-                  sub="교육자적 소양 · 용모·표정·인상 · 사고방식·성품"
-                  maxLabel="배점 15"
-                  choices={Q_15_CHOICES}
-                  value={q2}
-                  onChange={setQ2}
-                />
-                <ScoreItem
-                  title="③ 성실성"
-                  sub="근로의식 · 책임의식 · 성취욕구"
-                  maxLabel="배점 15"
-                  choices={Q_15_CHOICES}
-                  value={q3}
-                  onChange={setQ3}
-                />
-                <ScoreItem
-                  title="④ 업무에 대한 적극성"
-                  sub="입사 후 목표 · 달성의지 · 고난극복 경험"
-                  maxLabel="배점 15"
-                  choices={Q_15_CHOICES}
-                  value={q4}
-                  onChange={setQ4}
-                />
+                {INTERVIEW_ITEMS.map((it) => {
+                  const value =
+                    it.key === "q1"
+                      ? q1
+                      : it.key === "q2"
+                        ? q2
+                        : it.key === "q3"
+                          ? q3
+                          : q4;
+                  const onChange =
+                    it.key === "q1"
+                      ? setQ1
+                      : it.key === "q2"
+                        ? setQ2
+                        : it.key === "q3"
+                          ? setQ3
+                          : setQ4;
+                  return (
+                    <ScoreItem
+                      key={it.key}
+                      title={it.title}
+                      sub={it.sub}
+                      maxLabel={`배점 ${it.max}`}
+                      choices={it.options}
+                      value={value}
+                      onChange={onChange}
+                    />
+                  );
+                })}
               </div>
             )}
 
@@ -908,6 +915,24 @@ function ApplicantDetailPanel({
               </span>
             ))}
           </div>
+          <dl className="mt-3 space-y-1.5 text-base md:text-lg">
+            <div className="flex gap-2">
+              <dt className="w-20 shrink-0 font-semibold text-ink-muted">
+                생년월일
+              </dt>
+              <dd className="min-w-0 break-words font-medium text-ink">
+                {fmtBirthWithAge(detail.birth_date)}
+              </dd>
+            </div>
+            <div className="flex gap-2">
+              <dt className="w-20 shrink-0 font-semibold text-ink-muted">
+                주소
+              </dt>
+              <dd className="min-w-0 break-words font-medium text-ink">
+                {detail.address?.trim() || "-"}
+              </dd>
+            </div>
+          </dl>
         </div>
       </div>
 

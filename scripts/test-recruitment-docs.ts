@@ -3,6 +3,7 @@
 //   실행: npx tsx scripts/test-recruitment-docs.ts
 import {
   buildErpWorkbook,
+  buildInterviewDetailWorkbook,
   buildFinalSummaryDoc,
   buildScreeningSummaryDoc,
   buildInterviewNoticeDoc,
@@ -206,6 +207,7 @@ async function run() {
     console.log(`\n[시나리오] ${label}`);
     try {
       const xlsx = await buildErpWorkbook(data);
+      const xlsx2 = await buildInterviewDetailWorkbook(data);
       const d1 = await buildFinalSummaryDoc(data);
       const d2 = await buildScreeningSummaryDoc(data);
       const d3 = await buildInterviewNoticeDoc(data, {
@@ -216,6 +218,7 @@ async function run() {
       const d4 = await buildFinalNoticeDoc(data);
       const results = [
         checkZip("ERP xlsx", xlsx),
+        checkZip("면접 세부평가 xlsx", xlsx2),
         checkZip("최종 총괄표 docx", d1),
         checkZip("서류 총괄표 docx", d2),
         checkZip("면접 공고 docx", d3),
@@ -223,7 +226,7 @@ async function run() {
       ];
       results.forEach((r) => (r ? pass++ : fail++));
     } catch (e) {
-      fail += 5;
+      fail += 6;
       console.log(`  ✗ throw: ${e instanceof Error ? e.stack : String(e)}`);
     }
   }

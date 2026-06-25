@@ -59,6 +59,12 @@ export default async function RecruitmentAdminPage({
               📥 ERP용 Excel 다운로드
             </a>
             <a
+              href={`/hr/recruitment/${slug}/interview-detail`}
+              className="inline-flex items-center gap-1 rounded-lg border border-brand-green bg-card px-3 py-1.5 text-xs font-semibold text-brand-green hover:bg-brand-green/10"
+            >
+              📊 심사위원별 세부평가 다운로드
+            </a>
+            <a
               href={`/hr/recruitment/${slug}/documents-zip`}
               className="inline-flex items-center gap-1 rounded-lg border border-brand-green bg-card px-3 py-1.5 text-xs font-semibold text-brand-green hover:bg-brand-green/10"
             >

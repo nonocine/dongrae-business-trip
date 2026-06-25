@@ -22,6 +22,7 @@ import { fmtKstDateTime } from "@/lib/datetime";
 import {
   SCREENING_ITEMS,
   SCREENING_GROUPS,
+  INTERVIEW_ITEMS,
   screeningItemMax,
 } from "@/lib/recruitmentScore";
 import {
@@ -162,6 +163,7 @@ export default function ScreeningDashboard({
           applicants={applicants}
           aggregated={aggregated}
           reviewers={reviewers}
+          scores={scores}
         />
       )}
 
@@ -1241,11 +1243,13 @@ function FinalSummaryView({
   applicants,
   aggregated,
   reviewers,
+  scores,
 }: {
   posting: AdminPosting;
   applicants: AdminApplicant[];
   aggregated: Map<string, Aggregate>;
   reviewers: { screening: string[]; interview: string[] };
+  scores: ScoreEntry[];
 }) {
   const ranked = useMemo(() => {
     return [...applicants].sort((a, b) => {
@@ -1256,7 +1260,14 @@ function FinalSummaryView({
   }, [applicants, aggregated]);
 
   return (
-    <section className={cardCls}>
+    <div className="space-y-5">
+      <InterviewDetailSection
+        slug={posting.slug}
+        ranked={ranked}
+        reviewers={reviewers.interview}
+        scores={scores}
+      />
+      <section className={cardCls}>
       <div className="flex flex-wrap items-center justify-between gap-2">
         <h3 className="text-sm font-semibold text-ink">
           최종 집계{" "}
@@ -1327,7 +1338,191 @@ function FinalSummaryView({
           </tbody>
         </table>
       </div>
+      </section>
+    </div>
+  );
+}
+
+// =====================================================================
+// 심사위원별 면접 세부평가 점수표 — 지원자별로 위원이 q1~q4 항목에 준 점수.
+//   * 데이터: recruitment_scores(stage='interview').scores jsonb (q1~q4).
+//   * 항목 정의·배점은 INTERVIEW_ITEMS(lib) 단일 기준. 위원 열 동적.
+//   * 행=항목(q1~q4)+합계, 열=심사위원(+항목별 평균). 다운로드는 동일 데이터의 xlsx.
+// =====================================================================
+function InterviewDetailSection({
+  slug,
+  ranked,
+  reviewers,
+  scores,
+}: {
+  slug: string;
+  ranked: AdminApplicant[];
+  reviewers: string[];
+  scores: ScoreEntry[];
+}) {
+  // 지원자 → (위원명 → 면접 채점) 빠른 조회용.
+  const byApp = useMemo(() => {
+    const m = new Map<string, Map<string, ScoreEntry>>();
+    for (const s of scores) {
+      if (s.stage !== "interview") continue;
+      const nm = s.reviewer_name.trim();
+      if (!nm) continue;
+      let inner = m.get(s.application_id);
+      if (!inner) {
+        inner = new Map();
+        m.set(s.application_id, inner);
+      }
+      inner.set(nm, s);
+    }
+    return m;
+  }, [scores]);
+
+  // 면접 점수가 한 건이라도 있는 지원자만(총점순 = ranked 순서 유지).
+  const targets = ranked.filter((a) => (byApp.get(a.application_id)?.size ?? 0) > 0);
+
+  return (
+    <section className={cardCls}>
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <h3 className="text-sm font-semibold text-ink">
+          심사위원별 세부평가 점수표{" "}
+          <span className="ml-1 text-xs font-medium text-ink-hint">
+            면접 항목별 · 위원별
+          </span>
+        </h3>
+        <a
+          href={`/hr/recruitment/${slug}/interview-detail`}
+          className="inline-flex items-center gap-1 rounded-lg border border-brand-green bg-card px-3 py-1.5 text-xs font-semibold text-brand-green hover:bg-brand-green/10"
+        >
+          📊 세부평가 Excel 다운로드
+        </a>
+      </div>
+
+      {reviewers.length === 0 || targets.length === 0 ? (
+        <p className="mt-3 rounded-lg border border-dashed border-line bg-surface p-6 text-center text-sm text-ink-muted">
+          아직 면접 채점 내역이 없습니다.
+        </p>
+      ) : (
+        <div className="mt-3 space-y-5">
+          {targets.map((a) => (
+            <InterviewDetailTable
+              key={a.application_id}
+              applicant={a}
+              reviewers={reviewers}
+              byReviewer={byApp.get(a.application_id)}
+            />
+          ))}
+        </div>
+      )}
     </section>
+  );
+}
+
+// 한 지원자의 위원×항목 점수 표. 행=항목(q1~q4)+합계, 열=위원(+평균).
+function InterviewDetailTable({
+  applicant,
+  reviewers,
+  byReviewer,
+}: {
+  applicant: AdminApplicant;
+  reviewers: string[];
+  byReviewer: Map<string, ScoreEntry> | undefined;
+}) {
+  // 위원의 한 항목 점수 — 미채점 "—", 불참 "불참", 그 외 점수(없으면 "—").
+  const itemCell = (entry: ScoreEntry | undefined, key: string): string => {
+    if (!entry) return "—";
+    if (entry.is_absent) return "불참";
+    const v = entry.scores[key];
+    return typeof v === "number" && Number.isFinite(v) ? String(v) : "—";
+  };
+  // 항목별 위원 평균(불참·미채점 제외). 없으면 "—".
+  const itemAvg = (key: string): string => {
+    const vals: number[] = [];
+    for (const nm of reviewers) {
+      const e = byReviewer?.get(nm);
+      if (!e || e.is_absent) continue;
+      const v = e.scores[key];
+      if (typeof v === "number" && Number.isFinite(v)) vals.push(v);
+    }
+    if (vals.length === 0) return "—";
+    return fmtScore(vals.reduce((x, y) => x + y, 0) / vals.length);
+  };
+  // 위원 총점 셀.
+  const totalCell = (entry: ScoreEntry | undefined): string => {
+    if (!entry) return "—";
+    if (entry.is_absent) return "불참";
+    return String(entry.total_score ?? 0);
+  };
+  // 면접 총점 평균(불참·미채점 제외).
+  const totalAvg = (): string => {
+    const vals: number[] = [];
+    for (const nm of reviewers) {
+      const e = byReviewer?.get(nm);
+      if (!e || e.is_absent || e.total_score == null) continue;
+      vals.push(Number(e.total_score));
+    }
+    if (vals.length === 0) return "—";
+    return fmtScore(vals.reduce((x, y) => x + y, 0) / vals.length);
+  };
+
+  return (
+    <div className="rounded-lg border border-line">
+      <div className="flex flex-wrap items-baseline justify-between gap-2 border-b border-line bg-surface px-3 py-2">
+        <span className="text-sm font-bold text-ink">{applicant.name}</span>
+        <span className="font-mono text-[11px] text-ink-muted">
+          {applicant.applicant_number}
+        </span>
+      </div>
+      <div className="overflow-x-auto">
+        <table className="min-w-full divide-y divide-line text-sm">
+          <thead className="bg-surface text-xs text-ink-muted">
+            <tr>
+              <th className="px-3 py-2 text-left font-medium">평가 항목</th>
+              {reviewers.map((nm) => (
+                <th
+                  key={nm}
+                  className="px-2 py-2 text-right font-medium text-brand-green"
+                >
+                  {nm}
+                </th>
+              ))}
+              <th className="px-3 py-2 text-right font-medium">평균</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-line">
+            {INTERVIEW_ITEMS.map((it) => (
+              <tr key={it.key} className="hover:bg-surface">
+                <td className="px-3 py-2 text-ink-body">
+                  {it.shortTitle}
+                  <span className="ml-1 text-[10px] text-ink-hint">
+                    (/{it.max})
+                  </span>
+                </td>
+                {reviewers.map((nm) => (
+                  <td
+                    key={nm}
+                    className="px-2 py-2 text-right text-brand-green"
+                  >
+                    {itemCell(byReviewer?.get(nm), it.key)}
+                  </td>
+                ))}
+                <td className="px-3 py-2 text-right text-ink-body">
+                  {itemAvg(it.key)}
+                </td>
+              </tr>
+            ))}
+            <tr className="bg-brand-green/5 font-semibold">
+              <td className="px-3 py-2 text-ink">합계 (/65)</td>
+              {reviewers.map((nm) => (
+                <td key={nm} className="px-2 py-2 text-right text-brand-green">
+                  {totalCell(byReviewer?.get(nm))}
+                </td>
+              ))}
+              <td className="px-3 py-2 text-right text-ink">{totalAvg()}</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
   );
 }
 

@@ -14,6 +14,7 @@ import {
   requireInterviewJudge,
   getInterviewJudgeContext,
 } from "@/app/hr/recruitment/[slug]/actions";
+import { INTERVIEW_ITEMS, INTERVIEW_MAX } from "@/lib/recruitmentScore";
 
 // =====================================================================
 // 면접 채점 — /recruitment/[slug]/interview
@@ -138,9 +139,6 @@ export async function listInterviewCandidates(
   });
 }
 
-const ALLOWED_Q1 = [20, 15, 10, 5];
-const ALLOWED_OTHER = [15, 12, 9, 6];
-
 export async function saveInterviewScore(
   formData: FormData
 ): Promise<{ ok: true } | { ok: false; message: string }> {
@@ -204,36 +202,25 @@ export async function saveInterviewScore(
 
     const isAbsent = String(formData.get("is_absent") ?? "") === "true";
 
-    let q1 = 0;
-    let q2 = 0;
-    let q3 = 0;
-    let q4 = 0;
+    // 항목 점수 — q1~q4 정의·배점·허용값은 INTERVIEW_ITEMS(lib) 단일 기준.
+    //   불참이면 모두 0. 그 외엔 정의된 보기 값(택1)만 허용.
+    const qvals: Record<string, number> = { q1: 0, q2: 0, q3: 0, q4: 0 };
     if (!isAbsent) {
-      q1 = Number(formData.get("q1") ?? NaN);
-      q2 = Number(formData.get("q2") ?? NaN);
-      q3 = Number(formData.get("q3") ?? NaN);
-      q4 = Number(formData.get("q4") ?? NaN);
-      if (!ALLOWED_Q1.includes(q1))
-        return {
-          ok: false,
-          message: "① 청소년활동 운영 항목의 점수가 유효하지 않습니다.",
-        };
-      if (!ALLOWED_OTHER.includes(q2))
-        return {
-          ok: false,
-          message: "② 교육자적 자질 항목의 점수가 유효하지 않습니다.",
-        };
-      if (!ALLOWED_OTHER.includes(q3))
-        return {
-          ok: false,
-          message: "③ 성실성 항목의 점수가 유효하지 않습니다.",
-        };
-      if (!ALLOWED_OTHER.includes(q4))
-        return {
-          ok: false,
-          message: "④ 적극성 항목의 점수가 유효하지 않습니다.",
-        };
+      for (const it of INTERVIEW_ITEMS) {
+        const v = Number(formData.get(it.key) ?? NaN);
+        if (!it.options.some((o) => o.value === v)) {
+          return {
+            ok: false,
+            message: `${it.title} 항목의 점수가 유효하지 않습니다.`,
+          };
+        }
+        qvals[it.key] = v;
+      }
     }
+    const q1 = qvals.q1;
+    const q2 = qvals.q2;
+    const q3 = qvals.q3;
+    const q4 = qvals.q4;
     const total = isAbsent ? 0 : q1 + q2 + q3 + q4;
     const memoRaw = String(formData.get("memo") ?? "").trim();
     const memo = memoRaw.length > 0 ? memoRaw : null;
@@ -255,7 +242,7 @@ export async function saveInterviewScore(
           signature_data_url: signature || null,
         },
         total_score: total,
-        max_score: 65,
+        max_score: INTERVIEW_MAX,
         is_absent: isAbsent,
         memo,
         submitted_at: new Date().toISOString(),
@@ -362,8 +349,8 @@ export async function getMyInterviewScore(
 // 2-D-6) 면접 지원서 상세 — 좌측 패널용
 //   * requireInterviewJudge 로 인증(외부위원 쿠키 OR 이 공고의 활성 내부위원)
 //     + 해당 공고 소속 확인.
-//   * supabaseAdmin(service_role)로 조회. 채점 화면이므로 연락처·이메일·
-//     주소·생년월일 등 민감정보는 반환하지 않습니다.
+//   * supabaseAdmin(service_role)로 조회. 심사위원은 채점 판단에 필요한
+//     생년월일·주소까지 볼 수 있습니다(연락처·이메일 등 그 외 민감정보 제외).
 // =====================================================================
 export type InterviewDoc = {
   key: string;
@@ -375,6 +362,8 @@ export type InterviewDoc = {
 export type InterviewApplicantDetail = {
   name: string;
   field: string;
+  birth_date: string | null;
+  address: string | null;
   photo_url: string | null; // 증명사진 signed URL(없으면 null)
   education: EmployeeEducation[];
   career: EmployeeCareer[];
@@ -441,7 +430,7 @@ export async function getInterviewApplicantDetail(
     const { data: appRow, error: aErr } = await supabaseAdmin
       .from("recruitment_applications")
       .select(
-        "id, posting_id, applicant:recruitment_applicants(name, photo_url, education, career, motivation, self_development, career_summary, philosophy, documents)"
+        "id, posting_id, applicant:recruitment_applicants(name, birth_date, address, photo_url, education, career, motivation, self_development, career_summary, philosophy, documents)"
       )
       .eq("id", appId)
       .maybeSingle();
@@ -502,6 +491,8 @@ export async function getInterviewApplicantDetail(
       detail: {
         name: String(applicant.name ?? ""),
         field,
+        birth_date: (applicant.birth_date as string | null) ?? null,
+        address: (applicant.address as string | null) ?? null,
         photo_url,
         education: parseEducationInput(jsonbToString(applicant.education)),
         career: parseCareerInput(jsonbToString(applicant.career)),

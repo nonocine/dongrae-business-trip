@@ -29,6 +29,7 @@ import {
   INTERVIEW_MAX,
   TOTAL_MAX,
   SCREENING_GROUPS,
+  INTERVIEW_ITEMS,
   STATUS_LABEL,
   fmtScore,
   avgScreeningGroup,
@@ -161,6 +162,127 @@ export async function buildErpWorkbook(data: ReportData): Promise<ArrayBuffer> {
     from: { row: 3, column: 1 },
     to: { row: 3, column: headers.length },
   };
+
+  return (await wb.xlsx.writeBuffer()) as ArrayBuffer;
+}
+
+// =====================================================================
+// [1-B] 심사위원별 면접 세부평가 점수표 xlsx.
+//   * 위원별로 q1~q4 항목 점수 + 합계를 묶어 보여줍니다(열 = 위원, 하위열 = 항목).
+//   * 항목 정의·배점은 INTERVIEW_ITEMS(lib) 단일 기준. 위원 수만큼 열 동적 생성.
+//   * 미채점 위원은 빈칸, 불참은 "불참". 마지막에 면접 평균(총점 평균) 열.
+// =====================================================================
+export async function buildInterviewDetailWorkbook(
+  data: ReportData
+): Promise<ArrayBuffer> {
+  const { posting, applicants, interviewReviewers } = data;
+
+  const wb = new ExcelJS.Workbook();
+  wb.creator = "동래구청소년센터 채용시스템";
+  const ws = wb.addWorksheet("면접 세부평가", {
+    views: [{ state: "frozen", xSplit: 3, ySplit: 4 }],
+  });
+
+  const items = INTERVIEW_ITEMS;
+  const perReviewer = items.length + 1; // q1..qN + 합계
+  const fixed = 3; // 순위·이름·접수번호
+  const totalCols = fixed + interviewReviewers.length * perReviewer + 1; // +면접평균
+  const lastCol = totalCols;
+
+  // 1행: 제목 / 2행: 부제(배점 안내) — 전체 폭 병합.
+  const titleRow = ws.addRow([`${posting.title} — 심사위원별 면접 세부평가 점수표`]);
+  titleRow.font = { bold: true, size: 14 };
+  ws.mergeCells(1, 1, 1, totalCols);
+  const scaleText = items.map((it) => `${it.shortTitle} ${it.max}`).join(" · ");
+  const subRow = ws.addRow([
+    `채용분야: ${posting.field || "-"}    면접위원 ${interviewReviewers.length}명    대상 ${applicants.length}명    (배점: ${scaleText} = ${INTERVIEW_MAX}점)`,
+  ]);
+  subRow.font = { size: 10, color: { argb: "FF666666" } };
+  ws.mergeCells(2, 1, 2, totalCols);
+
+  // 3행(그룹): 순위·이름·접수번호 + 위원명(항목 묶음 위) + 면접평균.
+  // 4행(항목): 위원별 q1~qN 축약 라벨 + 합계.
+  const group: (string | number)[] = new Array(totalCols).fill("");
+  const subHead: (string | number)[] = new Array(totalCols).fill("");
+  group[0] = "순위";
+  group[1] = "이름";
+  group[2] = "접수번호";
+  interviewReviewers.forEach((nm, ri) => {
+    const start = fixed + ri * perReviewer; // 0-based 배열 인덱스
+    group[start] = nm;
+    items.forEach((it, k) => {
+      subHead[start + k] = `${it.shortTitle}(${it.max})`;
+    });
+    subHead[start + items.length] = "합계";
+  });
+  group[lastCol - 1] = "면접 평균";
+
+  const groupRow = ws.addRow(group); // row 3
+  const subHeadRow = ws.addRow(subHead); // row 4
+
+  // 헤더 병합 — 고정열·면접평균은 3~4행 세로 병합, 위원명은 항목 묶음 가로 병합.
+  ws.mergeCells(3, 1, 4, 1);
+  ws.mergeCells(3, 2, 4, 2);
+  ws.mergeCells(3, 3, 4, 3);
+  interviewReviewers.forEach((_nm, ri) => {
+    const start = fixed + ri * perReviewer + 1; // 1-based 열
+    ws.mergeCells(3, start, 3, start + items.length); // 위원명 가로 병합(항목+합계)
+  });
+  ws.mergeCells(3, lastCol, 4, lastCol);
+
+  for (const row of [groupRow, subHeadRow]) {
+    row.eachCell((cell) => {
+      cell.font = { bold: true, color: { argb: "FFFFFFFF" } };
+      cell.fill = {
+        type: "pattern",
+        pattern: "solid",
+        fgColor: { argb: "FF1F3A5F" },
+      };
+      cell.alignment = { horizontal: "center", vertical: "middle" };
+      cell.border = { bottom: { style: "thin", color: { argb: "FFBBBBBB" } } };
+    });
+  }
+
+  // 본문 — applicants 는 이미 총점 내림차순(rank 부여됨).
+  for (const a of applicants) {
+    const cells: (string | number)[] = new Array(totalCols).fill("");
+    cells[0] = a.rank;
+    cells[1] = a.name;
+    cells[2] = a.applicant_number;
+    interviewReviewers.forEach((nm, ri) => {
+      const start = fixed + ri * perReviewer; // 0-based
+      const s = a.interviewByReviewer.get(nm);
+      if (!s) return; // 미채점 → 빈칸
+      if (s.is_absent) {
+        cells[start + items.length] = "불참";
+        return;
+      }
+      items.forEach((it, k) => {
+        const v = s.scores[it.key];
+        cells[start + k] = typeof v === "number" && Number.isFinite(v) ? v : "";
+      });
+      cells[start + items.length] = scoreCell(s.total);
+    });
+    cells[lastCol - 1] = scoreCell(a.interviewAvg);
+    const row = ws.addRow(cells);
+    row.alignment = { vertical: "middle" };
+    row.getCell(1).alignment = { horizontal: "center", vertical: "middle" };
+    // 위원별 합계·면접평균 강조.
+    interviewReviewers.forEach((_nm, ri) => {
+      const sumCol = fixed + ri * perReviewer + items.length + 1; // 1-based 합계열
+      row.getCell(sumCol).font = { bold: true };
+    });
+    row.getCell(lastCol).font = { bold: true };
+  }
+
+  // 열 너비 + 숫자열 가운데 정렬.
+  ws.getColumn(1).width = 6;
+  ws.getColumn(2).width = 11;
+  ws.getColumn(3).width = 14;
+  for (let c = fixed + 1; c <= totalCols; c++) {
+    ws.getColumn(c).width = 9;
+    ws.getColumn(c).alignment = { horizontal: "center", vertical: "middle" };
+  }
 
   return (await wb.xlsx.writeBuffer()) as ArrayBuffer;
 }

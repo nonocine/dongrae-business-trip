@@ -127,6 +127,79 @@ export function isValidScreeningValue(item: ScreeningItem, v: number): boolean {
   return item.options.some((o) => o.value === v);
 }
 
+// =====================================================================
+// 면접 채점 기준표 — 항목 4종(q1~q4), 총 65점. 보기 택1(미선택 없음).
+//   * recruitment_scores(stage='interview') 의 scores jsonb 키: q1, q2, q3, q4.
+//   * UI(InterviewFlow)·서버 검증(saveInterviewScore)·집계 표·문서 빌더가
+//     모두 이 한 곳을 진실로 삼습니다. (배점 20/15/15/15 = 65)
+//   * options 는 PDF 원본 면접 심사표 척도(매우적합/적합/양호/보통)와 동일.
+// =====================================================================
+export type InterviewOption = { label: string; value: number };
+
+export type InterviewItem = {
+  key: string; // scores jsonb 키 (q1~q4)
+  title: string; // 화면 표시용 전체 제목
+  shortTitle: string; // 표 헤더용 축약 제목
+  sub: string; // 세부 평가요소(부제)
+  max: number; // 배점(=options 중 최댓값)
+  options: InterviewOption[]; // 보기(택1)
+};
+
+const INTERVIEW_OPTIONS_20: InterviewOption[] = [
+  { label: "매우적합", value: 20 },
+  { label: "적합", value: 15 },
+  { label: "양호", value: 10 },
+  { label: "보통", value: 5 },
+];
+const INTERVIEW_OPTIONS_15: InterviewOption[] = [
+  { label: "매우적합", value: 15 },
+  { label: "적합", value: 12 },
+  { label: "양호", value: 9 },
+  { label: "보통", value: 6 },
+];
+
+export const INTERVIEW_ITEMS: InterviewItem[] = [
+  {
+    key: "q1",
+    title: "① 청소년활동 운영의 이해도 및 업무수행 능력",
+    shortTitle: "①운영이해도",
+    sub: "업무관련 지식 · 의사소통 능력 · 관계형성 능력 · 운영계획",
+    max: 20,
+    options: INTERVIEW_OPTIONS_20,
+  },
+  {
+    key: "q2",
+    title: "② 교육자적 자질과 인생·직업·사회관",
+    shortTitle: "②교육자적자질",
+    sub: "교육자적 소양 · 용모·표정·인상 · 사고방식·성품",
+    max: 15,
+    options: INTERVIEW_OPTIONS_15,
+  },
+  {
+    key: "q3",
+    title: "③ 성실성",
+    shortTitle: "③성실성",
+    sub: "근로의식 · 책임의식 · 성취욕구",
+    max: 15,
+    options: INTERVIEW_OPTIONS_15,
+  },
+  {
+    key: "q4",
+    title: "④ 업무에 대한 적극성",
+    shortTitle: "④적극성",
+    sub: "입사 후 목표 · 달성의지 · 고난극복 경험",
+    max: 15,
+    options: INTERVIEW_OPTIONS_15,
+  },
+];
+
+// 한 항목 값이 유효한지(정의된 보기 점수 중 하나). 면접은 미선택(0)을 허용하지
+// 않습니다(불참 처리는 별도 플래그). 저장 검증·UI 가 공유.
+export function isValidInterviewValue(item: InterviewItem, v: number): boolean {
+  if (!Number.isFinite(v)) return false;
+  return item.options.some((o) => o.value === v);
+}
+
 export type ReportStatus =
   | "draft"
   | "submitted"
