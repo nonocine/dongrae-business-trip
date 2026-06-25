@@ -65,6 +65,12 @@ export default async function RecruitmentAdminPage({
               📊 심사위원별 세부평가 다운로드
             </a>
             <a
+              href={`/hr/recruitment/${slug}/interview-result`}
+              className="inline-flex items-center gap-1 rounded-lg border border-navy bg-card px-3 py-1.5 text-xs font-semibold text-navy hover:bg-navy-soft"
+            >
+              📄 면접 결과 워드 다운로드
+            </a>
+            <a
               href={`/hr/recruitment/${slug}/documents-zip`}
               className="inline-flex items-center gap-1 rounded-lg border border-brand-green bg-card px-3 py-1.5 text-xs font-semibold text-brand-green hover:bg-brand-green/10"
             >

@@ -21,10 +21,12 @@ import {
   ShadingType,
   HeightRule,
   Header,
+  PageBreak,
   convertMillimetersToTwip,
 } from "docx";
 import {
   type ReportData,
+  type ReviewerScore,
   SCREENING_MAX,
   INTERVIEW_MAX,
   TOTAL_MAX,
@@ -44,7 +46,9 @@ import {
   maskName,
   kstDateLabel,
   DOC_FONT,
+  NAVY,
   GRAY,
+  CELL_BORDERS,
 } from "./recruitmentDocx";
 import { fmtKstDate, fmtKstDateTime } from "./datetime";
 
@@ -285,6 +289,465 @@ export async function buildInterviewDetailWorkbook(
   }
 
   return (await wb.xlsx.writeBuffer()) as ArrayBuffer;
+}
+
+// =====================================================================
+// [1-C] 면접전형 심사 결과 docx — 총괄표 + 개인별 심사표(견본 양식 동일).
+//   * 한 파일: (1) 2차 전형 심사 총괄표  →  PageBreak  →  (2) 지원자×위원 1장씩.
+//   * 점수의 진실은 recruitment_scores(stage='interview').scores jsonb(q1~q4),
+//     배점·항목 라벨은 INTERVIEW_ITEMS(lib) 단일 기준. 읽기 전용.
+//   * 견본 PDF 양식: 4색 머리막대 · 점수 구간표 · 위원별 확인란((인) 공란).
+// =====================================================================
+
+// 총괄표 항목 헤더 — 견본 문구(업무능력·직업관·성실성·적극성)를 q1~q4 순서로.
+//   (개인별 심사표는 INTERVIEW_ITEMS 라벨·세부 불릿을 그대로 사용)
+const INTERVIEW_SUMMARY_HEADERS = ["업무능력", "직업관", "성실성", "적극성"];
+
+// 견본 근사 4색(빨강·파랑·초록·노랑).
+const RESULT_STRIP_COLORS = ["C0392B", "2E5C9E", "5FA83C", "F1C40F"];
+
+// 숫자 → 표시 문자열(없으면 빈칸).
+function numText(v: unknown): string {
+  return typeof v === "number" && Number.isFinite(v) ? String(v) : "";
+}
+
+// DXA 폭 + rowSpan/columnSpan 지원 셀(헤더). half-point = pt*2.
+function irHeadCell(text: string, dxa: number): TableCell {
+  return new TableCell({
+    width: { size: dxa, type: WidthType.DXA },
+    shading: { type: ShadingType.CLEAR, color: "auto", fill: NAVY },
+    verticalAlign: VerticalAlign.CENTER,
+    borders: CELL_BORDERS,
+    margins: { top: 40, bottom: 40, left: 50, right: 50 },
+    children: [
+      new Paragraph({
+        alignment: AlignmentType.CENTER,
+        children: [
+          new TextRun({
+            text,
+            bold: true,
+            size: 18,
+            color: "FFFFFF",
+            font: DOC_FONT,
+          }),
+        ],
+      }),
+    ],
+  });
+}
+
+type IrCellOpts = {
+  dxa: number;
+  rowSpan?: number;
+  columnSpan?: number;
+  bold?: boolean;
+  align?: (typeof AlignmentType)[keyof typeof AlignmentType];
+  size?: number; // pt
+  fill?: string;
+  color?: string;
+};
+
+// 본문 셀(여러 문단 허용) — 표는 columnWidths + 셀 width(DXA) 둘 다 지정.
+function irCellBox(children: Paragraph[], opts: IrCellOpts): TableCell {
+  return new TableCell({
+    width: { size: opts.dxa, type: WidthType.DXA },
+    rowSpan: opts.rowSpan,
+    columnSpan: opts.columnSpan,
+    shading: opts.fill
+      ? { type: ShadingType.CLEAR, color: "auto", fill: opts.fill }
+      : undefined,
+    verticalAlign: VerticalAlign.CENTER,
+    borders: CELL_BORDERS,
+    margins: { top: 40, bottom: 40, left: 60, right: 60 },
+    children,
+  });
+}
+
+// 본문 셀(단일 텍스트).
+function irCell(text: string, opts: IrCellOpts): TableCell {
+  return irCellBox(
+    [
+      new Paragraph({
+        alignment: opts.align ?? AlignmentType.CENTER,
+        children: [
+          new TextRun({
+            text: text || "",
+            bold: opts.bold,
+            size: (opts.size ?? 10) * 2,
+            color: opts.color,
+            font: DOC_FONT,
+          }),
+        ],
+      }),
+    ],
+    opts
+  );
+}
+
+// 4색 머리막대 — 테두리 없는 4칸 표.
+function irColorStrip(): Table {
+  const none = { style: BorderStyle.NONE, size: 0, color: "FFFFFF" } as const;
+  return new Table({
+    width: { size: 100, type: WidthType.PERCENTAGE },
+    layout: TableLayoutType.FIXED,
+    borders: {
+      top: none,
+      bottom: none,
+      left: none,
+      right: none,
+      insideHorizontal: none,
+      insideVertical: none,
+    },
+    rows: [
+      new TableRow({
+        height: { value: 120, rule: HeightRule.ATLEAST },
+        children: RESULT_STRIP_COLORS.map(
+          (c) =>
+            new TableCell({
+              width: { size: 25, type: WidthType.PERCENTAGE },
+              shading: { type: ShadingType.CLEAR, color: "auto", fill: c },
+              borders: {
+                top: none,
+                bottom: none,
+                left: none,
+                right: none,
+              },
+              margins: { top: 0, bottom: 0, left: 0, right: 0 },
+              children: [
+                new Paragraph({ children: [new TextRun({ text: "", size: 2 })] }),
+              ],
+            })
+        ),
+      }),
+    ],
+  });
+}
+
+// 한 지원자의 면접 위원별 채점(가나다순 위원만, 채점 있는 것만).
+function interviewEntriesOf(
+  a: ReportData["applicants"][number],
+  interviewReviewers: string[]
+): { name: string; entry: ReviewerScore }[] {
+  const out: { name: string; entry: ReviewerScore }[] = [];
+  for (const nm of interviewReviewers) {
+    const e = a.interviewByReviewer.get(nm);
+    if (e) out.push({ name: nm, entry: e });
+  }
+  return out;
+}
+
+// 면접 평균 내림차순(동점 가나다순) — 면접 채점이 1건이라도 있는 지원자만.
+function rankByInterview(
+  applicants: ReportData["applicants"]
+): ReportData["applicants"] {
+  return [...applicants]
+    .filter((a) => a.interviewByReviewer.size > 0)
+    .sort((a, b) => {
+      const av = a.interviewAvg ?? -1;
+      const bv = b.interviewAvg ?? -1;
+      if (bv !== av) return bv - av;
+      return a.name.localeCompare(b.name, "ko");
+    });
+}
+
+export async function buildInterviewResultDocx(
+  data: ReportData,
+  opts: { interviewDate?: string } = {}
+): Promise<Buffer> {
+  const { posting, applicants, interviewReviewers } = data;
+  const interviewDate = (opts.interviewDate ?? "").trim();
+  const ranked = rankByInterview(applicants);
+
+  // ---- (1) 총괄표 ----------------------------------------------------
+  // 열: 번호·이름·면접위원 + q1~q4(견본 헤더) + 득점 + 합계 + 평균.
+  const colW = [600, 1100, 1100, 900, 900, 900, 900, 800, 900, 900];
+  const headLabels = [
+    "번호",
+    "이름",
+    "면접위원",
+    ...INTERVIEW_ITEMS.map(
+      (it, i) => `${INTERVIEW_SUMMARY_HEADERS[i] ?? it.shortTitle}(${it.max})`
+    ),
+    `득점(${INTERVIEW_MAX})`,
+    "합계",
+    "평균",
+  ];
+  const headerRow = new TableRow({
+    tableHeader: true,
+    children: headLabels.map((t, i) => irHeadCell(t, colW[i])),
+  });
+
+  const summaryRows: TableRow[] = [headerRow];
+  const absentNames: string[] = [];
+  let no = 1;
+  for (const a of ranked) {
+    const entries = interviewEntriesOf(a, interviewReviewers);
+    const nRows = entries.length;
+    // 합계 = 위원 득점 합(불참=0), 평균 = 합계 / 채점위원수(불참 포함).
+    const totals = entries.map((x) =>
+      x.entry.is_absent ? 0 : x.entry.total ?? 0
+    );
+    const sum = totals.reduce((p, c) => p + c, 0);
+    const avg = nRows > 0 ? sum / nRows : null;
+    // 전원 불참(no-show) 지원자 → 비고 집계.
+    if (nRows > 0 && entries.every((x) => x.entry.is_absent)) {
+      absentNames.push(a.name);
+    }
+
+    entries.forEach((x, ri) => {
+      const cells: TableCell[] = [];
+      if (ri === 0) {
+        cells.push(irCell(String(no), { dxa: colW[0], rowSpan: nRows }));
+        cells.push(
+          irCell(a.name, { dxa: colW[1], rowSpan: nRows, bold: true })
+        );
+      }
+      cells.push(irCell(x.name, { dxa: colW[2] }));
+      INTERVIEW_ITEMS.forEach((it, i) => {
+        const v = x.entry.is_absent ? "" : numText(x.entry.scores[it.key]);
+        cells.push(irCell(v, { dxa: colW[3 + i] }));
+      });
+      cells.push(
+        irCell(x.entry.is_absent ? "불참" : String(x.entry.total ?? 0), {
+          dxa: colW[7],
+          bold: true,
+        })
+      );
+      if (ri === 0) {
+        cells.push(
+          irCell(String(sum), { dxa: colW[8], rowSpan: nRows, bold: true })
+        );
+        cells.push(
+          irCell(fmtScore(avg), { dxa: colW[9], rowSpan: nRows, bold: true })
+        );
+      }
+      summaryRows.push(new TableRow({ children: cells }));
+    });
+    no++;
+  }
+
+  const summaryTable = new Table({
+    columnWidths: colW,
+    layout: TableLayoutType.FIXED,
+    rows: summaryRows,
+  });
+
+  // 면접전형 결과 1~3순위 문장.
+  const top3 = ranked
+    .slice(0, 3)
+    .map((a, i) => `${i + 1}순위 ${a.name}`)
+    .join(", ");
+  const reviewerLine =
+    interviewReviewers.length > 0 ? interviewReviewers.join(", ") : "-";
+
+  const summaryChildren: (Paragraph | Table)[] = [
+    docNumberPara(posting.slug, "면접전형 심사결과"),
+    titlePara("2차 전형(면접전형) 심사 총괄표"),
+    para(`○ 채용분야 : ${posting.field || "-"}`, {
+      size: 11,
+      spacing: { after: 40 },
+    }),
+    para(`○ 면접일자 : ${interviewDate || ""}`, {
+      size: 11,
+      spacing: { after: 40 },
+    }),
+    para(`○ 면접위원 : ${reviewerLine}`, {
+      size: 11,
+      spacing: { after: 40 },
+    }),
+    para(`○ 면접전형 결과 : ${top3 || "-"}`, {
+      bold: true,
+      size: 11,
+      spacing: { after: 160 },
+    }),
+  ];
+  if (ranked.length === 0) {
+    summaryChildren.push(
+      para("※ 면접 채점 내역이 없습니다.", {
+        size: 10,
+        color: GRAY,
+        spacing: { after: 120 },
+      })
+    );
+  } else {
+    summaryChildren.push(summaryTable);
+  }
+  if (absentNames.length > 0) {
+    summaryChildren.push(
+      para(`※ ${absentNames.join(", ")} 불참`, {
+        size: 10,
+        color: GRAY,
+        spacing: { before: 120 },
+      })
+    );
+  }
+
+  // ---- (2) 개인별 심사표 (지원자 × 위원) ------------------------------
+  const sheetChildren: (Paragraph | Table)[] = [];
+  for (const a of ranked) {
+    const entries = interviewEntriesOf(a, interviewReviewers);
+    for (const { name: reviewerName, entry } of entries) {
+      const absent = entry.is_absent;
+      const scoreLabel = absent
+        ? `불참 / ${INTERVIEW_MAX}점`
+        : `${entry.total ?? 0}점 / ${INTERVIEW_MAX}점`;
+
+      // 1. 지원자 표.
+      const infoW = [1500, 3100, 1600, 2800];
+      const infoTable = new Table({
+        columnWidths: infoW,
+        layout: TableLayoutType.FIXED,
+        rows: [
+          new TableRow({
+            children: [
+              irCell("성명", { dxa: infoW[0], bold: true, fill: "F2F4F7" }),
+              irCell(a.name, { dxa: infoW[1] }),
+              irCell("면접전형 점수", {
+                dxa: infoW[2],
+                bold: true,
+                fill: "F2F4F7",
+              }),
+              irCell(scoreLabel, { dxa: infoW[3], bold: true }),
+            ],
+          }),
+          new TableRow({
+            children: [
+              irCell("모집분야", { dxa: infoW[0], bold: true, fill: "F2F4F7" }),
+              irCell(posting.field || "-", {
+                dxa: infoW[1] + infoW[2] + infoW[3],
+                columnSpan: 3,
+                align: AlignmentType.LEFT,
+              }),
+            ],
+          }),
+        ],
+      });
+
+      // 2. 심사표 — 항목 | 평가 구간 | 점수.
+      const critW = [4500, 3300, 1200];
+      const critRows: TableRow[] = [
+        new TableRow({
+          tableHeader: true,
+          children: [
+            irHeadCell("심사항목 (점수 분류를 기준으로 자유롭게 배점)", critW[0]),
+            irHeadCell("평가 구간", critW[1]),
+            irHeadCell("점수", critW[2]),
+          ],
+        }),
+      ];
+      for (const it of INTERVIEW_ITEMS) {
+        const labelParas = [
+          new Paragraph({
+            alignment: AlignmentType.LEFT,
+            children: [
+              new TextRun({
+                text: `${it.title}  (배점 ${it.max}점)`,
+                bold: true,
+                size: 20,
+                font: DOC_FONT,
+              }),
+            ],
+          }),
+          new Paragraph({
+            alignment: AlignmentType.LEFT,
+            children: [
+              new TextRun({
+                text: it.sub,
+                size: 17,
+                color: GRAY,
+                font: DOC_FONT,
+              }),
+            ],
+          }),
+        ];
+        const rangeText = it.options
+          .map((o) => `${o.label} ${o.value}`)
+          .join("   ");
+        critRows.push(
+          new TableRow({
+            children: [
+              irCellBox(labelParas, { dxa: critW[0], align: AlignmentType.LEFT }),
+              irCell(rangeText, { dxa: critW[1], size: 9 }),
+              irCell(absent ? "불참" : numText(entry.scores[it.key]), {
+                dxa: critW[2],
+                bold: true,
+                size: 14,
+              }),
+            ],
+          })
+        );
+      }
+      // 합계 행.
+      critRows.push(
+        new TableRow({
+          children: [
+            irCell("합계", {
+              dxa: critW[0],
+              bold: true,
+              fill: "F2F4F7",
+              align: AlignmentType.LEFT,
+            }),
+            irCell(`/ ${INTERVIEW_MAX}점`, { dxa: critW[1], fill: "F2F4F7" }),
+            irCell(absent ? "불참" : String(entry.total ?? 0), {
+              dxa: critW[2],
+              bold: true,
+              size: 14,
+              fill: "F2F4F7",
+            }),
+          ],
+        })
+      );
+      const critTable = new Table({
+        columnWidths: critW,
+        layout: TableLayoutType.FIXED,
+        rows: critRows,
+      });
+
+      // 페이지 분리(앞 내용과 항상 분리) + 머리막대 + 제목 + 표 + 확인란.
+      sheetChildren.push(
+        new Paragraph({ children: [new PageBreak()] }),
+        irColorStrip(),
+        para("2차 전형(면접전형) 심사표", {
+          bold: true,
+          size: 18,
+          align: AlignmentType.CENTER,
+          color: NAVY,
+          spacing: { before: 120, after: 200 },
+        }),
+        para("1. 지원자", { bold: true, size: 12, spacing: { after: 80 } }),
+        infoTable,
+        para("2. 심사표", {
+          bold: true,
+          size: 12,
+          spacing: { before: 200, after: 80 },
+        }),
+        critTable,
+        para(
+          "본인은 심사를 함에 있어 사실에 근거하여 객관적이고 공정하게 심사하였음을 확인합니다.",
+          { size: 11, spacing: { before: 320, after: 160 } }
+        ),
+        para(interviewDate || "", {
+          size: 11,
+          align: AlignmentType.CENTER,
+          spacing: { after: 120 },
+        }),
+        para(`심사위원 성명 : ${reviewerName}          (인)`, {
+          size: 11,
+          align: AlignmentType.RIGHT,
+        })
+      );
+    }
+  }
+
+  const doc = new Document({
+    sections: [
+      {
+        children: [...summaryChildren, ...sheetChildren],
+      },
+    ],
+  });
+
+  return Packer.toBuffer(doc);
 }
 
 // =====================================================================

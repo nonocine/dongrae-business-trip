@@ -4,6 +4,7 @@
 import {
   buildErpWorkbook,
   buildInterviewDetailWorkbook,
+  buildInterviewResultDocx,
   buildFinalSummaryDoc,
   buildScreeningSummaryDoc,
   buildInterviewNoticeDoc,
@@ -179,6 +180,39 @@ const screeningOnly: ReportData = {
   ],
 };
 
+// 시나리오 4 — 전원 불참(no-show): 면접위원 2명이 모두 불참 처리.
+const allAbsent: ReportData = {
+  posting: {
+    id: "p4",
+    slug: "2026-absent",
+    title: "전원 불참 공고",
+    field: "청소년활동",
+    recruit_count: 1,
+    status: "published",
+    appointment_date: null,
+  },
+  screeningReviewers: ["관장"],
+  interviewReviewers: ["김외부", "이심사"],
+  applicants: [
+    applicant({
+      name: "노쇼",
+      applicant_number: "2026-2001",
+      status: "interview_failed",
+      screeningByReviewer: new Map([
+        ["관장", rs("관장", 30, { degree: 5, gpa: 3, youth_cert: 4, national_cert: 4, statement: 9, qualitative: 5 })],
+      ]),
+      interviewByReviewer: new Map([
+        ["김외부", rs("김외부", 0, { q1: 0, q2: 0, q3: 0, q4: 0 }, { is_absent: true })],
+        ["이심사", rs("이심사", 0, { q1: 0, q2: 0, q3: 0, q4: 0 }, { is_absent: true })],
+      ]),
+      screeningAvg: 30,
+      interviewAvg: 0,
+      total: 30,
+      rank: 1,
+    }),
+  ],
+};
+
 const SIG = [0x50, 0x4b, 0x03, 0x04]; // ZIP/OOXML 'PK\x03\x04'
 
 function checkZip(name: string, buf: ArrayBuffer | Buffer): boolean {
@@ -199,6 +233,7 @@ async function run() {
     ["정상(2x2,결석,혼합상태)", normal],
     ["빈 공고(0명)", empty],
     ["면접위원0+무점수자", screeningOnly],
+    ["전원 불참(no-show)", allAbsent],
   ];
   let pass = 0;
   let fail = 0;
@@ -208,6 +243,9 @@ async function run() {
     try {
       const xlsx = await buildErpWorkbook(data);
       const xlsx2 = await buildInterviewDetailWorkbook(data);
+      const dIv = await buildInterviewResultDocx(data, {
+        interviewDate: "2026. 6. 20.(금)",
+      });
       const d1 = await buildFinalSummaryDoc(data);
       const d2 = await buildScreeningSummaryDoc(data);
       const d3 = await buildInterviewNoticeDoc(data, {
@@ -219,6 +257,7 @@ async function run() {
       const results = [
         checkZip("ERP xlsx", xlsx),
         checkZip("면접 세부평가 xlsx", xlsx2),
+        checkZip("면접전형 심사결과 docx", dIv),
         checkZip("최종 총괄표 docx", d1),
         checkZip("서류 총괄표 docx", d2),
         checkZip("면접 공고 docx", d3),
@@ -226,7 +265,7 @@ async function run() {
       ];
       results.forEach((r) => (r ? pass++ : fail++));
     } catch (e) {
-      fail += 6;
+      fail += 7;
       console.log(`  ✗ throw: ${e instanceof Error ? e.stack : String(e)}`);
     }
   }
