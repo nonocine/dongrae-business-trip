@@ -9,6 +9,9 @@ import {
   getMyStampUrl,
   uploadMyStamp,
   deleteMyStamp,
+  uploadMyDocument,
+  deleteMyDocument,
+  getMyDocumentUrl,
 } from "@/app/profile/hr/actions";
 import SignaturePad from "@/app/components/SignaturePad";
 import {
@@ -38,6 +41,7 @@ import {
   AwardTab,
   TrainingTab,
   AppointmentTab,
+  EmployeeDocumentsSection,
   type ProfileTabKey,
 } from "@/app/hr/ProfileFormParts";
 import {
@@ -198,6 +202,16 @@ export default function MyEmployeeProfileForm({
       else setPhotoError(res.message);
     });
   }
+
+  // 첨부서류 — 본인(self) 서버액션을 콜백으로 주입(driver_id 는 세션에서 도출).
+  const onDocUpload = (docKey: string, file: File) => {
+    const fd = new FormData();
+    fd.set("doc_key", docKey);
+    fd.set("file", file);
+    return uploadMyDocument(fd);
+  };
+  const onDocDelete = (docKey: string) => deleteMyDocument(docKey);
+  const onDocOpen = (docKey: string) => getMyDocumentUrl(docKey);
 
   return (
     <div className="space-y-5">
@@ -604,6 +618,17 @@ export default function MyEmployeeProfileForm({
               appointments={appointments}
               onChange={setAppointments}
               readOnly={locked}
+            />
+          </div>
+
+          {/* 첨부서류 탭 */}
+          <div className={tab === "documents" ? "" : "hidden"}>
+            <EmployeeDocumentsSection
+              initialDocuments={profile?.documents ?? {}}
+              readOnly={locked}
+              onUpload={onDocUpload}
+              onDelete={onDocDelete}
+              onOpen={onDocOpen}
             />
           </div>
 

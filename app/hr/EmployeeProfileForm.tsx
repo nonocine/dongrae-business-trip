@@ -5,7 +5,16 @@ import {
   saveEmployeeProfile,
   deleteEmployeeProfile,
   getEmployeePhotoUrl,
+  uploadEmployeeDocument,
+  deleteEmployeeDocument,
+  getEmployeeDocumentUrl,
+  saveEmployeeAuthLevel,
 } from "@/app/hr/actions";
+import {
+  AUTH_LEVELS,
+  AUTH_LEVEL_LABELS,
+  normalizeAuthLevel,
+} from "@/lib/authLevels";
 import {
   parseResidentNumber,
   normalizeEducationList,
@@ -34,6 +43,7 @@ import {
   AwardTab,
   TrainingTab,
   AppointmentTab,
+  EmployeeDocumentsSection,
   type ProfileTabKey,
 } from "@/app/hr/ProfileFormParts";
 import {
@@ -70,10 +80,13 @@ function formatDocDate(profile: EmployeeProfile | null): string {
 export default function EmployeeProfileForm({
   driver,
   profile,
+  canManageAuth,
   onDeleted,
 }: {
   driver: Driver;
   profile: EmployeeProfile | null;
+  // 권한등급(auth_level) 변경 가능 여부 — 관장(최고권한)만 true.
+  canManageAuth: boolean;
   onDeleted: () => void;
 }) {
   const locked = profile?.is_locked === true;
@@ -83,6 +96,37 @@ export default function EmployeeProfileForm({
   const [ok, setOk] = useState<string | null>(null);
   const [pending, startTransition] = useTransition();
   const [deletePending, deleteTransition] = useTransition();
+
+  // 권한등급(auth_level) — 본 폼 저장과 독립적으로 별도 저장(관장만).
+  const [authLevel, setAuthLevel] = useState<string>(
+    () => normalizeAuthLevel(profile?.auth_level) ?? ""
+  );
+  const [authError, setAuthError] = useState<string | null>(null);
+  const [authOk, setAuthOk] = useState<string | null>(null);
+  const [authPending, authTransition] = useTransition();
+
+  function handleAuthSave() {
+    setAuthError(null);
+    setAuthOk(null);
+    authTransition(async () => {
+      const res = await saveEmployeeAuthLevel(driver.id, authLevel);
+      if (res.ok) setAuthOk("권한등급이 저장되었습니다.");
+      else setAuthError(res.message);
+    });
+  }
+
+  // 첨부서류 — HR 서버액션을 콜백으로 주입.
+  const onDocUpload = (docKey: string, file: File) => {
+    const fd = new FormData();
+    fd.set("driver_id", driver.id);
+    fd.set("doc_key", docKey);
+    fd.set("file", file);
+    return uploadEmployeeDocument(fd);
+  };
+  const onDocDelete = (docKey: string) =>
+    deleteEmployeeDocument(driver.id, docKey);
+  const onDocOpen = (docKey: string) =>
+    getEmployeeDocumentUrl(driver.id, docKey);
 
   // 주민번호는 제어 입력 — 입력 즉시 생년월일·성별을 재계산합니다.
   const [rrn, setRrn] = useState(profile?.resident_number ?? "");
@@ -364,6 +408,55 @@ export default function EmployeeProfileForm({
                 />
               </div>
             </div>
+
+            {/* 권한등급(auth_level) — 직급과 별개의 ERP 호환 시스템 권한. 관장만 변경. */}
+            <div className="mt-4 rounded-lg border border-line bg-card p-3">
+              <div className="flex items-center justify-between">
+                <label className={labelCls}>권한등급 (시스템 권한)</label>
+                {!canManageAuth && (
+                  <span className="text-[11px] text-ink-hint">
+                    관장만 변경 가능
+                  </span>
+                )}
+              </div>
+              <p className="mt-0.5 text-[11px] text-ink-hint">
+                직급(팀장·팀원)과 별개의 시스템 권한입니다. ERP 와 동일
+                코드(M0/M1/M3)를 사용합니다.
+              </p>
+              <div className="mt-2 flex items-center gap-2">
+                <select
+                  value={authLevel}
+                  onChange={(e) => setAuthLevel(e.target.value)}
+                  disabled={!canManageAuth}
+                  className={`!mt-0 max-w-xs ${
+                    canManageAuth
+                      ? `${baseInputCls} bg-card`
+                      : `${baseInputCls} cursor-not-allowed bg-surface text-ink-muted`
+                  }`}
+                >
+                  <option value="">미지정</option>
+                  {AUTH_LEVELS.map((lv) => (
+                    <option key={lv} value={lv}>
+                      {AUTH_LEVEL_LABELS[lv]}
+                    </option>
+                  ))}
+                </select>
+                {canManageAuth && (
+                  <button
+                    type="button"
+                    onClick={handleAuthSave}
+                    disabled={authPending}
+                    className="shrink-0 rounded-lg border border-navy bg-card px-3 py-2 text-xs font-semibold text-navy hover:bg-navy-soft disabled:opacity-60"
+                  >
+                    {authPending ? "저장 중…" : "권한 저장"}
+                  </button>
+                )}
+              </div>
+              {authError && (
+                <p className="mt-1 text-xs text-stamp">{authError}</p>
+              )}
+              {authOk && <p className="mt-1 text-xs text-success">{authOk}</p>}
+            </div>
           </div>
 
           {/* 학력 탭 */}
@@ -418,6 +511,17 @@ export default function EmployeeProfileForm({
               appointments={appointments}
               onChange={setAppointments}
               readOnly={locked}
+            />
+          </div>
+
+          {/* 첨부서류 탭 */}
+          <div className={tab === "documents" ? "" : "hidden"}>
+            <EmployeeDocumentsSection
+              initialDocuments={profile?.documents ?? {}}
+              readOnly={locked}
+              onUpload={onDocUpload}
+              onDelete={onDocDelete}
+              onOpen={onDocOpen}
             />
           </div>
 

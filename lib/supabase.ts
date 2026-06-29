@@ -543,6 +543,10 @@ export type EmployeeProfile = {
   trainings: EmployeeTraining[];
   appointments: EmployeeAppointment[];
   military_service: string | null;
+  // ERP 호환 권한등급(M0/M1/M3 등). 직급(drivers.rank)과 별개. 자유 text → 그대로 보존.
+  auth_level: string | null;
+  // 인사기록 첨부서류 { docKey: storagePath }. (lib/employeeDocs.ts 슬롯 기준)
+  documents: Record<string, string>;
   // 잠금(Phase C에서 사용) — 인사기록카드 확정 후 수정 방지
   is_locked: boolean;
   locked_at: string | null;
@@ -635,6 +639,17 @@ function toJsonbArray<T extends Record<string, unknown>>(v: unknown): T[] {
   return [];
 }
 
+// jsonb 의 { docKey: path } 매핑을 안전한 Record<string,string> 으로 보정합니다.
+//   값이 비문자열/빈문자열이면 버립니다. 배열/누락이면 빈 객체.
+export function normalizeDocMap(raw: unknown): Record<string, string> {
+  if (raw == null || typeof raw !== "object" || Array.isArray(raw)) return {};
+  const out: Record<string, string> = {};
+  for (const [k, v] of Object.entries(raw as Record<string, unknown>)) {
+    if (typeof v === "string" && v.trim().length > 0) out[k] = v;
+  }
+  return out;
+}
+
 export function normalizeEmployeeProfile(
   raw: Record<string, unknown>
 ): EmployeeProfile {
@@ -659,6 +674,8 @@ export function normalizeEmployeeProfile(
     trainings: toJsonbArray<EmployeeTraining>(raw.trainings),
     appointments: toJsonbArray<EmployeeAppointment>(raw.appointments),
     military_service: (raw.military_service as string | null) ?? null,
+    auth_level: (raw.auth_level as string | null) ?? null,
+    documents: normalizeDocMap(raw.documents),
     is_locked: raw.is_locked === true,
     locked_at: (raw.locked_at as string | null) ?? null,
     locked_by: (raw.locked_by as string | null) ?? null,

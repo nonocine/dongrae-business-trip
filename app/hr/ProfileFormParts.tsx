@@ -1,5 +1,6 @@
 "use client";
 
+import { useState } from "react";
 import {
   EDUCATION_DEGREES,
   FAMILY_RELATIONS,
@@ -12,7 +13,11 @@ import {
   type EmployeeTraining,
   type EmployeeAppointment,
 } from "@/lib/supabase";
+import { EMPLOYEE_DOC_SLOTS, type EmployeeDocItem } from "@/lib/employeeDocs";
 import { tabBarCls, tabNavCls, tabItemCls } from "@/lib/ui";
+
+// 서버액션 결과(공통) — { ok } 판별 유니온.
+type ActionResult = { ok: true } | { ok: false; message: string };
 
 // =====================================================================
 // 인사기록카드 탭 (편집 화면)
@@ -25,7 +30,8 @@ export type ProfileTabKey =
   | "career"
   | "award"
   | "training"
-  | "appointment";
+  | "appointment"
+  | "documents";
 
 export const PROFILE_TABS: { key: ProfileTabKey; label: string }[] = [
   { key: "basic", label: "기본정보" },
@@ -36,6 +42,7 @@ export const PROFILE_TABS: { key: ProfileTabKey; label: string }[] = [
   { key: "award", label: "수상" },
   { key: "training", label: "교육이수" },
   { key: "appointment", label: "인사발령" },
+  { key: "documents", label: "첨부서류" },
 ];
 
 export function ProfileTabs({
@@ -1045,5 +1052,202 @@ export function AppointmentTab({
         </ul>
       )}
     </div>
+  );
+}
+
+// =====================================================================
+// 첨부서류 탭 — 직원 인사기록 첨부서류 10종(EMPLOYEE_DOC_SLOTS).
+//   * HR 직원관리 폼과 직원 본인 마이페이지가 공유합니다.
+//   * 업로드/삭제/열람 동작은 콜백으로 주입 — HR/본인 각자의 서버액션을 연결.
+//   * 파일은 즉시 업로드(폼 저장과 무관). path 는 서버가 documents jsonb 에 보관.
+// =====================================================================
+export function EmployeeDocumentsSection({
+  initialDocuments,
+  readOnly,
+  onUpload,
+  onDelete,
+  onOpen,
+}: {
+  initialDocuments: Record<string, string>;
+  readOnly: boolean;
+  onUpload: (docKey: string, file: File) => Promise<ActionResult>;
+  onDelete: (docKey: string) => Promise<ActionResult>;
+  onOpen: (docKey: string) => Promise<string | null>;
+}) {
+  const [uploaded, setUploaded] = useState<Set<string>>(
+    () => new Set(Object.keys(initialDocuments))
+  );
+  const [busyKey, setBusyKey] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  function handleUpload(docKey: string, file: File) {
+    if (file.size > 16 * 1024 * 1024) {
+      setError("파일 용량은 16MB 이하여야 합니다.");
+      return;
+    }
+    setError(null);
+    setBusyKey(docKey);
+    onUpload(docKey, file)
+      .then((res) => {
+        if (res.ok) {
+          setUploaded((prev) => new Set(prev).add(docKey));
+        } else {
+          setError(res.message);
+        }
+      })
+      .catch((e: unknown) =>
+        setError(
+          e instanceof Error
+            ? `업로드 실패: ${e.message}`
+            : "업로드 중 오류가 발생했습니다."
+        )
+      )
+      .finally(() => setBusyKey(null));
+  }
+
+  function handleDelete(docKey: string) {
+    if (!confirm("첨부 파일을 삭제할까요?")) return;
+    setError(null);
+    setBusyKey(docKey);
+    onDelete(docKey)
+      .then((res) => {
+        if (res.ok) {
+          setUploaded((prev) => {
+            const next = new Set(prev);
+            next.delete(docKey);
+            return next;
+          });
+        } else {
+          setError(res.message);
+        }
+      })
+      .catch((e: unknown) =>
+        setError(
+          e instanceof Error
+            ? `삭제 실패: ${e.message}`
+            : "삭제 중 오류가 발생했습니다."
+        )
+      )
+      .finally(() => setBusyKey(null));
+  }
+
+  function handleOpen(docKey: string) {
+    setError(null);
+    setBusyKey(docKey);
+    onOpen(docKey)
+      .then((url) => {
+        if (url) window.open(url, "_blank", "noopener,noreferrer");
+        else setError("열람 URL을 발급하지 못했습니다.");
+      })
+      .catch(() => setError("열람 중 오류가 발생했습니다."))
+      .finally(() => setBusyKey(null));
+  }
+
+  return (
+    <div className="space-y-2">
+      <p className="text-xs text-ink-muted">
+        PDF · JPG · PNG · WEBP, 파일당 16MB 이하. 여러 장이면 1개 파일로 합쳐
+        첨부하세요.
+      </p>
+      <ul className="space-y-2">
+        {EMPLOYEE_DOC_SLOTS.map((doc) => (
+          <EmployeeDocRow
+            key={doc.key}
+            doc={doc}
+            uploaded={uploaded.has(doc.key)}
+            busy={busyKey === doc.key}
+            readOnly={readOnly}
+            onPick={(file) => handleUpload(doc.key, file)}
+            onOpen={() => handleOpen(doc.key)}
+            onDelete={() => handleDelete(doc.key)}
+          />
+        ))}
+      </ul>
+      {error && <p className="text-xs text-stamp">{error}</p>}
+    </div>
+  );
+}
+
+function EmployeeDocRow({
+  doc,
+  uploaded,
+  busy,
+  readOnly,
+  onPick,
+  onOpen,
+  onDelete,
+}: {
+  doc: EmployeeDocItem;
+  uploaded: boolean;
+  busy: boolean;
+  readOnly: boolean;
+  onPick: (file: File) => void;
+  onOpen: () => void;
+  onDelete: () => void;
+}) {
+  return (
+    <li className="rounded-lg border border-line bg-card p-3 shadow-sm">
+      <div className="flex items-center justify-between gap-2">
+        <div className="min-w-0">
+          <div className="flex items-center gap-1.5">
+            <span className="text-sm font-semibold text-ink">{doc.label}</span>
+            {doc.required ? (
+              <span className="rounded-full bg-stamp-soft px-1.5 py-0.5 text-[10px] font-semibold text-stamp">
+                필수
+              </span>
+            ) : (
+              <span className="rounded-full bg-surface px-1.5 py-0.5 text-[10px] font-semibold text-ink-muted">
+                선택
+              </span>
+            )}
+          </div>
+          <p className="mt-0.5 text-[11px] text-ink-hint">
+            {uploaded ? "업로드됨" : "파일을 선택해주세요"}
+          </p>
+        </div>
+        <div className="flex shrink-0 items-center gap-1.5">
+          {uploaded && (
+            <button
+              type="button"
+              onClick={onOpen}
+              disabled={busy}
+              className="rounded-lg border border-brand-blue bg-card px-2.5 py-1.5 text-xs font-semibold text-brand-blue hover:bg-brand-blue-soft disabled:opacity-60"
+            >
+              열기 ↗
+            </button>
+          )}
+          {!readOnly && (
+            <label
+              className={`cursor-pointer rounded-lg border border-navy bg-card px-3 py-1.5 text-xs font-semibold text-navy hover:bg-navy-soft ${
+                busy ? "pointer-events-none opacity-60" : ""
+              }`}
+            >
+              {busy ? "처리 중…" : uploaded ? "교체" : "업로드"}
+              <input
+                type="file"
+                accept="application/pdf,image/jpeg,image/png,image/webp"
+                className="sr-only"
+                disabled={busy}
+                onChange={(e) => {
+                  const f = e.target.files?.[0];
+                  e.target.value = "";
+                  if (f) onPick(f);
+                }}
+              />
+            </label>
+          )}
+          {!readOnly && uploaded && (
+            <button
+              type="button"
+              onClick={onDelete}
+              disabled={busy}
+              className="rounded-lg border border-stamp bg-card px-2.5 py-1.5 text-xs font-medium text-stamp hover:bg-stamp-soft disabled:opacity-60"
+            >
+              삭제
+            </button>
+          )}
+        </div>
+      </div>
+    </li>
   );
 }

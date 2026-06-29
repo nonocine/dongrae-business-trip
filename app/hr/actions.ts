@@ -16,6 +16,9 @@ import {
   parseTrainingInput,
   parseAppointmentInput,
   signHrDocument,
+  removeHrDocuments,
+  normalizeDocMap,
+  HR_DOCUMENTS_BUCKET,
   type HrAdminRank,
   type Driver,
   type EmployeeRank,
@@ -31,6 +34,8 @@ import {
   requiredMapFromDocuments,
   type RecruitmentDocItem,
 } from "@/lib/recruitmentDocs";
+import { isEmployeeDocKey } from "@/lib/employeeDocs";
+import { AUTH_LEVELS } from "@/lib/authLevels";
 
 // =====================================================================
 // 인사 모듈 권한 — drivers.rank IN ('관장', '부장') 인 직원 세션만 통과.
@@ -295,6 +300,234 @@ export async function getEmployeePhotoUrl(
   if (error || !data) return null;
   return signHrDocument(
     ((data as { photo_url?: unknown }).photo_url as string | null) ?? null
+  );
+}
+
+// =====================================================================
+// 인사기록 첨부서류 (employee_profiles.documents jsonb)
+//   * 채용 첨부서류(uploadApplicantDocument) 패턴을 직원용으로 복제.
+//   * 경로: employees/{driverId}/docs/{docKey}.{ext} (hr-documents Private 버킷)
+//   * DB 엔 path 만 저장(공개 URL 금지) — 열람은 signHrDocument 임시 URL.
+//   * 잠긴 카드는 수정 불가. 종류는 lib/employeeDocs.ts 의 EMPLOYEE_DOC_SLOTS.
+// =====================================================================
+const EMPLOYEE_DOC_EXT: Record<string, string> = {
+  "image/jpeg": "jpg",
+  "image/png": "png",
+  "image/webp": "webp",
+  "application/pdf": "pdf",
+};
+
+export async function uploadEmployeeDocument(
+  formData: FormData
+): Promise<
+  | { ok: true; docKey: string; signedUrl: string | null }
+  | { ok: false; message: string }
+> {
+  try {
+    await requireHrAdmin();
+    const driverId = String(formData.get("driver_id") ?? "").trim();
+    const docKey = String(formData.get("doc_key") ?? "").trim();
+    if (!driverId) return { ok: false, message: "직원이 지정되지 않았습니다." };
+    if (!docKey || !isEmployeeDocKey(docKey)) {
+      return { ok: false, message: "허용되지 않은 서류 종류입니다." };
+    }
+
+    const file = formData.get("file");
+    if (!(file instanceof File) || file.size === 0) {
+      return { ok: false, message: "업로드할 파일을 선택해주세요." };
+    }
+    if (file.size > 16 * 1024 * 1024) {
+      return { ok: false, message: "파일 용량은 16MB 이하여야 합니다." };
+    }
+    const ext = EMPLOYEE_DOC_EXT[file.type];
+    if (!ext) {
+      return {
+        ok: false,
+        message: "PDF, JPG, PNG, WEBP 형식만 업로드할 수 있습니다.",
+      };
+    }
+
+    // 잠금 확인 + 기존 path 확보(확장자 교체 시 옛 파일 정리).
+    const { data: prev, error: pErr } = await supabaseAdmin
+      .from("employee_profiles")
+      .select("documents, is_locked")
+      .eq("driver_id", driverId)
+      .maybeSingle();
+    if (pErr) throw new Error(pErr.message);
+    if (prev && (prev as { is_locked?: unknown }).is_locked === true) {
+      return {
+        ok: false,
+        message: "잠긴 인사기록카드입니다. 먼저 잠금을 해제하세요.",
+      };
+    }
+    const prevDocs = normalizeDocMap(
+      (prev as { documents?: unknown } | null)?.documents
+    );
+    const oldPath = prevDocs[docKey] ?? null;
+
+    const newPath = `employees/${driverId}/docs/${docKey}.${ext}`;
+    const { error: upErr } = await supabase.storage
+      .from(HR_DOCUMENTS_BUCKET)
+      .upload(newPath, file, { contentType: file.type, upsert: true });
+    if (upErr) return { ok: false, message: `업로드 실패: ${upErr.message}` };
+
+    const nextDocs = { ...prevDocs, [docKey]: newPath };
+    const { error: dbErr } = await supabaseAdmin
+      .from("employee_profiles")
+      .upsert(
+        {
+          driver_id: driverId,
+          documents: nextDocs,
+          updated_at: new Date().toISOString(),
+        },
+        { onConflict: "driver_id" }
+      );
+    if (dbErr) throw new Error(dbErr.message);
+
+    if (oldPath && oldPath !== newPath) {
+      await removeHrDocuments([oldPath]);
+    }
+
+    revalidatePath("/hr");
+    return { ok: true, docKey, signedUrl: await signHrDocument(newPath) };
+  } catch (e) {
+    return {
+      ok: false,
+      message:
+        e instanceof Error ? e.message : "업로드 중 오류가 발생했습니다.",
+    };
+  }
+}
+
+export async function deleteEmployeeDocument(
+  driverId: string,
+  docKey: string
+): Promise<{ ok: true } | { ok: false; message: string }> {
+  try {
+    await requireHrAdmin();
+    if (!driverId || !docKey) {
+      return { ok: false, message: "요청 정보가 누락되었습니다." };
+    }
+    const { data: prev, error: pErr } = await supabaseAdmin
+      .from("employee_profiles")
+      .select("documents, is_locked")
+      .eq("driver_id", driverId)
+      .maybeSingle();
+    if (pErr) throw new Error(pErr.message);
+    if (!prev) return { ok: true };
+    if ((prev as { is_locked?: unknown }).is_locked === true) {
+      return {
+        ok: false,
+        message: "잠긴 인사기록카드입니다. 먼저 잠금을 해제하세요.",
+      };
+    }
+    const prevDocs = normalizeDocMap(
+      (prev as { documents?: unknown }).documents
+    );
+    const oldPath = prevDocs[docKey] ?? null;
+    if (!oldPath) return { ok: true };
+    const nextDocs = { ...prevDocs };
+    delete nextDocs[docKey];
+
+    const { error: dbErr } = await supabaseAdmin
+      .from("employee_profiles")
+      .update({ documents: nextDocs, updated_at: new Date().toISOString() })
+      .eq("driver_id", driverId);
+    if (dbErr) throw new Error(dbErr.message);
+
+    await removeHrDocuments([oldPath]);
+    revalidatePath("/hr");
+    return { ok: true };
+  } catch (e) {
+    return {
+      ok: false,
+      message: e instanceof Error ? e.message : "삭제 중 오류가 발생했습니다.",
+    };
+  }
+}
+
+// 직원 첨부서류 임시 열람 URL — 1시간. HR 관리자만 호출 가능.
+export async function getEmployeeDocumentUrl(
+  driverId: string,
+  docKey: string
+): Promise<string | null> {
+  await requireHrAdmin();
+  if (!driverId || !docKey) return null;
+  const { data, error } = await supabaseAdmin
+    .from("employee_profiles")
+    .select("documents")
+    .eq("driver_id", driverId)
+    .maybeSingle();
+  if (error || !data) return null;
+  const docs = normalizeDocMap((data as { documents?: unknown }).documents);
+  return signHrDocument(docs[docKey] ?? null);
+}
+
+// =====================================================================
+// 권한등급(auth_level) — ERP 호환 시스템 권한.
+//   * 변경은 관장(최고권한)만 가능 — 부장이 M0 이라도 타인 권한 부여는 불가.
+//     requireHrAdmin 은 master 를 '관장' 으로 반환하므로 rank==='관장' 으로 게이트.
+//   * 빈 값이면 NULL(미지정), 그 외엔 허용 코드(M0/M1/M3)만 저장.
+// =====================================================================
+export async function saveEmployeeAuthLevel(
+  driverId: string,
+  authLevel: string
+): Promise<{ ok: true } | { ok: false; message: string }> {
+  try {
+    const { rank } = await requireHrAdmin();
+    if (rank !== "관장") {
+      return { ok: false, message: "권한등급 변경은 관장만 가능합니다." };
+    }
+    if (!driverId) return { ok: false, message: "직원이 지정되지 않았습니다." };
+
+    const trimmed = authLevel.trim();
+    const value =
+      trimmed.length === 0
+        ? null
+        : (AUTH_LEVELS as readonly string[]).includes(trimmed)
+          ? trimmed
+          : undefined;
+    if (value === undefined) {
+      return { ok: false, message: "허용되지 않은 권한등급입니다." };
+    }
+
+    const { error } = await supabaseAdmin
+      .from("employee_profiles")
+      .upsert(
+        {
+          driver_id: driverId,
+          auth_level: value,
+          updated_at: new Date().toISOString(),
+        },
+        { onConflict: "driver_id" }
+      );
+    if (error) throw new Error(error.message);
+
+    revalidatePath("/hr");
+    return { ok: true };
+  } catch (e) {
+    return {
+      ok: false,
+      message:
+        e instanceof Error ? e.message : "권한등급 저장 중 오류가 발생했습니다.",
+    };
+  }
+}
+
+// 직원 권한등급 조회 — 게이트 토대 헬퍼. HR 관리자만 호출 가능.
+export async function getEmployeeAuthLevel(
+  driverId: string
+): Promise<string | null> {
+  await requireHrAdmin();
+  if (!driverId) return null;
+  const { data, error } = await supabaseAdmin
+    .from("employee_profiles")
+    .select("auth_level")
+    .eq("driver_id", driverId)
+    .maybeSingle();
+  if (error || !data) return null;
+  return (
+    ((data as { auth_level?: unknown }).auth_level as string | null) ?? null
   );
 }
 

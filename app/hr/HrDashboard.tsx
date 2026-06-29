@@ -15,11 +15,13 @@ export default function HrDashboard({
   profiles,
   recruitmentPostings,
   initialTab = "records",
+  canManageAuth,
 }: {
   drivers: Driver[];
   profiles: EmployeeProfile[];
   recruitmentPostings: RecruitmentPostingAdmin[];
   initialTab?: TabKey;
+  canManageAuth: boolean;
 }) {
   const [tab, setTab] = useState<TabKey>(initialTab);
 
@@ -29,7 +31,11 @@ export default function HrDashboard({
       <Tabs current={tab} onChange={setTab} />
 
       {tab === "records" && (
-        <RecordsTab drivers={drivers} profiles={profiles} />
+        <RecordsTab
+          drivers={drivers}
+          profiles={profiles}
+          canManageAuth={canManageAuth}
+        />
       )}
       {tab === "contracts" && (
         <PlaceholderCard
@@ -145,9 +151,11 @@ function QuickAccess({ onTab }: { onTab: (t: TabKey) => void }) {
 function RecordsTab({
   drivers,
   profiles,
+  canManageAuth,
 }: {
   drivers: Driver[];
   profiles: EmployeeProfile[];
+  canManageAuth: boolean;
 }) {
   const [selectedId, setSelectedId] = useState("");
 
@@ -194,6 +202,7 @@ function RecordsTab({
               key={selectedDriver.id}
               driver={selectedDriver}
               profile={selectedProfile}
+              canManageAuth={canManageAuth}
               onDeleted={() => setSelectedId("")}
             />
           ) : (
