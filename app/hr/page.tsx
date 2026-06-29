@@ -8,6 +8,7 @@ import {
   listRecruitmentPostings,
 } from "@/app/hr/actions";
 import { enforcePasswordChange } from "@/app/actions";
+import { isM0Grant } from "@/lib/authLevels";
 
 export const dynamic = "force-dynamic";
 
@@ -26,9 +27,9 @@ export default async function HrPage({
   // 임시 비밀번호 사용자는 비번 변경 페이지로 강제 이동
   await enforcePasswordChange();
   // 관장·부장 직원 세션이 아니면 / 로 redirect.
-  //   rank 로 권한등급(auth_level) 변경 가능 여부 판정 — 관장(최고권한)만 가능.
-  const { rank } = await requireHrAdmin();
-  const canManageAuth = rank === "관장";
+  //   권한등급(auth_level) 변경 가능 여부 — M0(관장·부장·master) 공유.
+  const me = await requireHrAdmin();
+  const canManageAuth = isM0Grant({ rank: me.rank });
 
   const { tab } = await searchParams;
   const initialTab: TabKey = VALID_TABS.includes(tab as TabKey)

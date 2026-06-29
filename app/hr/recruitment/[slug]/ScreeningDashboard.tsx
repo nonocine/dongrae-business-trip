@@ -29,6 +29,7 @@ import {
   saveScreeningScore,
   saveScreeningRejectReason,
   updateApplicationStatus,
+  convertApplicantToEmployee,
   bulkAnonymizeApplicants,
   type AdminApplicant,
   type AdminPosting,
@@ -59,11 +60,14 @@ export default function ScreeningDashboard({
   applicants,
   scores,
   myReviewerName,
+  canManageAuth,
 }: {
   posting: AdminPosting;
   applicants: AdminApplicant[];
   scores: ScoreEntry[];
   myReviewerName: string;
+  // M0(관장·부장·master) 여부 — 합격자 직원 전환 버튼 노출 게이트.
+  canManageAuth: boolean;
 }) {
   const [tab, setTab] = useState<TabKey>("list");
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -164,6 +168,7 @@ export default function ScreeningDashboard({
           aggregated={aggregated}
           reviewers={reviewers}
           scores={scores}
+          canManageAuth={canManageAuth}
         />
       )}
 
@@ -1244,12 +1249,14 @@ function FinalSummaryView({
   aggregated,
   reviewers,
   scores,
+  canManageAuth,
 }: {
   posting: AdminPosting;
   applicants: AdminApplicant[];
   aggregated: Map<string, Aggregate>;
   reviewers: { screening: string[]; interview: string[] };
   scores: ScoreEntry[];
+  canManageAuth: boolean;
 }) {
   const ranked = useMemo(() => {
     return [...applicants].sort((a, b) => {
@@ -1332,6 +1339,7 @@ function FinalSummaryView({
                   interviewAvg={ag?.interviewAvg ?? null}
                   interviewCount={ag?.interviewCount ?? 0}
                   totalAvg={ag?.totalAvg ?? null}
+                  canManageAuth={canManageAuth}
                 />
               );
             })}
@@ -1538,6 +1546,7 @@ function FinalRow({
   interviewAvg,
   interviewCount,
   totalAvg,
+  canManageAuth,
 }: {
   rank: number;
   applicant: AdminApplicant;
@@ -1550,9 +1559,13 @@ function FinalRow({
   interviewAvg: number | null;
   interviewCount: number;
   totalAvg: number | null;
+  canManageAuth: boolean;
 }) {
   const [pending, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
+  const [converting, startConvert] = useTransition();
+
+  const converted = applicant.converted_to_employee_id != null;
 
   function setStatus(next: AppStatus) {
     const label =
@@ -1572,6 +1585,31 @@ function FinalRow({
           e instanceof Error
             ? `상태 변경 실패: ${e.message}`
             : "알 수 없는 오류가 발생했습니다."
+        );
+      }
+    });
+  }
+
+  function handleConvert() {
+    if (
+      !confirm(
+        `${applicant.name} 님을 직원으로 전환합니다.\n이메일은 전환 후 인사기록카드에서 입력하세요.`
+      )
+    )
+      return;
+    setError(null);
+    startConvert(async () => {
+      try {
+        const res = await convertApplicantToEmployee(
+          applicant.application_id
+        );
+        if (!res.ok) setError(res.message);
+        // 성공 시 revalidate 로 목록이 갱신되어 "전환됨" 배지로 바뀜.
+      } catch (e) {
+        setError(
+          e instanceof Error
+            ? `전환 실패: ${e.message}`
+            : "직원 전환 중 오류가 발생했습니다."
         );
       }
     });
@@ -1646,6 +1684,24 @@ function FinalRow({
           >
             최종 불합격
           </button>
+
+          {/* 직원 전환 — 최종합격자에게만. 전환됨이면 배지, M0만 버튼 노출. */}
+          {applicant.status === "final_passed" &&
+            (converted ? (
+              <span className="rounded-md border border-navy bg-navy-soft px-2 py-1 text-[11px] font-semibold text-navy">
+                ✓ 전환됨
+              </span>
+            ) : canManageAuth ? (
+              <button
+                type="button"
+                onClick={handleConvert}
+                disabled={converting}
+                className="rounded-md border border-navy bg-card px-2 py-1 text-[11px] font-semibold text-navy hover:bg-navy-soft disabled:opacity-60"
+              >
+                {converting ? "전환 중…" : "직원으로 전환"}
+              </button>
+            ) : null)}
+
           {error && <p className="text-[10px] text-stamp">{error}</p>}
         </div>
       </td>

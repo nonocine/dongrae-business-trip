@@ -35,7 +35,7 @@ import {
   type RecruitmentDocItem,
 } from "@/lib/recruitmentDocs";
 import { isEmployeeDocKey } from "@/lib/employeeDocs";
-import { AUTH_LEVELS } from "@/lib/authLevels";
+import { AUTH_LEVELS, isM0Grant } from "@/lib/authLevels";
 
 // =====================================================================
 // 인사 모듈 권한 — drivers.rank IN ('관장', '부장') 인 직원 세션만 통과.
@@ -465,8 +465,8 @@ export async function getEmployeeDocumentUrl(
 
 // =====================================================================
 // 권한등급(auth_level) — ERP 호환 시스템 권한.
-//   * 변경은 관장(최고권한)만 가능 — 부장이 M0 이라도 타인 권한 부여는 불가.
-//     requireHrAdmin 은 master 를 '관장' 으로 반환하므로 rank==='관장' 으로 게이트.
+//   * 변경은 M0(관장·부장·master) 공유 권한 — 셋 중 누구나 가능.
+//     requireHrAdmin 통과자(관장·부장·master) 가 곧 M0 이므로 isM0Grant 로 확인.
 //   * 빈 값이면 NULL(미지정), 그 외엔 허용 코드(M0/M1/M3)만 저장.
 // =====================================================================
 export async function saveEmployeeAuthLevel(
@@ -474,9 +474,9 @@ export async function saveEmployeeAuthLevel(
   authLevel: string
 ): Promise<{ ok: true } | { ok: false; message: string }> {
   try {
-    const { rank } = await requireHrAdmin();
-    if (rank !== "관장") {
-      return { ok: false, message: "권한등급 변경은 관장만 가능합니다." };
+    const me = await requireHrAdmin();
+    if (!isM0Grant({ rank: me.rank })) {
+      return { ok: false, message: "권한등급 변경은 관장·부장만 가능합니다." };
     }
     if (!driverId) return { ok: false, message: "직원이 지정되지 않았습니다." };
 

@@ -1,3 +1,5 @@
+import { MASTER_EMAIL } from "@/lib/googleAuth";
+
 // =====================================================================
 // 직원 권한등급(auth_level) — ERP 호환 시스템 권한 코드.
 //   * 직급(drivers.rank: 관장/부장/팀장/팀원)과는 별개의 "시스템 권한".
@@ -53,4 +55,23 @@ export function effectiveAuthLevel(
   authLevel: string | null | undefined
 ): AuthLevel {
   return normalizeAuthLevel(authLevel) ?? authLevelFromRank(rank);
+}
+
+// 최고권한(M0) 직급 — 관장·부장. (master 계정은 email 로 별도 판정)
+export const M0_RANKS = ["관장", "부장"] as const;
+
+// 최고권한(M0) 판정 — 관장·부장·master@onnainna.kr 3계정이 권한을 공유합니다.
+//   * 셋 중 하나라도 해당하면 M0: rank ∈ (관장,부장) OR email = master OR auth_level = 'M0'.
+//   * 권한 부여(권한등급 변경)·합격자 직원 전환 등 최고권한 동작의 단일 게이트.
+//   * 인자는 가진 정보만 넘기면 됩니다(없는 값은 생략/None).
+export function isM0Grant(input: {
+  rank?: string | null;
+  email?: string | null;
+  authLevel?: string | null;
+}): boolean {
+  const { rank, email, authLevel } = input;
+  if (rank && (M0_RANKS as readonly string[]).includes(rank)) return true;
+  if (email && email.trim().toLowerCase() === MASTER_EMAIL) return true;
+  if (normalizeAuthLevel(authLevel) === "M0") return true;
+  return false;
 }

@@ -8,6 +8,7 @@ import {
   removeHrDocuments,
   uploadStampImage,
   STAMP_IMAGE_MIME,
+  HR_DOCUMENTS_BUCKET,
   parseEducationInput,
   parseLicenseInput,
   parseCareerInput,
@@ -27,6 +28,8 @@ import {
 } from "@/lib/supabase";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
 import { requireHrAdmin } from "@/app/hr/actions";
+import { isEmployeeDocKey } from "@/lib/employeeDocs";
+import { isM0Grant } from "@/lib/authLevels";
 import {
   SCREENING_ITEMS,
   SCREENING_MAX,
@@ -101,6 +104,8 @@ export type AdminApplicant = {
   status: AppStatus;
   submitted_at: string | null;
   screening_reject_reason: string | null;
+  // 직원 전환 시 연결된 drivers.id (없으면 미전환). 전환 버튼/배지 분기에 사용.
+  converted_to_employee_id: string | null;
 };
 
 export type ScoreEntry = {
@@ -223,7 +228,7 @@ export async function listApplicantsForAdmin(
   const { data: apps, error: aErr } = await supabaseAdmin
     .from("recruitment_applications")
     .select(
-      "id, applicant_id, status, submitted_at, screening_reject_reason, applicant:recruitment_applicants(*)"
+      "id, applicant_id, status, submitted_at, screening_reject_reason, converted_to_employee_id, applicant:recruitment_applicants(*)"
     )
     .eq("posting_id", posting.id)
     // 임시저장(draft) 상태는 노출하지 않음 — 접수 완료된 지원서만.
@@ -291,6 +296,8 @@ export async function listApplicantsForAdmin(
       submitted_at: (r.submitted_at as string | null) ?? null,
       screening_reject_reason:
         (r.screening_reject_reason as string | null) ?? null,
+      converted_to_employee_id:
+        (r.converted_to_employee_id as string | null) ?? null,
     });
   }
   return result;
@@ -462,6 +469,171 @@ export async function updateApplicationStatus(
       ok: false,
       message:
         e instanceof Error ? e.message : "상태 변경 중 오류가 발생했습니다.",
+    };
+  }
+}
+
+// =====================================================================
+// 합격자 → 직원 전환
+//   * M0(관장·부장·master) 공유 권한만 실행. requireHrAdmin 통과자가 곧 M0.
+//   * final_passed(최종합격) + 미전환(converted_to_employee_id IS NULL) 만 대상.
+//   * drivers(계정) → employee_profiles(인사기록) 생성 후 전환 링크 기록.
+//   * 지원서 첨부서류 중 직원 서류와 동일 key(diploma/transcript/license/
+//     career_cert/award_cert)는 employees/{driverId}/docs/ 로 파일 복사 시도.
+//   * email 은 비워둠 — 출근 시점에 인사기록카드에서 입력(→ 구글 로그인 매칭).
+//   * 순서: drivers → 서류복사 → employee_profiles → 링크. 뒤 단계 실패 시 롤백.
+// =====================================================================
+export async function convertApplicantToEmployee(
+  applicationId: string
+): Promise<{ ok: true; driverId: string } | { ok: false; message: string }> {
+  try {
+    const me = await requireHrAdmin();
+    if (!isM0Grant({ rank: me.rank })) {
+      return { ok: false, message: "직원 전환은 관장·부장만 가능합니다." };
+    }
+    if (!applicationId) {
+      return { ok: false, message: "application_id가 누락되었습니다." };
+    }
+
+    // 1) application + applicant 조회.
+    const { data: appRow, error: appErr } = await supabaseAdmin
+      .from("recruitment_applications")
+      .select(
+        "id, posting_id, status, converted_to_employee_id, applicant:recruitment_applicants(*)"
+      )
+      .eq("id", applicationId)
+      .maybeSingle();
+    if (appErr) throw new Error(appErr.message);
+    if (!appRow) return { ok: false, message: "지원서를 찾을 수 없습니다." };
+    const a = appRow as Record<string, unknown>;
+    const applicant = a.applicant as Record<string, unknown> | null;
+    if (!applicant) {
+      return { ok: false, message: "지원자 정보를 찾을 수 없습니다." };
+    }
+
+    // 2) 상태·중복 전환 가드.
+    if (asAppStatus(a.status) !== "final_passed") {
+      return {
+        ok: false,
+        message: "최종합격 상태인 지원자만 직원으로 전환할 수 있습니다.",
+      };
+    }
+    if (a.converted_to_employee_id != null) {
+      return { ok: false, message: "이미 전환된 합격자입니다." };
+    }
+
+    const name = String(applicant.name ?? "").trim();
+    if (!name) {
+      return { ok: false, message: "지원자 이름이 없어 전환할 수 없습니다." };
+    }
+
+    // 3) drivers 새 계정 — 기본 직급 '팀원', 비번 없음(구글 로그인 전용), 재직.
+    const { data: drv, error: drvErr } = await supabaseAdmin
+      .from("drivers")
+      .insert({ name, rank: "팀원", password: null, is_active: true })
+      .select("id")
+      .single();
+    if (drvErr || !drv) {
+      const msg = drvErr?.message ?? "직원 계정 생성에 실패했습니다.";
+      if (/duplicate|unique/i.test(msg)) {
+        return {
+          ok: false,
+          message: `이미 같은 이름('${name}')의 직원이 있습니다. 동명이인은 전환 후 이름을 구분해 주세요.`,
+        };
+      }
+      return { ok: false, message: `직원 계정 생성 실패: ${msg}` };
+    }
+    const newDriverId = String((drv as { id: unknown }).id);
+
+    // 4) 첨부서류 복사 — 직원 서류와 동일 key 만, 가능한 것만(실패는 건너뜀).
+    const applicantDocs = normalizeDocuments(applicant.documents);
+    const employeeDocs: Record<string, string> = {};
+    for (const [key, oldPath] of Object.entries(applicantDocs)) {
+      if (!isEmployeeDocKey(key)) continue;
+      const dot = oldPath.lastIndexOf(".");
+      const ext = dot >= 0 ? oldPath.slice(dot + 1) : "";
+      const newPath = `employees/${newDriverId}/docs/${key}${
+        ext ? `.${ext}` : ""
+      }`;
+      const { error: copyErr } = await supabase.storage
+        .from(HR_DOCUMENTS_BUCKET)
+        .copy(oldPath, newPath);
+      if (!copyErr) employeeDocs[key] = newPath;
+    }
+
+    // 5) employee_profiles 생성 — 지원서 값 복사. 실패 시 driver·복사파일 롤백.
+    const genderMap: Record<string, "남" | "여"> = { M: "남", F: "여" };
+    const applicantGender = (applicant.gender as string | null) ?? null;
+    const profileRow = {
+      driver_id: newDriverId,
+      name_chinese: (applicant.name_hanja as string | null) ?? null,
+      resident_number: null,
+      gender: applicantGender ? genderMap[applicantGender] ?? null : null,
+      birth_date: (applicant.birth_date as string | null) ?? null,
+      address: (applicant.address as string | null) ?? null,
+      email: null, // 출근 시점에 인사기록카드에서 입력
+      phone: (applicant.phone as string | null) ?? null,
+      join_date: null, // 관리자가 첫 출근일로 입력
+      leave_date: null,
+      military_service: null,
+      education: applicant.education ?? [],
+      family: [],
+      licenses: applicant.licenses ?? [],
+      career: applicant.career ?? [],
+      awards: applicant.awards ?? [],
+      trainings: applicant.trainings ?? [],
+      appointments: [],
+      auth_level: null, // 기본 팀원 권한
+      documents: employeeDocs,
+      updated_at: new Date().toISOString(),
+    };
+    const { error: profErr } = await supabaseAdmin
+      .from("employee_profiles")
+      .insert(profileRow);
+    if (profErr) {
+      await supabaseAdmin.from("drivers").delete().eq("id", newDriverId);
+      const copied = Object.values(employeeDocs);
+      if (copied.length > 0) await removeHrDocuments(copied);
+      return { ok: false, message: `인사기록 생성 실패: ${profErr.message}` };
+    }
+
+    // 6) 전환 링크 기록 — 동시성 가드(아직 미전환인 경우만 갱신).
+    const { data: linked, error: linkErr } = await supabaseAdmin
+      .from("recruitment_applications")
+      .update({
+        converted_to_employee_id: newDriverId,
+        updated_at: new Date().toISOString(),
+      })
+      .eq("id", applicationId)
+      .is("converted_to_employee_id", null)
+      .select("id")
+      .maybeSingle();
+    if (linkErr || !linked) {
+      // 동시 전환 등으로 링크 실패 → 방금 만든 직원·인사기록·복사파일 롤백.
+      await supabaseAdmin
+        .from("employee_profiles")
+        .delete()
+        .eq("driver_id", newDriverId);
+      await supabaseAdmin.from("drivers").delete().eq("id", newDriverId);
+      const copied = Object.values(employeeDocs);
+      if (copied.length > 0) await removeHrDocuments(copied);
+      return {
+        ok: false,
+        message: linkErr
+          ? `전환 기록 실패: ${linkErr.message}`
+          : "이미 전환된 합격자입니다.",
+      };
+    }
+
+    const slug = await slugFromPostingId(String(a.posting_id ?? ""));
+    if (slug) revalidatePath(`/hr/recruitment/${slug}`);
+    revalidatePath("/hr");
+    return { ok: true, driverId: newDriverId };
+  } catch (e) {
+    return {
+      ok: false,
+      message:
+        e instanceof Error ? e.message : "직원 전환 중 오류가 발생했습니다.",
     };
   }
 }
