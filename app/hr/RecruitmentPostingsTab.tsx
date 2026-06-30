@@ -67,6 +67,7 @@ function docToggleCls(active: boolean): string {
 type EditingState =
   | { kind: "new" }
   | { kind: "edit"; posting: RecruitmentPostingAdmin }
+  | { kind: "duplicate"; source: RecruitmentPostingAdmin }
   | { kind: "none" };
 
 export default function RecruitmentPostingsTab({
@@ -127,6 +128,9 @@ export default function RecruitmentPostingsTab({
                   editing.kind === "edit" ? editing.posting.id : null
                 }
                 onEdit={() => setEditing({ kind: "edit", posting: p })}
+                onDuplicate={() =>
+                  setEditing({ kind: "duplicate", source: p })
+                }
               />
             ))}
           </ul>
@@ -135,8 +139,21 @@ export default function RecruitmentPostingsTab({
 
       {editing.kind !== "none" && (
         <PostingForm
-          key={editing.kind === "edit" ? editing.posting.id : "new"}
-          initial={editing.kind === "edit" ? editing.posting : null}
+          key={
+            editing.kind === "edit"
+              ? `edit-${editing.posting.id}`
+              : editing.kind === "duplicate"
+                ? `dup-${editing.source.id}`
+                : "new"
+          }
+          mode={editing.kind}
+          initial={
+            editing.kind === "edit"
+              ? editing.posting
+              : editing.kind === "duplicate"
+                ? editing.source
+                : null
+          }
           onCancel={() => setEditing({ kind: "none" })}
           onSaved={() => setEditing({ kind: "none" })}
         />
@@ -152,10 +169,12 @@ function PostingRow({
   posting,
   editingId,
   onEdit,
+  onDuplicate,
 }: {
   posting: RecruitmentPostingAdmin;
   editingId: string | null;
   onEdit: () => void;
+  onDuplicate: () => void;
 }) {
   const [deleting, deleteTransition] = useTransition();
   const [toggling, toggleTransition] = useTransition();
@@ -289,6 +308,13 @@ function PostingRow({
           </button>
           <button
             type="button"
+            onClick={onDuplicate}
+            className="inline-flex grow items-center justify-center rounded-md border border-brand-blue bg-card px-2.5 py-1.5 text-xs font-semibold text-brand-blue hover:bg-brand-blue-soft sm:grow-0 sm:py-1"
+          >
+            복제하여 새 공고
+          </button>
+          <button
+            type="button"
             onClick={handleToggle}
             disabled={toggling}
             className={`inline-flex grow items-center justify-center rounded-md border bg-card px-2.5 py-1.5 text-xs font-semibold disabled:opacity-60 sm:grow-0 sm:py-1 ${
@@ -323,14 +349,20 @@ function PostingRow({
 // =====================================================================
 function PostingForm({
   initial,
+  mode,
   onCancel,
   onSaved,
 }: {
   initial: RecruitmentPostingAdmin | null;
+  mode: "new" | "edit" | "duplicate";
   onCancel: () => void;
   onSaved: () => void;
 }) {
-  const [slug, setSlug] = useState(initial?.slug ?? "");
+  const isEdit = mode === "edit";
+  const isDuplicate = mode === "duplicate";
+  // 복제: source 의 모든 값을 프리필하되 slug 는 비우고(unique 충돌 회피),
+  //   status 는 draft 로, id 는 넘기지 않는다(insert → 새 공고 생성).
+  const [slug, setSlug] = useState(isEdit ? (initial?.slug ?? "") : "");
   const [title, setTitle] = useState(initial?.title ?? "");
   const [field, setField] = useState(initial?.field ?? "");
   const [recruitCount, setRecruitCount] = useState(
@@ -378,7 +410,9 @@ function PostingForm({
   const [appointmentDate, setAppointmentDate] = useState(
     initial?.appointment_date ?? ""
   );
-  const [published, setPublished] = useState(initial?.status === "published");
+  const [published, setPublished] = useState(
+    isEdit && initial?.status === "published"
+  );
   // 제출 서류 5종 필수/선택 — 기존 공고는 저장된 required_documents 값,
   //   신규는 슬롯 기본값(졸업·성적·자격증=필수, 경력·수상=선택).
   const [docRequired, setDocRequired] = useState<Record<string, boolean>>(() =>
@@ -395,7 +429,8 @@ function PostingForm({
     startTransition(async () => {
       try {
         const fd = new FormData();
-        if (initial?.id) fd.set("id", initial.id);
+        // 편집일 때만 id 를 넘긴다 — 복제/신규는 id 없이 insert(원본 보존).
+        if (isEdit && initial?.id) fd.set("id", initial.id);
         fd.set("slug", slug);
         fd.set("title", title);
         fd.set("field", field);
@@ -432,7 +467,7 @@ function PostingForm({
         const res = await saveRecruitmentPosting(fd);
         if (res.ok) {
           setOk(
-            initial ? "수정되었습니다." : `공고가 등록되었습니다. (/${res.slug})`
+            isEdit ? "수정되었습니다." : `공고가 등록되었습니다. (/${res.slug})`
           );
           // 약간 텀을 두고 폼을 닫아 결과 메시지를 보여줌.
           setTimeout(onSaved, 600);
@@ -453,12 +488,24 @@ function PostingForm({
     <section className={cardCls}>
       <div className="flex items-center justify-between gap-2 border-b border-line pb-3">
         <h3 className="text-sm font-semibold text-ink">
-          {initial ? "공고 편집" : "새 공고 작성"}
+          {isEdit
+            ? "공고 편집"
+            : isDuplicate
+              ? "공고 복제 — 새 공고 작성"
+              : "새 공고 작성"}
         </h3>
         <button type="button" onClick={onCancel} className={btnSecondary}>
           취소
         </button>
       </div>
+
+      {isDuplicate && (
+        <p className="mt-3 rounded-lg border border-brand-blue-soft bg-brand-blue-soft/40 px-3 py-2 text-xs text-navy">
+          기존 공고의 내용을 모두 불러왔습니다. <b>공고 URL(slug)</b>을 새로
+          입력하고, 제목·기간 등 바뀐 항목만 수정한 뒤 등록하세요. 원본 공고는
+          그대로 보존됩니다.
+        </p>
+      )}
 
       <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-2 sm:gap-4">
         <div className="sm:col-span-2">
@@ -780,7 +827,7 @@ function PostingForm({
           disabled={pending}
           className={btnPrimary}
         >
-          {pending ? "저장 중…" : initial ? "수정 저장" : "공고 등록"}
+          {pending ? "저장 중…" : isEdit ? "수정 저장" : "공고 등록"}
         </button>
       </div>
     </section>
