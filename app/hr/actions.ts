@@ -36,6 +36,8 @@ import {
 } from "@/lib/recruitmentDocs";
 import { isEmployeeDocKey } from "@/lib/employeeDocs";
 import { AUTH_LEVELS, isM0Grant } from "@/lib/authLevels";
+import { isEmployeeRoleKey } from "@/lib/employeeRoles";
+import { listRolesForDriver } from "@/lib/employeeRolesServer";
 
 // =====================================================================
 // 인사 모듈 권한 — drivers.rank IN ('관장', '부장') 인 직원 세션만 통과.
@@ -529,6 +531,67 @@ export async function getEmployeeAuthLevel(
   return (
     ((data as { auth_level?: unknown }).auth_level as string | null) ?? null
   );
+}
+
+// =====================================================================
+// 직원 직무(employee_roles) — 다중 직무 부여/해제.
+//   * 조회는 HR 관리자, 변경은 M0(관장·부장·master) 공유 권한만.
+//   * EMPLOYEE_ROLES 에 정의된 key 만 허용. 직무 0개도 정상(일반 직원).
+//   * employee_roles 는 service_role 경유(supabaseAdmin) — listRolesForDriver 재사용.
+// =====================================================================
+export async function getEmployeeRoles(driverId: string): Promise<string[]> {
+  await requireHrAdmin();
+  if (!driverId) return [];
+  return listRolesForDriver(driverId);
+}
+
+export async function setEmployeeRoles(
+  driverId: string,
+  roleKeys: string[]
+): Promise<{ ok: true } | { ok: false; message: string }> {
+  try {
+    const me = await requireHrAdmin();
+    if (!isM0Grant({ rank: me.rank })) {
+      return { ok: false, message: "직무 변경은 관장·부장만 가능합니다." };
+    }
+    if (!driverId) return { ok: false, message: "직원이 지정되지 않았습니다." };
+
+    // 허용 key 검증 — 정의되지 않은 직무가 섞여 있으면 거부.
+    const wanted = Array.from(new Set(roleKeys ?? []));
+    if (wanted.some((k) => !isEmployeeRoleKey(k))) {
+      return { ok: false, message: "허용되지 않은 직무가 포함되어 있습니다." };
+    }
+
+    // 현재 부여된 직무와 비교해 추가/삭제분만 반영.
+    const current = await listRolesForDriver(driverId);
+    const toAdd = wanted.filter((k) => !current.includes(k));
+    const toRemove = current.filter((k) => !wanted.includes(k));
+
+    if (toAdd.length > 0) {
+      const rows = toAdd.map((role_key) => ({ driver_id: driverId, role_key }));
+      const { error: insErr } = await supabaseAdmin
+        .from("employee_roles")
+        .insert(rows);
+      if (insErr) throw new Error(insErr.message);
+    }
+    if (toRemove.length > 0) {
+      const { error: delErr } = await supabaseAdmin
+        .from("employee_roles")
+        .delete()
+        .eq("driver_id", driverId)
+        .in("role_key", toRemove);
+      if (delErr) throw new Error(delErr.message);
+    }
+
+    revalidatePath("/hr");
+    return { ok: true };
+  } catch (e) {
+    return {
+      ok: false,
+      message:
+        e instanceof Error ? e.message : "직무 저장 중 오류가 발생했습니다.",
+    };
+  }
 }
 
 // =====================================================================

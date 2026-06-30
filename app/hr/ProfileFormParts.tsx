@@ -14,6 +14,7 @@ import {
   type EmployeeAppointment,
 } from "@/lib/supabase";
 import { EMPLOYEE_DOC_SLOTS, type EmployeeDocItem } from "@/lib/employeeDocs";
+import { EMPLOYEE_ROLES } from "@/lib/employeeRoles";
 import { tabBarCls, tabNavCls, tabItemCls } from "@/lib/ui";
 
 // 서버액션 결과(공통) — { ok } 판별 유니온.
@@ -1249,5 +1250,120 @@ function EmployeeDocRow({
         </div>
       </div>
     </li>
+  );
+}
+
+// =====================================================================
+// 담당 직무 섹션 — 직원에게 부여된 직무(EMPLOYEE_ROLES) 다중 선택.
+//   * HR 직원관리 폼: 편집 가능(M0). 저장 시 onSave(roleKeys) 호출.
+//   * 직원 본인 마이페이지: readOnly(열람만, onSave 없음).
+//   * 권한등급 박스와 동일한 톤. 0개 선택도 정상.
+// =====================================================================
+export function EmployeeRolesSection({
+  initialRoles,
+  readOnly,
+  onSave,
+}: {
+  initialRoles: string[];
+  readOnly: boolean;
+  onSave?: (roleKeys: string[]) => Promise<ActionResult>;
+}) {
+  const [selected, setSelected] = useState<Set<string>>(
+    () => new Set(initialRoles)
+  );
+  const [pending, setPending] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [ok, setOk] = useState<string | null>(null);
+
+  function toggle(key: string) {
+    setOk(null);
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
+  }
+
+  function handleSave() {
+    if (!onSave) return;
+    setError(null);
+    setOk(null);
+    setPending(true);
+    onSave([...selected])
+      .then((res) => {
+        if (res.ok) setOk("담당 직무가 저장되었습니다.");
+        else setError(res.message);
+      })
+      .catch((e: unknown) =>
+        setError(
+          e instanceof Error ? e.message : "직무 저장 중 오류가 발생했습니다."
+        )
+      )
+      .finally(() => setPending(false));
+  }
+
+  return (
+    <div className="mt-4 rounded-lg border border-line bg-card p-3">
+      <div className="flex items-center justify-between">
+        <span className="block text-xs font-bold text-navy">담당 직무</span>
+        {readOnly && (
+          <span className="text-[11px] text-ink-hint">M0만 변경 가능</span>
+        )}
+      </div>
+      <p className="mt-0.5 text-[11px] text-ink-hint">
+        대시보드 메뉴·기능 접근의 기준이 됩니다. 여러 개 선택할 수 있습니다.
+      </p>
+      <div className="mt-2 grid grid-cols-1 gap-1.5 sm:grid-cols-2">
+        {EMPLOYEE_ROLES.map((r) => {
+          const on = selected.has(r.key);
+          return (
+            <label
+              key={r.key}
+              className={`flex items-start gap-2 rounded-md border px-2.5 py-2 ${
+                on ? "border-navy bg-navy-soft" : "border-line bg-card"
+              } ${readOnly ? "cursor-default" : "cursor-pointer"}`}
+            >
+              <input
+                type="checkbox"
+                checked={on}
+                disabled={readOnly}
+                onChange={() => {
+                  if (!readOnly) toggle(r.key);
+                }}
+                className="mt-0.5 h-3.5 w-3.5 rounded border-line text-navy focus:ring-navy disabled:opacity-60"
+              />
+              <span className="min-w-0">
+                <span className="block text-xs font-semibold text-ink">
+                  {r.label}
+                </span>
+                <span className="mt-0.5 block text-[11px] text-ink-hint">
+                  {r.description}
+                </span>
+              </span>
+            </label>
+          );
+        })}
+      </div>
+      {readOnly && selected.size === 0 && (
+        <p className="mt-2 text-[11px] text-ink-hint">
+          지정된 담당 직무가 없습니다.
+        </p>
+      )}
+      {!readOnly && onSave && (
+        <div className="mt-2 flex flex-wrap items-center gap-2">
+          <button
+            type="button"
+            onClick={handleSave}
+            disabled={pending}
+            className="shrink-0 rounded-lg border border-navy bg-card px-3 py-2 text-xs font-semibold text-navy hover:bg-navy-soft disabled:opacity-60"
+          >
+            {pending ? "저장 중…" : "직무 저장"}
+          </button>
+          {error && <span className="text-xs text-stamp">{error}</span>}
+          {ok && <span className="text-xs text-success">{ok}</span>}
+        </div>
+      )}
+    </div>
   );
 }

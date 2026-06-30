@@ -9,6 +9,8 @@ import {
   deleteEmployeeDocument,
   getEmployeeDocumentUrl,
   saveEmployeeAuthLevel,
+  getEmployeeRoles,
+  setEmployeeRoles,
 } from "@/app/hr/actions";
 import {
   AUTH_LEVELS,
@@ -44,6 +46,7 @@ import {
   TrainingTab,
   AppointmentTab,
   EmployeeDocumentsSection,
+  EmployeeRolesSection,
   type ProfileTabKey,
 } from "@/app/hr/ProfileFormParts";
 import {
@@ -114,6 +117,18 @@ export default function EmployeeProfileForm({
       else setAuthError(res.message);
     });
   }
+
+  // 담당 직무 — 마운트 시 로드(null=로딩중). 저장은 M0만(canManageAuth).
+  const [roles, setRoles] = useState<string[] | null>(null);
+  useEffect(() => {
+    let alive = true;
+    getEmployeeRoles(driver.id).then((r) => {
+      if (alive) setRoles(r);
+    });
+    return () => {
+      alive = false;
+    };
+  }, [driver.id]);
 
   // 첨부서류 — HR 서버액션을 콜백으로 주입.
   const onDocUpload = (docKey: string, file: File) => {
@@ -457,6 +472,19 @@ export default function EmployeeProfileForm({
               )}
               {authOk && <p className="mt-1 text-xs text-success">{authOk}</p>}
             </div>
+
+            {/* 담당 직무 — M0만 편집, 그 외 읽기전용 */}
+            {roles !== null && (
+              <EmployeeRolesSection
+                initialRoles={roles}
+                readOnly={!canManageAuth}
+                onSave={
+                  canManageAuth
+                    ? (keys) => setEmployeeRoles(driver.id, keys)
+                    : undefined
+                }
+              />
+            )}
           </div>
 
           {/* 학력 탭 */}

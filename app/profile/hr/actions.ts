@@ -27,6 +27,7 @@ import {
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
 import { decodeDataUrl } from "@/lib/recruitmentApplicantDocData";
 import { isEmployeeDocKey } from "@/lib/employeeDocs";
+import { listRolesForDriver } from "@/lib/employeeRolesServer";
 
 // 세션의 직원 이름으로 drivers row 를 조회합니다.
 // 타 직원 카드 접근을 막기 위해 driver_id 는 항상 세션에서만 도출합니다.
@@ -527,4 +528,11 @@ export async function getMyDocumentUrl(
   if (error || !data) return null;
   const docs = normalizeDocMap((data as { documents?: unknown }).documents);
   return signHrDocument(docs[docKey] ?? null);
+}
+
+// 본인 담당 직무 목록(읽기전용) — 세션에서 직원 도출. 마이페이지 표시용.
+export async function getMyEmployeeRoles(): Promise<string[]> {
+  const driver = await getMyDriver();
+  if (!driver) return [];
+  return listRolesForDriver(driver.id);
 }

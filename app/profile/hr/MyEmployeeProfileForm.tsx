@@ -12,6 +12,7 @@ import {
   uploadMyDocument,
   deleteMyDocument,
   getMyDocumentUrl,
+  getMyEmployeeRoles,
 } from "@/app/profile/hr/actions";
 import SignaturePad from "@/app/components/SignaturePad";
 import {
@@ -42,6 +43,7 @@ import {
   TrainingTab,
   AppointmentTab,
   EmployeeDocumentsSection,
+  EmployeeRolesSection,
   type ProfileTabKey,
 } from "@/app/hr/ProfileFormParts";
 import {
@@ -131,6 +133,9 @@ export default function MyEmployeeProfileForm({
   const [stampModal, setStampModal] = useState(false);
   const [stampDraw, setStampDraw] = useState<string | null>(null);
 
+  // 담당 직무(읽기전용) — 마운트 시 로드. null=로딩중.
+  const [roles, setRoles] = useState<string[] | null>(null);
+
   const fieldCls = locked
     ? `${baseInputCls} cursor-not-allowed bg-surface text-ink-muted`
     : `${baseInputCls} bg-card`;
@@ -146,6 +151,9 @@ export default function MyEmployeeProfileForm({
     });
     getMyStampUrl().then((url) => {
       if (alive) setStampUrl(url);
+    });
+    getMyEmployeeRoles().then((r) => {
+      if (alive) setRoles(r);
     });
     return () => {
       alive = false;
@@ -564,6 +572,11 @@ export default function MyEmployeeProfileForm({
                 />
               </div>
             </div>
+
+            {/* 담당 직무 — 본인은 열람만(변경은 관장·부장) */}
+            {roles !== null && (
+              <EmployeeRolesSection initialRoles={roles} readOnly />
+            )}
           </div>
 
           {/* 학력 탭 */}
