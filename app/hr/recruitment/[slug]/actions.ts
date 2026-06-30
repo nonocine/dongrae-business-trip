@@ -573,6 +573,23 @@ export async function convertApplicantToEmployee(
       if (!copyErr) employeeDocs[key] = newPath;
     }
 
+    // 4-1) 증명사진 복사 — 지원서 사진을 직원 사진 위치로(있을 때만).
+    //   직원 사진 경로 규칙은 uploadProfilePhoto 와 동일: employees/{driverId}/profile-photo.{ext}.
+    //   hr-documents 버킷 내 copy. 사진 없는 지원자는 건너뜀(newPhotoPath=null).
+    let newPhotoPath: string | null = null;
+    const applicantPhoto = (applicant.photo_url as string | null) ?? null;
+    if (applicantPhoto) {
+      const dot = applicantPhoto.lastIndexOf(".");
+      const ext = dot >= 0 ? applicantPhoto.slice(dot + 1) : "";
+      const photoPath = `employees/${newDriverId}/profile-photo${
+        ext ? `.${ext}` : ""
+      }`;
+      const { error: photoErr } = await supabase.storage
+        .from(HR_DOCUMENTS_BUCKET)
+        .copy(applicantPhoto, photoPath);
+      if (!photoErr) newPhotoPath = photoPath;
+    }
+
     // 5) employee_profiles 생성 — 지원서 값 복사. 실패 시 driver·복사파일 롤백.
     const genderMap: Record<string, "남" | "여"> = { M: "남", F: "여" };
     const applicantGender = (applicant.gender as string | null) ?? null;
@@ -583,6 +600,7 @@ export async function convertApplicantToEmployee(
       gender: applicantGender ? genderMap[applicantGender] ?? null : null,
       birth_date: (applicant.birth_date as string | null) ?? null,
       address: (applicant.address as string | null) ?? null,
+      photo_url: newPhotoPath, // 지원서 증명사진(복사 성공 시), 없으면 null
       email: null, // 출근 시점에 인사기록카드에서 입력
       phone: (applicant.phone as string | null) ?? null,
       join_date: null, // 관리자가 첫 출근일로 입력
@@ -604,7 +622,10 @@ export async function convertApplicantToEmployee(
       .insert(profileRow);
     if (profErr) {
       await supabaseAdmin.from("drivers").delete().eq("id", newDriverId);
-      const copied = Object.values(employeeDocs);
+      const copied = [
+        ...Object.values(employeeDocs),
+        ...(newPhotoPath ? [newPhotoPath] : []),
+      ];
       if (copied.length > 0) await removeHrDocuments(copied);
       return { ok: false, message: `인사기록 생성 실패: ${profErr.message}` };
     }
@@ -627,7 +648,10 @@ export async function convertApplicantToEmployee(
         .delete()
         .eq("driver_id", newDriverId);
       await supabaseAdmin.from("drivers").delete().eq("id", newDriverId);
-      const copied = Object.values(employeeDocs);
+      const copied = [
+        ...Object.values(employeeDocs),
+        ...(newPhotoPath ? [newPhotoPath] : []),
+      ];
       if (copied.length > 0) await removeHrDocuments(copied);
       return {
         ok: false,
