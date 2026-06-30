@@ -6,6 +6,7 @@ import {
   getMyEmployeeRoles,
 } from "@/app/profile/hr/actions";
 import { getGoogleSession } from "@/app/actions";
+import { listAnnouncements } from "@/app/announcements/actions";
 import { isM0Grant } from "@/lib/authLevels";
 import { roleLabel } from "@/lib/employeeRoles";
 import { cardCls } from "@/lib/ui";
@@ -23,6 +24,11 @@ function formatDate(d: string | null | undefined): string | null {
   const [y, m, day] = d.split("-");
   if (!y || !m || !day) return d;
   return `${Number(y)}년 ${Number(m)}월 ${Number(day)}일`;
+}
+
+// ISO 타임스탬프 → "2026.06.30" (공지 목록 미리보기용 컴팩트 표기).
+function fmtDay(iso: string): string {
+  return iso ? iso.slice(0, 10).replaceAll("-", ".") : "";
 }
 
 // 정보 한 줄(라벨 + 값). 값이 없으면 흐리게 "-".
@@ -175,12 +181,13 @@ export default async function EmployeeDashboard({
     );
   }
 
-  // 본인 인사정보·사진·직무·구글세션(M0 판정용)을 병렬 조회.
-  const [my, photoUrl, roles, g] = await Promise.all([
+  // 본인 인사정보·사진·직무·구글세션(M0 판정용)·최신 공지를 병렬 조회.
+  const [my, photoUrl, roles, g, recentAnnouncements] = await Promise.all([
     getMyProfile(),
     getMyPhotoUrl(),
     getMyEmployeeRoles(),
     getGoogleSession(),
+    listAnnouncements(3),
   ]);
 
   const driver = my?.driver ?? null;
@@ -304,6 +311,51 @@ export default async function EmployeeDashboard({
           <p className="mt-4 rounded-lg bg-warning-soft px-3 py-2.5 text-sm font-medium text-warning">
             아직 인사정보가 없습니다. 아래 “내 인사기록카드”에서 입력해주세요.
           </p>
+        )}
+      </section>
+
+      {/* 공지사항 미리보기 — 최신 3건(고정 우선) */}
+      <section className={cardCls}>
+        <div className="mb-2 flex items-center justify-between">
+          <h3 className="text-sm font-bold tracking-wide text-navy">
+            공지사항
+          </h3>
+          <Link
+            href="/announcements"
+            className="text-xs font-semibold text-brand-blue hover:underline"
+          >
+            전체 보기 →
+          </Link>
+        </div>
+        {recentAnnouncements.length === 0 ? (
+          <p className="py-3 text-center text-xs text-ink-hint">
+            등록된 공지가 없습니다.
+          </p>
+        ) : (
+          <ul className="divide-y divide-line/70">
+            {recentAnnouncements.map((a) => (
+              <li key={a.id}>
+                <Link
+                  href="/announcements"
+                  className="flex items-center justify-between gap-2 rounded-md px-1 py-2 hover:bg-surface"
+                >
+                  <span className="flex min-w-0 items-center gap-1.5">
+                    {a.is_pinned && (
+                      <span aria-hidden className="shrink-0 text-[11px]">
+                        📌
+                      </span>
+                    )}
+                    <span className="truncate text-sm text-ink-body">
+                      {a.title}
+                    </span>
+                  </span>
+                  <span className="shrink-0 text-[11px] text-ink-hint">
+                    {fmtDay(a.created_at)}
+                  </span>
+                </Link>
+              </li>
+            ))}
+          </ul>
         )}
       </section>
 
