@@ -1,5 +1,6 @@
 "use server";
 
+import { randomUUID } from "node:crypto";
 import { revalidatePath } from "next/cache";
 import { cookies } from "next/headers";
 import {
@@ -527,10 +528,21 @@ export async function convertApplicantToEmployee(
       return { ok: false, message: "지원자 이름이 없어 전환할 수 없습니다." };
     }
 
-    // 3) drivers 새 계정 — 기본 직급 '팀원', 비번 없음(구글 로그인 전용), 재직.
+    // 3) drivers 새 계정 — 기본 직급 '팀원', 구글 로그인 전용, 재직.
+    //    drivers.password 는 NOT NULL 평문 컬럼이라 값이 필요하지만, 이 계정은
+    //    비밀번호 로그인을 쓰지 않는다. loginEmployee 는 입력값을 trim 한 뒤 평문
+    //    동치 비교하므로, (1) 추측 불가한 난수에 (2) 앞뒤 공백을 둘러 trim 된
+    //    입력과는 절대 일치할 수 없는 placeholder 를 넣어 비밀번호 로그인을
+    //    원천 차단한다(구글 로그인만 가능). 일반 직원 생성/로그인 로직과는 무관.
+    const placeholderPassword = ` google-only-${randomUUID()}${randomUUID()} `;
     const { data: drv, error: drvErr } = await supabaseAdmin
       .from("drivers")
-      .insert({ name, rank: "팀원", password: null, is_active: true })
+      .insert({
+        name,
+        rank: "팀원",
+        password: placeholderPassword,
+        is_active: true,
+      })
       .select("id")
       .single();
     if (drvErr || !drv) {
