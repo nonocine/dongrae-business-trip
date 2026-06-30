@@ -567,7 +567,9 @@ export async function convertApplicantToEmployee(
       const newPath = `employees/${newDriverId}/docs/${key}${
         ext ? `.${ext}` : ""
       }`;
-      const { error: copyErr } = await supabase.storage
+      // service_role 로 복사 — Private 버킷의 storage RLS 에서 anon 은 copy
+      // 권한이 없어 실패하므로 supabaseAdmin.storage 로 우회한다.
+      const { error: copyErr } = await supabaseAdmin.storage
         .from(HR_DOCUMENTS_BUCKET)
         .copy(oldPath, newPath);
       if (!copyErr) employeeDocs[key] = newPath;
@@ -584,7 +586,8 @@ export async function convertApplicantToEmployee(
       const photoPath = `employees/${newDriverId}/profile-photo${
         ext ? `.${ext}` : ""
       }`;
-      const { error: photoErr } = await supabase.storage
+      // service_role 로 복사 — anon 은 Private 버킷 copy 권한이 없어 실패한다.
+      const { error: photoErr } = await supabaseAdmin.storage
         .from(HR_DOCUMENTS_BUCKET)
         .copy(applicantPhoto, photoPath);
       if (!photoErr) newPhotoPath = photoPath;
