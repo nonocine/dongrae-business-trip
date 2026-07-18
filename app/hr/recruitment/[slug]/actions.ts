@@ -350,8 +350,9 @@ export async function listScoresForPosting(
 // =====================================================================
 // 서류 채점 저장 — 35점 만점, 기준표 클릭 선택식 세부항목 6종.
 //   * 항목 키: degree, gpa, youth_cert, national_cert, statement,
-//     qualitative (정의는 lib/recruitmentScore SCREENING_ITEMS).
-//   * 각 항목은 미선택(0) 또는 정의된 보기 점수만 허용. 합계는 클라이언트
+//     career_years (정의는 lib/recruitmentScore SCREENING_ITEMS).
+//   * 각 항목은 미선택 또는 정의된 보기 점수만 허용(경력평가는 0년=0점도 정식
+//     보기). 미선택은 폼에서 빈 값("")으로 와 0 으로 합산되며, 합계는 클라이언트
 //     값을 신뢰하지 않고 서버에서 6개 합으로 재계산.
 //   * 로그인한 관장/부장 이름을 reviewer_name 으로 자동 채움.
 // =====================================================================

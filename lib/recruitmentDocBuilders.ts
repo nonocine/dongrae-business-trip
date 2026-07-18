@@ -37,6 +37,7 @@ import {
   STATUS_LABEL,
   fmtScore,
   avgScreeningGroup,
+  screeningThirdGroupTitle,
   screeningResultLabel,
 } from "./recruitmentScore";
 import {
@@ -857,9 +858,11 @@ export async function buildScreeningSummaryDoc(
     a.name.localeCompare(b.name, "ko")
   );
 
-  // 그룹 만점(전문성 20 · 자기소개서 10 · 정성평가 5)은 기준표에서 파생.
+  // 그룹 만점(전문성 20 · 자기소개서 10 · 경력평가 5)은 기준표에서 파생.
   const gMax = (key: string) =>
     SCREENING_GROUPS.find((g) => g.key === key)?.max ?? 0;
+  // 3번째 그룹 라벨 — 기록 key 에 따라 "경력평가"(신)/"정성평가"(과거) 분기.
+  const thirdTitle = screeningThirdGroupTitle(applicants);
 
   const headerRow = new TableRow({
     tableHeader: true,
@@ -868,7 +871,7 @@ export async function buildScreeningSummaryDoc(
       headCell("이름", 12),
       headCell(`전문성 (${gMax("expertise")}점)`, 13),
       headCell(`자기소개서 (${gMax("statement")}점)`, 13),
-      headCell(`정성평가 (${gMax("qualitative")}점)`, 11),
+      headCell(`${thirdTitle} (${gMax("career")}점)`, 11),
       headCell(`득점 (${SCREENING_MAX}점)`, 12),
       headCell("결과", 9),
       headCell("사유", 24),
@@ -879,7 +882,8 @@ export async function buildScreeningSummaryDoc(
     // 신·레거시 데이터 모두 그룹 합계로 정규화해 표시(avgScreeningGroup).
     const expertise = avgScreeningGroup(a.screeningByReviewer, "expertise");
     const statement = avgScreeningGroup(a.screeningByReviewer, "statement");
-    const qualitative = avgScreeningGroup(a.screeningByReviewer, "qualitative");
+    // 경력(신 career_years) 또는 과거 정성평가(qualitative) 합산값.
+    const career = avgScreeningGroup(a.screeningByReviewer, "career");
     const isFail = screeningResultLabel(a.status) === "불합격";
     // 사유는 불합격자만 표시(합격/미정은 빈칸). 입력값 없으면 빈칸.
     const reason = isFail ? (a.screeningRejectReason ?? "") : "";
@@ -889,7 +893,7 @@ export async function buildScreeningSummaryDoc(
         dataCell(a.name, { align: AlignmentType.LEFT }),
         dataCell(fmtScore(expertise)),
         dataCell(fmtScore(statement)),
-        dataCell(fmtScore(qualitative)),
+        dataCell(fmtScore(career)),
         dataCell(fmtScore(a.screeningAvg), { bold: true }),
         dataCell(screeningResultLabel(a.status)),
         dataCell(reason, { align: AlignmentType.LEFT }),
@@ -943,7 +947,7 @@ export async function buildScreeningSummaryDoc(
           table,
           para("", { spacing: { after: 80 } }),
           para(
-            `※ 항목 점수는 심사위원 ${data.screeningReviewers.length || 0}인의 평균값입니다. (전문성 ${gMax("expertise")} · 자기소개서 ${gMax("statement")} · 정성평가 ${gMax("qualitative")} = ${SCREENING_MAX}점)`,
+            `※ 항목 점수는 심사위원 ${data.screeningReviewers.length || 0}인의 평균값입니다. (전문성 ${gMax("expertise")} · 자기소개서 ${gMax("statement")} · ${thirdTitle} ${gMax("career")} = ${SCREENING_MAX}점)`,
             { size: 9, color: GRAY, spacing: { after: 200 } }
           ),
           para(`작성일 : ${kstDateLabel(new Date())}`, {

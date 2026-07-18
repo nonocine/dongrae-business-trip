@@ -14,11 +14,14 @@ export const TOTAL_MAX = SCREENING_MAX + INTERVIEW_MAX;
 // =====================================================================
 // 서류 채점 기준표 — 클릭 선택식(택1) 세부항목 6종, 총 35점.
 //   * scores jsonb 키: degree, gpa, youth_cert, national_cert,
-//     statement, qualitative. 각 값은 선택된 보기 점수(미선택=0).
+//     statement, career_years. 각 값은 선택된 보기 점수.
+//   * 2026-2 이전 채용은 6번째 항목이 정성평가(qualitative)였습니다. 이번
+//     개편부터 경력평가(career_years, 0~5년)로 교체. 과거 qualitative 기록은
+//     정규화·문서에서 옛 라벨("정성평가")로 그대로 표시합니다(감사 대비, 불변).
 //   * UI(ScreeningScoreCard)·서버 검증(saveScreeningScore)·문서 빌더가
 //     모두 이 한 곳을 진실로 삼습니다.
 // =====================================================================
-export type ScreeningGroupKey = "expertise" | "statement" | "qualitative";
+export type ScreeningGroupKey = "expertise" | "statement" | "career";
 
 export type ScreeningOption = { label: string; value: number };
 
@@ -83,13 +86,18 @@ export const SCREENING_ITEMS: ScreeningItem[] = [
     ],
   },
   {
-    key: "qualitative",
-    group: "qualitative",
-    title: "정성평가",
+    // 2026-2 이전에는 정성평가(qualitative, 우수5/보통3/미흡1)였던 슬롯.
+    // 이번 개편부터 경력평가로 교체. 과거 qualitative 기록은 하위호환 표시.
+    key: "career_years",
+    group: "career",
+    title: "경력평가",
     options: [
-      { label: "우수", value: 5 },
-      { label: "보통", value: 3 },
-      { label: "미흡", value: 1 },
+      { label: "5년 이상", value: 5 },
+      { label: "4년 이상", value: 4 },
+      { label: "3년 이상", value: 3 },
+      { label: "2년 이상", value: 2 },
+      { label: "1년 이상", value: 1 },
+      { label: "0년(경력 없음)", value: 0 },
     ],
   },
 ];
@@ -104,7 +112,7 @@ export const SCREENING_GROUPS: {
   key: ScreeningGroupKey;
   title: string;
   max: number;
-}[] = (["expertise", "statement", "qualitative"] as ScreeningGroupKey[]).map(
+}[] = (["expertise", "statement", "career"] as ScreeningGroupKey[]).map(
   (g) => ({
     key: g,
     title:
@@ -112,7 +120,7 @@ export const SCREENING_GROUPS: {
         ? "전문성"
         : g === "statement"
           ? "자기소개서"
-          : "정성평가",
+          : "경력평가",
     max: SCREENING_ITEMS.filter((it) => it.group === g).reduce(
       (sum, it) => sum + screeningItemMax(it),
       0
@@ -120,10 +128,13 @@ export const SCREENING_GROUPS: {
   })
 );
 
-// 한 항목 값이 유효한지(미선택=0 또는 정의된 보기 점수 중 하나).
+// 한 항목 값이 유효한지 — 미선택(0) 또는 정의된 보기 점수 중 하나.
+//   * 경력평가(career_years)는 "0년(경력 없음)=0"이 정식 보기이므로 0도 정상
+//     선택값입니다. 미선택과 0점 선택은 UI 상태(number|null)로 구분하고, 저장
+//     시에는 둘 다 득점 0으로 동일하게 합산됩니다(jsonb 스키마 불변 제약).
 export function isValidScreeningValue(item: ScreeningItem, v: number): boolean {
   if (!Number.isFinite(v)) return false;
-  if (v === 0) return true; // 미선택
+  if (v === 0) return true; // 미선택, 또는 경력평가 0년 선택
   return item.options.some((o) => o.value === v);
 }
 
@@ -300,16 +311,18 @@ export function avgScoreKey(
   return vals.reduce((a, b) => a + b, 0) / vals.length;
 }
 
-// 서류 점수(scores jsonb)를 신 구조 기준 그룹 합계로 정규화.
-//   * 신 구조(degree/gpa/... 키)면 그대로 그룹 합산.
-//   * 레거시(q1_expertise/q2_license/q3_statement 키만 있는 옛 데이터)면:
-//       전문성 = q1_expertise + q2_license(옛 자격증을 전문성에 흡수),
-//       자기소개서 = q3_statement, 정성평가 = 0.
-//     → 득점 합계는 옛 총점과 동일하게 보존되고, 총괄표 열도 깨지지 않습니다.
+// 서류 점수(scores jsonb)를 3개 그룹(전문성·자기소개서·경력) 합계로 정규화.
+//   * 현행 구조(degree/gpa/youth_cert/national_cert/statement + career_years).
+//   * 3번째 그룹(career)은 career_years(신) + qualitative(2026-2 이전 정성평가)
+//     를 합산 — 한 기록에는 둘 중 하나만 존재하므로 옛 정성평가 점수가 그대로
+//     경력 그룹 열에 보존됩니다(총괄표 표시 라벨은 screeningThirdGroupTitle 로
+//     기록의 key 에 따라 "경력평가"/"정성평가"로 분기).
+//   * 최고참 레거시(q1_expertise/q2_license/q3_statement 만 있는 옛 데이터)면:
+//       전문성 = q1_expertise + q2_license, 자기소개서 = q3_statement, 경력 = 0.
 export function normalizeScreeningScores(scores: Record<string, number>): {
   expertise: number;
   statement: number;
-  qualitative: number;
+  career: number;
   total: number;
   legacy: boolean;
 } {
@@ -325,22 +338,23 @@ export function normalizeScreeningScores(scores: Record<string, number>): {
     const expertise =
       num("degree") + num("gpa") + num("youth_cert") + num("national_cert");
     const statement = num("statement");
-    const qualitative = num("qualitative");
+    // career_years(신) 또는 qualitative(옛 정성평가) 중 존재하는 값이 그대로 반영.
+    const career = num("career_years") + num("qualitative");
     return {
       expertise,
       statement,
-      qualitative,
-      total: expertise + statement + qualitative,
+      career,
+      total: expertise + statement + career,
       legacy: false,
     };
   }
-  // 레거시 매핑.
+  // 최고참 레거시 매핑.
   const expertise = num("q1_expertise") + num("q2_license");
   const statement = num("q3_statement");
   return {
     expertise,
     statement,
-    qualitative: 0,
+    career: 0,
     total: expertise + statement,
     legacy: true,
   };
@@ -357,6 +371,21 @@ export function avgScreeningGroup(
   }
   if (vals.length === 0) return null;
   return vals.reduce((a, b) => a + b, 0) / vals.length;
+}
+
+// 서류 3번째 그룹의 표시 라벨 — 기록의 scores key 로 판별.
+//   * 이번 개편 이후 채점(career_years) → "경력평가".
+//   * 개편 이전 기록(qualitative) → "정성평가" (감사 대비, 기록 불변 표시).
+//   * 한 공고의 기록은 동질적(전역 기준 교체)이므로 첫 판별값을 사용.
+//     기록이 전혀 없으면 현행 기준("경력평가")을 기본값으로 반환.
+export function screeningThirdGroupTitle(applicants: ReportApplicant[]): string {
+  for (const a of applicants) {
+    for (const r of a.screeningByReviewer.values()) {
+      if (typeof r.scores["career_years"] === "number") return "경력평가";
+      if (typeof r.scores["qualitative"] === "number") return "정성평가";
+    }
+  }
+  return "경력평가";
 }
 
 // 서류전형 결과 — status 로부터 합격/불합격/미정.

@@ -824,12 +824,17 @@ function ScreeningScoreCard({
   memoInitial: string;
   submittedAt: string | null;
 }) {
-  // 항목 키 -> 선택 점수(0 = 미선택).
-  const [selected, setSelected] = useState<Record<string, number>>(() => {
-    const init: Record<string, number> = {};
+  // 항목 키 -> 선택 점수(null = 미선택). 0 은 유효한 선택값일 수 있음
+  // (경력평가의 "0년(경력 없음)=0"). 그래서 미선택은 0 이 아니라 null 로 구분.
+  const [selected, setSelected] = useState<Record<string, number | null>>(() => {
+    const init: Record<string, number | null> = {};
     for (const item of SCREENING_ITEMS) {
       const v = initialScores[item.key];
-      init[item.key] = typeof v === "number" && Number.isFinite(v) ? v : 0;
+      const hasNum = typeof v === "number" && Number.isFinite(v);
+      // 0 값 보기가 있는 항목(경력평가)만 저장된 0 을 "선택된 0"으로 복원하고,
+      // 그 외 항목은 0 = 미선택(null) 로 본다.
+      const hasZeroOption = item.options.some((o) => o.value === 0);
+      init[item.key] = hasNum && (v !== 0 || hasZeroOption) ? v : null;
     }
     return init;
   });
@@ -839,7 +844,7 @@ function ScreeningScoreCard({
   const [pending, startTransition] = useTransition();
 
   const total = useMemo(
-    () => SCREENING_ITEMS.reduce((sum, it) => sum + (selected[it.key] || 0), 0),
+    () => SCREENING_ITEMS.reduce((sum, it) => sum + (selected[it.key] ?? 0), 0),
     [selected]
   );
 
@@ -847,8 +852,8 @@ function ScreeningScoreCard({
     setOk(null);
     setSelected((prev) => ({
       ...prev,
-      // 같은 보기를 다시 누르면 해제.
-      [key]: prev[key] === value ? 0 : value,
+      // 같은 보기를 다시 누르면 해제(null = 미선택).
+      [key]: prev[key] === value ? null : value,
     }));
   }
 
@@ -861,7 +866,9 @@ function ScreeningScoreCard({
         fd.set("slug", slug);
         fd.set("application_id", applicationId);
         for (const item of SCREENING_ITEMS) {
-          fd.set(item.key, String(selected[item.key] || 0));
+          const v = selected[item.key];
+          // 미선택은 빈 값으로 전송(서버에서 0 으로 합산). 0년 선택은 "0" 전송.
+          fd.set(item.key, v == null ? "" : String(v));
         }
         fd.set("memo", memo);
         const res = await saveScreeningScore(fd);
@@ -899,7 +906,7 @@ function ScreeningScoreCard({
         {SCREENING_GROUPS.map((group) => {
           const items = SCREENING_ITEMS.filter((it) => it.group === group.key);
           const groupTotal = items.reduce(
-            (sum, it) => sum + (selected[it.key] || 0),
+            (sum, it) => sum + (selected[it.key] ?? 0),
             0
           );
           return (
@@ -922,7 +929,7 @@ function ScreeningScoreCard({
                     title={item.title}
                     max={screeningItemMax(item)}
                     options={item.options}
-                    value={selected[item.key] || 0}
+                    value={selected[item.key] ?? null}
                     onPick={(v) => pick(item.key, v)}
                   />
                 ))}
@@ -978,7 +985,8 @@ function ScreeningItemRow({
   title: string;
   max: number;
   options: { label: string; value: number }[];
-  value: number;
+  // null = 미선택. 0 은 유효한 선택값(경력평가 0년)일 수 있어 number 와 구분.
+  value: number | null;
   onPick: (v: number) => void;
 }) {
   return (
@@ -989,7 +997,8 @@ function ScreeningItemRow({
       </div>
       <div className="mt-1.5 flex flex-wrap gap-1.5">
         {options.map((opt) => {
-          const active = value === opt.value;
+          // 미선택(null)일 때는 0점 보기도 활성으로 보이지 않게 한다.
+          const active = value !== null && value === opt.value;
           return (
             <button
               key={opt.label}
