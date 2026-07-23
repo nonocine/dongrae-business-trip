@@ -1256,6 +1256,28 @@ function EmployeeSalaryEditor({
                 <label className="flex items-center gap-1.5 pt-5 text-xs text-ink-body">
                   <input
                     type="checkbox"
+                    checked={r.extra.meal_target}
+                    onChange={(e) =>
+                      patchExtra(r.key, { meal_target: e.target.checked })
+                    }
+                    className="h-3.5 w-3.5 rounded border-line text-navy focus:ring-navy"
+                  />
+                  급식비 대상
+                </label>
+                <label className="flex items-center gap-1.5 pt-5 text-xs text-ink-body">
+                  <input
+                    type="checkbox"
+                    checked={r.extra.transport_target}
+                    onChange={(e) =>
+                      patchExtra(r.key, { transport_target: e.target.checked })
+                    }
+                    className="h-3.5 w-3.5 rounded border-line text-navy focus:ring-navy"
+                  />
+                  교통보조비 대상
+                </label>
+                <label className="flex items-center gap-1.5 pt-5 text-xs text-ink-body">
+                  <input
+                    type="checkbox"
                     checked={r.extra.mgmt_target}
                     onChange={(e) =>
                       patchExtra(r.key, { mgmt_target: e.target.checked })

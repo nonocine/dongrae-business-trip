@@ -44,8 +44,10 @@ export type EmployeeSalaryProfileRow = {
 export type SalaryExtra = {
   family_allowance: number; // 가족수당 월액(없으면 0)
   cert_level: "" | "1" | "2" | "3"; // 자격수당 등급(빈=없음)
-  mgmt_target: boolean; // 관리업무수당 대상(관장·부장)
-  overtime_target: boolean; // 시간외수당 대상(지도자·팀원)
+  meal_target: boolean; // 급식비 대상(기본 true — 전원. 예외만 해제)
+  transport_target: boolean; // 교통보조비 대상(기본 true — 전원. 예외만 해제)
+  mgmt_target: boolean; // 관리업무수당 대상(관장·부장. 기본 false)
+  overtime_target: boolean; // 시간외수당 대상(지도자·팀원. 기본 false)
   sangjo: number | null; // 상조회비 개인 예외(null=기본 config 값 사용)
   income_tax: number; // 갑근세 월액(공단/원천 입력. 주민세는 이 값의 10% 자동)
   pension: number; // 국민연금 월액(공단 고지액 입력. 0=미표시)
@@ -57,6 +59,8 @@ export type SalaryExtra = {
 export const EMPTY_SALARY_EXTRA: SalaryExtra = {
   family_allowance: 0,
   cert_level: "",
+  meal_target: true,
+  transport_target: true,
   mgmt_target: false,
   overtime_target: false,
   sangjo: null,
@@ -96,6 +100,10 @@ export function normalizeSalaryExtra(raw: unknown): SalaryExtra {
     family_allowance: num(r.family_allowance),
     cert_level:
       level === "1" || level === "2" || level === "3" ? level : "",
+    // 급식비·교통보조비 — 키 없음/undefined = 기본 true(전원). 명시적 false 만 제외.
+    //   (기존 저장 데이터 하위호환: 새 키가 없어도 정상 지급되도록)
+    meal_target: r.meal_target !== false,
+    transport_target: r.transport_target !== false,
     mgmt_target: r.mgmt_target === true,
     overtime_target: r.overtime_target === true,
     sangjo:
@@ -216,13 +224,17 @@ export function calcMonthlyPayroll(input: {
       floor10(baseSalary * cfg("mgmt_allowance_rate"))
     );
   }
-  add(payItems, "meal_allowance", "급식비", cfg("meal_allowance"));
+  if (extra.meal_target) {
+    add(payItems, "meal_allowance", "급식비", cfg("meal_allowance"));
+  }
   const certKey = certAllowanceKey(extra.cert_level);
   if (certKey) {
     add(payItems, "cert_allowance", "지도사자격수당", cfg(certKey));
   }
   add(payItems, "family_allowance", "가족수당", Math.round(extra.family_allowance));
-  add(payItems, "transport_allowance", "교통보조비", cfg("transport_allowance"));
+  if (extra.transport_target) {
+    add(payItems, "transport_allowance", "교통보조비", cfg("transport_allowance"));
+  }
 
   const totalPay = payItems.reduce((s, i) => s + i.amount, 0);
 
