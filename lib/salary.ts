@@ -37,14 +37,21 @@ export type EmployeeSalaryProfileRow = {
   extra: SalaryExtra;
 };
 
-// extra jsonb — 개인 항목. 2차 계산에서 salary_config 단가와 결합됩니다.
+// extra jsonb — 개인 항목. 급여 값은 회계담당이 화면에서 직접 입력합니다.
+//   * 4대보험(pension·health·longterm_care·employment_ins)은 요율 계산이 실제
+//     공단 고지액과 불일치(개인별 예외)하여 갑근세처럼 "월액 입력값"으로 둡니다.
+//     0/미입력 = 해당 없음(명세서에서 제외). 요율 계산은 참고치로만 사용합니다.
 export type SalaryExtra = {
   family_allowance: number; // 가족수당 월액(없으면 0)
   cert_level: "" | "1" | "2" | "3"; // 자격수당 등급(빈=없음)
   mgmt_target: boolean; // 관리업무수당 대상(관장·부장)
   overtime_target: boolean; // 시간외수당 대상(지도자·팀원)
   sangjo: number | null; // 상조회비 개인 예외(null=기본 config 값 사용)
-  income_tax: number; // 갑근세 월액(담당자 직접 입력. 주민세는 2차에서 10% 자동)
+  income_tax: number; // 갑근세 월액(공단/원천 입력. 주민세는 이 값의 10% 자동)
+  pension: number; // 국민연금 월액(공단 고지액 입력. 0=미표시)
+  health: number; // 국민건강 월액(공단 고지액 입력. 0=미표시)
+  longterm_care: number; // 장기요양 월액(공단 고지액 입력. 0=미표시)
+  employment_ins: number; // 고용보험 월액(공단 고지액 입력. 0=미표시)
 };
 
 export const EMPTY_SALARY_EXTRA: SalaryExtra = {
@@ -54,6 +61,10 @@ export const EMPTY_SALARY_EXTRA: SalaryExtra = {
   overtime_target: false,
   sangjo: null,
   income_tax: 0,
+  pension: 0,
+  health: 0,
+  longterm_care: 0,
+  employment_ins: 0,
 };
 
 // 자격수당 등급 옵션(UI). key 는 salary_config 의 cert_allowance_{n} 과 연결.
@@ -94,6 +105,11 @@ export function normalizeSalaryExtra(raw: unknown): SalaryExtra {
           ? Number(r.sangjo)
           : null,
     income_tax: num(r.income_tax),
+    // 4대보험 — 기존 저장(키 없음)은 0(미입력) 취급 → 하위호환.
+    pension: num(r.pension),
+    health: num(r.health),
+    longterm_care: num(r.longterm_care),
+    employment_ins: num(r.employment_ins),
   };
 }
 
@@ -151,11 +167,10 @@ export function sortGradeRows<T extends { grade: string; step: number }>(
 //       → 428,050, 주민세 385,960×0.1=38,596 → 38,590. 둘 다 10원 절사와 일치.
 //       (반올림이면 각각 428,060 / 38,600 이 되어 실측과 어긋남)
 //
-//   [4대보험 기준액] 1차는 "지급총액(월)"을 기준액으로 사용합니다.
-//     · 실제 명세서의 국민연금·건강보험은 연간 고정된 보수월액/기준소득월액
-//       (전년도 소득·상여 포함 평균)을 기준으로 하므로, 우리 데이터만으로는
-//       정확히 재현되지 않습니다. 미리보기는 "월 지급총액 기준 추정치"이며
-//       실제 공제액과 차이가 날 수 있습니다(작업 보고 및 하단 안내문 참조).
+//   [4대보험] 국민연금·건강·장기요양·고용보험은 공단 고지액이 요율 계산과
+//     불일치(개인별 예외: 관장 고용보험 0원 등)하므로 extra 의 "입력값"을 그대로
+//     공제합니다. 0/미입력 항목은 명세서에서 제외합니다(줄 자체가 안 나옴).
+//     요율 계산은 estimateInsuranceByRate 로 분리 보존 — 입력 칸 옆 참고치·예산용.
 //
 //   [월 미리보기 제외 항목] 시간외수당·명절휴가비·연가보상비는 월 변동/특정 월
 //     지급이라 여기서 제외하고 2차(월별 생성) 시 "해당 월 추가 항목"으로 더합니다.
@@ -215,13 +230,13 @@ export function calcMonthlyPayroll(input: {
   const deductItems: PayItem[] = [];
   const incomeTax = Math.round(extra.income_tax);
   add(deductItems, "income_tax", "갑근세", incomeTax);
+  // 주민세는 규칙이 확실(갑근세 × 10%) → 자동 계산 유지(10원 절사).
   add(deductItems, "resident_tax", "주민세", floor10(incomeTax * cfg("resident_tax_rate")));
-  // 기준액=지급총액(1차). 위 [4대보험 기준액] 주석 참조.
-  add(deductItems, "pension", "국민연금", floor10(totalPay * cfg("pension_rate")));
-  const health = floor10(totalPay * cfg("health_rate"));
-  add(deductItems, "health", "국민건강", health);
-  add(deductItems, "longterm_care", "장기요양", floor10(health * cfg("longterm_care_rate")));
-  add(deductItems, "employment", "고용보험", floor10(totalPay * cfg("employment_rate")));
+  // 4대보험 — 공단 고지액(extra 입력값) 그대로. 0/미입력이면 add 가 제외.
+  add(deductItems, "pension", "국민연금", Math.round(extra.pension));
+  add(deductItems, "health", "국민건강", Math.round(extra.health));
+  add(deductItems, "longterm_care", "장기요양", Math.round(extra.longterm_care));
+  add(deductItems, "employment", "고용보험", Math.round(extra.employment_ins));
   const sangjo = extra.sangjo ?? cfg("sangjo_fee");
   add(deductItems, "sangjo", "상조회비", Math.round(sangjo));
   // 산재보험(accident_rate)은 사업주 부담 → 직원 공제내역에서 제외.
@@ -229,6 +244,37 @@ export function calcMonthlyPayroll(input: {
   const totalDeduct = deductItems.reduce((s, i) => s + i.amount, 0);
   const netPay = totalPay - totalDeduct;
   return { payItems, deductItems, totalPay, totalDeduct, netPay };
+}
+
+// 4대보험 요율 참고치 — 실제 공제는 입력값이지만, 입력 칸 옆 "계산 참고" 표시와
+//   향후 연간 예산 산출을 위해 요율 기반 추정을 보존합니다(지급총액 × config 요율).
+//   실제 공단 고지액과는 차이가 있으므로 어디까지나 참고용입니다.
+export type InsuranceEstimate = {
+  pension: number;
+  health: number;
+  longterm_care: number;
+  employment: number;
+};
+
+export function estimateInsuranceByRate(input: {
+  baseSalary: number;
+  extra: SalaryExtra;
+  config: Record<string, number>;
+}): InsuranceEstimate {
+  const { config } = input;
+  const cfg = (key: string): number => {
+    const v = Number(config[key]);
+    return Number.isFinite(v) ? v : 0;
+  };
+  // 지급총액은 계산 엔진 재사용(지급 항목은 4대보험 입력값과 무관).
+  const { totalPay } = calcMonthlyPayroll(input);
+  const health = floor10(totalPay * cfg("health_rate"));
+  return {
+    pension: floor10(totalPay * cfg("pension_rate")),
+    health,
+    longterm_care: floor10(health * cfg("longterm_care_rate")),
+    employment: floor10(totalPay * cfg("employment_rate")),
+  };
 }
 
 export type MonthRange = { start_month: number; end_month: number };

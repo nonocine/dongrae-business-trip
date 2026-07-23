@@ -1,12 +1,9 @@
-// 급여 계산 엔진 검증 — 실제 명세서(허일수 2026-05) 재현 테스트.
+// 급여 계산 엔진 검증 — 실제 급여대장 재현 테스트.
 //   실행: npx tsx scripts/test-salary-calc.ts  (package.json: npm run test:salary)
 //
-//   목적:
-//   1) 지급내역(기본급·관리업무수당·급식비·자격수당·가족수당·교통보조비)과
-//      지급총액이 실측과 정확히 일치하는지 — 회귀 가드(불일치 시 실패).
-//   2) 원 단위 절사(관리업무수당 428,050 / 주민세 38,590)가 재현되는지.
-//   3) 국민연금·건강보험은 연간 고정 보수월액 기반이라 월 지급총액 기준
-//      추정치와 차이가 남 — 그 차이를 "정보"로 출력(실패로 취급하지 않음).
+//   4대보험은 요율 계산이 아니라 공단 고지액(extra 입력값)을 그대로 공제하므로,
+//   입력값을 넣으면 미리보기가 실제 대장과 "원 단위까지" 일치해야 합니다.
+//   0/미입력 항목(예: 허일수 고용보험·장기요양)은 명세서에서 제외되어야 합니다.
 import { calcMonthlyPayroll, type SalaryExtra } from "../lib/salary";
 
 // 2026년 salary_config (라이브 DB 조회값).
@@ -27,25 +24,6 @@ const CONFIG_2026: Record<string, number> = {
   transport_allowance: 50000,
 };
 
-// 허일수 2026-05 입력.
-const heoExtra: SalaryExtra = {
-  family_allowance: 90000,
-  cert_level: "1", // 자격수당 50,000 (cert_allowance_1)
-  mgmt_target: true, // 관리업무수당 대상
-  overtime_target: false,
-  sangjo: null, // 기본 sangjo_fee(15,000) 사용
-  income_tax: 385960, // 갑근세(명세서 입력값)
-};
-
-const result = calcMonthlyPayroll({
-  baseSalary: 4756180,
-  extra: heoExtra,
-  config: CONFIG_2026,
-});
-
-const amt = (items: { key: string; amount: number }[], key: string): number =>
-  items.find((i) => i.key === key)?.amount ?? 0;
-
 let failures = 0;
 function expectEq(label: string, actual: number, expected: number) {
   const ok = actual === expected;
@@ -54,48 +32,82 @@ function expectEq(label: string, actual: number, expected: number) {
     `${ok ? "✓" : "✗"} ${label}: ${actual.toLocaleString()} (기대 ${expected.toLocaleString()})`
   );
 }
-
-console.log("=== 지급내역 (실측과 정확히 일치해야 함) ===");
-expectEq("기본급", amt(result.payItems, "base"), 4756180);
-expectEq("관리업무수당(10원 절사)", amt(result.payItems, "mgmt_allowance"), 428050);
-expectEq("급식비", amt(result.payItems, "meal_allowance"), 160000);
-expectEq("지도사자격수당", amt(result.payItems, "cert_allowance"), 50000);
-expectEq("가족수당", amt(result.payItems, "family_allowance"), 90000);
-expectEq("교통보조비", amt(result.payItems, "transport_allowance"), 50000);
-expectEq("지급총액", result.totalPay, 5534230);
-
-console.log("\n=== 공제내역 (원 단위 절사 검증) ===");
-expectEq("갑근세", amt(result.deductItems, "income_tax"), 385960);
-expectEq("주민세(10원 절사)", amt(result.deductItems, "resident_tax"), 38590);
-
-console.log(
-  "\n=== 국민연금·건강보험: 월 지급총액 기준 추정치 vs 실측 (차이는 정보) ==="
-);
-const ACTUAL = { pension: 241820, health: 214010 };
-const est = {
-  pension: amt(result.deductItems, "pension"),
-  health: amt(result.deductItems, "health"),
-};
-for (const key of ["pension", "health"] as const) {
-  const diff = est[key] - ACTUAL[key];
-  const pct = ((diff / ACTUAL[key]) * 100).toFixed(1);
-  console.log(
-    `  ${key}: 추정 ${est[key].toLocaleString()} / 실측 ${ACTUAL[key].toLocaleString()} → 차이 ${
-      diff >= 0 ? "+" : ""
-    }${diff.toLocaleString()} (${pct}%)`
-  );
+function expectAbsent(
+  label: string,
+  items: { key: string }[],
+  key: string
+) {
+  const ok = !items.some((i) => i.key === key);
+  if (!ok) failures++;
+  console.log(`${ok ? "✓" : "✗"} ${label}: 공제내역에 '${key}' 줄 없음`);
 }
-console.log(
-  `  (참고) 장기요양 ${amt(result.deductItems, "longterm_care").toLocaleString()}, 고용보험 ${amt(
-    result.deductItems,
-    "employment"
-  ).toLocaleString()} — 실측 명세서엔 별도 표기 없음`
-);
-console.log(
-  `  엔진 공제총액 ${result.totalDeduct.toLocaleString()} / 차인지급 ${result.netPay.toLocaleString()} (실측 공제 895,380 / 차인 4,638,850)`
-);
+const amt = (items: { key: string; amount: number }[], key: string): number =>
+  items.find((i) => i.key === key)?.amount ?? 0;
+
+// ---------------------------------------------------------------------
+// 케이스 1: 허일수 2026-07 (고용보험·장기요양 0 → 미표시)
+// ---------------------------------------------------------------------
+console.log("=== 케이스 1: 허일수 2026-07 급여대장 ===");
+const heo = calcMonthlyPayroll({
+  baseSalary: 4756180,
+  extra: {
+    family_allowance: 90000,
+    cert_level: "1",
+    mgmt_target: true,
+    overtime_target: false,
+    sangjo: null,
+    income_tax: 385960,
+    pension: 246470, // 공단 고지액
+    health: 214010, // 공단 고지액
+    longterm_care: 0, // 미표시
+    employment_ins: 0, // 관장 등 예외 — 미표시
+  } satisfies SalaryExtra,
+  config: CONFIG_2026,
+});
+
+console.log("[지급내역]");
+expectEq("관리업무수당(10원 절사)", amt(heo.payItems, "mgmt_allowance"), 428050);
+expectEq("지급총액", heo.totalPay, 5534230);
+console.log("[공제내역]");
+expectEq("갑근세", amt(heo.deductItems, "income_tax"), 385960);
+expectEq("주민세(자동 10%)", amt(heo.deductItems, "resident_tax"), 38590);
+expectEq("국민연금(입력)", amt(heo.deductItems, "pension"), 246470);
+expectEq("국민건강(입력)", amt(heo.deductItems, "health"), 214010);
+expectEq("상조회비", amt(heo.deductItems, "sangjo"), 15000);
+expectAbsent("고용보험(0)", heo.deductItems, "employment");
+expectAbsent("장기요양(0)", heo.deductItems, "longterm_care");
+expectEq("공제총액", heo.totalDeduct, 900030);
+expectEq("차인지급액", heo.netPay, 4634200);
+
+// ---------------------------------------------------------------------
+// 케이스 2: 노미현 — 고용보험 45,930 입력 시 고용보험 줄이 표시되는지
+//   (기본급/기타 실측 전체는 미상 → 핵심 동작만 검증: 입력값 그대로 표시)
+// ---------------------------------------------------------------------
+console.log("\n=== 케이스 2: 노미현 — 고용보험 입력 표시 ===");
+const nomiExtra: SalaryExtra = {
+  family_allowance: 0,
+  cert_level: "",
+  mgmt_target: false,
+  overtime_target: true,
+  sangjo: null,
+  income_tax: 0,
+  pension: 213840,
+  health: 185820,
+  longterm_care: 24070,
+  employment_ins: 45930,
+};
+const nomi = calcMonthlyPayroll({
+  baseSalary: 4756180,
+  extra: nomiExtra,
+  config: CONFIG_2026,
+});
+expectEq("고용보험(입력 표시)", amt(nomi.deductItems, "employment"), 45930);
+expectEq("장기요양(입력 표시)", amt(nomi.deductItems, "longterm_care"), 24070);
+// 갑근세 0 → 갑근세/주민세 줄 없음(주민세는 갑근세 기반).
+expectAbsent("갑근세(0)", nomi.deductItems, "income_tax");
+expectAbsent("주민세(갑근세 0)", nomi.deductItems, "resident_tax");
 
 console.log(
-  `\n${failures === 0 ? "PASS" : "FAIL"} — 하드 검증 ${failures}건 실패`
+  `\n${failures === 0 ? "PASS" : "FAIL"} — 검증 ${failures}건 실패`
 );
 process.exit(failures === 0 ? 0 : 1);

@@ -24,6 +24,7 @@ import {
   gradeSortKey,
   validateMonthRanges,
   calcMonthlyPayroll,
+  estimateInsuranceByRate,
   type SalaryGradeRow,
   type SalaryConfigRow,
   type EmployeeSalaryProfileRow,
@@ -744,6 +745,37 @@ function newEditRow(): EditRow {
   };
 }
 
+// 4대보험 입력 칸 — 공단 고지액 직접 입력 + 요율 참고치(회색) 표시.
+function InsuranceInput({
+  label,
+  value,
+  estimate,
+  onChange,
+}: {
+  label: string;
+  value: number;
+  estimate: number | null;
+  onChange: (n: number) => void;
+}) {
+  return (
+    <div>
+      <label className="block text-[11px] font-semibold text-navy">{label}</label>
+      <input
+        type="number"
+        value={value || ""}
+        onChange={(e) => onChange(Number(e.target.value || 0))}
+        placeholder="공단 고지액 입력"
+        className={`${inCls} text-right font-mono`}
+      />
+      {estimate != null && (
+        <p className="mt-0.5 text-[10px] text-ink-hint">
+          계산 참고: 약 {formatKRW(estimate)}원
+        </p>
+      )}
+    </div>
+  );
+}
+
 function EmployeeSalarySection({
   year,
   grades,
@@ -1004,6 +1036,15 @@ function EmployeeSalaryEditor({
       <div className="space-y-4">
         {editRows.map((r, idx) => {
           const base = baseOf(r.grade, r.step);
+          // 4대보험 요율 참고치 — 입력 칸 옆 "계산 참고" 표시용(실제 공제는 입력값).
+          const estIns =
+            hasConfig && base != null
+              ? estimateInsuranceByRate({
+                  baseSalary: base,
+                  extra: r.extra,
+                  config,
+                })
+              : null;
           return (
             <div
               key={r.key}
@@ -1164,10 +1205,37 @@ function EmployeeSalaryEditor({
                         income_tax: Number(e.target.value || 0),
                       })
                     }
-                    placeholder="0"
+                    placeholder="공단 고지액 입력"
                     className={`${inCls} text-right font-mono`}
                   />
+                  <p className="mt-0.5 text-[10px] text-ink-hint">
+                    주민세는 갑근세의 10% 자동 계산
+                  </p>
                 </div>
+                <InsuranceInput
+                  label="국민연금(월)"
+                  value={r.extra.pension}
+                  estimate={estIns?.pension ?? null}
+                  onChange={(n) => patchExtra(r.key, { pension: n })}
+                />
+                <InsuranceInput
+                  label="국민건강(월)"
+                  value={r.extra.health}
+                  estimate={estIns?.health ?? null}
+                  onChange={(n) => patchExtra(r.key, { health: n })}
+                />
+                <InsuranceInput
+                  label="장기요양(월)"
+                  value={r.extra.longterm_care}
+                  estimate={estIns?.longterm_care ?? null}
+                  onChange={(n) => patchExtra(r.key, { longterm_care: n })}
+                />
+                <InsuranceInput
+                  label="고용보험(월)"
+                  value={r.extra.employment_ins}
+                  estimate={estIns?.employment ?? null}
+                  onChange={(n) => patchExtra(r.key, { employment_ins: n })}
+                />
                 <div>
                   <label className="block text-[11px] font-semibold text-navy">
                     상조회비(개인 예외)
@@ -1370,9 +1438,8 @@ function PayrollPreview({
       </div>
 
       <p className="mt-2 text-[11px] leading-relaxed text-ink-hint">
-        명절휴가비·연가보상비·시간외수당은 해당 월 생성 시 추가됩니다. 국민연금·건강보험은
-        월 지급총액 기준 추정치로, 실제 공제액(연간 고정 보수월액 기준)과 차이가 날 수
-        있습니다.
+        국민연금·건강보험 등은 공단 고지액을 입력하세요. 명절휴가비·연가보상비·시간외수당은
+        해당 월 생성 시 추가됩니다.
       </p>
     </div>
   );
