@@ -140,6 +140,97 @@ export function sortGradeRows<T extends { grade: string; step: number }>(
   });
 }
 
+// =====================================================================
+// 공용 월 급여 계산 엔진 — calcMonthlyPayroll
+//   * 이 함수가 급여 계산의 단일 출처입니다. 미리보기(1차)와 월별 명세서
+//     생성·확정(2차)이 모두 이 함수를 재사용합니다(계산 이원화 금지).
+//   * 순수 함수(부수효과 없음) — 입력만으로 결정됩니다.
+//
+//   [원 단위 처리] 10원 미만 절사(floor10).
+//     · 실측 근거: 허일수 2026-05 명세서에서 관리업무수당 4,756,180×0.09=428,056.2
+//       → 428,050, 주민세 385,960×0.1=38,596 → 38,590. 둘 다 10원 절사와 일치.
+//       (반올림이면 각각 428,060 / 38,600 이 되어 실측과 어긋남)
+//
+//   [4대보험 기준액] 1차는 "지급총액(월)"을 기준액으로 사용합니다.
+//     · 실제 명세서의 국민연금·건강보험은 연간 고정된 보수월액/기준소득월액
+//       (전년도 소득·상여 포함 평균)을 기준으로 하므로, 우리 데이터만으로는
+//       정확히 재현되지 않습니다. 미리보기는 "월 지급총액 기준 추정치"이며
+//       실제 공제액과 차이가 날 수 있습니다(작업 보고 및 하단 안내문 참조).
+//
+//   [월 미리보기 제외 항목] 시간외수당·명절휴가비·연가보상비는 월 변동/특정 월
+//     지급이라 여기서 제외하고 2차(월별 생성) 시 "해당 월 추가 항목"으로 더합니다.
+// =====================================================================
+export type PayItem = { key: string; label: string; amount: number };
+
+export type MonthlyPayroll = {
+  payItems: PayItem[];
+  deductItems: PayItem[];
+  totalPay: number;
+  totalDeduct: number;
+  netPay: number;
+};
+
+// 10원 미만 절사(원 단위 버림). 위 [원 단위 처리] 주석 참조.
+export function floor10(n: number): number {
+  if (!Number.isFinite(n)) return 0;
+  return Math.floor(n / 10) * 10;
+}
+
+export function calcMonthlyPayroll(input: {
+  baseSalary: number;
+  extra: SalaryExtra;
+  config: Record<string, number>;
+}): MonthlyPayroll {
+  const { baseSalary, extra, config } = input;
+  const cfg = (key: string): number => {
+    const v = Number(config[key]);
+    return Number.isFinite(v) ? v : 0;
+  };
+  const add = (arr: PayItem[], key: string, label: string, amount: number) => {
+    if (amount > 0) arr.push({ key, label, amount });
+  };
+
+  // --- 지급내역 (0/미대상 항목은 제외) ---
+  const payItems: PayItem[] = [];
+  add(payItems, "base", "기본급", Math.round(baseSalary));
+  if (extra.mgmt_target) {
+    add(
+      payItems,
+      "mgmt_allowance",
+      "관리업무수당",
+      floor10(baseSalary * cfg("mgmt_allowance_rate"))
+    );
+  }
+  add(payItems, "meal_allowance", "급식비", cfg("meal_allowance"));
+  const certKey = certAllowanceKey(extra.cert_level);
+  if (certKey) {
+    add(payItems, "cert_allowance", "지도사자격수당", cfg(certKey));
+  }
+  add(payItems, "family_allowance", "가족수당", Math.round(extra.family_allowance));
+  add(payItems, "transport_allowance", "교통보조비", cfg("transport_allowance"));
+
+  const totalPay = payItems.reduce((s, i) => s + i.amount, 0);
+
+  // --- 공제내역 ---
+  const deductItems: PayItem[] = [];
+  const incomeTax = Math.round(extra.income_tax);
+  add(deductItems, "income_tax", "갑근세", incomeTax);
+  add(deductItems, "resident_tax", "주민세", floor10(incomeTax * cfg("resident_tax_rate")));
+  // 기준액=지급총액(1차). 위 [4대보험 기준액] 주석 참조.
+  add(deductItems, "pension", "국민연금", floor10(totalPay * cfg("pension_rate")));
+  const health = floor10(totalPay * cfg("health_rate"));
+  add(deductItems, "health", "국민건강", health);
+  add(deductItems, "longterm_care", "장기요양", floor10(health * cfg("longterm_care_rate")));
+  add(deductItems, "employment", "고용보험", floor10(totalPay * cfg("employment_rate")));
+  const sangjo = extra.sangjo ?? cfg("sangjo_fee");
+  add(deductItems, "sangjo", "상조회비", Math.round(sangjo));
+  // 산재보험(accident_rate)은 사업주 부담 → 직원 공제내역에서 제외.
+
+  const totalDeduct = deductItems.reduce((s, i) => s + i.amount, 0);
+  const netPay = totalPay - totalDeduct;
+  return { payItems, deductItems, totalPay, totalDeduct, netPay };
+}
+
 export type MonthRange = { start_month: number; end_month: number };
 
 // 월 구간 검증 — 각 구간 1~12·start≤end, 같은 직원·연도 내 구간 겹침 금지.

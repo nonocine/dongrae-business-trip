@@ -23,6 +23,7 @@ import {
   sortGradeRows,
   gradeSortKey,
   validateMonthRanges,
+  calcMonthlyPayroll,
   type SalaryGradeRow,
   type SalaryConfigRow,
   type EmployeeSalaryProfileRow,
@@ -164,6 +165,7 @@ export default function SalaryManager({
         <EmployeeSalarySection
           year={year}
           grades={grades}
+          configs={configs}
           employees={employees}
           rows={rows}
           onRefresh={() => reload(year)}
@@ -745,17 +747,26 @@ function newEditRow(): EditRow {
 function EmployeeSalarySection({
   year,
   grades,
+  configs,
   employees,
   rows,
   onRefresh,
 }: {
   year: number;
   grades: SalaryGradeRow[];
+  configs: SalaryConfigRow[];
   employees: SalaryEmployee[];
   rows: EmployeeSalaryProfileRow[];
   onRefresh: () => void;
 }) {
   const [selected, setSelected] = useState<string>("");
+
+  // 계산 엔진용 config 맵(key→값). 연도 기준값이 없으면 미리보기 계산 불가.
+  const configMap = useMemo(() => {
+    const m: Record<string, number> = {};
+    for (const c of configs) m[c.config_key] = c.config_value;
+    return m;
+  }, [configs]);
 
   // 직원별 기존 행 수(요약 배지).
   const countByDriver = useMemo(() => {
@@ -818,6 +829,7 @@ function EmployeeSalarySection({
           key={`${selectedEmp.driver_id}-${year}`}
           year={year}
           grades={grades}
+          config={configMap}
           employee={selectedEmp}
           existingRows={rows.filter((r) => r.driver_id === selectedEmp.driver_id)}
           onRefresh={onRefresh}
@@ -841,12 +853,14 @@ function EmployeeSalarySection({
 function EmployeeSalaryEditor({
   year,
   grades,
+  config,
   employee,
   existingRows,
   onRefresh,
 }: {
   year: number;
   grades: SalaryGradeRow[];
+  config: Record<string, number>;
   employee: SalaryEmployee;
   existingRows: EmployeeSalaryProfileRow[];
   onRefresh: () => void;
@@ -867,6 +881,8 @@ function EmployeeSalaryEditor({
   );
   const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
   const [pending, start] = useTransition();
+  // 미리보기 기준 구간(여러 구간이면 구간별 기본급이 달라 선택). 기본 구간 1.
+  const [previewIdx, setPreviewIdx] = useState(0);
 
   // 급수 목록(현재 연도 호봉표) + 급수→호봉 목록.
   const gradeNames = useMemo(() => {
@@ -907,6 +923,23 @@ function EmployeeSalaryEditor({
     );
     return check.ok ? null : check.message;
   }, [editRows]);
+
+  // 월 급여 미리보기 — 선택 구간의 기본급 + extra 로 공용 계산 엔진 호출.
+  const hasConfig = Object.keys(config).length > 0;
+  const pIdx = Math.min(previewIdx, editRows.length - 1);
+  const previewRow = editRows[pIdx] ?? null;
+  const previewBase = previewRow ? baseOf(previewRow.grade, previewRow.step) : null;
+  // extra(체크박스·가족수당·갑근세 등) 변경 시 재계산되도록 직렬화 키를 의존성에.
+  const previewExtraKey = JSON.stringify(previewRow?.extra ?? null);
+  const preview = useMemo(() => {
+    if (!hasConfig || !previewRow || previewBase == null) return null;
+    return calcMonthlyPayroll({
+      baseSalary: previewBase,
+      extra: previewRow.extra,
+      config,
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [hasConfig, previewBase, config, previewRow, previewExtraKey]);
 
   function save() {
     setMsg(null);
@@ -1228,6 +1261,119 @@ function EmployeeSalaryEditor({
           </button>
         )}
       </div>
+
+      {/* 월 급여 미리보기 — 표시용(저장·계산 이원화 아님, calcMonthlyPayroll 공용). */}
+      <div className="mt-5 border-t border-line pt-4">
+        <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+          <h4 className="text-sm font-bold text-navy">월 급여 미리보기</h4>
+          {editRows.length > 1 && (
+            <label className="flex items-center gap-1.5 text-xs text-ink-muted">
+              기준 구간
+              <select
+                value={pIdx}
+                onChange={(e) => setPreviewIdx(Number(e.target.value))}
+                className="rounded-md border border-line bg-card px-2 py-1 text-xs text-ink-body focus:border-navy focus:outline-none"
+              >
+                {editRows.map((r, i) => (
+                  <option key={r.key} value={i}>
+                    구간 {i + 1} ({r.start_month}~{r.end_month}월)
+                  </option>
+                ))}
+              </select>
+            </label>
+          )}
+        </div>
+
+        {!hasConfig ? (
+          <p className="rounded-lg bg-warning-soft px-3 py-2 text-xs text-warning">
+            {year}년 급여 기준값이 없어 미리보기를 계산할 수 없습니다. “급여 기준값”
+            탭에서 먼저 기준값을 입력하세요.
+          </p>
+        ) : preview == null ? (
+          <p className="rounded-lg bg-surface px-3 py-2 text-xs text-ink-hint">
+            급수·호봉을 선택하면 명세서 미리보기가 표시됩니다.
+          </p>
+        ) : (
+          <PayrollPreview
+            preview={preview}
+            label={`구간 ${pIdx + 1} 기준 (${previewRow?.start_month}~${previewRow?.end_month}월)`}
+          />
+        )}
+      </div>
     </section>
+  );
+}
+
+// 명세서형 미리보기 — 2단(급여내역|공제내역) + 지급/공제 총액 + 차인지급액.
+function PayrollPreview({
+  preview,
+  label,
+}: {
+  preview: ReturnType<typeof calcMonthlyPayroll>;
+  label: string;
+}) {
+  const rowsCls = "flex items-center justify-between py-1 text-sm";
+  return (
+    <div className="rounded-lg border border-hr-border bg-hr-bg p-3 sm:p-4">
+      <div className="mb-2 flex items-center justify-between border-b border-hr-border pb-2">
+        <span className="text-xs font-bold tracking-[0.15em] text-navy">
+          급여명세서 (미리보기)
+        </span>
+        <span className="text-[11px] text-ink-hint">{label}</span>
+      </div>
+
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+        {/* 급여내역 */}
+        <div>
+          <p className="mb-1 text-xs font-bold text-navy">급여 내역</p>
+          <div className="divide-y divide-line/60">
+            {preview.payItems.map((it) => (
+              <div key={it.key} className={rowsCls}>
+                <span className="text-ink-body">{it.label}</span>
+                <span className="font-mono text-ink">{formatKRW(it.amount)}</span>
+              </div>
+            ))}
+          </div>
+          <div className="mt-1 flex items-center justify-between border-t border-hr-border pt-1.5 text-sm font-bold">
+            <span className="text-navy">지급 총액</span>
+            <span className="font-mono text-ink">
+              {formatKRW(preview.totalPay)}
+            </span>
+          </div>
+        </div>
+
+        {/* 공제내역 */}
+        <div>
+          <p className="mb-1 text-xs font-bold text-navy">공제 내역</p>
+          <div className="divide-y divide-line/60">
+            {preview.deductItems.map((it) => (
+              <div key={it.key} className={rowsCls}>
+                <span className="text-ink-body">{it.label}</span>
+                <span className="font-mono text-ink">{formatKRW(it.amount)}</span>
+              </div>
+            ))}
+          </div>
+          <div className="mt-1 flex items-center justify-between border-t border-hr-border pt-1.5 text-sm font-bold">
+            <span className="text-navy">공제 총액</span>
+            <span className="font-mono text-ink">
+              {formatKRW(preview.totalDeduct)}
+            </span>
+          </div>
+        </div>
+      </div>
+
+      <div className="mt-3 flex items-center justify-between rounded-md bg-navy px-3 py-2 text-white">
+        <span className="text-sm font-bold tracking-wide">차인지급액</span>
+        <span className="font-mono text-base font-bold">
+          {formatKRW(preview.netPay)}
+        </span>
+      </div>
+
+      <p className="mt-2 text-[11px] leading-relaxed text-ink-hint">
+        명절휴가비·연가보상비·시간외수당은 해당 월 생성 시 추가됩니다. 국민연금·건강보험은
+        월 지급총액 기준 추정치로, 실제 공제액(연간 고정 보수월액 기준)과 차이가 날 수
+        있습니다.
+      </p>
+    </div>
   );
 }
