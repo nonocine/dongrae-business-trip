@@ -17,6 +17,9 @@ import {
   CERT_LEVEL_OPTIONS,
   EMPTY_SALARY_EXTRA,
   formatKRW,
+  formatConfigValue,
+  isRateKey,
+  formatRate,
   sortGradeRows,
   gradeSortKey,
   validateMonthRanges,
@@ -523,10 +526,16 @@ function ConfigEditRow({
       <td className="px-2 py-2">
         <input
           type="number"
+          step="any"
           value={form.value}
           onChange={(e) => setForm({ ...form, value: e.target.value })}
           className={`${inCls} text-right font-mono`}
         />
+        {isRateKey(form.key.trim()) && (
+          <p className="mt-1 text-right text-[11px] text-ink-hint">
+            요율(소수 입력) = {formatRate(Number(form.value))}
+          </p>
+        )}
       </td>
       <td className="px-2 py-2">
         <div className="flex justify-end gap-1">
@@ -671,7 +680,7 @@ function ConfigSection({
                   <td className={`${tdCls} font-mono text-xs`}>{r.config_key}</td>
                   <td className={tdCls}>{r.label ?? "-"}</td>
                   <td className={`${tdCls} text-right font-mono`}>
-                    {formatKRW(r.config_value)}
+                    {formatConfigValue(r.config_key, r.config_value)}
                   </td>
                   <td className={`${tdCls} text-right`}>
                     <div className="flex justify-end gap-1">

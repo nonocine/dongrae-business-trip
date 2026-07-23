@@ -103,6 +103,26 @@ export function formatKRW(n: number | null | undefined): string {
   return Math.round(Number(n)).toLocaleString("ko-KR");
 }
 
+// config_key 가 요율(비율)인지 — 소수(0<v<1)로 저장되므로 금액과 다르게 표시해야 함.
+//   * 요율은 key 가 _rate 로 끝납니다(예: pension_rate 0.0475).
+//   * 금액용 formatKRW(Math.round)로 표시하면 0.0475 → "0" 으로 뭉개지므로 분리.
+export function isRateKey(key: string): boolean {
+  return key.endsWith("_rate");
+}
+
+// 요율(소수) → 퍼센트 문자열. 0.0475 → "4.75%", 0.09 → "9%", 1.2 → "120%".
+export function formatRate(value: number | null | undefined): string {
+  if (value == null || !Number.isFinite(Number(value))) return "-";
+  // 부동소수 잡음 제거(0.03595*100=3.5949999… 방지) 후 불필요한 0 절삭.
+  const pct = Number((Number(value) * 100).toFixed(6));
+  return `${pct.toLocaleString("ko-KR")}%`;
+}
+
+// 기준값 표시 — 요율 key 는 퍼센트, 그 외는 원화. (기준값 표에서 사용)
+export function formatConfigValue(key: string, value: number): string {
+  return isRateKey(key) ? formatRate(value) : formatKRW(value);
+}
+
 // 급수 정렬용 숫자 추출 — "6급" → 6, 파싱 실패 시 큰 수(뒤로).
 export function gradeSortKey(grade: string): number {
   const m = grade.match(/\d+/);
