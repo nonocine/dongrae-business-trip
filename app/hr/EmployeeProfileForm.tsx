@@ -9,6 +9,7 @@ import {
   deleteEmployeeDocument,
   getEmployeeDocumentUrl,
   saveEmployeeAuthLevel,
+  saveEmploymentStatus,
   getEmployeeRoles,
   setEmployeeRoles,
 } from "@/app/hr/actions";
@@ -115,6 +116,32 @@ export default function EmployeeProfileForm({
       const res = await saveEmployeeAuthLevel(driver.id, authLevel);
       if (res.ok) setAuthOk("권한등급이 저장되었습니다.");
       else setAuthError(res.message);
+    });
+  }
+
+  // 재직 상태(employment_status/resignation_date) — 급여·증명서 기준. M0만 변경.
+  //   본 폼 저장과 독립적으로 별도 저장(권한등급 패턴과 동일).
+  const [empStatus, setEmpStatus] = useState<"active" | "resigned">(
+    () => profile?.employment_status ?? "active"
+  );
+  const [resignDate, setResignDate] = useState<string>(
+    () => profile?.resignation_date ?? ""
+  );
+  const [empError, setEmpError] = useState<string | null>(null);
+  const [empOk, setEmpOk] = useState<string | null>(null);
+  const [empPending, empTransition] = useTransition();
+
+  function handleEmpSave() {
+    setEmpError(null);
+    setEmpOk(null);
+    empTransition(async () => {
+      const res = await saveEmploymentStatus(
+        driver.id,
+        empStatus,
+        empStatus === "resigned" ? resignDate : null
+      );
+      if (res.ok) setEmpOk("재직 상태가 저장되었습니다.");
+      else setEmpError(res.message);
     });
   }
 
@@ -471,6 +498,74 @@ export default function EmployeeProfileForm({
                 <p className="mt-1 text-xs text-stamp">{authError}</p>
               )}
               {authOk && <p className="mt-1 text-xs text-success">{authOk}</p>}
+            </div>
+
+            {/* 재직 상태 — 급여·증명서 기준(레거시 퇴사일과 별개). 관장·부장만 변경. */}
+            <div className="mt-4 rounded-lg border border-line bg-card p-3">
+              <div className="flex items-center justify-between">
+                <label className={labelCls}>재직 상태</label>
+                {!canManageAuth ? (
+                  <span
+                    className={
+                      empStatus === "resigned" ? badgeWarning : badgeSuccess
+                    }
+                  >
+                    {empStatus === "resigned" ? "퇴사" : "재직"}
+                  </span>
+                ) : (
+                  <span className="text-[11px] text-ink-hint">
+                    관장·부장만 변경 가능
+                  </span>
+                )}
+              </div>
+              <p className="mt-0.5 text-[11px] text-ink-hint">
+                급여·증명서 발급의 기준이 되는 재직 상태입니다. 퇴사 처리해도
+                인사기록은 삭제되지 않고 보존됩니다.
+              </p>
+              {canManageAuth ? (
+                <div className="mt-2 flex flex-wrap items-end gap-2">
+                  <select
+                    value={empStatus}
+                    onChange={(e) =>
+                      setEmpStatus(e.target.value as "active" | "resigned")
+                    }
+                    className={`!mt-0 max-w-[140px] ${baseInputCls} bg-card`}
+                  >
+                    <option value="active">재직</option>
+                    <option value="resigned">퇴사</option>
+                  </select>
+                  {empStatus === "resigned" && (
+                    <div>
+                      <label className="block text-[11px] font-bold text-navy">
+                        퇴사일
+                      </label>
+                      <input
+                        type="date"
+                        value={resignDate}
+                        onChange={(e) => setResignDate(e.target.value)}
+                        className={`!mt-0.5 max-w-[170px] ${baseInputCls} bg-card`}
+                      />
+                    </div>
+                  )}
+                  <button
+                    type="button"
+                    onClick={handleEmpSave}
+                    disabled={empPending}
+                    className="shrink-0 rounded-lg border border-navy bg-card px-3 py-2 text-xs font-semibold text-navy hover:bg-navy-soft disabled:opacity-60"
+                  >
+                    {empPending ? "저장 중…" : "상태 저장"}
+                  </button>
+                </div>
+              ) : (
+                empStatus === "resigned" &&
+                resignDate && (
+                  <p className="mt-2 text-xs text-ink-muted">
+                    퇴사일: {resignDate}
+                  </p>
+                )
+              )}
+              {empError && <p className="mt-1 text-xs text-stamp">{empError}</p>}
+              {empOk && <p className="mt-1 text-xs text-success">{empOk}</p>}
             </div>
 
             {/* 담당 직무 — M0만 편집, 그 외 읽기전용 */}

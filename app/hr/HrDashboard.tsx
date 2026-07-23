@@ -158,12 +158,32 @@ function RecordsTab({
   canManageAuth: boolean;
 }) {
   const [selectedId, setSelectedId] = useState("");
+  // 재직/퇴사 필터 — 기본은 재직만 노출(퇴사자는 분리). 기록은 삭제하지 않고 보존.
+  const [statusFilter, setStatusFilter] = useState<"active" | "resigned">(
+    "active"
+  );
 
   const profileMap = useMemo(() => {
     const m = new Map<string, EmployeeProfile>();
     for (const p of profiles) m.set(p.driver_id, p);
     return m;
   }, [profiles]);
+
+  // 직원의 재직 상태 — 인사기록카드의 employment_status 기준(없으면 재직).
+  const statusOf = (driverId: string): "active" | "resigned" =>
+    profileMap.get(driverId)?.employment_status ?? "active";
+
+  const resignedCount = useMemo(
+    () => drivers.filter((d) => statusOf(d.id) === "resigned").length,
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [drivers, profileMap]
+  );
+
+  const visibleDrivers = useMemo(
+    () => drivers.filter((d) => statusOf(d.id) === statusFilter),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [drivers, profileMap, statusFilter]
+  );
 
   const selectedDriver =
     drivers.find((d) => d.id === selectedId) ?? null;
@@ -173,25 +193,50 @@ function RecordsTab({
 
   return (
     <div className="space-y-5">
-      {/* 직원 선택 */}
+      {/* 직원 선택 + 재직/퇴사 필터 */}
       <section className={cardCls}>
-        <label className="block text-xs font-medium text-ink-muted">
-          인사기록카드를 편집할 직원 선택
-        </label>
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <label className="block text-xs font-medium text-ink-muted">
+            인사기록카드를 편집할 직원 선택
+          </label>
+          <div className="flex gap-1">
+            <button
+              type="button"
+              onClick={() => setStatusFilter("active")}
+              className={filterBtnCls(statusFilter === "active")}
+            >
+              재직
+            </button>
+            <button
+              type="button"
+              onClick={() => setStatusFilter("resigned")}
+              className={filterBtnCls(statusFilter === "resigned")}
+            >
+              퇴사 {resignedCount > 0 && `(${resignedCount})`}
+            </button>
+          </div>
+        </div>
         <select
-          value={selectedId}
+          value={visibleDrivers.some((d) => d.id === selectedId) ? selectedId : ""}
           onChange={(e) => setSelectedId(e.target.value)}
           className={inputCls}
         >
           <option value="">직원을 선택해주세요</option>
-          {drivers.map((d) => (
+          {visibleDrivers.map((d) => (
             <option key={d.id} value={d.id}>
               {profileMap.has(d.id) ? "✅" : "❌"} {d.name}
               {d.rank ? ` (${d.rank})` : ""}
-              {d.is_active ? "" : " — 퇴사"}
+              {statusOf(d.id) === "resigned" ? " — 퇴사" : ""}
             </option>
           ))}
         </select>
+        {visibleDrivers.length === 0 && (
+          <p className="mt-2 text-xs text-ink-hint">
+            {statusFilter === "resigned"
+              ? "퇴사 처리된 직원이 없습니다."
+              : "재직 중인 직원이 없습니다."}
+          </p>
+        )}
       </section>
 
       <div className="grid grid-cols-1 gap-5 lg:grid-cols-[1fr_320px]">
@@ -223,10 +268,11 @@ function RecordsTab({
           )}
         </div>
 
-        {/* 우측: 직원 목록 체크리스트 */}
+        {/* 우측: 직원 목록 체크리스트 (현재 필터 기준) */}
         <EmployeeChecklistCard
-          drivers={drivers}
+          drivers={visibleDrivers}
           profileMap={profileMap}
+          statusOf={statusOf}
           selectedId={selectedId}
           onSelect={setSelectedId}
         />
@@ -235,14 +281,25 @@ function RecordsTab({
   );
 }
 
+// 재직/퇴사 필터 버튼 스타일.
+function filterBtnCls(active: boolean): string {
+  return `rounded-full px-3 py-1 text-xs font-semibold transition ${
+    active
+      ? "bg-navy text-white"
+      : "border border-line bg-card text-ink-muted hover:bg-surface"
+  }`;
+}
+
 function EmployeeChecklistCard({
   drivers,
   profileMap,
+  statusOf,
   selectedId,
   onSelect,
 }: {
   drivers: Driver[];
   profileMap: Map<string, EmployeeProfile>;
+  statusOf: (driverId: string) => "active" | "resigned";
   selectedId: string;
   onSelect: (id: string) => void;
 }) {
@@ -257,13 +314,14 @@ function EmployeeChecklistCard({
       </h3>
       {drivers.length === 0 ? (
         <p className="mt-3 text-xs text-ink-muted">
-          등록된 직원이 없습니다.
+          표시할 직원이 없습니다.
         </p>
       ) : (
         <ul className="mt-3 space-y-1">
           {drivers.map((d) => {
             const has = profileMap.has(d.id);
             const active = d.id === selectedId;
+            const resigned = statusOf(d.id) === "resigned";
             return (
               <li key={d.id}>
                 <button
@@ -273,7 +331,7 @@ function EmployeeChecklistCard({
                     active
                       ? "bg-navy-soft ring-1 ring-navy"
                       : "hover:bg-surface"
-                  }`}
+                  } ${resigned ? "opacity-60" : ""}`}
                 >
                   <span className="flex items-center gap-1.5">
                     <span aria-hidden>{has ? "✅" : "❌"}</span>
@@ -281,8 +339,10 @@ function EmployeeChecklistCard({
                     {d.rank && (
                       <span className="text-xs text-ink-hint">{d.rank}</span>
                     )}
-                    {!d.is_active && (
-                      <span className="text-[10px] text-ink-hint">(퇴사)</span>
+                    {resigned && (
+                      <span className="rounded-full bg-warning-soft px-1.5 py-0.5 text-[10px] font-semibold text-warning">
+                        퇴사
+                      </span>
                     )}
                   </span>
                   <span

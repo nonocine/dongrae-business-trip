@@ -535,6 +535,11 @@ export type EmployeeProfile = {
   photo_url: string | null;
   join_date: string | null;
   leave_date: string | null;
+  // 재직 상태 — 급여·증명서의 기준 필드(레거시 leave_date 와 별개로 신설).
+  //   'active'(재직) | 'resigned'(퇴사). 퇴사면 resignation_date 를 채웁니다.
+  //   DB 기본값 'active' — 합격자→직원 전환 시 컬럼 미지정이라 자동 재직 처리됩니다.
+  employment_status: "active" | "resigned";
+  resignation_date: string | null;
   education: EmployeeEducation[];
   family: EmployeeFamily[];
   licenses: EmployeeLicense[];
@@ -666,6 +671,10 @@ export function normalizeEmployeeProfile(
     photo_url: (raw.photo_url as string | null) ?? null,
     join_date: (raw.join_date as string | null) ?? null,
     leave_date: (raw.leave_date as string | null) ?? null,
+    // 알 수 없는 값/누락은 'active' 로 보정(기존 행 하위호환).
+    employment_status:
+      raw.employment_status === "resigned" ? "resigned" : "active",
+    resignation_date: (raw.resignation_date as string | null) ?? null,
     education: toJsonbArray<EmployeeEducation>(raw.education),
     family: toJsonbArray<EmployeeFamily>(raw.family),
     licenses: toJsonbArray<EmployeeLicense>(raw.licenses),

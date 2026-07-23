@@ -516,6 +516,62 @@ export async function saveEmployeeAuthLevel(
   }
 }
 
+// =====================================================================
+// 재직 상태(employment_status / resignation_date) — 급여 1차 PART A.
+//   * 변경은 M0(관장·부장·master)만. (auth_level·직무와 동일 게이트)
+//   * 'active'(재직) → resignation_date 는 항상 null 로 강제.
+//     'resigned'(퇴사) → resignation_date(YYYY-MM-DD) 필수.
+//   * 삭제 금지 원칙: 퇴사는 상태 전환만 하고 인사기록·계정은 보존합니다.
+//   * 본 폼(saveEmployeeProfile)과 독립 저장(별도 버튼) — auth_level 패턴 재사용.
+// =====================================================================
+export async function saveEmploymentStatus(
+  driverId: string,
+  status: string,
+  resignationDate: string | null
+): Promise<{ ok: true } | { ok: false; message: string }> {
+  try {
+    const me = await requireHrAdmin();
+    if (!isM0Grant({ rank: me.rank })) {
+      return { ok: false, message: "재직 상태 변경은 관장·부장만 가능합니다." };
+    }
+    if (!driverId) return { ok: false, message: "직원이 지정되지 않았습니다." };
+
+    const s = status.trim();
+    if (s !== "active" && s !== "resigned") {
+      return { ok: false, message: "허용되지 않은 재직 상태입니다." };
+    }
+
+    let resign: string | null = null;
+    if (s === "resigned") {
+      const d = (resignationDate ?? "").trim();
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(d)) {
+        return { ok: false, message: "퇴사일(YYYY-MM-DD)을 입력해주세요." };
+      }
+      resign = d;
+    }
+
+    const { error } = await supabaseAdmin.from("employee_profiles").upsert(
+      {
+        driver_id: driverId,
+        employment_status: s,
+        resignation_date: resign,
+        updated_at: new Date().toISOString(),
+      },
+      { onConflict: "driver_id" }
+    );
+    if (error) throw new Error(error.message);
+
+    revalidatePath("/hr");
+    return { ok: true };
+  } catch (e) {
+    return {
+      ok: false,
+      message:
+        e instanceof Error ? e.message : "재직 상태 저장 중 오류가 발생했습니다.",
+    };
+  }
+}
+
 // 직원 권한등급 조회 — 게이트 토대 헬퍼. HR 관리자만 호출 가능.
 export async function getEmployeeAuthLevel(
   driverId: string

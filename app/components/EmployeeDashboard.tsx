@@ -452,7 +452,12 @@ export default async function EmployeeDashboard({
                   회계
                 </p>
                 <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-                  <PendingCard icon="💰" title="급여" desc="급여 관리" />
+                  <MenuCard
+                    href="/hr/salary"
+                    icon="💰"
+                    title="급여 기준 관리"
+                    desc="호봉표·기준값·직원별 급여 설정"
+                  />
                   <PendingCard icon="📊" title="예산" desc="예산 관리" />
                 </div>
               </div>
