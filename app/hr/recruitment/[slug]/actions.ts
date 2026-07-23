@@ -1922,6 +1922,80 @@ export async function getInterviewJudgeContext(
 }
 
 // =====================================================================
+// getMyJudgeAssignments — 로그인 직원 본인이 내부위원으로 배정된 면접 공고 목록.
+//   * 대시보드 "내 심사 배정" 카드(심사화면 입구)에서 사용.
+//   * 신원 도출은 requireInterviewJudge 와 동일: 세션 이름 → drivers 이름 매칭.
+//     (클라이언트 입력이 아닌 세션 기반이므로 service_role 조회가 안전)
+//   * 노출 기준: judge_type='internal' & is_active=true & 공고 status ∈ {published, closed}.
+//     (archived·draft 는 제외 → archived 되면 카드에서 자동으로 사라짐)
+//   * 미로그인/직원 아님/이름 매칭 실패/미배정/조회 오류 → 모두 빈 배열(에러 화면 금지).
+// =====================================================================
+export type MyJudgeAssignment = {
+  slug: string;
+  title: string;
+  field: string;
+};
+
+export async function getMyJudgeAssignments(): Promise<MyJudgeAssignment[]> {
+  try {
+    const me = await getSession();
+    const isEmployee =
+      !!me && me.kind === "employee" && me.name.trim().length > 0;
+    if (!isEmployee) return [];
+    const empName = (me as { name: string }).name.trim();
+
+    // 이름으로 직원 식별(drivers.name UNIQUE). 매칭 실패 → 조용히 빈 배열.
+    const { data: driver, error: dErr } = await supabaseAdmin
+      .from("drivers")
+      .select("id")
+      .eq("name", empName)
+      .maybeSingle();
+    if (dErr || !driver) return [];
+    const driverId = String((driver as { id?: unknown }).id ?? "");
+    if (!driverId) return [];
+
+    // 이 직원이 활성 내부위원으로 배정된 공고 id 수집.
+    const { data: judges, error: jErr } = await supabaseAdmin
+      .from("recruitment_judges")
+      .select("posting_id")
+      .eq("driver_id", driverId)
+      .eq("judge_type", "internal")
+      .eq("is_active", true);
+    if (jErr) return [];
+    const postingIds = Array.from(
+      new Set(
+        (judges ?? [])
+          .map((r) => String((r as { posting_id?: unknown }).posting_id ?? ""))
+          .filter((x) => x.length > 0)
+      )
+    );
+    if (postingIds.length === 0) return [];
+
+    // 공고 중 면접 진행 대상(published/closed)만. draft·archived 제외.
+    const { data: postings, error: pErr } = await supabaseAdmin
+      .from("recruitment_postings")
+      .select("slug, title, field, status")
+      .in("id", postingIds)
+      .in("status", ["published", "closed"]);
+    if (pErr) return [];
+
+    return (postings ?? [])
+      .map((row) => {
+        const r = row as Record<string, unknown>;
+        return {
+          slug: String(r.slug ?? ""),
+          title: String(r.title ?? ""),
+          field: String(r.field ?? ""),
+        };
+      })
+      .filter((p) => p.slug.length > 0);
+  } catch {
+    // 어떤 오류든 카드 미표시로 흡수(대시보드가 깨지지 않게).
+    return [];
+  }
+}
+
+// =====================================================================
 // 2-D-4) 공고별 외부위원 배정 토글 — /hr/recruitment/[slug]/judges
 //   * external_judges_pool 의 위원을 본 공고에 켜고(배정)/끄는(해제) 토글.
 //   * 배정 = recruitment_judges 에 is_active=true 스냅샷 행 생성/재활성화

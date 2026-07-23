@@ -7,6 +7,7 @@ import {
 } from "@/app/profile/hr/actions";
 import { getGoogleSession } from "@/app/actions";
 import { listAnnouncements } from "@/app/announcements/actions";
+import { getMyJudgeAssignments } from "@/app/hr/recruitment/[slug]/actions";
 import { isM0Grant } from "@/lib/authLevels";
 import { roleLabel } from "@/lib/employeeRoles";
 import { cardCls } from "@/lib/ui";
@@ -181,14 +182,16 @@ export default async function EmployeeDashboard({
     );
   }
 
-  // 본인 인사정보·사진·직무·구글세션(M0 판정용)·최신 공지를 병렬 조회.
-  const [my, photoUrl, roles, g, recentAnnouncements] = await Promise.all([
-    getMyProfile(),
-    getMyPhotoUrl(),
-    getMyEmployeeRoles(),
-    getGoogleSession(),
-    listAnnouncements(3),
-  ]);
+  // 본인 인사정보·사진·직무·구글세션(M0 판정용)·최신 공지·심사 배정을 병렬 조회.
+  const [my, photoUrl, roles, g, recentAnnouncements, judgeAssignments] =
+    await Promise.all([
+      getMyProfile(),
+      getMyPhotoUrl(),
+      getMyEmployeeRoles(),
+      getGoogleSession(),
+      listAnnouncements(3),
+      getMyJudgeAssignments(),
+    ]);
 
   const driver = my?.driver ?? null;
   const profile = my?.profile ?? null;
@@ -240,6 +243,47 @@ export default async function EmployeeDashboard({
           오늘도 좋은 하루 되세요. 내 정보와 담당 업무를 확인할 수 있습니다.
         </p>
       </section>
+
+      {/* 내 심사 배정 — 면접 심사위원으로 배정된 공고가 1건 이상일 때만 노출.
+          배정 없는 대다수 직원에겐 카드 자체가 안 보임. 클릭 시 심사화면으로 진입하고,
+          거기서 기존 requireInterviewJudge 판정이 이어서 최종 검증합니다. */}
+      {judgeAssignments.length > 0 && (
+        <section className={cardCls}>
+          <SectionHeading>내 심사 배정</SectionHeading>
+          <p className="mb-3 text-sm text-ink-muted">
+            면접 심사위원으로 배정되었습니다. 아래 채용의 심사화면으로 이동할 수
+            있습니다.
+          </p>
+          <ul className="space-y-2.5">
+            {judgeAssignments.map((a) => (
+              <li key={a.slug}>
+                <Link
+                  href={`/recruitment/${a.slug}/interview`}
+                  className="group flex items-center gap-3 rounded-xl border border-brand-blue/40 bg-brand-blue-soft/30 p-4 text-left transition hover:border-brand-blue hover:bg-brand-blue-soft/60"
+                >
+                  <span aria-hidden className="text-2xl">
+                    🧑‍⚖️
+                  </span>
+                  <span className="min-w-0">
+                    <span className="block text-sm font-semibold text-ink">
+                      {a.title}
+                    </span>
+                    <span className="mt-0.5 block text-xs text-ink-muted">
+                      {a.field ? `${a.field} · 면접 채점` : "면접 채점"}
+                    </span>
+                  </span>
+                  <span
+                    aria-hidden
+                    className="ml-auto shrink-0 self-center text-brand-blue transition group-hover:translate-x-0.5"
+                  >
+                    →
+                  </span>
+                </Link>
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
 
       {/* 내 프로필 카드 */}
       <section className={cardCls}>
