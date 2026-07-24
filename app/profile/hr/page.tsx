@@ -2,7 +2,9 @@ import Link from "next/link";
 import { redirect } from "next/navigation";
 import Header from "@/app/components/Header";
 import MyEmployeeProfileForm from "@/app/profile/hr/MyEmployeeProfileForm";
+import MyTrainingsSection from "@/app/profile/hr/MyTrainingsSection";
 import { getMyProfile } from "@/app/profile/hr/actions";
+import { getMyTrainings } from "@/app/profile/hr/trainingActions";
 import { enforcePasswordChange, getSession } from "@/app/actions";
 
 export const dynamic = "force-dynamic";
@@ -16,7 +18,10 @@ export default async function MyHrPage() {
   // 관리자는 본인 인사기록카드 개념이 없음
   if (session.kind === "admin") redirect("/admin");
 
-  const my = await getMyProfile();
+  const [my, myTrainings] = await Promise.all([
+    getMyProfile(),
+    getMyTrainings(),
+  ]);
   if (!my) redirect("/");
 
   return (
@@ -41,6 +46,12 @@ export default async function MyHrPage() {
           driverName={my.driver.name}
           profile={my.profile}
         />
+
+        {myTrainings && (
+          <div className="mt-5">
+            <MyTrainingsSection initial={myTrainings} />
+          </div>
+        )}
       </main>
     </>
   );

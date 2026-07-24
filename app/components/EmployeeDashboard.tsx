@@ -5,10 +5,13 @@ import {
   getMyPhotoUrl,
   getMyEmployeeRoles,
 } from "@/app/profile/hr/actions";
+import { getMyTrainingSummary } from "@/app/profile/hr/trainingActions";
+import { getTrainingsAdminSummary } from "@/app/hr/trainings/actions";
 import { getGoogleSession } from "@/app/actions";
 import { listAnnouncements } from "@/app/announcements/actions";
 import { getMyJudgeAssignments } from "@/app/hr/recruitment/[slug]/actions";
 import { isM0Grant } from "@/lib/authLevels";
+import { ddayLabel } from "@/lib/trainings";
 import { roleLabel } from "@/lib/employeeRoles";
 import { cardCls } from "@/lib/ui";
 
@@ -124,7 +127,7 @@ function SectionHeading({ children }: { children: ReactNode }) {
 }
 
 // 관리자(M0) 영역 — 채용·인사·권한/직무·외부위원 진입점. admin/M0 공용.
-function AdminArea() {
+function AdminArea({ trainingNotMet }: { trainingNotMet: number | null }) {
   return (
     <section className={cardCls}>
       <SectionHeading>관리자 영역</SectionHeading>
@@ -146,6 +149,18 @@ function AdminArea() {
           icon="🔑"
           title="권한·직무 지정"
           desc="권한등급·담당 직무 변경 (인사기록카드 편집)"
+        />
+        <MenuCard
+          href="/hr/trainings"
+          icon="🎓"
+          title="의무교육 현황"
+          desc={
+            trainingNotMet == null
+              ? "법정 의무교육 등록·이수 현황"
+              : trainingNotMet > 0
+                ? `미이수 총 ${trainingNotMet}건 — 등록·현황판`
+                : "올해 모두 이수 완료 ✓"
+          }
         />
         <MenuCard
           href="/hr/external-judges"
@@ -177,21 +192,31 @@ export default async function EmployeeDashboard({
             아래에서 업무를 시작하세요.
           </p>
         </section>
-        <AdminArea />
+        <AdminArea trainingNotMet={null} />
       </div>
     );
   }
 
-  // 본인 인사정보·사진·직무·구글세션(M0 판정용)·최신 공지·심사 배정을 병렬 조회.
-  const [my, photoUrl, roles, g, recentAnnouncements, judgeAssignments] =
-    await Promise.all([
-      getMyProfile(),
-      getMyPhotoUrl(),
-      getMyEmployeeRoles(),
-      getGoogleSession(),
-      listAnnouncements(3),
-      getMyJudgeAssignments(),
-    ]);
+  // 본인 인사정보·사진·직무·구글세션(M0 판정용)·최신 공지·심사 배정·의무교육 요약을 병렬 조회.
+  const [
+    my,
+    photoUrl,
+    roles,
+    g,
+    recentAnnouncements,
+    judgeAssignments,
+    trainingSummary,
+    trainingAdminSummary,
+  ] = await Promise.all([
+    getMyProfile(),
+    getMyPhotoUrl(),
+    getMyEmployeeRoles(),
+    getGoogleSession(),
+    listAnnouncements(3),
+    getMyJudgeAssignments(),
+    getMyTrainingSummary(),
+    getTrainingsAdminSummary(),
+  ]);
 
   const driver = my?.driver ?? null;
   const profile = my?.profile ?? null;
@@ -413,6 +438,25 @@ export default async function EmployeeDashboard({
             title="내 인사기록카드"
             desc="내 인사정보·증명사진·첨부서류 입력/수정"
           />
+          {/* 내 의무교육 — 올해 교육이 1개 이상일 때만 노출. */}
+          {trainingSummary && trainingSummary.total > 0 && (
+            <MenuCard
+              href="/profile/hr#my-trainings"
+              icon="🎓"
+              title="내 의무교육"
+              desc={
+                trainingSummary.notMet === 0
+                  ? "올해 교육 모두 완료 ✓"
+                  : `${trainingSummary.done}/${trainingSummary.total} 완료 · 미이수 ${trainingSummary.notMet}건${
+                      trainingSummary.nearest
+                        ? ` · 가장 임박: ${trainingSummary.nearest.name} ${ddayLabel(
+                            trainingSummary.nearest.dday
+                          )}`
+                        : ""
+                    }`
+              }
+            />
+          )}
           <PendingCard
             icon="🧾"
             title="증명서 신청"
@@ -480,10 +524,15 @@ export default async function EmployeeDashboard({
                     title="증명서 발급"
                     desc="재직·경력증명서 발급"
                   />
-                  <PendingCard
+                  <MenuCard
+                    href="/hr/trainings"
                     icon="🎓"
                     title="의무교육 현황"
-                    desc="법정 의무교육 이수 현황"
+                    desc={
+                      trainingAdminSummary && trainingAdminSummary.totalNotMet > 0
+                        ? `미이수 총 ${trainingAdminSummary.totalNotMet}건 — 등록·현황판`
+                        : "법정 의무교육 등록·이수 현황"
+                    }
                   />
                 </div>
               </div>
@@ -509,7 +558,11 @@ export default async function EmployeeDashboard({
       )}
 
       {/* 관리자 영역 — M0(관장·부장·마스터)만 */}
-      {isM0 && <AdminArea />}
+      {isM0 && (
+        <AdminArea
+          trainingNotMet={trainingAdminSummary?.totalNotMet ?? null}
+        />
+      )}
     </div>
   );
 }
