@@ -1,10 +1,8 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import { getSession, getGoogleSession } from "@/app/actions";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
-import { isM0Grant } from "@/lib/authLevels";
-import { listRolesForDriver } from "@/lib/employeeRolesServer";
+import { resolveSalaryAccess, requireSalaryAccess } from "@/lib/salaryAccess";
 import {
   normalizeSalaryExtra,
   validateMonthRanges,
@@ -23,56 +21,9 @@ import {
 //   * 계산·명세서·발송 없음(2차). 여기서는 기준값/설정 데이터 입력·관리만.
 // =====================================================================
 
-type SalaryAccess = { name: string; driverId: string | null };
-
-// 급여 접근 컨텍스트 — 권한 없으면 null. (페이지는 redirect, 액션은 throw 로 사용)
-async function resolveSalaryAccess(): Promise<SalaryAccess | null> {
-  const me = await getSession();
-  if (!me || me.kind !== "employee" || !me.name.trim()) return null;
-  const g = await getGoogleSession();
-
-  // 이름 → drivers 매칭(기존 헬퍼들과 동일 기준).
-  const { data: driver } = await supabaseAdmin
-    .from("drivers")
-    .select("id, rank")
-    .eq("name", me.name.trim())
-    .maybeSingle();
-  const driverId =
-    driver && typeof (driver as { id?: unknown }).id === "string"
-      ? String((driver as { id: string }).id)
-      : null;
-  const rank = (driver as { rank?: string | null } | null)?.rank ?? null;
-
-  // 권한등급(auth_level) — 인사기록카드 값.
-  let authLevel: string | null = null;
-  if (driverId) {
-    const { data: prof } = await supabaseAdmin
-      .from("employee_profiles")
-      .select("auth_level")
-      .eq("driver_id", driverId)
-      .maybeSingle();
-    authLevel = (prof as { auth_level?: string | null } | null)?.auth_level ?? null;
-  }
-
-  const isM0 = isM0Grant({ rank, email: g?.email, authLevel });
-  const roles = driverId ? await listRolesForDriver(driverId) : [];
-  const canAccess = isM0 || roles.includes("accounting");
-  if (!canAccess) return null;
-  return { name: me.name.trim(), driverId };
-}
-
-// 페이지용 — 접근 가능 여부만.
+// 페이지용 — 접근 가능 여부만. (접근 컨텍스트는 lib/salaryAccess 공용)
 export async function canAccessSalary(): Promise<boolean> {
   return (await resolveSalaryAccess()) !== null;
-}
-
-// 액션용 — 미통과면 throw(호출처에서 catch 하여 메시지 표시).
-async function requireSalaryAccess(): Promise<SalaryAccess> {
-  const ctx = await resolveSalaryAccess();
-  if (!ctx) {
-    throw new Error("급여 관리 권한이 없습니다. (관장·부장 또는 회계 담당자)");
-  }
-  return ctx;
 }
 
 // --- 정규화 ---

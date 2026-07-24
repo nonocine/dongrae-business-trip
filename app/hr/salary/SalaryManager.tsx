@@ -15,6 +15,7 @@ import {
 } from "@/app/hr/salary/actions";
 import {
   CERT_LEVEL_OPTIONS,
+  TEAM_OPTIONS,
   EMPTY_SALARY_EXTRA,
   formatKRW,
   formatConfigValue,
@@ -29,7 +30,9 @@ import {
   type SalaryConfigRow,
   type EmployeeSalaryProfileRow,
   type SalaryExtra,
+  type SalaryTeamValue,
 } from "@/lib/salary";
+import MonthlyPayrollSection from "@/app/hr/salary/MonthlyPayroll";
 import {
   cardCls,
   tabBarCls,
@@ -47,7 +50,7 @@ const inCls =
 const thCls = "px-2 py-2 text-left text-xs font-semibold text-navy";
 const tdCls = "px-2 py-2 align-middle text-sm text-ink-body";
 
-type SectionKey = "grade" | "config" | "employee";
+type SectionKey = "grade" | "config" | "employee" | "monthly";
 const MONTHS = Array.from({ length: 12 }, (_, i) => i + 1);
 
 export default function SalaryManager({
@@ -57,6 +60,7 @@ export default function SalaryManager({
   config,
   employees,
   salaryRows,
+  isM0,
 }: {
   initialYear: number;
   years: number[];
@@ -64,8 +68,9 @@ export default function SalaryManager({
   config: SalaryConfigRow[];
   employees: SalaryEmployee[];
   salaryRows: EmployeeSalaryProfileRow[];
+  isM0: boolean;
 }) {
-  const [section, setSection] = useState<SectionKey>("grade");
+  const [section, setSection] = useState<SectionKey>("monthly");
   const [year, setYear] = useState<number>(initialYear);
   const [yearList, setYearList] = useState<number[]>(
     years.length > 0 ? years : [initialYear]
@@ -131,6 +136,7 @@ export default function SalaryManager({
         <nav className={tabNavCls}>
           {(
             [
+              { key: "monthly", label: "월별 급여" },
               { key: "grade", label: "호봉표" },
               { key: "config", label: "급여 기준값" },
               { key: "employee", label: "직원별 급여 설정" },
@@ -148,6 +154,9 @@ export default function SalaryManager({
         </nav>
       </div>
 
+      {section === "monthly" && (
+        <MonthlyPayrollSection year={year} isM0={isM0} />
+      )}
       {section === "grade" && (
         <GradeTableSection
           year={year}
@@ -1032,6 +1041,35 @@ function EmployeeSalaryEditor({
         연중 호봉이 바뀌면 “구간 추가”로 월 구간을 나눠 입력하세요. (예: 1~5월
         6급5호봉 / 6~12월 6급6호봉)
       </p>
+
+      {/* 소속 팀 — 급여대장 그룹(센터/방과후아카데미). 모든 구간에 동일 적용. */}
+      <div className="mb-4 flex flex-wrap items-center gap-2 rounded-lg border border-line bg-surface/60 px-3 py-2">
+        <label className="text-xs font-semibold text-navy">소속 팀</label>
+        <select
+          value={editRows[0]?.extra.team ?? ""}
+          onChange={(e) =>
+            setEditRows((prev) =>
+              prev.map((r) => ({
+                ...r,
+                extra: {
+                  ...r.extra,
+                  team: e.target.value as SalaryTeamValue,
+                },
+              }))
+            )
+          }
+          className="rounded-md border border-line bg-card px-2.5 py-1.5 text-sm text-ink-body focus:border-navy focus:outline-none focus:ring-1 focus:ring-navy"
+        >
+          {TEAM_OPTIONS.map((o) => (
+            <option key={o.value} value={o.value}>
+              {o.label}
+            </option>
+          ))}
+        </select>
+        <span className="text-[11px] text-ink-hint">
+          급여대장에서 센터/방과후아카데미 그룹을 나누는 기준입니다.
+        </span>
+      </div>
 
       <div className="space-y-4">
         {editRows.map((r, idx) => {

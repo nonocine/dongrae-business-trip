@@ -37,6 +37,36 @@ export type EmployeeSalaryProfileRow = {
   extra: SalaryExtra;
 };
 
+// 급여대장 그룹(팀) — 센터 / 방과후아카데미 2그룹.
+export type PayrollTeam = "center" | "afterschool";
+export const TEAM_LABEL: Record<PayrollTeam, string> = {
+  center: "센터",
+  afterschool: "방과후아카데미",
+};
+export const TEAM_OPTIONS: { value: SalaryTeamValue; label: string }[] = [
+  { value: "", label: "자동(이름 기준)" },
+  { value: "center", label: "센터" },
+  { value: "afterschool", label: "방과후아카데미" },
+];
+// extra.team 저장값 — "" 는 미지정(이름 시드로 자동 분류).
+export type SalaryTeamValue = "" | PayrollTeam;
+
+// 팀 시드 — extra.team 미설정 직원의 이름 기반 기본 분류.
+//   실제 2026-07 급여대장 기준 방과후아카데미 인원. 화면에서 extra.team 을
+//   지정하면 그 값이 우선하며, 이 시드는 미지정 직원의 방어적 기본값입니다.
+//   (인사이동은 직원별 급여설정의 '소속 팀' 선택으로 반영)
+export const AFTERSCHOOL_SEED_NAMES = ["김소연", "한지형", "권수현", "박수선"];
+
+// 직원의 최종 팀 판정 — extra.team 우선, 없으면 이름 시드, 그래도 없으면 센터.
+export function resolveTeam(input: {
+  team?: SalaryTeamValue | null;
+  name?: string | null;
+}): PayrollTeam {
+  if (input.team === "center" || input.team === "afterschool") return input.team;
+  const nm = (input.name ?? "").replace(/\s+/g, "");
+  return AFTERSCHOOL_SEED_NAMES.includes(nm) ? "afterschool" : "center";
+}
+
 // extra jsonb — 개인 항목. 급여 값은 회계담당이 화면에서 직접 입력합니다.
 //   * 4대보험(pension·health·longterm_care·employment_ins)은 요율 계산이 실제
 //     공단 고지액과 불일치(개인별 예외)하여 갑근세처럼 "월액 입력값"으로 둡니다.
@@ -54,6 +84,7 @@ export type SalaryExtra = {
   health: number; // 국민건강 월액(공단 고지액 입력. 0=미표시)
   longterm_care: number; // 장기요양 월액(공단 고지액 입력. 0=미표시)
   employment_ins: number; // 고용보험 월액(공단 고지액 입력. 0=미표시)
+  team: SalaryTeamValue; // 소속 팀(급여대장 그룹). ""=미지정(이름 시드 자동)
 };
 
 export const EMPTY_SALARY_EXTRA: SalaryExtra = {
@@ -69,6 +100,7 @@ export const EMPTY_SALARY_EXTRA: SalaryExtra = {
   health: 0,
   longterm_care: 0,
   employment_ins: 0,
+  team: "",
 };
 
 // 자격수당 등급 옵션(UI). key 는 salary_config 의 cert_allowance_{n} 과 연결.
@@ -118,6 +150,8 @@ export function normalizeSalaryExtra(raw: unknown): SalaryExtra {
     health: num(r.health),
     longterm_care: num(r.longterm_care),
     employment_ins: num(r.employment_ins),
+    // 소속 팀 — 잘못된/없는 값은 ""(미지정)로 보정(하위호환).
+    team: r.team === "center" || r.team === "afterschool" ? r.team : "",
   };
 }
 
@@ -287,6 +321,88 @@ export function estimateInsuranceByRate(input: {
     longterm_care: floor10(health * cfg("longterm_care_rate")),
     employment: floor10(totalPay * cfg("employment_rate")),
   };
+}
+
+// =====================================================================
+// 월별 급여(급여 2차) — payroll_records 모델·합계·월 대상 판정 (순수)
+//   * payroll_records: driver_id, year, month, pay_items/deduct_items(jsonb),
+//     total_pay/total_deduct/net_pay, confirmed_at/confirmed_by, emailed_at,
+//     UNIQUE(driver_id, year, month).
+//   * 계산은 calcMonthlyPayroll 단일 출처. 여기서는 저장 모델과 파생 헬퍼만.
+// =====================================================================
+export type PayrollRecord = {
+  id: string;
+  driver_id: string;
+  year: number;
+  month: number;
+  pay_items: PayItem[];
+  deduct_items: PayItem[];
+  total_pay: number;
+  total_deduct: number;
+  net_pay: number;
+  confirmed_at: string | null;
+  confirmed_by: string | null;
+  emailed_at: string | null;
+};
+
+// "이 달 추가 항목" 프리셋 — 명절 있는 달·연말에만 담당자가 더하는 변동 지급.
+//   급여대장 고정 열에 없는 항목(명절휴가비·연가보상비)은 대장 '비고'에 표기됩니다.
+//   시간외수당은 관리업무수당과 같은 열을 공유합니다(직책에 따라 택일).
+export const PAY_ADDON_PRESETS: { key: string; label: string }[] = [
+  { key: "overtime", label: "시간외수당" },
+  { key: "holiday_bonus", label: "명절휴가비" },
+  { key: "annual_leave", label: "연가보상비" },
+];
+
+// 확정 여부 — confirmed_at 이 있으면 확정본.
+export function isConfirmed(rec: { confirmed_at: string | null }): boolean {
+  return !!rec.confirmed_at;
+}
+
+// PayItem[] 금액 합계(방어적 — 비정상 값은 0 취급, 원 단위 반올림).
+export function sumAmount(items: PayItem[]): number {
+  return items.reduce(
+    (s, i) => s + (Number.isFinite(i.amount) ? Math.round(i.amount) : 0),
+    0
+  );
+}
+
+// 지급·공제 배열로부터 합계·차인지급액 재계산(수정 시 자동 재계산).
+export function recalcTotals(
+  payItems: PayItem[],
+  deductItems: PayItem[]
+): { total_pay: number; total_deduct: number; net_pay: number } {
+  const total_pay = sumAmount(payItems);
+  const total_deduct = sumAmount(deductItems);
+  return { total_pay, total_deduct, net_pay: total_pay - total_deduct };
+}
+
+// 급여 설정 구간이 해당 월을 포함하는지.
+export function rangeIncludesMonth(
+  r: { start_month: number; end_month: number },
+  month: number
+): boolean {
+  return month >= r.start_month && month <= r.end_month;
+}
+
+// 퇴사 경계 — 해당 연·월에 급여 대상인지. 퇴사월까지 포함, 그 다음 달부터 제외.
+//   resignation_date 는 'YYYY-MM-DD'. 없거나 파싱 실패면 방어적으로 포함.
+export function isEmployedInMonth(input: {
+  year: number;
+  month: number;
+  employment_status: "active" | "resigned";
+  resignation_date: string | null;
+}): boolean {
+  if (input.employment_status !== "resigned" || !input.resignation_date) {
+    return true;
+  }
+  const m = input.resignation_date.match(/^(\d{4})-(\d{1,2})/);
+  if (!m) return true;
+  const resYear = Number(m[1]);
+  const resMonth = Number(m[2]);
+  if (input.year < resYear) return true; // 미래 퇴사 → 아직 재직
+  if (input.year > resYear) return false; // 퇴사 연도 지남
+  return input.month <= resMonth; // 같은 해: 퇴사월까지 포함
 }
 
 export type MonthRange = { start_month: number; end_month: number };

@@ -1,0 +1,808 @@
+"use server";
+
+import { revalidatePath } from "next/cache";
+import { supabaseAdmin } from "@/lib/supabaseAdmin";
+import { requireSalaryAccess } from "@/lib/salaryAccess";
+import {
+  calcMonthlyPayroll,
+  normalizeSalaryExtra,
+  recalcTotals,
+  rangeIncludesMonth,
+  isEmployedInMonth,
+  resolveTeam,
+  type PayItem,
+  type PayrollRecord,
+  type PayrollTeam,
+  type SalaryExtra,
+} from "@/lib/salary";
+import {
+  parseEdiBuffer,
+  EDI_FILE_TYPES,
+  type EdiFileType,
+  type EdiUpdateKey,
+} from "@/lib/salaryEdi";
+
+// =====================================================================
+// 월별 급여 — 생성·조회·수정·확정·확정취소 + 4대보험 EDI 업로드 (급여 2차)
+//   * 계산은 calcMonthlyPayroll 단일 출처(이원화 금지).
+//   * 권한: requireSalaryAccess(M0 또는 accounting). 확정취소만 M0 전용.
+//   * payroll_records: driver_id, year, month, pay_items/deduct_items(jsonb),
+//     total_pay/total_deduct/net_pay, confirmed_at/confirmed_by, emailed_at.
+// =====================================================================
+
+// --- 정규화 ---
+function toPayItems(v: unknown): PayItem[] {
+  if (!Array.isArray(v)) return [];
+  return v
+    .map((x) => {
+      const o = (x ?? {}) as Record<string, unknown>;
+      return {
+        key: String(o.key ?? ""),
+        label: String(o.label ?? ""),
+        amount: Number(o.amount ?? 0),
+      };
+    })
+    .filter((i) => i.key && Number.isFinite(i.amount));
+}
+
+function toPayrollRecord(raw: Record<string, unknown>): PayrollRecord {
+  return {
+    id: String(raw.id ?? ""),
+    driver_id: String(raw.driver_id ?? ""),
+    year: Number(raw.year ?? 0),
+    month: Number(raw.month ?? 0),
+    pay_items: toPayItems(raw.pay_items),
+    deduct_items: toPayItems(raw.deduct_items),
+    total_pay: Number(raw.total_pay ?? 0),
+    total_deduct: Number(raw.total_deduct ?? 0),
+    net_pay: Number(raw.net_pay ?? 0),
+    confirmed_at: (raw.confirmed_at as string | null) ?? null,
+    confirmed_by: (raw.confirmed_by as string | null) ?? null,
+    emailed_at: (raw.emailed_at as string | null) ?? null,
+  };
+}
+
+// --- 생성 컨텍스트(연도 기준 데이터 일괄 로드) ---
+type EmpMeta = {
+  driver_id: string;
+  name: string;
+  rank: string | null;
+  employment_status: "active" | "resigned";
+  resignation_date: string | null;
+};
+type ProfileRow = {
+  driver_id: string;
+  grade: string;
+  step: number;
+  start_month: number;
+  end_month: number;
+  extra: SalaryExtra;
+};
+type GenContext = {
+  gradeMap: Map<string, number>; // `${grade}::${step}` → base_salary
+  configMap: Record<string, number>;
+  profilesByDriver: Map<string, ProfileRow[]>;
+  empByDriver: Map<string, EmpMeta>;
+};
+
+async function loadContext(year: number): Promise<GenContext> {
+  const [gradeRes, configRes, profRes, driverRes, empRes] = await Promise.all([
+    supabaseAdmin
+      .from("salary_grade_table")
+      .select("grade, step, base_salary")
+      .eq("year", year),
+    supabaseAdmin
+      .from("salary_config")
+      .select("config_key, config_value")
+      .eq("year", year),
+    supabaseAdmin
+      .from("employee_salary_profiles")
+      .select("driver_id, grade, step, start_month, end_month, extra")
+      .eq("year", year),
+    supabaseAdmin.from("drivers").select("id, name, rank"),
+    supabaseAdmin
+      .from("employee_profiles")
+      .select("driver_id, employment_status, resignation_date"),
+  ]);
+
+  const gradeMap = new Map<string, number>();
+  for (const g of gradeRes.data ?? []) {
+    const r = g as Record<string, unknown>;
+    gradeMap.set(
+      `${String(r.grade ?? "")}::${Number(r.step ?? 0)}`,
+      Number(r.base_salary ?? 0)
+    );
+  }
+  const configMap: Record<string, number> = {};
+  for (const c of configRes.data ?? []) {
+    const r = c as Record<string, unknown>;
+    configMap[String(r.config_key ?? "")] = Number(r.config_value ?? 0);
+  }
+  const profilesByDriver = new Map<string, ProfileRow[]>();
+  for (const p of profRes.data ?? []) {
+    const r = p as Record<string, unknown>;
+    const row: ProfileRow = {
+      driver_id: String(r.driver_id ?? ""),
+      grade: String(r.grade ?? ""),
+      step: Number(r.step ?? 0),
+      start_month: Number(r.start_month ?? 0),
+      end_month: Number(r.end_month ?? 0),
+      extra: normalizeSalaryExtra(r.extra),
+    };
+    const list = profilesByDriver.get(row.driver_id) ?? [];
+    list.push(row);
+    profilesByDriver.set(row.driver_id, list);
+  }
+  const statusByDriver = new Map<
+    string,
+    { status: "active" | "resigned"; date: string | null }
+  >();
+  for (const p of empRes.data ?? []) {
+    const r = p as Record<string, unknown>;
+    statusByDriver.set(String(r.driver_id ?? ""), {
+      status: r.employment_status === "resigned" ? "resigned" : "active",
+      date: (r.resignation_date as string | null) ?? null,
+    });
+  }
+  const empByDriver = new Map<string, EmpMeta>();
+  for (const d of driverRes.data ?? []) {
+    const r = d as Record<string, unknown>;
+    const id = String(r.id ?? "");
+    const st = statusByDriver.get(id);
+    empByDriver.set(id, {
+      driver_id: id,
+      name: String(r.name ?? ""),
+      rank: (r.rank as string | null) ?? null,
+      employment_status: st?.status ?? "active",
+      resignation_date: st?.date ?? null,
+    });
+  }
+  return { gradeMap, configMap, profilesByDriver, empByDriver };
+}
+
+// 해당 월을 포함하는 급여 설정 구간(없으면 null). 비겹침 전제라 첫 일치.
+function profileForMonth(rows: ProfileRow[], month: number): ProfileRow | null {
+  return rows.find((r) => rangeIncludesMonth(r, month)) ?? null;
+}
+
+// 대상자(그 월 급여 지급) 판정 — 구간 포함 + 재직(퇴사월까지).
+function isTarget(
+  ctx: GenContext,
+  driverId: string,
+  year: number,
+  month: number
+): ProfileRow | null {
+  const prof = profileForMonth(ctx.profilesByDriver.get(driverId) ?? [], month);
+  if (!prof) return null;
+  const emp = ctx.empByDriver.get(driverId);
+  if (!emp) return null;
+  if (
+    !isEmployedInMonth({
+      year,
+      month,
+      employment_status: emp.employment_status,
+      resignation_date: emp.resignation_date,
+    })
+  ) {
+    return null;
+  }
+  return prof;
+}
+
+// 설정 기준 명세서 계산(base + extra). base 없으면 null.
+function computeFromProfile(
+  ctx: GenContext,
+  prof: ProfileRow
+): { payItems: PayItem[]; deductItems: PayItem[] } | null {
+  const base = ctx.gradeMap.get(`${prof.grade}::${prof.step}`);
+  if (base == null) return null;
+  const calc = calcMonthlyPayroll({
+    baseSalary: base,
+    extra: prof.extra,
+    config: ctx.configMap,
+  });
+  return { payItems: calc.payItems, deductItems: calc.deductItems };
+}
+
+// =====================================================================
+// PART 1. 월별 급여 생성
+// =====================================================================
+export type GenerateResult =
+  | {
+      ok: true;
+      created: number;
+      updated: number;
+      skippedConfirmed: string[]; // 확정되어 덮어쓰지 않음
+      existingDrafts: string[]; // 이미 초안 존재(overwrite 필요)
+      noBase: string[]; // 호봉표에 기본급 없음
+      targets: number;
+    }
+  | { ok: false; message: string };
+
+export async function generateMonthlyPayroll(input: {
+  year: number;
+  month: number;
+  overwriteDrafts: boolean;
+}): Promise<GenerateResult> {
+  try {
+    await requireSalaryAccess();
+    const year = Number(input.year);
+    const month = Number(input.month);
+    if (!Number.isInteger(year) || year < 2000 || year > 2100)
+      return { ok: false, message: "연도가 올바르지 않습니다." };
+    if (!Number.isInteger(month) || month < 1 || month > 12)
+      return { ok: false, message: "월이 올바르지 않습니다." };
+
+    const ctx = await loadContext(year);
+
+    // 기존 레코드 맵.
+    const { data: existing, error: exErr } = await supabaseAdmin
+      .from("payroll_records")
+      .select("*")
+      .eq("year", year)
+      .eq("month", month);
+    if (exErr) throw new Error(exErr.message);
+    const existingByDriver = new Map<string, PayrollRecord>();
+    for (const r of existing ?? [])
+      existingByDriver.set(
+        String((r as Record<string, unknown>).driver_id),
+        toPayrollRecord(r as Record<string, unknown>)
+      );
+
+    let created = 0;
+    let updated = 0;
+    const skippedConfirmed: string[] = [];
+    const existingDrafts: string[] = [];
+    const noBase: string[] = [];
+    let targets = 0;
+
+    for (const [driverId, emp] of ctx.empByDriver) {
+      const prof = isTarget(ctx, driverId, year, month);
+      if (!prof) continue;
+      targets++;
+      const computed = computeFromProfile(ctx, prof);
+      if (!computed) {
+        noBase.push(emp.name);
+        continue;
+      }
+      const totals = recalcTotals(computed.payItems, computed.deductItems);
+      const existRec = existingByDriver.get(driverId);
+      const payload = {
+        driver_id: driverId,
+        year,
+        month,
+        pay_items: computed.payItems,
+        deduct_items: computed.deductItems,
+        total_pay: totals.total_pay,
+        total_deduct: totals.total_deduct,
+        net_pay: totals.net_pay,
+      };
+
+      if (!existRec) {
+        const { error } = await supabaseAdmin
+          .from("payroll_records")
+          .insert(payload);
+        if (error) throw new Error(error.message);
+        created++;
+      } else if (existRec.confirmed_at) {
+        skippedConfirmed.push(emp.name); // 확정건 보호
+      } else if (!input.overwriteDrafts) {
+        existingDrafts.push(emp.name); // 초안 존재 → 확인 필요
+      } else {
+        const { error } = await supabaseAdmin
+          .from("payroll_records")
+          .update(payload)
+          .eq("id", existRec.id);
+        if (error) throw new Error(error.message);
+        updated++;
+      }
+    }
+
+    revalidatePath("/hr/salary");
+    return {
+      ok: true,
+      created,
+      updated,
+      skippedConfirmed,
+      existingDrafts,
+      noBase,
+      targets,
+    };
+  } catch (e) {
+    return {
+      ok: false,
+      message: e instanceof Error ? e.message : "급여 생성 중 오류가 발생했습니다.",
+    };
+  }
+}
+
+// =====================================================================
+// PART 1/2. 목록 조회 — 레코드 + 직원 메타 + 팀 + 설정과 다름 표식
+// =====================================================================
+export type MonthlyRow = {
+  recordId: string;
+  driver_id: string;
+  name: string;
+  rank: string | null;
+  team: PayrollTeam;
+  pay_items: PayItem[];
+  deduct_items: PayItem[];
+  total_pay: number;
+  total_deduct: number;
+  net_pay: number;
+  confirmed: boolean;
+  modified: boolean; // 초안 생성값(설정) 대비 수정됨
+};
+
+export type MonthlyListResult = {
+  year: number;
+  month: number;
+  rows: MonthlyRow[];
+  missingNames: string[]; // 대상인데 레코드 없음(생성 필요)
+  allConfirmed: boolean;
+  anyConfirmed: boolean;
+};
+
+function itemsEqual(a: PayItem[], b: PayItem[]): boolean {
+  if (a.length !== b.length) return false;
+  const key = (i: PayItem) => `${i.key}:${Math.round(i.amount)}`;
+  const sa = a.map(key).sort();
+  const sb = b.map(key).sort();
+  return sa.every((v, i) => v === sb[i]);
+}
+
+export async function listMonthlyPayroll(input: {
+  year: number;
+  month: number;
+}): Promise<MonthlyListResult> {
+  await requireSalaryAccess();
+  const year = Number(input.year);
+  const month = Number(input.month);
+  const ctx = await loadContext(year);
+
+  const { data, error } = await supabaseAdmin
+    .from("payroll_records")
+    .select("*")
+    .eq("year", year)
+    .eq("month", month);
+  if (error) throw new Error(error.message);
+  const records = (data ?? []).map((r) =>
+    toPayrollRecord(r as Record<string, unknown>)
+  );
+  const recByDriver = new Map(records.map((r) => [r.driver_id, r]));
+
+  const rows: MonthlyRow[] = [];
+  for (const rec of records) {
+    const emp = ctx.empByDriver.get(rec.driver_id);
+    const prof = profileForMonth(
+      ctx.profilesByDriver.get(rec.driver_id) ?? [],
+      month
+    );
+    const team = resolveTeam({
+      team: prof?.extra.team ?? "",
+      name: emp?.name ?? "",
+    });
+    // 설정과 다름 — 설정 기준 재계산과 저장값 비교.
+    let modified = false;
+    if (prof) {
+      const base = computeFromProfile(ctx, prof);
+      if (base) {
+        modified =
+          !itemsEqual(base.payItems, rec.pay_items) ||
+          !itemsEqual(base.deductItems, rec.deduct_items);
+      }
+    }
+    rows.push({
+      recordId: rec.id,
+      driver_id: rec.driver_id,
+      name: emp?.name ?? "(이름 없음)",
+      rank: emp?.rank ?? null,
+      team,
+      pay_items: rec.pay_items,
+      deduct_items: rec.deduct_items,
+      total_pay: rec.total_pay,
+      total_deduct: rec.total_deduct,
+      net_pay: rec.net_pay,
+      confirmed: !!rec.confirmed_at,
+      modified,
+    });
+  }
+
+  // 정렬: 팀(센터→방과후) → 이름.
+  const teamOrder: Record<PayrollTeam, number> = { center: 0, afterschool: 1 };
+  rows.sort((a, b) => {
+    if (a.team !== b.team) return teamOrder[a.team] - teamOrder[b.team];
+    return a.name.localeCompare(b.name, "ko");
+  });
+
+  // 대상인데 레코드 없는 직원.
+  const missingNames: string[] = [];
+  for (const [driverId, emp] of ctx.empByDriver) {
+    if (recByDriver.has(driverId)) continue;
+    if (isTarget(ctx, driverId, year, month)) missingNames.push(emp.name);
+  }
+
+  const anyConfirmed = rows.some((r) => r.confirmed);
+  const allConfirmed = rows.length > 0 && rows.every((r) => r.confirmed);
+  return { year, month, rows, missingNames, allConfirmed, anyConfirmed };
+}
+
+// =====================================================================
+// PART 2. 명세서 수정 — 항목 금액/추가/삭제 후 합계 재계산
+// =====================================================================
+function sanitizeItems(items: unknown): PayItem[] {
+  if (!Array.isArray(items)) return [];
+  return items
+    .map((x) => {
+      const o = (x ?? {}) as Record<string, unknown>;
+      return {
+        key: String(o.key ?? "").trim(),
+        label: String(o.label ?? "").trim(),
+        amount: Math.round(Number(o.amount ?? 0)),
+      };
+    })
+    .filter((i) => i.key && i.label && Number.isFinite(i.amount));
+}
+
+export async function savePayrollRecord(input: {
+  recordId: string;
+  pay_items: PayItem[];
+  deduct_items: PayItem[];
+}): Promise<{ ok: true } | { ok: false; message: string }> {
+  try {
+    await requireSalaryAccess();
+    if (!input.recordId) return { ok: false, message: "레코드가 없습니다." };
+
+    const { data: cur, error: curErr } = await supabaseAdmin
+      .from("payroll_records")
+      .select("id, confirmed_at")
+      .eq("id", input.recordId)
+      .maybeSingle();
+    if (curErr) throw new Error(curErr.message);
+    if (!cur) return { ok: false, message: "레코드를 찾을 수 없습니다." };
+    if ((cur as { confirmed_at: string | null }).confirmed_at) {
+      return {
+        ok: false,
+        message: "확정된 급여는 수정할 수 없습니다. 먼저 확정을 취소하세요.",
+      };
+    }
+
+    const pay = sanitizeItems(input.pay_items);
+    const ded = sanitizeItems(input.deduct_items);
+    const totals = recalcTotals(pay, ded);
+    const { error } = await supabaseAdmin
+      .from("payroll_records")
+      .update({
+        pay_items: pay,
+        deduct_items: ded,
+        total_pay: totals.total_pay,
+        total_deduct: totals.total_deduct,
+        net_pay: totals.net_pay,
+      })
+      .eq("id", input.recordId);
+    if (error) throw new Error(error.message);
+    revalidatePath("/hr/salary");
+    return { ok: true };
+  } catch (e) {
+    return {
+      ok: false,
+      message: e instanceof Error ? e.message : "수정 저장 중 오류가 발생했습니다.",
+    };
+  }
+}
+
+// =====================================================================
+// PART 3. 확정 / 확정 취소
+// =====================================================================
+export async function confirmMonthlyPayroll(input: {
+  year: number;
+  month: number;
+  force: boolean;
+}): Promise<
+  | { ok: true; confirmed: number }
+  | { ok: false; message?: string; warnings?: string[] }
+> {
+  try {
+    const who = await requireSalaryAccess();
+    const year = Number(input.year);
+    const month = Number(input.month);
+
+    const { data, error } = await supabaseAdmin
+      .from("payroll_records")
+      .select("*")
+      .eq("year", year)
+      .eq("month", month);
+    if (error) throw new Error(error.message);
+    const records = (data ?? []).map((r) =>
+      toPayrollRecord(r as Record<string, unknown>)
+    );
+    const drafts = records.filter((r) => !r.confirmed_at);
+    if (drafts.length === 0) {
+      return { ok: false, message: "확정할 초안 급여가 없습니다." };
+    }
+
+    // 검증: 차인지급액 음수·지급총액 0원.
+    const ctx = await loadContext(year);
+    const warnings: string[] = [];
+    for (const r of drafts) {
+      const name = ctx.empByDriver.get(r.driver_id)?.name ?? r.driver_id;
+      if (r.net_pay < 0) warnings.push(`${name}: 차인지급액이 음수입니다.`);
+      if (r.total_pay === 0) warnings.push(`${name}: 지급총액이 0원입니다.`);
+    }
+    if (warnings.length > 0 && !input.force) {
+      return { ok: false, warnings };
+    }
+
+    const now = new Date().toISOString();
+    const { error: upErr } = await supabaseAdmin
+      .from("payroll_records")
+      .update({ confirmed_at: now, confirmed_by: who.name })
+      .eq("year", year)
+      .eq("month", month)
+      .is("confirmed_at", null);
+    if (upErr) throw new Error(upErr.message);
+
+    revalidatePath("/hr/salary");
+    return { ok: true, confirmed: drafts.length };
+  } catch (e) {
+    return {
+      ok: false,
+      message: e instanceof Error ? e.message : "확정 중 오류가 발생했습니다.",
+    };
+  }
+}
+
+// 확정 취소 — M0 전용. 사유 없이 단순 취소(confirmed_by 초기화).
+export async function cancelMonthlyConfirm(input: {
+  year: number;
+  month: number;
+}): Promise<{ ok: true; canceled: number } | { ok: false; message: string }> {
+  try {
+    await requireSalaryAccess({ onlyM0: true });
+    const year = Number(input.year);
+    const month = Number(input.month);
+    const { data, error } = await supabaseAdmin
+      .from("payroll_records")
+      .update({ confirmed_at: null, confirmed_by: null })
+      .eq("year", year)
+      .eq("month", month)
+      .not("confirmed_at", "is", null)
+      .select("id");
+    if (error) throw new Error(error.message);
+    revalidatePath("/hr/salary");
+    return { ok: true, canceled: (data ?? []).length };
+  } catch (e) {
+    return {
+      ok: false,
+      message: e instanceof Error ? e.message : "확정 취소 중 오류가 발생했습니다.",
+    };
+  }
+}
+
+// =====================================================================
+// PART 5. 4대보험 EDI 업로드 — 미리보기 / 적용
+// =====================================================================
+const EXTRA_LABEL: Record<EdiUpdateKey, string> = {
+  pension: "국민연금",
+  health: "국민건강",
+  longterm_care: "장기요양",
+  employment_ins: "고용보험",
+};
+
+export type EdiDiffRow = {
+  name: string;
+  matched: boolean;
+  key: EdiUpdateKey;
+  label: string;
+  oldValue: number;
+  newValue: number;
+  delta: number;
+  bigChange: boolean; // ±30% 이상
+  note: string | null;
+};
+
+export type EdiPreviewResult =
+  | {
+      ok: true;
+      fileType: EdiFileType;
+      diffs: EdiDiffRow[];
+      warnings: string[];
+      unmatchedNames: string[];
+      missingActiveNames: string[]; // 재직 대상인데 파일에 없음
+    }
+  | { ok: false; message: string };
+
+// 이름 → driverId + 그 월 프로필. 공용 로직.
+function buildMatchers(ctx: GenContext, month: number) {
+  const idByName = new Map<string, string>();
+  for (const [id, emp] of ctx.empByDriver)
+    idByName.set(emp.name.replace(/\s+/g, ""), id);
+  const profOf = (driverId: string): ProfileRow | null =>
+    profileForMonth(ctx.profilesByDriver.get(driverId) ?? [], month);
+  return { idByName, profOf };
+}
+
+function ediEntriesToUpdates(
+  buffer: Uint8Array,
+  fileType: EdiFileType,
+  configMap: Record<string, number>
+) {
+  return parseEdiBuffer(buffer, fileType, {
+    employmentEmpRate: configMap["employment_emp_rate"] ?? 0,
+  });
+}
+
+export async function previewEdiUpload(input: {
+  year: number;
+  month: number;
+  fileType: EdiFileType;
+  base64: string;
+}): Promise<EdiPreviewResult> {
+  try {
+    await requireSalaryAccess();
+    const year = Number(input.year);
+    const month = Number(input.month);
+    if (!EDI_FILE_TYPES.some((t) => t.value === input.fileType))
+      return { ok: false, message: "파일 종류가 올바르지 않습니다." };
+
+    const buffer = Buffer.from(input.base64, "base64");
+    const ctx = await loadContext(year);
+    const parsed = ediEntriesToUpdates(buffer, input.fileType, ctx.configMap);
+    const { idByName, profOf } = buildMatchers(ctx, month);
+
+    const diffs: EdiDiffRow[] = [];
+    const unmatchedNames: string[] = [];
+    const matchedDriverIds = new Set<string>();
+
+    for (const entry of parsed.entries) {
+      const nkey = entry.name.replace(/\s+/g, "");
+      const driverId = idByName.get(nkey) ?? null;
+      if (!driverId) {
+        unmatchedNames.push(entry.name);
+      } else {
+        matchedDriverIds.add(driverId);
+      }
+      const prof = driverId ? profOf(driverId) : null;
+      const extra = prof?.extra ?? null;
+      for (const [k, v] of Object.entries(entry.update) as [
+        EdiUpdateKey,
+        number,
+      ][]) {
+        const oldValue = extra ? Number(extra[k] ?? 0) : 0;
+        const delta = v - oldValue;
+        const bigChange =
+          oldValue > 0 && Math.abs(delta) / oldValue >= 0.3;
+        diffs.push({
+          name: entry.name,
+          matched: !!driverId,
+          key: k,
+          label: EXTRA_LABEL[k],
+          oldValue,
+          newValue: v,
+          delta,
+          bigChange,
+          note: entry.note,
+        });
+      }
+    }
+
+    // 재직 대상인데 파일에 없는 직원(산재 등 공제무관 파일은 생략).
+    const missingActiveNames: string[] = [];
+    if (input.fileType !== "accident") {
+      for (const [driverId, emp] of ctx.empByDriver) {
+        if (!isTarget(ctx, driverId, year, month)) continue;
+        if (!matchedDriverIds.has(driverId)) missingActiveNames.push(emp.name);
+      }
+    }
+
+    return {
+      ok: true,
+      fileType: input.fileType,
+      diffs,
+      warnings: parsed.warnings,
+      unmatchedNames,
+      missingActiveNames,
+    };
+  } catch (e) {
+    return {
+      ok: false,
+      message: e instanceof Error ? e.message : "미리보기 중 오류가 발생했습니다.",
+    };
+  }
+}
+
+export async function applyEdiUpload(input: {
+  year: number;
+  month: number;
+  fileType: EdiFileType;
+  base64: string;
+}): Promise<
+  | {
+      ok: true;
+      applied: number;
+      updatedNames: string[];
+      unmatchedNames: string[];
+      needsRegen: string[]; // 초안 레코드 존재 → 재생성 필요
+    }
+  | { ok: false; message: string }
+> {
+  try {
+    await requireSalaryAccess();
+    const year = Number(input.year);
+    const month = Number(input.month);
+    if (input.fileType === "accident")
+      return {
+        ok: false,
+        message: "산재보험은 급여 공제 대상이 아닙니다. (적용 불필요)",
+      };
+    if (!EDI_FILE_TYPES.some((t) => t.value === input.fileType))
+      return { ok: false, message: "파일 종류가 올바르지 않습니다." };
+
+    const buffer = Buffer.from(input.base64, "base64");
+    const ctx = await loadContext(year);
+    const parsed = ediEntriesToUpdates(buffer, input.fileType, ctx.configMap);
+    const { idByName, profOf } = buildMatchers(ctx, month);
+
+    const updatedNames: string[] = [];
+    const unmatchedNames: string[] = [];
+    const touchedDrivers = new Set<string>();
+
+    for (const entry of parsed.entries) {
+      const driverId = idByName.get(entry.name.replace(/\s+/g, "")) ?? null;
+      if (!driverId) {
+        unmatchedNames.push(entry.name);
+        continue;
+      }
+      const prof = profOf(driverId);
+      if (!prof) {
+        unmatchedNames.push(`${entry.name}(해당 월 급여설정 없음)`);
+        continue;
+      }
+      const nextExtra: SalaryExtra = normalizeSalaryExtra({
+        ...prof.extra,
+        ...entry.update, // pension/health/longterm_care/employment_ins
+      });
+      const { error } = await supabaseAdmin
+        .from("employee_salary_profiles")
+        .update({ extra: nextExtra, updated_at: new Date().toISOString() })
+        .eq("driver_id", driverId)
+        .eq("year", year)
+        .eq("start_month", prof.start_month)
+        .eq("end_month", prof.end_month);
+      if (error) throw new Error(error.message);
+      updatedNames.push(entry.name);
+      touchedDrivers.add(driverId);
+    }
+
+    // 해당 월 초안 레코드가 있으면 재생성 필요 안내(확정건은 불변).
+    const needsRegen: string[] = [];
+    if (touchedDrivers.size > 0) {
+      const { data: recs } = await supabaseAdmin
+        .from("payroll_records")
+        .select("driver_id, confirmed_at")
+        .eq("year", year)
+        .eq("month", month);
+      for (const r of recs ?? []) {
+        const rr = r as Record<string, unknown>;
+        const did = String(rr.driver_id);
+        if (touchedDrivers.has(did) && !rr.confirmed_at) {
+          needsRegen.push(ctx.empByDriver.get(did)?.name ?? did);
+        }
+      }
+    }
+
+    revalidatePath("/hr/salary");
+    return {
+      ok: true,
+      applied: updatedNames.length,
+      updatedNames,
+      unmatchedNames,
+      needsRegen,
+    };
+  } catch (e) {
+    return {
+      ok: false,
+      message: e instanceof Error ? e.message : "적용 중 오류가 발생했습니다.",
+    };
+  }
+}

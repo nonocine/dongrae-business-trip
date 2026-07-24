@@ -118,6 +118,7 @@ const nomiExtra: SalaryExtra = {
   health: 185820,
   longterm_care: 24070,
   employment_ins: 45930,
+  team: "",
 };
 const nomi = calcMonthlyPayroll({
   baseSalary: 4756180,

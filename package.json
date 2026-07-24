@@ -11,6 +11,7 @@
     "test:e2e:ui": "playwright test --ui",
     "test:docs": "tsx scripts/test-recruitment-docs.ts",
     "test:salary": "tsx scripts/test-salary-calc.ts",
+    "test:edi": "tsx scripts/test-salary-edi.ts",
     "gen:icons": "node scripts/gen-icons.mjs"
   },
   "dependencies": {
