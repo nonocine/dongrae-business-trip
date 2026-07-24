@@ -21,6 +21,8 @@ import {
   saveRecruitmentPosting,
   deleteRecruitmentPosting,
   setRecruitmentPostingStatus,
+  archiveRecruitmentPosting,
+  unarchiveRecruitmentPosting,
   type RecruitmentPostingAdmin,
 } from "@/app/hr/actions";
 import RecruitmentShareButton from "@/app/hr/RecruitmentShareButton";
@@ -178,9 +180,12 @@ function PostingRow({
 }) {
   const [deleting, deleteTransition] = useTransition();
   const [toggling, toggleTransition] = useTransition();
+  const [archiving, archiveTransition] = useTransition();
   const [err, setErr] = useState<string | null>(null);
   // 마운트 시각을 1회 캡처 — 렌더를 순수하게 유지(react-hooks/purity).
   const [now] = useState(() => Date.now());
+
+  const isArchived = posting.status === "archived";
 
   // published 가 아니면(draft/closed) "공개 전환", published 면 "비공개 전환".
   const willPublish = posting.status !== "published";
@@ -189,8 +194,9 @@ function PostingRow({
     new Date(posting.application_end).getTime() < now &&
     posting.status === "published";
 
-  const statusBadge =
-    posting.status === "published"
+  const statusBadge = isArchived
+    ? badgeNeutral
+    : posting.status === "published"
       ? closed
         ? badgeNeutral
         : badgeSuccess
@@ -198,14 +204,19 @@ function PostingRow({
         ? badgeNeutral
         : badgeWarning;
 
-  const statusLabel =
-    posting.status === "published"
+  const statusLabel = isArchived
+    ? "🗄 종결"
+    : posting.status === "published"
       ? closed
         ? "마감"
         : "공개"
       : posting.status === "closed"
         ? "종료"
         : "비공개";
+
+  // 채용 종결(보관) 버튼 노출 — 진행/마감 상태(published·closed)에서만.
+  const canArchive =
+    posting.status === "published" || posting.status === "closed";
 
   const isEditing = editingId === posting.id;
 
@@ -230,13 +241,41 @@ function PostingRow({
   function handleDelete() {
     if (
       !confirm(
-        `"${posting.title}" 공고를 삭제하시겠습니까?\n지원서가 한 건이라도 접수되어 있으면 삭제되지 않고 비공개로 전환하셔야 합니다.`
+        `"${posting.title}" 공고를 영구 삭제합니다.\n\n지원서·채점 등 모든 기록이 영구 삭제됩니다. 공공기관 기록 보존 의무를 확인하세요.\n(지원서가 한 건이라도 접수되어 있으면 삭제되지 않습니다)`
       )
     )
       return;
     setErr(null);
     deleteTransition(async () => {
       const res = await deleteRecruitmentPosting(posting.id);
+      if (!res.ok) setErr(res.message);
+    });
+  }
+
+  function handleArchive() {
+    if (
+      !confirm(
+        `"${posting.title}" 채용을 종결 처리합니다.\n기록은 보존되며, 심사 배정 카드와 심사화면 접근이 닫힙니다.`
+      )
+    )
+      return;
+    setErr(null);
+    archiveTransition(async () => {
+      const res = await archiveRecruitmentPosting(posting.id);
+      if (!res.ok) setErr(res.message);
+    });
+  }
+
+  function handleUnarchive() {
+    if (
+      !confirm(
+        `"${posting.title}" 공고의 종결을 취소하고 '종료(마감)' 상태로 되돌립니다.\n심사 배정 카드·심사화면 접근이 다시 열립니다.`
+      )
+    )
+      return;
+    setErr(null);
+    archiveTransition(async () => {
+      const res = await unarchiveRecruitmentPosting(posting.id);
       if (!res.ok) setErr(res.message);
     });
   }
@@ -313,30 +352,58 @@ function PostingRow({
           >
             복제하여 새 공고
           </button>
-          <button
-            type="button"
-            onClick={handleToggle}
-            disabled={toggling}
-            className={`inline-flex grow items-center justify-center rounded-md border bg-card px-2.5 py-1.5 text-xs font-semibold disabled:opacity-60 sm:grow-0 sm:py-1 ${
-              willPublish
-                ? "border-brand-green text-brand-green hover:bg-brand-green/10"
-                : "border-warning text-warning hover:bg-warning-soft"
-            }`}
-          >
-            {toggling
-              ? "전환 중…"
-              : willPublish
-                ? "공개 전환"
-                : "비공개 전환"}
-          </button>
-          <button
-            type="button"
-            onClick={handleDelete}
-            disabled={deleting}
-            className="inline-flex grow items-center justify-center rounded-md border border-stamp bg-card px-2.5 py-1.5 text-xs font-medium text-stamp hover:bg-stamp-soft disabled:opacity-60 sm:grow-0 sm:py-1"
-          >
-            {deleting ? "삭제 중…" : "삭제"}
-          </button>
+          {/* 공개/비공개 전환 — 종결(archived) 공고에는 숨김(먼저 종결 취소). */}
+          {!isArchived && (
+            <button
+              type="button"
+              onClick={handleToggle}
+              disabled={toggling}
+              className={`inline-flex grow items-center justify-center rounded-md border bg-card px-2.5 py-1.5 text-xs font-semibold disabled:opacity-60 sm:grow-0 sm:py-1 ${
+                willPublish
+                  ? "border-brand-green text-brand-green hover:bg-brand-green/10"
+                  : "border-warning text-warning hover:bg-warning-soft"
+              }`}
+            >
+              {toggling
+                ? "전환 중…"
+                : willPublish
+                  ? "공개 전환"
+                  : "비공개 전환"}
+            </button>
+          )}
+          {/* 채용 종결(보관) — published/closed 에서만. 기록 보존 상태 전환. */}
+          {canArchive && (
+            <button
+              type="button"
+              onClick={handleArchive}
+              disabled={archiving}
+              className="inline-flex grow items-center justify-center rounded-md border border-navy bg-card px-2.5 py-1.5 text-xs font-semibold text-navy hover:bg-navy-soft disabled:opacity-60 sm:grow-0 sm:py-1"
+            >
+              {archiving ? "처리 중…" : "채용 종결"}
+            </button>
+          )}
+          {/* 종결 취소(→ closed) — 실수 복구용, M0 에게만 의미. */}
+          {isArchived && (
+            <button
+              type="button"
+              onClick={handleUnarchive}
+              disabled={archiving}
+              className="inline-flex grow items-center justify-center rounded-md border border-brand-green bg-card px-2.5 py-1.5 text-xs font-semibold text-brand-green hover:bg-brand-green/10 disabled:opacity-60 sm:grow-0 sm:py-1"
+            >
+              {archiving ? "처리 중…" : "종결 취소"}
+            </button>
+          )}
+          {/* 삭제 — 기록 소실 방지: 종결(archived) 상태에서만 노출. */}
+          {isArchived && (
+            <button
+              type="button"
+              onClick={handleDelete}
+              disabled={deleting}
+              className="inline-flex grow items-center justify-center rounded-md border border-stamp bg-card px-2.5 py-1.5 text-xs font-medium text-stamp hover:bg-stamp-soft disabled:opacity-60 sm:grow-0 sm:py-1"
+            >
+              {deleting ? "삭제 중…" : "삭제"}
+            </button>
+          )}
         </div>
       </div>
       {err && <p className={`mt-2 ${noticeError}`}>{err}</p>}

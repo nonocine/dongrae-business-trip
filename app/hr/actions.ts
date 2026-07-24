@@ -693,7 +693,7 @@ export type RecruitmentPostingAdmin = {
   final_result_announce_date: string | null;
   appointment_date: string | null;
   notice: string | null;
-  status: "draft" | "published" | "closed";
+  status: "draft" | "published" | "closed" | "archived";
   required_documents: RecruitmentDocItem[];
   view_count: number;
   created_at: string;
@@ -706,7 +706,9 @@ function normalizeRecruitmentPostingAdmin(
 ): RecruitmentPostingAdmin {
   const status = String(raw.status ?? "draft");
   const safeStatus: RecruitmentPostingAdmin["status"] =
-    status === "published" || status === "closed" ? status : "draft";
+    status === "published" || status === "closed" || status === "archived"
+      ? status
+      : "draft";
   return {
     id: String(raw.id ?? ""),
     slug: String(raw.slug ?? ""),
@@ -969,6 +971,71 @@ export async function setRecruitmentPostingStatus(
       ok: false,
       message:
         e instanceof Error ? e.message : "상태 전환 중 오류가 발생했습니다.",
+    };
+  }
+}
+
+// 채용 종결(archived) — 완전히 끝난 공고를 "보관" 상태로 전환.
+//   * 공공기관 기록 보존 원칙: 데이터는 그대로 두고 status 만 바꾼다(삭제 아님).
+//   * archived 효과(기존 구현): 대시보드 "내 심사 배정" 카드 제외, 심사화면 접근 차단.
+//     채점·지원자·문서 다운로드는 관리자(M0) 화면에서 계속 열람 가능.
+//   * 권한: requireHrAdmin(관장·부장·master = M0).
+export async function archiveRecruitmentPosting(
+  id: string
+): Promise<{ ok: true } | { ok: false; message: string }> {
+  try {
+    await requireHrAdmin();
+    if (!id) return { ok: false, message: "공고 ID가 없습니다." };
+
+    const { data, error } = await supabase
+      .from("recruitment_postings")
+      .update({ status: "archived", updated_at: new Date().toISOString() })
+      .eq("id", id)
+      .select("slug")
+      .single();
+    if (error) throw new Error(error.message);
+
+    revalidatePath("/hr");
+    revalidatePath("/recruitment");
+    const slug = String((data as { slug: unknown }).slug ?? "");
+    if (slug) revalidatePath(`/recruitment/${slug}`);
+    return { ok: true };
+  } catch (e) {
+    return {
+      ok: false,
+      message: e instanceof Error ? e.message : "종결 처리 중 오류가 발생했습니다.",
+    };
+  }
+}
+
+// 채용 종결 취소 — archived → closed(마감) 로 되돌린다(실수 복구용).
+//   * closed 로 복귀하면 "내 심사 배정" 카드·심사화면 접근이 다시 열린다.
+//   * 권한: requireHrAdmin(M0).
+export async function unarchiveRecruitmentPosting(
+  id: string
+): Promise<{ ok: true } | { ok: false; message: string }> {
+  try {
+    await requireHrAdmin();
+    if (!id) return { ok: false, message: "공고 ID가 없습니다." };
+
+    const { data, error } = await supabase
+      .from("recruitment_postings")
+      .update({ status: "closed", updated_at: new Date().toISOString() })
+      .eq("id", id)
+      .select("slug")
+      .single();
+    if (error) throw new Error(error.message);
+
+    revalidatePath("/hr");
+    revalidatePath("/recruitment");
+    const slug = String((data as { slug: unknown }).slug ?? "");
+    if (slug) revalidatePath(`/recruitment/${slug}`);
+    return { ok: true };
+  } catch (e) {
+    return {
+      ok: false,
+      message:
+        e instanceof Error ? e.message : "종결 취소 중 오류가 발생했습니다.",
     };
   }
 }
