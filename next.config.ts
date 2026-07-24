@@ -9,6 +9,12 @@ const nextConfig: NextConfig = {
       bodySizeLimit: "20mb",
     },
   },
+  // 급여명세서 PDF(급여 3차)는 서버에서 나눔고딕 TTF 를 fs 로 읽습니다.
+  // Vercel 서버리스 번들에 폰트가 포함되도록 급여 라우트에 강제 트레이싱합니다.
+  outputFileTracingIncludes: {
+    "/hr/salary": ["./lib/fonts/*.ttf"],
+    "/hr/salary/**": ["./lib/fonts/*.ttf"],
+  },
 };
 
 export default nextConfig;

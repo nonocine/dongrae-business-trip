@@ -10,6 +10,7 @@ import {
   rangeIncludesMonth,
   isEmployedInMonth,
   resolveTeam,
+  TEAM_LABEL,
   type PayItem,
   type PayrollRecord,
   type PayrollTeam,
@@ -21,6 +22,8 @@ import {
   type EdiFileType,
   type EdiUpdateKey,
 } from "@/lib/salaryEdi";
+import { buildPayslipPdf } from "@/lib/salaryPayslip";
+import { isMailerConfigured, sendMailWithAttachment } from "@/lib/mailer";
 
 // =====================================================================
 // 월별 급여 — 생성·조회·수정·확정·확정취소 + 4대보험 EDI 업로드 (급여 2차)
@@ -803,6 +806,216 @@ export async function applyEdiUpload(input: {
     return {
       ok: false,
       message: e instanceof Error ? e.message : "적용 중 오류가 발생했습니다.",
+    };
+  }
+}
+
+// =====================================================================
+// 급여 3차. 급여명세서 PDF 이메일 발송
+//   * 확정된 달만. 각 직원에게 "본인 것만" 첨부(driver_id↔레코드 1:1).
+//   * 개별 실패가 전체를 막지 않도록 직원별 독립 처리 + 결과 집계.
+//   * 성공 시 payroll_records.emailed_at 기록. 재발송 허용(옵션).
+// =====================================================================
+
+// driver_id → email 맵.
+async function loadEmails(): Promise<Map<string, string | null>> {
+  const { data } = await supabaseAdmin
+    .from("employee_profiles")
+    .select("driver_id, email");
+  const m = new Map<string, string | null>();
+  for (const r of data ?? []) {
+    const rr = r as Record<string, unknown>;
+    const email = String(rr.email ?? "").trim();
+    m.set(String(rr.driver_id), email || null);
+  }
+  return m;
+}
+
+export type PayslipTarget = {
+  driver_id: string;
+  name: string;
+  email: string | null;
+  teamLabel: string;
+  emailedAt: string | null;
+};
+
+export type PayslipTargetsResult = {
+  configured: boolean; // 발송 자격증명(GMAIL_*) 준비 여부
+  confirmed: boolean; // 그 달 전 레코드 확정 여부
+  hasRecords: boolean;
+  targets: PayslipTarget[]; // 확정 레코드 대상
+};
+
+// 발송 전 확인 모달용 — 대상 목록·설정 여부.
+export async function listPayslipTargets(input: {
+  year: number;
+  month: number;
+}): Promise<PayslipTargetsResult> {
+  await requireSalaryAccess();
+  const year = Number(input.year);
+  const month = Number(input.month);
+  const ctx = await loadContext(year);
+  const emails = await loadEmails();
+
+  const { data, error } = await supabaseAdmin
+    .from("payroll_records")
+    .select("*")
+    .eq("year", year)
+    .eq("month", month);
+  if (error) throw new Error(error.message);
+  const records = (data ?? []).map((r) =>
+    toPayrollRecord(r as Record<string, unknown>)
+  );
+  const confirmed = records.length > 0 && records.every((r) => r.confirmed_at);
+
+  const targets: PayslipTarget[] = records
+    .filter((r) => r.confirmed_at) // 확정 건만 발송 대상
+    .map((r) => {
+      const emp = ctx.empByDriver.get(r.driver_id);
+      const prof = profileForMonth(
+        ctx.profilesByDriver.get(r.driver_id) ?? [],
+        month
+      );
+      const team = resolveTeam({
+        team: prof?.extra.team ?? "",
+        name: emp?.name ?? "",
+      });
+      return {
+        driver_id: r.driver_id,
+        name: emp?.name ?? "(이름 없음)",
+        email: emails.get(r.driver_id) ?? null,
+        teamLabel: TEAM_LABEL[team],
+        emailedAt: r.emailed_at,
+      };
+    })
+    .sort((a, b) => a.name.localeCompare(b.name, "ko"));
+
+  return {
+    configured: isMailerConfigured(),
+    confirmed,
+    hasRecords: records.length > 0,
+    targets,
+  };
+}
+
+export type PayslipSendItem = {
+  name: string;
+  email: string | null;
+  status: "sent" | "skipped_no_email" | "skipped_already" | "failed";
+  error?: string;
+};
+
+export type PayslipSendResult =
+  | {
+      ok: true;
+      sent: number;
+      failed: number;
+      skipped: number;
+      items: PayslipSendItem[];
+    }
+  | { ok: false; message?: string; notConfigured?: boolean };
+
+export async function sendPayslips(input: {
+  year: number;
+  month: number;
+  includeAlreadySent: boolean;
+}): Promise<PayslipSendResult> {
+  try {
+    await requireSalaryAccess();
+    if (!isMailerConfigured()) {
+      return { ok: false, notConfigured: true };
+    }
+    const year = Number(input.year);
+    const month = Number(input.month);
+    const ctx = await loadContext(year);
+    const emails = await loadEmails();
+
+    const { data, error } = await supabaseAdmin
+      .from("payroll_records")
+      .select("*")
+      .eq("year", year)
+      .eq("month", month);
+    if (error) throw new Error(error.message);
+    const records = (data ?? []).map((r) =>
+      toPayrollRecord(r as Record<string, unknown>)
+    );
+    // 확정 건만 발송(초안 발송 금지).
+    const confirmed = records.filter((r) => r.confirmed_at);
+    if (confirmed.length === 0) {
+      return { ok: false, message: "확정된 급여가 없습니다. 먼저 확정하세요." };
+    }
+
+    const items: PayslipSendItem[] = [];
+    let sent = 0;
+    let failed = 0;
+    let skipped = 0;
+
+    // 직원별 독립 처리 — 한 명 실패가 전체를 막지 않음.
+    for (const rec of confirmed) {
+      const emp = ctx.empByDriver.get(rec.driver_id);
+      const name = emp?.name ?? "(이름 없음)";
+      const email = emails.get(rec.driver_id) ?? null;
+
+      if (!email) {
+        skipped++;
+        items.push({ name, email: null, status: "skipped_no_email" });
+        continue;
+      }
+      if (rec.emailed_at && !input.includeAlreadySent) {
+        skipped++;
+        items.push({ name, email, status: "skipped_already" });
+        continue;
+      }
+
+      try {
+        const prof = profileForMonth(
+          ctx.profilesByDriver.get(rec.driver_id) ?? [],
+          month
+        );
+        const team = resolveTeam({ team: prof?.extra.team ?? "", name });
+        // ★본인 레코드(rec)로만 PDF 생성 → 교차 발송 방지.
+        const pdf = await buildPayslipPdf(rec, {
+          name,
+          teamLabel: TEAM_LABEL[team],
+          year,
+          month,
+        });
+        await sendMailWithAttachment({
+          to: email,
+          subject: `[동래구청소년센터] ${month}월 급여명세서`,
+          text: `안녕하세요, ${name}님.\n\n첨부된 ${year}년 ${month}월 급여명세서를 확인해 주세요.\n문의: 회계담당\n\n동래구청소년센터`,
+          attachments: [
+            {
+              filename: `${year}년${month}월_급여명세서_${name}.pdf`,
+              content: Buffer.from(pdf),
+              contentType: "application/pdf",
+            },
+          ],
+        });
+        // 성공 시에만 발송 시각 기록.
+        await supabaseAdmin
+          .from("payroll_records")
+          .update({ emailed_at: new Date().toISOString() })
+          .eq("id", rec.id);
+        sent++;
+        items.push({ name, email, status: "sent" });
+      } catch (e) {
+        failed++;
+        items.push({
+          name,
+          email,
+          status: "failed",
+          error: e instanceof Error ? e.message : "발송 실패",
+        });
+      }
+    }
+
+    revalidatePath("/hr/salary");
+    return { ok: true, sent, failed, skipped, items };
+  } catch (e) {
+    return {
+      ok: false,
+      message: e instanceof Error ? e.message : "발송 중 오류가 발생했습니다.",
     };
   }
 }

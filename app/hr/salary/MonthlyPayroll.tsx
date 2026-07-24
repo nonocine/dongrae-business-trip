@@ -9,9 +9,13 @@ import {
   cancelMonthlyConfirm,
   previewEdiUpload,
   applyEdiUpload,
+  listPayslipTargets,
+  sendPayslips,
   type MonthlyRow,
   type MonthlyListResult,
   type EdiPreviewResult,
+  type PayslipTargetsResult,
+  type PayslipSendResult,
 } from "@/app/hr/salary/monthlyActions";
 import {
   formatKRW,
@@ -70,6 +74,7 @@ export default function MonthlyPayrollSection({
   const [busy, startBusy] = useTransition();
   const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
   const [editingId, setEditingId] = useState<string | null>(null);
+  const [sendOpen, setSendOpen] = useState(false);
 
   function load() {
     startLoad(async () => {
@@ -227,8 +232,28 @@ export default function MonthlyPayrollSection({
                 급여대장 다운로드{!allConfirmed ? " (초안)" : ""}
               </a>
             )}
+            {hasRows && (
+              <button
+                type="button"
+                onClick={() => setSendOpen(true)}
+                disabled={!allConfirmed}
+                className={btnPrimary}
+                title={
+                  !allConfirmed
+                    ? "확정된 달만 명세서를 발송할 수 있습니다."
+                    : ""
+                }
+              >
+                명세서 이메일 발송
+              </button>
+            )}
           </div>
         </div>
+        {hasRows && !allConfirmed && (
+          <p className="mt-2 text-[11px] text-ink-hint">
+            명세서 발송은 급여를 확정한 뒤에 활성화됩니다.
+          </p>
+        )}
 
         {msg && (
           <p className={`mt-3 ${msg.ok ? noticeSuccess : noticeError}`}>
@@ -297,6 +322,233 @@ export default function MonthlyPayrollSection({
         month={month}
         onApplied={() => load()}
       />
+
+      {sendOpen && (
+        <PayslipSendModal
+          year={year}
+          month={month}
+          onClose={() => setSendOpen(false)}
+          onSent={() => load()}
+        />
+      )}
+    </div>
+  );
+}
+
+// =====================================================================
+// 명세서 이메일 발송 모달 — 대상 확인 → 발송 → 결과
+// =====================================================================
+function PayslipSendModal({
+  year,
+  month,
+  onClose,
+  onSent,
+}: {
+  year: number;
+  month: number;
+  onClose: () => void;
+  onSent: () => void;
+}) {
+  const [targets, setTargets] = useState<PayslipTargetsResult | null>(null);
+  const [loading, startLoad] = useTransition();
+  const [sending, startSend] = useTransition();
+  const [includeAlreadySent, setIncludeAlreadySent] = useState(false);
+  const [result, setResult] = useState<PayslipSendResult | null>(null);
+  const [err, setErr] = useState<string | null>(null);
+
+  useEffect(() => {
+    startLoad(async () => {
+      setTargets(await listPayslipTargets({ year, month }));
+    });
+  }, [year, month]);
+
+  const sendable = useMemo(() => {
+    if (!targets) return [];
+    return targets.targets.filter(
+      (t) => t.email && (includeAlreadySent || !t.emailedAt)
+    );
+  }, [targets, includeAlreadySent]);
+
+  function doSend() {
+    setErr(null);
+    setResult(null);
+    startSend(async () => {
+      const res = await sendPayslips({ year, month, includeAlreadySent });
+      if (!res.ok) {
+        if (res.notConfigured) {
+          setErr(
+            "발송 설정이 필요합니다. 환경변수 GMAIL_SENDER / GMAIL_APP_PASSWORD 를 등록하세요."
+          );
+        } else {
+          setErr(res.message ?? "발송에 실패했습니다.");
+        }
+        return;
+      }
+      setResult(res);
+      onSent();
+    });
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
+      <div className="max-h-[85vh] w-full max-w-2xl overflow-y-auto rounded-xl border border-line bg-card p-5 shadow-lg">
+        <div className="mb-3 flex items-center justify-between">
+          <h3 className="text-base font-bold text-ink">
+            {year}년 {month}월 급여명세서 발송
+          </h3>
+          <button
+            type="button"
+            onClick={onClose}
+            className="text-sm text-ink-muted hover:underline"
+          >
+            닫기
+          </button>
+        </div>
+
+        {loading || !targets ? (
+          <p className="py-8 text-center text-sm text-ink-hint">불러오는 중…</p>
+        ) : !targets.configured ? (
+          <div className={noticeWarning}>
+            발송 설정이 필요합니다. 환경변수{" "}
+            <code className="font-mono">GMAIL_SENDER</code> /{" "}
+            <code className="font-mono">GMAIL_APP_PASSWORD</code> 를 등록한 뒤 다시
+            시도하세요. (에러 아님 — 설정 후 사용 가능)
+          </div>
+        ) : (
+          <>
+            {result ? (
+              <SendResultView result={result} />
+            ) : (
+              <>
+                <div className="mb-3 overflow-x-auto">
+                  <table className="w-full min-w-[420px] border-collapse">
+                    <thead>
+                      <tr className="border-b border-line">
+                        <th className={thCls}>이름</th>
+                        <th className={thCls}>이메일</th>
+                        <th className={thCls}>상태</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {targets.targets.map((t) => (
+                        <tr
+                          key={t.driver_id}
+                          className="border-b border-line/60"
+                        >
+                          <td className={tdCls}>{t.name}</td>
+                          <td className={`${tdCls} font-mono text-xs`}>
+                            {t.email ?? (
+                              <span className="text-stamp">이메일 미등록</span>
+                            )}
+                          </td>
+                          <td className={tdCls}>
+                            {!t.email ? (
+                              <span className={badgeWarning}>발송 제외</span>
+                            ) : t.emailedAt ? (
+                              <span className={badgeSuccess}>이미 발송됨</span>
+                            ) : (
+                              <span className={badgeNeutral}>미발송</span>
+                            )}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+
+                {targets.targets.some((t) => !t.email) && (
+                  <p className={`mb-3 ${noticeWarning}`}>
+                    이메일 미등록 직원은 발송에서 제외됩니다. 인사기록카드에서
+                    이메일을 등록해 주세요.
+                  </p>
+                )}
+
+                <label className="mb-3 flex items-center gap-2 text-sm text-ink-body">
+                  <input
+                    type="checkbox"
+                    checked={includeAlreadySent}
+                    onChange={(e) => setIncludeAlreadySent(e.target.checked)}
+                    className="h-4 w-4 rounded border-line text-navy focus:ring-navy"
+                  />
+                  이미 발송된 직원도 포함(재발송)
+                </label>
+
+                {err && <p className={`mb-3 ${noticeError}`}>{err}</p>}
+
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={doSend}
+                    disabled={sending || sendable.length === 0}
+                    className={btnPrimary}
+                  >
+                    {sending
+                      ? "발송 중…"
+                      : `${sendable.length}명에게 발송`}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={onClose}
+                    className={btnSecondary}
+                  >
+                    취소
+                  </button>
+                </div>
+              </>
+            )}
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function SendResultView({ result }: { result: PayslipSendResult }) {
+  if (!result.ok) return null;
+  const label: Record<string, string> = {
+    sent: "발송 완료",
+    skipped_no_email: "이메일 미등록",
+    skipped_already: "이미 발송(건너뜀)",
+    failed: "실패",
+  };
+  return (
+    <div className="space-y-3">
+      <p className={noticeSuccess}>
+        발송 {result.sent}건 · 실패 {result.failed}건 · 건너뜀 {result.skipped}건
+      </p>
+      <div className="overflow-x-auto">
+        <table className="w-full min-w-[420px] border-collapse">
+          <thead>
+            <tr className="border-b border-line">
+              <th className={thCls}>이름</th>
+              <th className={thCls}>이메일</th>
+              <th className={thCls}>결과</th>
+            </tr>
+          </thead>
+          <tbody>
+            {result.items.map((it, i) => (
+              <tr key={`${it.name}-${i}`} className="border-b border-line/60">
+                <td className={tdCls}>{it.name}</td>
+                <td className={`${tdCls} font-mono text-xs`}>
+                  {it.email ?? "-"}
+                </td>
+                <td className={tdCls}>
+                  {it.status === "sent" ? (
+                    <span className={badgeSuccess}>{label[it.status]}</span>
+                  ) : it.status === "failed" ? (
+                    <span className={badgeWarning}>
+                      {label[it.status]}
+                      {it.error ? ` — ${it.error}` : ""}
+                    </span>
+                  ) : (
+                    <span className={badgeNeutral}>{label[it.status]}</span>
+                  )}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
     </div>
   );
 }
