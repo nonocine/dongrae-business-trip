@@ -352,28 +352,62 @@ function PayslipSendModal({
   const [targets, setTargets] = useState<PayslipTargetsResult | null>(null);
   const [loading, startLoad] = useTransition();
   const [sending, startSend] = useTransition();
-  const [includeAlreadySent, setIncludeAlreadySent] = useState(false);
+  // 선택된 driver_id 집합. 이메일 있는 대상만 선택 가능.
+  const [selected, setSelected] = useState<Set<string>>(new Set());
   const [result, setResult] = useState<PayslipSendResult | null>(null);
   const [err, setErr] = useState<string | null>(null);
 
   useEffect(() => {
     startLoad(async () => {
-      setTargets(await listPayslipTargets({ year, month }));
+      const res = await listPayslipTargets({ year, month });
+      setTargets(res);
+      // 기본 체크 규칙: 이메일 있고 아직 미발송인 대상만 자동 선택.
+      //   (이미 발송됨은 해제 — 필요 시 개별 체크로 재발송)
+      setSelected(
+        new Set(
+          res.targets
+            .filter((t) => t.email && !t.emailedAt)
+            .map((t) => t.driver_id)
+        )
+      );
     });
   }, [year, month]);
 
-  const sendable = useMemo(() => {
-    if (!targets) return [];
-    return targets.targets.filter(
-      (t) => t.email && (includeAlreadySent || !t.emailedAt)
+  // 선택 가능(이메일 등록) 대상.
+  const selectableIds = useMemo(() => {
+    if (!targets) return [] as string[];
+    return targets.targets.filter((t) => t.email).map((t) => t.driver_id);
+  }, [targets]);
+
+  const allSelectableChecked =
+    selectableIds.length > 0 && selectableIds.every((id) => selected.has(id));
+
+  function toggleOne(driverId: string) {
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (next.has(driverId)) next.delete(driverId);
+      else next.add(driverId);
+      return next;
+    });
+  }
+
+  function toggleAll() {
+    setSelected(
+      allSelectableChecked ? new Set() : new Set(selectableIds)
     );
-  }, [targets, includeAlreadySent]);
+  }
+
+  const selectedCount = selected.size;
 
   function doSend() {
     setErr(null);
     setResult(null);
     startSend(async () => {
-      const res = await sendPayslips({ year, month, includeAlreadySent });
+      const res = await sendPayslips({
+        year,
+        month,
+        driverIds: [...selected],
+      });
       if (!res.ok) {
         if (res.notConfigured) {
           setErr(
@@ -421,9 +455,20 @@ function PayslipSendModal({
             ) : (
               <>
                 <div className="mb-3 overflow-x-auto">
-                  <table className="w-full min-w-[420px] border-collapse">
+                  <table className="w-full min-w-[460px] border-collapse">
                     <thead>
                       <tr className="border-b border-line">
+                        <th className={`${thCls} w-10`}>
+                          <input
+                            type="checkbox"
+                            checked={allSelectableChecked}
+                            onChange={toggleAll}
+                            disabled={selectableIds.length === 0}
+                            className="h-4 w-4 rounded border-line text-navy focus:ring-navy disabled:opacity-40"
+                            title="전체 선택/해제"
+                            aria-label="전체 선택/해제"
+                          />
+                        </th>
                         <th className={thCls}>이름</th>
                         <th className={thCls}>이메일</th>
                         <th className={thCls}>상태</th>
@@ -435,6 +480,21 @@ function PayslipSendModal({
                           key={t.driver_id}
                           className="border-b border-line/60"
                         >
+                          <td className={tdCls}>
+                            <input
+                              type="checkbox"
+                              checked={selected.has(t.driver_id)}
+                              onChange={() => toggleOne(t.driver_id)}
+                              disabled={!t.email}
+                              className="h-4 w-4 rounded border-line text-navy focus:ring-navy disabled:opacity-40"
+                              title={
+                                !t.email
+                                  ? "이메일 미등록 — 선택할 수 없습니다"
+                                  : ""
+                              }
+                              aria-label={`${t.name} 선택`}
+                            />
+                          </td>
                           <td className={tdCls}>{t.name}</td>
                           <td className={`${tdCls} font-mono text-xs`}>
                             {t.email ?? (
@@ -458,20 +518,16 @@ function PayslipSendModal({
 
                 {targets.targets.some((t) => !t.email) && (
                   <p className={`mb-3 ${noticeWarning}`}>
-                    이메일 미등록 직원은 발송에서 제외됩니다. 인사기록카드에서
-                    이메일을 등록해 주세요.
+                    이메일 미등록 직원은 선택할 수 없어 발송에서 제외됩니다.
+                    인사기록카드에서 이메일을 등록해 주세요.
                   </p>
                 )}
 
-                <label className="mb-3 flex items-center gap-2 text-sm text-ink-body">
-                  <input
-                    type="checkbox"
-                    checked={includeAlreadySent}
-                    onChange={(e) => setIncludeAlreadySent(e.target.checked)}
-                    className="h-4 w-4 rounded border-line text-navy focus:ring-navy"
-                  />
-                  이미 발송된 직원도 포함(재발송)
-                </label>
+                <p className="mb-3 text-[11px] text-ink-hint">
+                  기본값은 “아직 발송하지 않은 직원”만 선택됩니다. 이미 발송된
+                  직원을 체크하면 재발송됩니다. (테스트·개별 발송 시 필요한 사람만
+                  선택하세요.)
+                </p>
 
                 {err && <p className={`mb-3 ${noticeError}`}>{err}</p>}
 
@@ -479,12 +535,12 @@ function PayslipSendModal({
                   <button
                     type="button"
                     onClick={doSend}
-                    disabled={sending || sendable.length === 0}
+                    disabled={sending || selectedCount === 0}
                     className={btnPrimary}
                   >
                     {sending
                       ? "발송 중…"
-                      : `${sendable.length}명에게 발송`}
+                      : `선택한 ${selectedCount}명에게 발송`}
                   </button>
                   <button
                     type="button"
@@ -515,6 +571,7 @@ function SendResultView({ result }: { result: PayslipSendResult }) {
     <div className="space-y-3">
       <p className={noticeSuccess}>
         발송 {result.sent}건 · 실패 {result.failed}건 · 건너뜀 {result.skipped}건
+        {result.ignored > 0 ? ` · 무시 ${result.ignored}건(대상 아님)` : ""}
       </p>
       <div className="overflow-x-auto">
         <table className="w-full min-w-[420px] border-collapse">

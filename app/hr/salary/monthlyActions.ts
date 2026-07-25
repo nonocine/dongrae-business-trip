@@ -911,6 +911,7 @@ export type PayslipSendResult =
       sent: number;
       failed: number;
       skipped: number;
+      ignored: number; // 전달됐지만 대상 아님(확정 레코드에 없음) — 무시된 id 수
       items: PayslipSendItem[];
     }
   | { ok: false; message?: string; notConfigured?: boolean };
@@ -918,7 +919,8 @@ export type PayslipSendResult =
 export async function sendPayslips(input: {
   year: number;
   month: number;
-  includeAlreadySent: boolean;
+  // 선택된 driver_id 목록만 발송. 재발송/일부/개별 발송 지원.
+  driverIds: string[];
 }): Promise<PayslipSendResult> {
   try {
     await requireSalaryAccess();
@@ -945,13 +947,30 @@ export async function sendPayslips(input: {
       return { ok: false, message: "확정된 급여가 없습니다. 먼저 확정하세요." };
     }
 
+    // 서버 측 재검증 — 전달된 id 중 확정 레코드에 실제 존재하는 것만 대상.
+    //   목록에 없는 id는 에러가 아니라 무시하고 결과에 개수로 표기.
+    const confirmedById = new Map(confirmed.map((r) => [r.driver_id, r]));
+    const requestedIds = Array.isArray(input.driverIds) ? input.driverIds : [];
+    const uniqueRequested = [...new Set(requestedIds.map((id) => String(id)))];
+    const validIds = uniqueRequested.filter((id) => confirmedById.has(id));
+    const ignored = uniqueRequested.length - validIds.length;
+
+    if (validIds.length === 0) {
+      return {
+        ok: false,
+        message: "발송할 대상을 선택하세요. (선택된 대상이 확정 급여에 없습니다)",
+      };
+    }
+
     const items: PayslipSendItem[] = [];
     let sent = 0;
     let failed = 0;
     let skipped = 0;
 
     // 직원별 독립 처리 — 한 명 실패가 전체를 막지 않음.
-    for (const rec of confirmed) {
+    //   선택된 대상만 발송(선택 = 재발송 의사이므로 emailed_at 무관).
+    for (const driverId of validIds) {
+      const rec = confirmedById.get(driverId)!;
       const emp = ctx.empByDriver.get(rec.driver_id);
       const name = emp?.name ?? "(이름 없음)";
       const email = emails.get(rec.driver_id) ?? null;
@@ -959,11 +978,6 @@ export async function sendPayslips(input: {
       if (!email) {
         skipped++;
         items.push({ name, email: null, status: "skipped_no_email" });
-        continue;
-      }
-      if (rec.emailed_at && !input.includeAlreadySent) {
-        skipped++;
-        items.push({ name, email, status: "skipped_already" });
         continue;
       }
 
@@ -1011,7 +1025,7 @@ export async function sendPayslips(input: {
     }
 
     revalidatePath("/hr/salary");
-    return { ok: true, sent, failed, skipped, items };
+    return { ok: true, sent, failed, skipped, ignored, items };
   } catch (e) {
     return {
       ok: false,
