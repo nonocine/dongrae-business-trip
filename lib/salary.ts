@@ -67,6 +67,22 @@ export function resolveTeam(input: {
   return AFTERSCHOOL_SEED_NAMES.includes(nm) ? "afterschool" : "center";
 }
 
+// 직원의 저장된 소속 팀 값 — 여러 급여 구간 중 지정된 값이 있으면 그것을 우선.
+//   * 소속 팀은 직원 단위(UI: "모든 구간에 동일 적용")이므로, 특정 월 구간의
+//     extra.team 이 ""(미지정)이어도 다른 구간에 지정값이 있으면 그것을 사용합니다.
+//   * 이렇게 해야 "구간을 나눠 저장하는 과정에서 일부 구간만 팀이 지정된" 경우에도
+//     저장된 값이 시드(이름 기반 기본값)에 밀리지 않습니다.
+//   * 전 구간이 미지정일 때만 ""(→ resolveTeam 이 이름 시드 적용)을 반환.
+export function effectiveTeamValue(
+  profiles: { extra?: { team?: SalaryTeamValue | null } | null }[]
+): SalaryTeamValue {
+  for (const p of profiles) {
+    const t = p?.extra?.team;
+    if (t === "center" || t === "afterschool") return t;
+  }
+  return "";
+}
+
 // extra jsonb — 개인 항목. 급여 값은 회계담당이 화면에서 직접 입력합니다.
 //   * 4대보험(pension·health·longterm_care·employment_ins)은 요율 계산이 실제
 //     공단 고지액과 불일치(개인별 예외)하여 갑근세처럼 "월액 입력값"으로 둡니다.

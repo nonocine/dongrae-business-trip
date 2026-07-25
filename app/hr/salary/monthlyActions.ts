@@ -10,6 +10,7 @@ import {
   rangeIncludesMonth,
   isEmployedInMonth,
   resolveTeam,
+  effectiveTeamValue,
   TEAM_LABEL,
   type PayItem,
   type PayrollRecord,
@@ -381,8 +382,9 @@ export async function listMonthlyPayroll(input: {
       ctx.profilesByDriver.get(rec.driver_id) ?? [],
       month
     );
+    // 팀은 직원 단위 — 구간 중 지정된 값 우선(일부 구간만 지정돼도 시드에 밀리지 않게).
     const team = resolveTeam({
-      team: prof?.extra.team ?? "",
+      team: effectiveTeamValue(ctx.profilesByDriver.get(rec.driver_id) ?? []),
       name: emp?.name ?? "",
     });
     // 설정과 다름 — 설정 기준 재계산과 저장값 비교.
@@ -872,12 +874,8 @@ export async function listPayslipTargets(input: {
     .filter((r) => r.confirmed_at) // 확정 건만 발송 대상
     .map((r) => {
       const emp = ctx.empByDriver.get(r.driver_id);
-      const prof = profileForMonth(
-        ctx.profilesByDriver.get(r.driver_id) ?? [],
-        month
-      );
       const team = resolveTeam({
-        team: prof?.extra.team ?? "",
+        team: effectiveTeamValue(ctx.profilesByDriver.get(r.driver_id) ?? []),
         name: emp?.name ?? "",
       });
       return {
@@ -982,11 +980,10 @@ export async function sendPayslips(input: {
       }
 
       try {
-        const prof = profileForMonth(
-          ctx.profilesByDriver.get(rec.driver_id) ?? [],
-          month
-        );
-        const team = resolveTeam({ team: prof?.extra.team ?? "", name });
+        const team = resolveTeam({
+          team: effectiveTeamValue(ctx.profilesByDriver.get(rec.driver_id) ?? []),
+          name,
+        });
         // ★본인 레코드(rec)로만 PDF 생성 → 교차 발송 방지.
         const pdf = await buildPayslipPdf(rec, {
           name,
