@@ -94,8 +94,11 @@ export async function buildPayslipPdf(
 
   const pdf = await PDFDocument.create();
   pdf.registerFontkit(fontkit);
-  const font = await pdf.embedFont(regularFont(), { subset: true });
-  const bold = await pdf.embedFont(boldFont(), { subset: true });
+  // subset 임베드는 Vercel(서버리스) 환경에서 한글 글리프가 누락돼
+  // 발송 PDF가 깨져 보이는 문제가 있어, 나눔고딕을 통째로 임베드한다.
+  // (파일 크기 증가는 감수 — 한글 렌더 정확성 우선.)
+  const font = await pdf.embedFont(regularFont(), { subset: false });
+  const bold = await pdf.embedFont(boldFont(), { subset: false });
 
   const W = 595.28;
   const Hpt = 841.89;
