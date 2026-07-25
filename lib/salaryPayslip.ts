@@ -159,74 +159,91 @@ export async function buildPayslipPdf(
   text(M, infoY, `소속: ${model.org}`, { size: 10.5 });
   text(M, infoY + 16, `성명: ${model.name}`, { size: 10.5, bold: true });
 
-  // 2단 표.
+  // 2단 표 — 좌우 두 단이 한 표를 이루도록 인접 배치(가운데 세로 구분선 공유).
+  //   좌우 행 수가 달라도 긴 쪽 기준으로 행 높이를 맞추고, 짧은 쪽은 빈 칸(테두리 유지).
+  //   소계(지급 총액|공제 총액)는 두 단 모두 같은 줄(맨 아래)에 나란히.
   const tableTop = infoY + 44;
   const contentW = W - 2 * M;
-  const gap = 16;
-  const colW = (contentW - gap) / 2;
+  const colW = contentW / 2;
   const leftX = M;
-  const rightX = M + colW + gap;
+  const rightX = M + colW;
   const headH = 24;
   const rowH = 22;
   const amtPad = 8;
+  const textDy = 6; // 셀 내 텍스트 상단 여백
 
-  const drawColumn = (
+  // 한 셀(라벨 좌·금액 우) 렌더 — item 없으면 빈 칸(테두리만).
+  const cell = (
     x: number,
-    title: string,
-    items: PayItem[],
-    totalLabel: string,
-    totalValue: number
-  ): number => {
-    // 헤더.
+    y: number,
+    item: PayItem | undefined,
+    opts: {
+      fill?: ReturnType<typeof rgb>;
+      bold?: boolean;
+      labelColor?: ReturnType<typeof rgb>;
+      size?: number;
+    } = {}
+  ) => {
+    rect(x, y, colW, rowH, { fill: opts.fill, border: LINE });
+    if (!item) return;
+    const size = opts.size ?? 10;
+    text(x + amtPad, y + textDy, item.label, {
+      size,
+      bold: opts.bold,
+      color: opts.labelColor,
+    });
+    text(x + colW - amtPad, y + textDy, formatKRW(item.amount), {
+      size,
+      bold: opts.bold,
+      align: "right",
+      color: opts.labelColor,
+    });
+  };
+
+  // 헤더 행(양 단, 진한 네이비 배경 · 흰 글씨).
+  const drawHeader = (x: number, title: string) => {
     rect(x, tableTop, colW, headH, { fill: NAVY });
-    text(x + amtPad, tableTop + 6, title, { size: 10.5, bold: true, color: WHITE });
-    text(x + colW - amtPad, tableTop + 6, "금액", {
+    text(x + amtPad, tableTop + textDy, title, {
+      size: 10.5,
+      bold: true,
+      color: WHITE,
+    });
+    text(x + colW - amtPad, tableTop + textDy, "금액", {
       size: 10.5,
       bold: true,
       color: WHITE,
       align: "right",
     });
-    // 항목 행.
-    let y = tableTop + headH;
-    for (const it of items) {
-      rect(x, y, colW, rowH, { border: LINE });
-      text(x + amtPad, y + 6, it.label, { size: 10 });
-      text(x + colW - amtPad, y + 6, formatKRW(it.amount), {
-        size: 10,
-        align: "right",
-      });
-      y += rowH;
-    }
-    // 소계.
-    rect(x, y, colW, rowH, { fill: SUBTOTAL_BG, border: LINE });
-    text(x + amtPad, y + 6, totalLabel, { size: 10, bold: true, color: NAVY });
-    text(x + colW - amtPad, y + 6, formatKRW(totalValue), {
-      size: 10,
-      bold: true,
-      align: "right",
-      color: NAVY,
-    });
-    y += rowH;
-    return y; // 하단 yTop
   };
+  drawHeader(leftX, "급여 내역");
+  drawHeader(rightX, "공제 내역");
 
-  const leftBottom = drawColumn(
+  // 항목 행 — 긴 쪽 기준으로 행 수를 맞춤.
+  const bodyRows = Math.max(model.payItems.length, model.deductItems.length);
+  const bodyTop = tableTop + headH;
+  for (let i = 0; i < bodyRows; i++) {
+    const y = bodyTop + i * rowH;
+    cell(leftX, y, model.payItems[i]);
+    cell(rightX, y, model.deductItems[i]);
+  }
+
+  // 소계 행 — 두 단 같은 줄(굵게 · 연회색 배경).
+  const subtotalY = bodyTop + bodyRows * rowH;
+  cell(
     leftX,
-    "급여 내역",
-    model.payItems,
-    "지급총액",
-    model.totalPay
+    subtotalY,
+    { key: "_subtotal", label: "지급 총액", amount: model.totalPay },
+    { fill: SUBTOTAL_BG, bold: true, labelColor: NAVY }
   );
-  const rightBottom = drawColumn(
+  cell(
     rightX,
-    "공제 내역",
-    model.deductItems,
-    "공제금액",
-    model.totalDeduct
+    subtotalY,
+    { key: "_subtotal", label: "공제 총액", amount: model.totalDeduct },
+    { fill: SUBTOTAL_BG, bold: true, labelColor: NAVY }
   );
 
-  // 차인지급액 박스(양 컬럼 아래).
-  const netTop = Math.max(leftBottom, rightBottom) + 16;
+  // 차인지급액 박스(표 전체 폭 아래).
+  const netTop = subtotalY + rowH + 16;
   const netH = 30;
   rect(M, netTop, contentW, netH, { fill: NAVY });
   text(M + amtPad, netTop + 9, "차인지급액", {

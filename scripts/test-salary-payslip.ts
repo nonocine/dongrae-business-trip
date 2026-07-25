@@ -91,6 +91,42 @@ async function main() {
     /* test-results 없으면 무시 */
   }
 
+  console.log("\n=== 좌우 행수 다른 케이스 렌더(짧은 단 빈 칸) ===");
+  // 공제가 급여보다 많은 케이스(좌1/우7) — 소계가 같은 줄에 맞도록 렌더되는지.
+  const lopsided = {
+    pay_items: [{ key: "base", label: "기본급", amount: 4756180 }],
+    deduct_items: [
+      { key: "income_tax", label: "갑근세", amount: 300000 },
+      { key: "resident_tax", label: "주민세", amount: 30000 },
+      { key: "pension", label: "국민연금", amount: 200000 },
+      { key: "health", label: "국민건강", amount: 180000 },
+      { key: "longterm_care", label: "장기요양", amount: 24000 },
+      { key: "employment_ins", label: "고용보험", amount: 45930 },
+      { key: "sangjo", label: "상조회비", amount: 15000 },
+    ],
+    total_pay: 4756180,
+    total_deduct: 794930,
+    net_pay: 3961250,
+  };
+  const lopBytes = await buildPayslipPdf(lopsided, {
+    name: "노미현",
+    teamLabel: "센터",
+    year: 2026,
+    month: 7,
+  });
+  expect(
+    "좌1/우7 렌더 %PDF",
+    Buffer.from(lopBytes.slice(0, 5)).toString("latin1").startsWith("%PDF-"),
+    "헤더 없음"
+  );
+  expect("좌1/우7 바이트 존재", lopBytes.length > 1000, String(lopBytes.length));
+  try {
+    writeFileSync("test-results/payslip-노미현-2026-07.pdf", lopBytes);
+    console.log("  (저장: test-results/payslip-노미현-2026-07.pdf)");
+  } catch {
+    /* test-results 없으면 무시 */
+  }
+
   console.log("\n=== ★교차 발송 방지: 각 직원 = 자기 명세서 ===");
   const nomiRecord = {
     pay_items: [{ key: "base", label: "기본급", amount: 4756180 }],
