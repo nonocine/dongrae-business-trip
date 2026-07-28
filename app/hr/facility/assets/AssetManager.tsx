@@ -140,6 +140,19 @@ export default function AssetManager({
     budget !== "all" ||
     status !== "all" ||
     q.trim() !== "";
+
+  // 엑셀 다운로드 URL — 현재 필터를 쿼리로 전달(서버가 동일 적용).
+  const exportHref = useMemo(() => {
+    const p = new URLSearchParams();
+    if (year !== "all") p.set("year", year);
+    if (loc !== "all") p.set("location", loc);
+    if (budget !== "all") p.set("budget", budget);
+    if (status !== "all") p.set("status", status);
+    if (q.trim()) p.set("q", q.trim());
+    const qs = p.toString();
+    return `/hr/facility/assets/export${qs ? `?${qs}` : ""}`;
+  }, [year, loc, budget, status, q]);
+
   function resetFilters() {
     setYear("all");
     setLoc("all");
@@ -277,16 +290,25 @@ export default function AssetManager({
               ? `필터 결과 ${filtered.length}건 / 전체 ${assets.length}건`
               : `전체 ${assets.length}건`}
           </p>
-          <button
-            type="button"
-            onClick={() => {
-              setMsg(null);
-              setModal({ mode: "create", asset: null });
-            }}
-            className={btnPrimary}
-          >
-            + 비품 등록
-          </button>
+          <div className="flex items-center gap-2">
+            <a
+              href={exportHref}
+              className={btnSecondary}
+              title="현재 필터가 적용된 목록을 엑셀로 내려받습니다"
+            >
+              엑셀 다운로드
+            </a>
+            <button
+              type="button"
+              onClick={() => {
+                setMsg(null);
+                setModal({ mode: "create", asset: null });
+              }}
+              className={btnPrimary}
+            >
+              + 비품 등록
+            </button>
+          </div>
         </div>
 
         {msg && (
