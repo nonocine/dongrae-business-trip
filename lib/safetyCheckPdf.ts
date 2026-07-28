@@ -32,8 +32,9 @@ function boldFont(): Buffer {
 
 const NAVY = rgb(0.122, 0.227, 0.373);
 const INK = rgb(0.13, 0.15, 0.18);
-const LINE = rgb(0.25, 0.25, 0.25);
-const HEAD_BG = rgb(0.9, 0.9, 0.9);
+const LINE = rgb(0.2, 0.2, 0.2); // 검정에 가까운 테두리
+const HEAD_BG = rgb(0.88, 0.88, 0.88); // 표 머리 회색
+const SECTION_BG = rgb(0.83, 0.86, 0.9); // 부문 제목 음영(네이비 톤 옅게)
 
 export function safetyPdfFilename(check: SafetyCheck): string {
   const mm = String(check.check_month).padStart(2, "0");
@@ -106,7 +107,7 @@ export async function buildSafetyCheckPdf(
       height: h,
       color: opts.fill,
       borderColor: opts.border ? LINE : undefined,
-      borderWidth: opts.border ? 0.6 : 0,
+      borderWidth: opts.border ? 0.8 : 0,
     });
   };
 
@@ -151,111 +152,151 @@ export async function buildSafetyCheckPdf(
   });
   yTop += headH + 8;
 
-  const headerRowH = 18;
+  const headerRowH = 20;
+  const bottom = H - M;
+
+  // 표 머리행 — 페이지마다 반복.
   const drawTableHeader = () => {
-    rect(colX.cat, yTop, contentW, headerRowH, { fill: HEAD_BG, border: true });
-    // 세로 구분선(셀 테두리).
-    rect(colX.cat, yTop, cCat, headerRowH, { border: true });
-    rect(colX.no, yTop, cNo, headerRowH, { border: true });
-    rect(colX.content, yTop, cContent, headerRowH, { border: true });
-    rect(colX.pass, yTop, cChk, headerRowH, { border: true });
-    rect(colX.fail, yTop, cChk, headerRowH, { border: true });
-    rect(colX.na, yTop, cChk, headerRowH, { border: true });
-    rect(colX.note, yTop, cNote, headerRowH, { border: true });
-    const ty = yTop + 5;
-    text(colX.cat + cCat / 2, ty, "구분", { size: 8, bold: true, align: "center" });
-    text(colX.no + cNo / 2, ty, "번호", { size: 8, bold: true, align: "center" });
-    text(colX.content + cContent / 2, ty, "점검항목", { size: 8, bold: true, align: "center" });
-    text(colX.pass + cChk / 2, ty, "적합", { size: 8, bold: true, align: "center" });
-    text(colX.fail + cChk / 2, ty, "부적합", { size: 7.5, bold: true, align: "center" });
-    text(colX.na + cChk / 2, ty, "해당\n없음", { size: 7, bold: true, align: "center" });
+    const cells: [number, number, string][] = [
+      [colX.cat, cCat, "구분"],
+      [colX.no, cNo, "번호"],
+      [colX.content, cContent, "점검항목"],
+      [colX.pass, cChk, "적합"],
+      [colX.fail, cChk, "부적합"],
+      [colX.na, cChk, "해당없음"],
+      [colX.note, cNote, "지적사항"],
+    ];
+    for (const [x, w] of cells)
+      rect(x, yTop, w, headerRowH, { fill: HEAD_BG, border: true });
+    for (const [x, w, label] of cells)
+      text(x + w / 2, yTop + (headerRowH - 8) / 2, label, {
+        size: label.length >= 3 ? 7 : 8.5,
+        bold: true,
+        align: "center",
+      });
     yTop += headerRowH;
   };
 
-  const ensureSpace = (need: number) => {
-    if (yTop + need > H - M) {
-      page = pdf.addPage([W, H]);
-      yTop = M;
-      drawTableHeader();
-    }
+  // 부문 제목 행(음영).
+  const sectionRowH = 16;
+  const drawSectionRow = (title: string) => {
+    rect(M, yTop, contentW, sectionRowH, { fill: SECTION_BG, border: true });
+    text(M + 6, yTop + (sectionRowH - 8.5) / 2, `【${title}】`, {
+      size: 8.5,
+      bold: true,
+      color: INK,
+    });
+    yTop += sectionRowH;
   };
 
-  // 항목 행 높이 — 내용 길이에 따라 2줄 허용.
   const lineH = 10;
   const padY = 4;
-  const wrapContent = (s: string, maxW: number): string[] => {
-    const f = font;
-    const size = 7.5;
+  const CONTENT_SIZE = 7.5;
+  const NOTE_SIZE = 7;
+
+  // 폭 기준 줄바꿈(최대 maxLines 줄).
+  const wrap = (s: string, maxW: number, size: number, maxLines: number): string[] => {
+    if (!s) return [];
     const lines: string[] = [];
     let cur = "";
     for (const ch of s) {
       const test = cur + ch;
-      if (f.widthOfTextAtSize(test, size) > maxW && cur) {
+      if (font.widthOfTextAtSize(test, size) > maxW && cur) {
         lines.push(cur);
         cur = ch;
-        if (lines.length >= 2) break; // 최대 2줄
+        if (lines.length >= maxLines) return lines;
       } else cur = test;
     }
-    if (cur && lines.length < 3) lines.push(cur);
-    return lines.slice(0, 3);
+    if (cur) lines.push(cur);
+    return lines.slice(0, maxLines);
   };
 
-  drawTableHeader();
+  const rowHeightOf = (it: SafetyItemWithResult): {
+    h: number;
+    contentLines: string[];
+    noteLines: string[];
+  } => {
+    const contentLines = wrap(it.content, cContent - 8, CONTENT_SIZE, 3);
+    const noteLines = it.note ? wrap(it.note, cNote - 6, NOTE_SIZE, 3) : [];
+    const maxLines = Math.max(contentLines.length, noteLines.length, 1);
+    return { h: Math.max(18, maxLines * lineH + padY * 2), contentLines, noteLines };
+  };
 
+  const breakPage = (sectionTitle: string | null) => {
+    page = pdf.addPage([W, H]);
+    yTop = M;
+    drawTableHeader();
+    if (sectionTitle) drawSectionRow(sectionTitle);
+  };
+
+  // 항목 한 행 그리기(구분 셀 제외 — 구분은 카테고리 단위 병합으로 별도).
+  const drawItemRow = (
+    it: SafetyItemWithResult,
+    rowH: number,
+    contentLines: string[],
+    noteLines: string[]
+  ) => {
+    rect(colX.no, yTop, cNo, rowH, { border: true });
+    rect(colX.content, yTop, cContent, rowH, { border: true });
+    rect(colX.pass, yTop, cChk, rowH, { border: true });
+    rect(colX.fail, yTop, cChk, rowH, { border: true });
+    rect(colX.na, yTop, cChk, rowH, { border: true });
+    rect(colX.note, yTop, cNote, rowH, { border: true });
+
+    text(colX.no + cNo / 2, yTop + rowH / 2 - 4, String(it.item_no), {
+      size: 8,
+      align: "center",
+    });
+    contentLines.forEach((ln, li) => {
+      text(colX.content + 4, yTop + padY + li * lineH, ln, { size: CONTENT_SIZE });
+    });
+    // 결과별 ○ — result 값에 따라 정확한 열에.
+    const markX =
+      it.result === "fail" ? colX.fail : it.result === "na" ? colX.na : colX.pass;
+    text(markX + cChk / 2, yTop + rowH / 2 - 5, "○", {
+      size: 11,
+      bold: true,
+      align: "center",
+      color: NAVY,
+    });
+    // 지적사항 — 결과 무관, 값 있으면 출력.
+    noteLines.forEach((ln, li) => {
+      text(colX.note + 3, yTop + padY + li * lineH, ln, { size: NOTE_SIZE });
+    });
+  };
+
+  // --- 렌더 ---
+  drawTableHeader();
   const groups = groupSafetyItems(items);
   for (const g of groups) {
-    // 부문 헤더 줄.
-    ensureSpace(16);
-    rect(M, yTop, contentW, 15, { fill: HEAD_BG, border: true });
-    text(M + 6, yTop + 4, `【${g.section}】`, { size: 8.5, bold: true, color: NAVY });
-    yTop += 15;
+    // 부문 제목(자리 없으면 개행 후).
+    if (yTop + sectionRowH + 18 > bottom) breakPage(null);
+    drawSectionRow(g.section);
 
     for (const cat of g.categories) {
-      for (let i = 0; i < cat.items.length; i++) {
-        const it = cat.items[i];
-        const contentLines = wrapContent(it.content, cContent - 8);
-        const rowH = Math.max(18, contentLines.length * lineH + padY * 2);
-        ensureSpace(rowH);
+      let idx = 0;
+      while (idx < cat.items.length) {
+        // 최소 한 행은 현재 페이지에 들어가도록 보장.
+        const firstH = rowHeightOf(cat.items[idx]).h;
+        if (yTop + firstH > bottom) breakPage(g.section);
 
-        // 셀 테두리.
-        rect(colX.cat, yTop, cCat, rowH, { border: true });
-        rect(colX.no, yTop, cNo, rowH, { border: true });
-        rect(colX.content, yTop, cContent, rowH, { border: true });
-        rect(colX.pass, yTop, cChk, rowH, { border: true });
-        rect(colX.fail, yTop, cChk, rowH, { border: true });
-        rect(colX.na, yTop, cChk, rowH, { border: true });
-        rect(colX.note, yTop, cNote, rowH, { border: true });
+        const runStartY = yTop;
+        while (idx < cat.items.length) {
+          const it = cat.items[idx];
+          const { h, contentLines, noteLines } = rowHeightOf(it);
+          if (yTop + h > bottom) break; // 페이지 참 → 이 런 종료
+          drawItemRow(it, h, contentLines, noteLines);
+          yTop += h;
+          idx++;
+        }
+        // 구분(category) 셀 — 이번 페이지 런 전체를 세로 병합처럼 한 칸으로.
+        rect(colX.cat, runStartY, cCat, yTop - runStartY, { border: true });
+        text(colX.cat + 4, runStartY + 6, cat.category, {
+          size: 7,
+          maxW: cCat - 8,
+        });
 
-        // 구분(각 카테고리 첫 행에만 표기).
-        if (i === 0) {
-          text(colX.cat + 4, yTop + rowH / 2 - 4, cat.category, {
-            size: 7,
-            maxW: cCat - 8,
-          });
-        }
-        text(colX.no + cNo / 2, yTop + rowH / 2 - 4, String(it.item_no), {
-          size: 8,
-          align: "center",
-        });
-        contentLines.forEach((ln, li) => {
-          text(colX.content + 4, yTop + padY + li * lineH, ln, { size: 7.5 });
-        });
-        // 결과 체크(○).
-        const mark = (cx: number) =>
-          text(cx + cChk / 2, yTop + rowH / 2 - 5, "○", {
-            size: 10,
-            bold: true,
-            align: "center",
-            color: NAVY,
-          });
-        if (it.result === "pass") mark(colX.pass);
-        else if (it.result === "fail") mark(colX.fail);
-        else mark(colX.na);
-        // 지적사항.
-        if (it.note) {
-          text(colX.note + 3, yTop + padY, it.note, { size: 7, maxW: cNote - 6 });
-        }
-        yTop += rowH;
+        if (idx < cat.items.length) breakPage(g.section); // 다음 페이지로 이어감
       }
     }
   }

@@ -288,16 +288,19 @@ function ItemRow({
           })}
         </div>
       </div>
-      {item.result === "fail" && (
-        <input
-          value={note}
-          onChange={(e) => setNote(e.target.value)}
-          onBlur={() => onNote(note)}
-          disabled={readOnly}
-          placeholder="지적사항(보수 필요 내용 등)"
-          className="mt-1.5 block w-full rounded-md border border-stamp/40 bg-stamp-soft/30 px-2.5 py-1.5 text-sm text-ink-body focus:border-stamp focus:outline-none focus:ring-1 focus:ring-stamp disabled:opacity-60"
-        />
-      )}
+      {/* 지적사항 — 결과와 무관하게 항상 입력 가능(적합이어도 메모 가능). */}
+      <input
+        value={note}
+        onChange={(e) => setNote(e.target.value)}
+        onBlur={() => onNote(note)}
+        disabled={readOnly}
+        placeholder="지적사항(선택 — 적합이어도 메모 가능)"
+        className={`mt-1.5 block w-full rounded-md px-2.5 py-1.5 text-sm text-ink-body focus:outline-none focus:ring-1 disabled:opacity-60 ${
+          item.result === "fail"
+            ? "border border-stamp/50 bg-stamp-soft/30 focus:border-stamp focus:ring-stamp"
+            : "border border-line bg-card focus:border-navy focus:ring-navy"
+        }`}
+      />
     </div>
   );
 }
