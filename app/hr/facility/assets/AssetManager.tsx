@@ -1,6 +1,7 @@
 "use client";
 
-import { useMemo, useState, useTransition } from "react";
+import { useMemo, useRef, useState, useTransition } from "react";
+import { createPortal } from "react-dom";
 import { useRouter } from "next/navigation";
 import {
   ASSET_STATUS_OPTIONS,
@@ -40,6 +41,13 @@ const thCls = "px-2 py-2 text-left text-xs font-semibold text-navy whitespace-no
 const tdCls = "px-2 py-2 align-middle text-sm text-ink-body whitespace-nowrap";
 const rowBtn =
   "rounded border border-line px-1.5 py-1 text-xs text-ink-muted hover:bg-surface disabled:opacity-50";
+
+// 좌측 고정(sticky) 컬럼 — 취득일(104px) + 품목(200px). 가로 스크롤 시에도 노출.
+const STICKY_DATE = "sticky left-0 z-10 w-[104px] min-w-[104px] bg-card group-hover:bg-surface";
+const STICKY_NAME =
+  "sticky left-[104px] z-10 w-[200px] min-w-[200px] border-r border-line bg-card group-hover:bg-surface";
+
+const PAGE_SIZE = 20;
 
 // 모달 모드 — create/duplicate 는 신규 저장, edit 는 기존 수정.
 type ModalState =
@@ -113,7 +121,7 @@ export default function AssetManager({
     return rows;
   }, [assets, year, loc, budget, status, q, sortKey, sortDir]);
 
-  // 집계 — 현재 필터 결과.
+  // 집계 — 현재 필터 결과 "전체" 기준(페이지 무관).
   const agg = useMemo(() => {
     let qty = 0;
     let amount = 0;
@@ -124,12 +132,24 @@ export default function AssetManager({
     return { count: filtered.length, qty, amount };
   }, [filtered]);
 
+  // 페이지네이션(20건/페이지) + 행 펼침.
+  const [page, setPage] = useState(1);
+  const [expandedId, setExpandedId] = useState<string | null>(null);
+  const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
+  const safePage = Math.min(page, totalPages);
+  const pageRows = useMemo(
+    () => filtered.slice((safePage - 1) * PAGE_SIZE, safePage * PAGE_SIZE),
+    [filtered, safePage]
+  );
+
+  // 필터·정렬 변경 시 항상 1페이지로(각 핸들러에서 명시 호출).
   function toggleSort(key: SortKey) {
     if (sortKey === key) setSortDir((d) => (d === "asc" ? "desc" : "asc"));
     else {
       setSortKey(key);
       setSortDir(key === "amount" ? "desc" : "desc");
     }
+    setPage(1);
   }
   const sortMark = (key: SortKey) =>
     sortKey === key ? (sortDir === "asc" ? " ▲" : " ▼") : "";
@@ -159,6 +179,7 @@ export default function AssetManager({
     setBudget("all");
     setStatus("all");
     setQ("");
+    setPage(1);
   }
 
   // --- 행 액션(불용/되돌리기/삭제) — 성공 시 router.refresh 로 목록 갱신 ---
@@ -203,7 +224,10 @@ export default function AssetManager({
         <div className="flex flex-wrap items-center gap-2">
           <select
             value={year}
-            onChange={(e) => setYear(e.target.value)}
+            onChange={(e) => {
+              setYear(e.target.value);
+              setPage(1);
+            }}
             className={selCls}
             aria-label="취득연도"
           >
@@ -217,7 +241,10 @@ export default function AssetManager({
 
           <select
             value={loc}
-            onChange={(e) => setLoc(e.target.value)}
+            onChange={(e) => {
+              setLoc(e.target.value);
+              setPage(1);
+            }}
             className={selCls}
             aria-label="장소"
           >
@@ -231,7 +258,10 @@ export default function AssetManager({
 
           <select
             value={budget}
-            onChange={(e) => setBudget(e.target.value)}
+            onChange={(e) => {
+              setBudget(e.target.value);
+              setPage(1);
+            }}
             className={selCls}
             aria-label="예산출처"
           >
@@ -245,7 +275,10 @@ export default function AssetManager({
 
           <select
             value={status}
-            onChange={(e) => setStatus(e.target.value as AssetStatus)}
+            onChange={(e) => {
+              setStatus(e.target.value as AssetStatus);
+              setPage(1);
+            }}
             className={selCls}
             aria-label="상태"
           >
@@ -258,7 +291,10 @@ export default function AssetManager({
 
           <input
             value={q}
-            onChange={(e) => setQ(e.target.value)}
+            onChange={(e) => {
+              setQ(e.target.value);
+              setPage(1);
+            }}
             placeholder="품목·규격 검색"
             className={`${selCls} min-w-[160px] flex-1`}
           />
@@ -289,6 +325,7 @@ export default function AssetManager({
             {activeFilter
               ? `필터 결과 ${filtered.length}건 / 전체 ${assets.length}건`
               : `전체 ${assets.length}건`}
+            {filtered.length > PAGE_SIZE && ` · ${safePage}/${totalPages}페이지`}
           </p>
           <div className="flex items-center gap-2">
             <a
@@ -326,63 +363,75 @@ export default function AssetManager({
               : "조건에 맞는 비품이 없습니다. 필터를 조정하세요."}
           </div>
         ) : (
-          <div className="overflow-x-auto">
-            <table className="w-full min-w-[1240px] border-collapse">
-              <thead>
-                <tr className="border-b border-line">
-                  <th
-                    className={`${thCls} cursor-pointer select-none hover:text-navy-strong`}
-                    onClick={() => toggleSort("acquired_on")}
-                  >
-                    취득일자{sortMark("acquired_on")}
-                  </th>
-                  <th className={thCls}>품목</th>
-                  <th className={thCls}>규격</th>
-                  <th className={thCls}>장소</th>
-                  <th className={thCls}>단위</th>
-                  <th className={`${thCls} text-right`}>수량</th>
-                  <th className={`${thCls} text-right`}>단가</th>
-                  <th
-                    className={`${thCls} cursor-pointer select-none text-right hover:text-navy-strong`}
-                    onClick={() => toggleSort("amount")}
-                  >
-                    금액{sortMark("amount")}
-                  </th>
-                  <th className={thCls}>내구연한</th>
-                  <th className={thCls}>폐기예정일</th>
-                  <th className={thCls}>예산출처</th>
-                  <th className={thCls}>상태</th>
-                  <th className={thCls}>비고</th>
-                  <th className={`${thCls} text-right`}>관리</th>
-                </tr>
-              </thead>
-              <tbody>
-                {filtered.map((a) => (
-                  <AssetRow
-                    key={a.id}
-                    asset={a}
-                    todayYmd={todayYmd}
-                    isM0={isM0}
-                    busy={pending && rowBusyId === a.id}
-                    onEdit={() => {
-                      setMsg(null);
-                      setModal({ mode: "edit", asset: a });
-                    }}
-                    onDuplicate={() => {
-                      setMsg(null);
-                      setModal({ mode: "duplicate", asset: a });
-                    }}
-                    onDispose={() => {
-                      setMsg(null);
-                      setDisposeTarget(a);
-                    }}
-                    onRestore={() => onRestore(a)}
-                    onDelete={() => onDelete(a)}
-                  />
-                ))}
-              </tbody>
-            </table>
-          </div>
+          <>
+            <div className="overflow-x-auto">
+              <table className="w-full min-w-[720px] border-collapse">
+                <thead>
+                  <tr className="border-b border-line">
+                    <th
+                      className={`${thCls} ${STICKY_DATE} cursor-pointer select-none hover:text-navy-strong`}
+                      onClick={() => toggleSort("acquired_on")}
+                    >
+                      취득일{sortMark("acquired_on")}
+                    </th>
+                    <th
+                      className={`${thCls} ${STICKY_NAME}`}
+                    >
+                      품목
+                    </th>
+                    <th className={thCls}>장소</th>
+                    <th className={`${thCls} text-right`}>수량</th>
+                    <th
+                      className={`${thCls} cursor-pointer select-none text-right hover:text-navy-strong`}
+                      onClick={() => toggleSort("amount")}
+                    >
+                      금액{sortMark("amount")}
+                    </th>
+                    <th className={thCls}>폐기예정일</th>
+                    <th className={thCls}>상태</th>
+                    <th className={`${thCls} text-right`}>관리</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {pageRows.map((a) => (
+                    <AssetRow
+                      key={a.id}
+                      asset={a}
+                      todayYmd={todayYmd}
+                      isM0={isM0}
+                      busy={pending && rowBusyId === a.id}
+                      expanded={expandedId === a.id}
+                      onToggle={() =>
+                        setExpandedId((cur) => (cur === a.id ? null : a.id))
+                      }
+                      onEdit={() => {
+                        setMsg(null);
+                        setModal({ mode: "edit", asset: a });
+                      }}
+                      onDuplicate={() => {
+                        setMsg(null);
+                        setModal({ mode: "duplicate", asset: a });
+                      }}
+                      onDispose={() => {
+                        setMsg(null);
+                        setDisposeTarget(a);
+                      }}
+                      onRestore={() => onRestore(a)}
+                      onDelete={() => onDelete(a)}
+                    />
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            <Pagination
+              page={safePage}
+              totalPages={totalPages}
+              onChange={(p) => {
+                setPage(p);
+                setExpandedId(null);
+              }}
+            />
+          </>
         )}
       </section>
 
@@ -448,6 +497,8 @@ function AssetRow({
   todayYmd,
   isM0,
   busy,
+  expanded,
+  onToggle,
   onEdit,
   onDuplicate,
   onDispose,
@@ -458,6 +509,8 @@ function AssetRow({
   todayYmd: string;
   isM0: boolean;
   busy: boolean;
+  expanded: boolean;
+  onToggle: () => void;
   onEdit: () => void;
   onDuplicate: () => void;
   onDispose: () => void;
@@ -466,83 +519,277 @@ function AssetRow({
 }) {
   const disposed = !!asset.disposed_on;
   return (
-    <tr className="border-b border-line/60">
-      <td className={`${tdCls} font-mono text-xs`}>{asset.acquired_on ?? "—"}</td>
-      <td className={`${tdCls} font-medium text-ink`}>{asset.item_name}</td>
-      <td className={`${tdCls} max-w-[220px] truncate`} title={asset.spec ?? ""}>
-        {asset.spec ?? "—"}
-      </td>
-      <td className={tdCls}>{asset.location ?? "—"}</td>
-      <td className={tdCls}>{asset.unit ?? "—"}</td>
-      <td className={`${tdCls} text-right font-mono`}>
-        {asset.quantity.toLocaleString("ko-KR")}
-      </td>
-      <td className={`${tdCls} text-right font-mono`}>
-        {formatNum(asset.unit_price)}
-      </td>
-      <td className={`${tdCls} text-right font-mono font-semibold`}>
-        {formatNum(asset.amount)}
-      </td>
-      <td className={tdCls}>
-        {asset.useful_life_years != null ? `${asset.useful_life_years}년` : "—"}
-      </td>
-      <td className={`${tdCls} font-mono text-xs`}>
-        {asset.disposal_scheduled_on ?? "—"}
-      </td>
-      <td className={tdCls}>{asset.budget_source ?? "—"}</td>
-      <td className={tdCls}>
-        <StatusBadge asset={asset} todayYmd={todayYmd} />
-      </td>
-      <td className={`${tdCls} max-w-[200px] truncate`} title={asset.note ?? ""}>
-        {asset.note ?? "—"}
-      </td>
-      <td className={`${tdCls} text-right`}>
-        <div className="flex justify-end gap-1">
-          <button type="button" onClick={onEdit} disabled={busy} className={rowBtn}>
-            수정
-          </button>
-          <button
-            type="button"
-            onClick={onDuplicate}
-            disabled={busy}
-            className={rowBtn}
-            title="이 행 값으로 등록 모달 열기(같은 물품 재구매)"
+    <>
+      <tr
+        className="group cursor-pointer border-b border-line/60 hover:bg-surface"
+        onClick={onToggle}
+      >
+        <td className={`${tdCls} ${STICKY_DATE} font-mono text-xs`}>
+          {asset.acquired_on ?? "—"}
+        </td>
+        <td className={`${tdCls} ${STICKY_NAME} font-medium text-ink`}>
+          <span className="mr-1 inline-block w-3 text-ink-hint">
+            {expanded ? "▾" : "▸"}
+          </span>
+          {asset.item_name}
+        </td>
+        <td className={tdCls}>{asset.location ?? "—"}</td>
+        <td className={`${tdCls} text-right font-mono`}>
+          {asset.quantity.toLocaleString("ko-KR")}
+        </td>
+        <td className={`${tdCls} text-right font-mono font-semibold`}>
+          {formatNum(asset.amount)}
+        </td>
+        <td className={`${tdCls} font-mono text-xs`}>
+          {asset.disposal_scheduled_on ?? "—"}
+        </td>
+        <td className={tdCls}>
+          <StatusBadge asset={asset} todayYmd={todayYmd} />
+        </td>
+        <td className={`${tdCls} text-right`}>
+          {/* 관리 셀 클릭은 행 펼침으로 전파하지 않음 */}
+          <div
+            className="flex justify-end gap-1"
+            onClick={(e) => e.stopPropagation()}
           >
-            복제
-          </button>
-          {disposed ? (
             <button
               type="button"
-              onClick={onRestore}
+              onClick={onEdit}
               disabled={busy}
               className={rowBtn}
             >
-              되돌리기
+              수정
             </button>
-          ) : (
-            <button
-              type="button"
-              onClick={onDispose}
-              disabled={busy}
-              className={rowBtn}
-            >
-              불용
-            </button>
-          )}
-          {isM0 && (
-            <button
-              type="button"
-              onClick={onDelete}
-              disabled={busy}
-              className="rounded border border-stamp px-1.5 py-1 text-xs text-stamp hover:bg-stamp-soft disabled:opacity-50"
-            >
-              삭제
-            </button>
-          )}
-        </div>
-      </td>
-    </tr>
+            <RowMenu
+              disposed={disposed}
+              isM0={isM0}
+              busy={busy}
+              onDuplicate={onDuplicate}
+              onDispose={onDispose}
+              onRestore={onRestore}
+              onDelete={onDelete}
+            />
+          </div>
+        </td>
+      </tr>
+      {expanded && (
+        <tr className="border-b border-line/60 bg-surface/40">
+          <td colSpan={8} className="px-4 py-3">
+            <dl className="grid grid-cols-2 gap-x-6 gap-y-2 text-sm sm:grid-cols-3">
+              <DetailItem label="규격" value={asset.spec ?? "—"} />
+              <DetailItem label="단위" value={asset.unit ?? "—"} />
+              <DetailItem
+                label="단가"
+                value={asset.unit_price ? `${formatNum(asset.unit_price)}원` : "—"}
+              />
+              <DetailItem
+                label="내구연한"
+                value={
+                  asset.useful_life_years != null
+                    ? `${asset.useful_life_years}년`
+                    : "—"
+                }
+              />
+              <DetailItem label="예산출처" value={asset.budget_source ?? "—"} />
+              <DetailItem label="비고" value={asset.note ?? "—"} />
+            </dl>
+          </td>
+        </tr>
+      )}
+    </>
   );
+}
+
+function DetailItem({ label, value }: { label: string; value: string }) {
+  return (
+    <div>
+      <dt className="text-[11px] text-ink-muted">{label}</dt>
+      <dd className="mt-0.5 whitespace-pre-wrap break-words text-ink-body">
+        {value}
+      </dd>
+    </div>
+  );
+}
+
+// 행 관리 ⋯ 드롭다운 — overflow 클리핑을 피하려 portal + fixed 좌표로 렌더.
+function RowMenu({
+  disposed,
+  isM0,
+  busy,
+  onDuplicate,
+  onDispose,
+  onRestore,
+  onDelete,
+}: {
+  disposed: boolean;
+  isM0: boolean;
+  busy: boolean;
+  onDuplicate: () => void;
+  onDispose: () => void;
+  onRestore: () => void;
+  onDelete: () => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const btnRef = useRef<HTMLButtonElement>(null);
+  const [pos, setPos] = useState<{ top: number; left: number } | null>(null);
+
+  function toggle() {
+    if (!open && btnRef.current) {
+      const r = btnRef.current.getBoundingClientRect();
+      setPos({ top: r.bottom + 4, left: Math.max(8, r.right - 160) });
+    }
+    setOpen((o) => !o);
+  }
+
+  const item =
+    "block w-full px-3 py-1.5 text-left text-xs text-ink-body hover:bg-surface";
+
+  return (
+    <>
+      <button
+        ref={btnRef}
+        type="button"
+        onClick={toggle}
+        disabled={busy}
+        className={rowBtn}
+        aria-label="더보기"
+      >
+        ⋯
+      </button>
+      {open &&
+        pos &&
+        createPortal(
+          <div className="fixed inset-0 z-[60]" onClick={() => setOpen(false)}>
+            <div
+              className="absolute w-40 overflow-hidden rounded-lg border border-line bg-card py-1 shadow-lg"
+              style={{ top: pos.top, left: pos.left }}
+              onClick={(e) => e.stopPropagation()}
+            >
+              <button
+                type="button"
+                className={item}
+                onClick={() => {
+                  setOpen(false);
+                  onDuplicate();
+                }}
+              >
+                복제 등록
+              </button>
+              {disposed ? (
+                <button
+                  type="button"
+                  className={item}
+                  onClick={() => {
+                    setOpen(false);
+                    onRestore();
+                  }}
+                >
+                  되돌리기
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  className={item}
+                  onClick={() => {
+                    setOpen(false);
+                    onDispose();
+                  }}
+                >
+                  불용 처리
+                </button>
+              )}
+              {isM0 && (
+                <button
+                  type="button"
+                  className={`${item} text-stamp`}
+                  onClick={() => {
+                    setOpen(false);
+                    onDelete();
+                  }}
+                >
+                  삭제
+                </button>
+              )}
+            </div>
+          </div>,
+          document.body
+        )}
+    </>
+  );
+}
+
+// 페이지네이션 — 20건/페이지, 하단 이동.
+function Pagination({
+  page,
+  totalPages,
+  onChange,
+}: {
+  page: number;
+  totalPages: number;
+  onChange: (p: number) => void;
+}) {
+  if (totalPages <= 1) return null;
+  const pages = pageList(page, totalPages);
+  return (
+    <div className="mt-4 flex items-center justify-center gap-1">
+      <PBtn disabled={page <= 1} onClick={() => onChange(page - 1)}>
+        ‹
+      </PBtn>
+      {pages.map((p, i) =>
+        p === "…" ? (
+          <span key={`e${i}`} className="px-1 text-xs text-ink-hint">
+            …
+          </span>
+        ) : (
+          <PBtn key={p} active={p === page} onClick={() => onChange(p)}>
+            {p}
+          </PBtn>
+        )
+      )}
+      <PBtn disabled={page >= totalPages} onClick={() => onChange(page + 1)}>
+        ›
+      </PBtn>
+    </div>
+  );
+}
+
+function PBtn({
+  children,
+  active,
+  disabled,
+  onClick,
+}: {
+  children: React.ReactNode;
+  active?: boolean;
+  disabled?: boolean;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      disabled={disabled}
+      className={`min-w-[30px] rounded-md border px-2 py-1 text-xs ${
+        active
+          ? "border-navy bg-navy text-white"
+          : "border-line text-ink-body hover:bg-surface"
+      } disabled:opacity-40`}
+    >
+      {children}
+    </button>
+  );
+}
+
+function pageList(page: number, total: number): (number | "…")[] {
+  if (total <= 7) return Array.from({ length: total }, (_, i) => i + 1);
+  const out: (number | "…")[] = [1];
+  const start = Math.max(2, page - 1);
+  const end = Math.min(total - 1, page + 1);
+  if (start > 2) out.push("…");
+  for (let i = start; i <= end; i++) out.push(i);
+  if (end < total - 1) out.push("…");
+  out.push(total);
+  return out;
 }
 
 // =====================================================================
