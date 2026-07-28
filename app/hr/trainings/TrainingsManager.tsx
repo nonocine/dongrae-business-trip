@@ -10,6 +10,7 @@ import {
   adminUploadCertificate,
   adminGetCertificateUrl,
   adminDeleteCompletion,
+  runTrainingReminderNow,
   type TrainingMatrix,
   type MatrixCompletion,
 } from "@/app/hr/trainings/actions";
@@ -52,12 +53,14 @@ export default function TrainingsManager({
   years,
   trainings: initialTrainings,
   matrix: initialMatrix,
+  isM0,
 }: {
   initialYear: number;
   thisYear: number;
   years: number[];
   trainings: MandatoryTraining[];
   matrix: TrainingMatrix;
+  isM0: boolean;
 }) {
   const [year, setYear] = useState<number>(initialYear);
   const [trainings, setTrainings] =
@@ -86,6 +89,38 @@ export default function TrainingsManager({
     driverId: string;
   } | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
+
+  // D-7 독촉 수동 실행(M0).
+  const [reminding, startRemind] = useTransition();
+  function runReminderNow() {
+    if (
+      !confirm(
+        "마감 D-7 이내 미이수자에게 슬랙 독촉 DM을 지금 보낼까요? (관리자 요약도 함께 발송)"
+      )
+    )
+      return;
+    setMsg(null);
+    startRemind(async () => {
+      const res = await runTrainingReminderNow();
+      if (!res.ok) {
+        setMsg({ kind: "err", text: res.message });
+        return;
+      }
+      const s = res.summary;
+      if (s.targetEmployees === 0) {
+        setMsg({ kind: "ok", text: "독촉 대상이 없습니다. (D-7 이내 미이수 없음)" });
+        return;
+      }
+      const tail =
+        s.unreachable.length > 0
+          ? ` · 미연결 ${s.unreachable.length}명(${s.unreachable.join(", ")})`
+          : "";
+      setMsg({
+        kind: "ok",
+        text: `DM ${s.dmSent}건 발송 / 미연결 ${s.dmFailed}명${tail} · 관리자 요약 발송`,
+      });
+    });
+  }
 
   // 연도 선택지 — 기존 연도 ∪ (작년·올해·내년) ∪ 현재 선택.
   const yearOptions = useMemo(() => {
@@ -588,13 +623,26 @@ export default function TrainingsManager({
           <h3 className="text-sm font-bold tracking-wide text-navy">
             이수 현황판 ({year}년)
           </h3>
-          <span className="text-xs text-ink-muted">
-            재직 {matrix.employees.length}명 · 활성 교육{" "}
-            {matrix.trainings.length}종 · 미이수 총{" "}
-            <b className={totalNotMet > 0 ? "text-stamp" : "text-success"}>
-              {totalNotMet}건
-            </b>
-          </span>
+          <div className="flex flex-wrap items-center gap-3">
+            <span className="text-xs text-ink-muted">
+              재직 {matrix.employees.length}명 · 활성 교육{" "}
+              {matrix.trainings.length}종 · 미이수 총{" "}
+              <b className={totalNotMet > 0 ? "text-stamp" : "text-success"}>
+                {totalNotMet}건
+              </b>
+            </span>
+            {isM0 && (
+              <button
+                type="button"
+                onClick={runReminderNow}
+                disabled={reminding}
+                className={btnSecondary}
+                title="마감 D-7 이내 미이수자에게 슬랙 독촉 DM + 관리자 요약을 즉시 발송"
+              >
+                {reminding ? "발송 중…" : "지금 독촉 보내기"}
+              </button>
+            )}
+          </div>
         </div>
 
         {matrix.trainings.length === 0 || matrix.employees.length === 0 ? (

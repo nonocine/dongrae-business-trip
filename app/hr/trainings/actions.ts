@@ -22,6 +22,10 @@ import {
   cellKey,
   type MandatoryTraining,
 } from "@/lib/trainings";
+import {
+  runTrainingReminder,
+  type TrainingReminderSummary,
+} from "@/lib/trainingReminder";
 
 // =====================================================================
 // 법정의무교육 담당자 액션 — /hr/trainings
@@ -539,20 +543,24 @@ export async function adminDeleteCompletion(
 }
 
 // =====================================================================
-// 슬랙 알림 훅 — 구조만(이번 버전은 실제 발송 X).
-//   TODO(slack): 슬랙 연동 작업에서 기한 임박(D-7 등) 미이수자에게 알림.
-//     - 대상: getTrainingMatrix 로 미이수 재직자 산출 → 채널/DM webhook 호출.
-//     - 스케줄러(예: cron)로 매일 1회 호출 예정. 실제 발송·스케줄은 이번 범위 밖.
-//   현재는 no-op 스텁. (app/announcements/actions.ts notifySlackAnnouncement 와 동일 방식)
-//
-//   [호출 지점 — 향후 구현]
-//     예) 매일 1회 스케줄러가 활성 교육을 훑어, 기한 D-7·D-1·D-DAY 인 교육에 대해
-//         notifySlackTrainingDue(training.id) 를 호출 → 함수 내부에서 미이수
-//         재직자를 산출하고 채널/DM 으로 알림. (이번 범위 밖: 발송·스케줄 미구현)
+// 의무교육 D-7 독촉 — 수동 실행(M0 전용). Cron 과 동일 코어(lib/trainingReminder).
+//   * Cron 하루 안 기다리고 검증용. 슬랙 실패해도 데이터 조회만 성공하면 ok.
 // =====================================================================
-export async function notifySlackTrainingDue(
-  trainingId: string
-): Promise<void> {
-  // 의도적으로 비워둠 — 실제 슬랙 발송은 다음 작업에서 구현.
-  void trainingId;
+export async function runTrainingReminderNow(): Promise<
+  | { ok: true; summary: TrainingReminderSummary }
+  | { ok: false; message: string }
+> {
+  try {
+    const ctx = await requireTrainingAccess();
+    if (!ctx.isM0) {
+      return { ok: false, message: "독촉 발송은 관장·부장만 실행할 수 있습니다." };
+    }
+    const summary = await runTrainingReminder();
+    return { ok: true, summary };
+  } catch (e) {
+    return {
+      ok: false,
+      message: e instanceof Error ? e.message : "독촉 실행 중 오류가 발생했습니다.",
+    };
+  }
 }

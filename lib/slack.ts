@@ -61,3 +61,88 @@ export function siteBaseUrl(): string | null {
 export function slackLink(url: string, label: string): string {
   return `<${url}|${label}>`;
 }
+
+// --- Slack Web API DM (Bot Token) -------------------------------------
+// 이메일로 슬랙 유저를 찾아(users.lookupByEmail) DM(chat.postMessage) 발송.
+//   * SLACK_BOT_TOKEN(xoxb-) 필요. 없으면 skip.
+//   * 매칭 실패(슬랙 미가입/이메일 불일치)·API 실패·타임아웃 → false, 절대 throw 안 함.
+//   * 반환 true=DM 발송 성공, false=미연결/실패(호출부에서 '미연결' 표기에 사용).
+export async function sendSlackDM(
+  email: string | null | undefined,
+  text: string
+): Promise<boolean> {
+  const token = process.env.SLACK_BOT_TOKEN;
+  const addr = (email ?? "").trim();
+  if (!addr) return false;
+  if (!token) {
+    console.warn("[slack] SLACK_BOT_TOKEN 미설정 — DM skip");
+    return false;
+  }
+  try {
+    const userId = await lookupUserIdByEmail(token, addr);
+    if (!userId) {
+      console.warn(`[slack] 사용자 매칭 실패(미연결): ${addr}`);
+      return false;
+    }
+    return await postMessage(token, userId, text);
+  } catch (e) {
+    console.warn("[slack] DM 실패:", e instanceof Error ? e.message : e);
+    return false;
+  }
+}
+
+async function slackApi(
+  token: string,
+  method: string,
+  body: URLSearchParams | Record<string, unknown>,
+  form: boolean
+): Promise<{ ok: boolean; data: Record<string, unknown> }> {
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), TIMEOUT_MS);
+  try {
+    const res = await fetch(`https://slack.com/api/${method}`, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${token}`,
+        "Content-Type": form
+          ? "application/x-www-form-urlencoded"
+          : "application/json; charset=utf-8",
+      },
+      body: form ? (body as URLSearchParams) : JSON.stringify(body),
+      signal: ctrl.signal,
+    });
+    const data = (await res.json()) as Record<string, unknown>;
+    return { ok: res.ok && data.ok === true, data };
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+async function lookupUserIdByEmail(
+  token: string,
+  email: string
+): Promise<string | null> {
+  const { ok, data } = await slackApi(
+    token,
+    "users.lookupByEmail",
+    new URLSearchParams({ email }),
+    true
+  );
+  if (!ok) return null;
+  const user = data.user as { id?: string } | undefined;
+  return user?.id ?? null;
+}
+
+async function postMessage(
+  token: string,
+  channel: string,
+  text: string
+): Promise<boolean> {
+  const { ok } = await slackApi(
+    token,
+    "chat.postMessage",
+    { channel, text },
+    false
+  );
+  return ok;
+}

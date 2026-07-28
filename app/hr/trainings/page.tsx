@@ -57,6 +57,7 @@ export default async function TrainingsPage() {
           years={years}
           trainings={trainings}
           matrix={matrix}
+          isM0={access.isM0}
         />
       </main>
     </>
