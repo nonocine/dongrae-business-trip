@@ -3,7 +3,10 @@
 import { revalidatePath } from "next/cache";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
 import { getSession } from "@/app/actions";
-import { requireCertificateAccess } from "@/lib/certificateAccess";
+import {
+  requireCertificateAccess,
+  resolveCertificateAccess,
+} from "@/lib/certificateAccess";
 import {
   CERT_TYPES,
   CERT_STATEMENT,
@@ -12,9 +15,11 @@ import {
   calcServicePeriod,
   formatIssueLabel,
   toCertificateIssue,
+  toCertRequest,
   type CertType,
   type CertSnapshot,
   type CertificateIssue,
+  type CertRequest,
 } from "@/lib/certificates";
 import { buildCertificatePdf } from "@/lib/certificatePdf";
 import { downloadHrImage } from "@/lib/recruitmentApplicantDocData";
@@ -69,7 +74,11 @@ function pickAppointment(appointments: unknown): {
 
 async function loadProfile(driverId: string): Promise<ProfileLite | null> {
   const [{ data: driver }, { data: prof }] = await Promise.all([
-    supabaseAdmin.from("drivers").select("name").eq("id", driverId).maybeSingle(),
+    supabaseAdmin
+      .from("drivers")
+      .select("name, rank")
+      .eq("id", driverId)
+      .maybeSingle(),
     supabaseAdmin
       .from("employee_profiles")
       .select(
@@ -79,6 +88,7 @@ async function loadProfile(driverId: string): Promise<ProfileLite | null> {
       .maybeSingle(),
   ]);
   if (!driver) return null;
+  const rank = ((driver as { rank?: string | null }).rank ?? "")?.trim() || null;
   const p = (prof ?? {}) as Record<string, unknown>;
   const appt = pickAppointment(p.appointments);
   return {
@@ -88,8 +98,9 @@ async function loadProfile(driverId: string): Promise<ProfileLite | null> {
     join_date: (p.join_date as string | null) ?? null,
     employment_status: p.employment_status === "resigned" ? "resigned" : "active",
     resignation_date: (p.resignation_date as string | null) ?? null,
-    department: appt.department,
-    duty: appt.title,
+    // 발령 부서 없으면 직책(rank)으로 폴백 — 관장·부장 등은 근무부서 칸에 직책 표기.
+    department: appt.department ?? rank,
+    duty: appt.title ?? rank,
   };
 }
 
@@ -187,74 +198,48 @@ export type IssueResult =
     }
   | { ok: false; message: string };
 
-// --- 본인 재직증명서 셀프 발급 ----------------------------------------
-export async function issueMyCertificate(input: {
-  purpose: string;
-  duty: string;
-}): Promise<IssueResult> {
-  try {
-    const me = await getSession();
-    if (!me || me.kind !== "employee" || !me.name.trim())
-      return { ok: false, message: "로그인이 필요합니다." };
+// 재직증명서 실제 발급(내부) — 승인 시 호출. 채번·snapshot·대장 insert.
+async function issueEmployment(
+  driverId: string,
+  prof: ProfileLite,
+  purpose: string,
+  duty: string | null,
+  issuedBy: string
+): Promise<{ id: string; snapshot: CertSnapshot }> {
+  const issuedOn = kstTodayYmd();
+  const year = Number(issuedOn.slice(0, 4));
+  const { id, snapshot } = await insertWithNumber({
+    certType: "employment",
+    year,
+    driverId,
+    name: prof.name,
+    purpose,
+    issuedOn,
+    issuedBy,
+    makeSnapshot: (s) =>
+      buildSnapshot({
+        certType: "employment",
+        year,
+        seq: s,
+        prof,
+        duty,
+        from: prof.join_date,
+        to: null, // 재직 → 현재
+        purpose,
+        issuedOn,
+      }),
+  });
+  return { id, snapshot };
+}
 
-    const { data: driver } = await supabaseAdmin
-      .from("drivers")
-      .select("id")
-      .eq("name", me.name.trim())
-      .maybeSingle();
-    const driverId = (driver as { id?: string } | null)?.id ?? null;
-    if (!driverId) return { ok: false, message: "직원 정보를 찾을 수 없습니다." };
-
-    const prof = await loadProfile(driverId);
-    if (!prof) return { ok: false, message: "인사기록을 찾을 수 없습니다." };
-    // 재직증명서는 재직자만(방어적 — 퇴직자는 로그인 불가).
-    if (prof.employment_status === "resigned")
-      return { ok: false, message: "재직 중인 직원만 재직증명서를 발급할 수 있습니다." };
-
-    const purpose = cleanStr(input.purpose) ?? "서류제출용";
-    const duty = cleanStr(input.duty) ?? prof.duty;
-    const issuedOn = kstTodayYmd();
-    const year = Number(issuedOn.slice(0, 4));
-
-    const { seq, snapshot } = await insertWithNumber({
-      certType: "employment",
-      year,
-      driverId,
-      name: prof.name,
-      purpose,
-      issuedOn,
-      issuedBy: "본인",
-      makeSnapshot: (s) =>
-        buildSnapshot({
-          certType: "employment",
-          year,
-          seq: s,
-          prof,
-          duty,
-          from: prof.join_date,
-          to: null, // 재직 → 현재
-          purpose,
-          issuedOn,
-        }),
-    });
-
-    const pdf = await buildCertificatePdf(snapshot, await loadSeal());
-    revalidatePath("/profile/hr");
-    revalidatePath("/hr/certificates");
-    return {
-      ok: true,
-      label: snapshot.issueLabel,
-      year,
-      seq,
-      filename: pdfFilename(snapshot),
-      pdfBase64: Buffer.from(pdf).toString("base64"),
-    };
-  } catch (e) {
-    return {
-      ok: false,
-      message: e instanceof Error ? e.message : "발급 중 오류가 발생했습니다.",
-    };
-  }
+// 세션 직원의 driver_id 조회.
+async function myDriverId(name: string): Promise<string | null> {
+  const { data } = await supabaseAdmin
+    .from("drivers")
+    .select("id")
+    .eq("name", name.trim())
+    .maybeSingle();
+  return (data as { id?: string } | null)?.id ?? null;
 }
 
 // --- 경력증명서 발급(관리자) — 퇴사자 포함 ----------------------------
@@ -434,6 +419,193 @@ export async function getMyCertificatePrefill(): Promise<{
     defaultDuty: lastDuty ?? prof.duty ?? "",
     name: prof.name,
   };
+}
+
+// =====================================================================
+// 재직증명서 승인제 — 직원 신청(certificate_requests) → M0 승인 시 발급.
+//   * 경력증명서(관리자 직접 발급)는 승인 절차 없음(현행 유지).
+// =====================================================================
+const REQ_TABLE = "certificate_requests";
+
+// 본인 재직증명서 신청(pending). 재직자만, 중복 pending 차단.
+export async function requestMyCertificate(input: {
+  purpose: string;
+  duty: string;
+}): Promise<{ ok: true; message: string } | { ok: false; message: string }> {
+  try {
+    const me = await getSession();
+    if (!me || me.kind !== "employee" || !me.name.trim())
+      return { ok: false, message: "로그인이 필요합니다." };
+    const driverId = await myDriverId(me.name);
+    if (!driverId) return { ok: false, message: "직원 정보를 찾을 수 없습니다." };
+    const prof = await loadProfile(driverId);
+    if (!prof) return { ok: false, message: "인사기록을 찾을 수 없습니다." };
+    if (prof.employment_status === "resigned")
+      return { ok: false, message: "재직 중인 직원만 신청할 수 있습니다." };
+
+    // 중복 pending 차단.
+    const { data: dup } = await supabaseAdmin
+      .from(REQ_TABLE)
+      .select("id")
+      .eq("driver_id", driverId)
+      .eq("cert_type", "employment")
+      .eq("status", "pending")
+      .maybeSingle();
+    if (dup)
+      return {
+        ok: false,
+        message: "이미 승인 대기 중인 신청이 있습니다. 승인 후 다시 신청하세요.",
+      };
+
+    const purpose = cleanStr(input.purpose) ?? "서류제출용";
+    const duty = cleanStr(input.duty) ?? prof.duty;
+    const { error } = await supabaseAdmin.from(REQ_TABLE).insert({
+      driver_id: driverId,
+      employee_name: prof.name,
+      cert_type: "employment",
+      purpose,
+      duty,
+      status: "pending",
+      requested_at: new Date().toISOString(),
+    });
+    if (error) throw new Error(error.message);
+    revalidatePath("/profile/hr");
+    revalidatePath("/hr/certificates");
+    return { ok: true, message: "재직증명서 발급을 신청했습니다. 승인 후 발급됩니다." };
+  } catch (e) {
+    return {
+      ok: false,
+      message: e instanceof Error ? e.message : "신청 중 오류가 발생했습니다.",
+    };
+  }
+}
+
+// 본인 신청 현황(마이페이지).
+export async function listMyRequests(): Promise<CertRequest[]> {
+  const me = await getSession();
+  if (!me || me.kind !== "employee" || !me.name.trim()) return [];
+  const driverId = await myDriverId(me.name);
+  if (!driverId) return [];
+  const { data } = await supabaseAdmin
+    .from(REQ_TABLE)
+    .select("*")
+    .eq("driver_id", driverId)
+    .order("requested_at", { ascending: false });
+  return (data ?? []).map((r) => toCertRequest(r as Record<string, unknown>));
+}
+
+// 승인 대기 목록(관리자 — M0/hr 열람).
+export async function listPendingRequests(): Promise<CertRequest[]> {
+  await requireCertificateAccess();
+  const { data, error } = await supabaseAdmin
+    .from(REQ_TABLE)
+    .select("*")
+    .eq("status", "pending")
+    .order("requested_at", { ascending: true });
+  if (error) throw new Error(error.message);
+  return (data ?? []).map((r) => toCertRequest(r as Record<string, unknown>));
+}
+
+// 대시보드 배지용 — 대기 건수(접근 불가 시 0).
+export async function getPendingCertRequestCount(): Promise<number> {
+  const access = await resolveCertificateAccess();
+  if (!access) return 0;
+  const { count } = await supabaseAdmin
+    .from(REQ_TABLE)
+    .select("id", { count: "exact", head: true })
+    .eq("status", "pending");
+  return count ?? 0;
+}
+
+// 승인 — M0만. 승인 시점에 채번·발급·대장 기록 후 issue_id 연결.
+export async function approveRequest(
+  id: string
+): Promise<{ ok: true; label: string } | { ok: false; message: string }> {
+  try {
+    const access = await requireCertificateAccess();
+    if (!access.isM0)
+      return { ok: false, message: "승인은 관장·부장만 할 수 있습니다." };
+    if (!id) return { ok: false, message: "대상이 없습니다." };
+
+    const { data: reqRow, error: reqErr } = await supabaseAdmin
+      .from(REQ_TABLE)
+      .select("*")
+      .eq("id", id)
+      .maybeSingle();
+    if (reqErr) throw new Error(reqErr.message);
+    if (!reqRow) return { ok: false, message: "신청을 찾을 수 없습니다." };
+    const req = toCertRequest(reqRow as Record<string, unknown>);
+    if (req.status !== "pending")
+      return { ok: false, message: "이미 처리된 신청입니다." };
+    if (!req.driver_id) return { ok: false, message: "신청자 정보가 없습니다." };
+
+    const prof = await loadProfile(req.driver_id);
+    if (!prof) return { ok: false, message: "신청자 인사기록을 찾을 수 없습니다." };
+
+    const { id: issueId, snapshot } = await issueEmployment(
+      req.driver_id,
+      prof,
+      req.purpose,
+      req.duty,
+      access.name
+    );
+
+    const { error: upErr } = await supabaseAdmin
+      .from(REQ_TABLE)
+      .update({
+        status: "approved",
+        decided_at: new Date().toISOString(),
+        decided_by: access.name,
+        issue_id: issueId,
+      })
+      .eq("id", id)
+      .eq("status", "pending"); // 동시 승인 방지
+    if (upErr) throw new Error(upErr.message);
+
+    revalidatePath("/hr/certificates");
+    revalidatePath("/profile/hr");
+    return { ok: true, label: snapshot.issueLabel };
+  } catch (e) {
+    return {
+      ok: false,
+      message: e instanceof Error ? e.message : "승인 중 오류가 발생했습니다.",
+    };
+  }
+}
+
+// 반려 — M0만. 사유 기록.
+export async function rejectRequest(
+  id: string,
+  reason: string
+): Promise<{ ok: true } | { ok: false; message: string }> {
+  try {
+    const access = await requireCertificateAccess();
+    if (!access.isM0)
+      return { ok: false, message: "반려는 관장·부장만 할 수 있습니다." };
+    if (!id) return { ok: false, message: "대상이 없습니다." };
+    const r = cleanStr(reason);
+    if (!r) return { ok: false, message: "반려 사유를 입력하세요." };
+
+    const { error } = await supabaseAdmin
+      .from(REQ_TABLE)
+      .update({
+        status: "rejected",
+        reject_reason: r,
+        decided_at: new Date().toISOString(),
+        decided_by: access.name,
+      })
+      .eq("id", id)
+      .eq("status", "pending");
+    if (error) throw new Error(error.message);
+    revalidatePath("/hr/certificates");
+    revalidatePath("/profile/hr");
+    return { ok: true };
+  } catch (e) {
+    return {
+      ok: false,
+      message: e instanceof Error ? e.message : "반려 중 오류가 발생했습니다.",
+    };
+  }
 }
 
 // --- 재발급(snapshot 그대로) — 대장에 새 행 만들지 않음 ----------------

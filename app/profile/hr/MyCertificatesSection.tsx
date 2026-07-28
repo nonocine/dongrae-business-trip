@@ -2,20 +2,21 @@
 
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import {
-  issueMyCertificate,
-  reissuePdf,
-} from "@/app/hr/certificates/actions";
+import { requestMyCertificate, reissuePdf } from "@/app/hr/certificates/actions";
 import {
   CERT_TYPES,
+  CERT_REQUEST_STATUS_LABEL,
   formatIssuedDate,
   type CertificateIssue,
+  type CertRequest,
 } from "@/lib/certificates";
 import {
   cardCls,
   btnPrimary,
   btnSecondary,
   badgeNavy,
+  badgeWarning,
+  badgeDanger,
   noticeError,
   noticeSuccess,
   noticeWarning,
@@ -24,7 +25,6 @@ import {
 const inCls =
   "block w-full rounded-md border border-line bg-card px-2.5 py-1.5 text-sm text-ink-body shadow-sm focus:border-navy focus:outline-none focus:ring-1 focus:ring-navy";
 
-// base64 → PDF 다운로드(클라이언트).
 function downloadBase64Pdf(b64: string, filename: string) {
   const bin = atob(b64);
   const bytes = new Uint8Array(bin.length);
@@ -41,10 +41,12 @@ function downloadBase64Pdf(b64: string, filename: string) {
 
 export default function MyCertificatesSection({
   history,
+  requests,
   defaultDuty,
   canIssue,
 }: {
   history: CertificateIssue[];
+  requests: CertRequest[];
   defaultDuty: string;
   canIssue: boolean;
 }) {
@@ -53,6 +55,10 @@ export default function MyCertificatesSection({
   const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
   const [reissuingId, setReissuingId] = useState<string | null>(null);
   const [pending, start] = useTransition();
+
+  const openRequests = requests.filter(
+    (r) => r.status === "pending" || r.status === "rejected"
+  );
 
   function doReissue(rec: CertificateIssue) {
     setMsg(null);
@@ -80,18 +86,21 @@ export default function MyCertificatesSection({
           }}
           disabled={!canIssue}
           className={btnPrimary}
-          title={
-            !canIssue ? "재직 중인 직원만 재직증명서를 발급할 수 있습니다." : ""
-          }
+          title={!canIssue ? "재직 중인 직원만 신청할 수 있습니다." : ""}
         >
-          재직증명서 발급
+          재직증명서 신청
         </button>
       </div>
 
+      <p className="mb-3 text-xs text-ink-muted">
+        재직증명서는 신청 후 관장·부장 승인을 거쳐 발급됩니다. 승인되면 아래 발급
+        이력에서 PDF를 받을 수 있습니다.
+      </p>
+
       {!canIssue && (
         <p className={`mb-3 ${noticeWarning}`}>
-          재직 중인 직원만 재직증명서를 즉시 발급할 수 있습니다. (경력증명서는
-          담당자에게 요청하세요.)
+          재직 중인 직원만 재직증명서를 신청할 수 있습니다. (경력증명서는 담당자에게
+          문의하세요.)
         </p>
       )}
 
@@ -99,9 +108,34 @@ export default function MyCertificatesSection({
         <p className={`mb-3 ${msg.ok ? noticeSuccess : noticeError}`}>{msg.text}</p>
       )}
 
+      {/* 내 신청 현황(대기/반려) */}
+      {openRequests.length > 0 && (
+        <div className="mb-4 rounded-lg border border-line bg-surface/50 p-3">
+          <p className="mb-2 text-xs font-bold text-navy">내 신청 현황</p>
+          <ul className="space-y-1.5">
+            {openRequests.map((r) => (
+              <li key={r.id} className="flex items-center gap-2 text-sm">
+                <span className={badgeNavy}>{CERT_TYPES[r.cert_type]}</span>
+                <span className="text-ink-body">{r.purpose}</span>
+                {r.status === "pending" ? (
+                  <span className={badgeWarning}>
+                    {CERT_REQUEST_STATUS_LABEL.pending}
+                  </span>
+                ) : (
+                  <span className={badgeDanger}>
+                    반려{r.reject_reason ? ` — ${r.reject_reason}` : ""}
+                  </span>
+                )}
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+
+      {/* 발급 이력 */}
       {history.length === 0 ? (
         <p className="py-6 text-center text-sm text-ink-hint">
-          발급 이력이 없습니다. 위 버튼으로 재직증명서를 즉시 발급하세요.
+          발급 이력이 없습니다. 위 버튼으로 재직증명서를 신청하세요.
         </p>
       ) : (
         <div className="overflow-x-auto">
@@ -157,10 +191,10 @@ export default function MyCertificatesSection({
       )}
 
       {open && (
-        <IssueModal
+        <RequestModal
           defaultDuty={defaultDuty}
           onClose={() => setOpen(false)}
-          onIssued={(text) => {
+          onRequested={(text) => {
             setOpen(false);
             setMsg({ ok: true, text });
             router.refresh();
@@ -171,14 +205,14 @@ export default function MyCertificatesSection({
   );
 }
 
-function IssueModal({
+function RequestModal({
   defaultDuty,
   onClose,
-  onIssued,
+  onRequested,
 }: {
   defaultDuty: string;
   onClose: () => void;
-  onIssued: (text: string) => void;
+  onRequested: (text: string) => void;
 }) {
   const [purpose, setPurpose] = useState("서류제출용");
   const [duty, setDuty] = useState(defaultDuty);
@@ -188,13 +222,12 @@ function IssueModal({
   function submit() {
     setErr(null);
     start(async () => {
-      const res = await issueMyCertificate({ purpose, duty });
+      const res = await requestMyCertificate({ purpose, duty });
       if (!res.ok) {
         setErr(res.message);
         return;
       }
-      downloadBase64Pdf(res.pdfBase64, res.filename);
-      onIssued(`${res.label}로 발급되었습니다. PDF가 다운로드됩니다.`);
+      onRequested(res.message);
     });
   }
 
@@ -202,7 +235,7 @@ function IssueModal({
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
       <div className="w-full max-w-md rounded-xl border border-line bg-card p-5 shadow-lg">
         <div className="mb-3 flex items-center justify-between">
-          <h3 className="text-base font-bold text-ink">재직증명서 발급</h3>
+          <h3 className="text-base font-bold text-ink">재직증명서 신청</h3>
           <button
             type="button"
             onClick={onClose}
@@ -214,7 +247,7 @@ function IssueModal({
 
         <p className="mb-3 text-xs text-ink-muted">
           성명·생년월일·주소·근무부서·재직기간은 인사기록에서 자동으로 채워집니다.
-          용도와 직위·담당업무만 확인하세요.
+          용도와 직위·담당업무만 확인하세요. 신청 후 승인되면 발급됩니다.
         </p>
 
         <label className="block text-[11px] font-semibold text-navy">용도</label>
@@ -244,7 +277,7 @@ function IssueModal({
             disabled={pending}
             className={btnPrimary}
           >
-            {pending ? "발급 중…" : "발급 · PDF 받기"}
+            {pending ? "신청 중…" : "신청하기"}
           </button>
           <button type="button" onClick={onClose} className={btnSecondary}>
             취소

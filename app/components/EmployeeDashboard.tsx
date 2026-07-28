@@ -7,6 +7,7 @@ import {
 } from "@/app/profile/hr/actions";
 import { getMyTrainingSummary } from "@/app/profile/hr/trainingActions";
 import { getTrainingsAdminSummary } from "@/app/hr/trainings/actions";
+import { getPendingCertRequestCount } from "@/app/hr/certificates/actions";
 import { getGoogleSession } from "@/app/actions";
 import { listAnnouncements } from "@/app/announcements/actions";
 import { getMyJudgeAssignments } from "@/app/hr/recruitment/[slug]/actions";
@@ -127,7 +128,13 @@ function SectionHeading({ children }: { children: ReactNode }) {
 }
 
 // 관리자(M0) 영역 — 채용·인사·권한/직무·외부위원 진입점. admin/M0 공용.
-function AdminArea({ trainingNotMet }: { trainingNotMet: number | null }) {
+function AdminArea({
+  trainingNotMet,
+  pendingCertCount = 0,
+}: {
+  trainingNotMet: number | null;
+  pendingCertCount?: number;
+}) {
   return (
     <section className={cardCls}>
       <SectionHeading>관리자 영역</SectionHeading>
@@ -172,7 +179,11 @@ function AdminArea({ trainingNotMet }: { trainingNotMet: number | null }) {
           href="/hr/certificates"
           icon="🧾"
           title="증명서 발급대장"
-          desc="재직·경력증명서 발급·발급 기록"
+          desc={
+            pendingCertCount > 0
+              ? `승인 대기 ${pendingCertCount}건 — 발급·기록`
+              : "재직·경력증명서 발급·발급 기록"
+          }
         />
       </div>
     </section>
@@ -242,6 +253,9 @@ export default async function EmployeeDashboard({
 
   const roleSet = new Set(roles);
   const roleLabels = roles.map((r) => roleLabel(r));
+
+  // 증명서 승인 대기 건수(M0만 — 관리자 영역 배지).
+  const pendingCertCount = isM0 ? await getPendingCertRequestCount() : 0;
 
   // 핵심 인사정보가 모두 비어있으면 입력 안내를 강조.
   const profileEmpty =
@@ -570,6 +584,7 @@ export default async function EmployeeDashboard({
       {isM0 && (
         <AdminArea
           trainingNotMet={trainingAdminSummary?.totalNotMet ?? null}
+          pendingCertCount={pendingCertCount}
         />
       )}
     </div>

@@ -6,6 +6,7 @@ import { resolveCertificateAccess } from "@/lib/certificateAccess";
 import {
   listCertificates,
   listCertificateEmployees,
+  listPendingRequests,
 } from "@/app/hr/certificates/actions";
 import CertificateLedger from "@/app/hr/certificates/CertificateLedger";
 
@@ -18,9 +19,10 @@ export default async function CertificatesPage() {
   const access = await resolveCertificateAccess();
   if (!access) redirect("/");
 
-  const [issues, employees] = await Promise.all([
+  const [issues, employees, pending] = await Promise.all([
     listCertificates(),
     listCertificateEmployees(),
+    listPendingRequests(),
   ]);
 
   return (
@@ -45,7 +47,12 @@ export default async function CertificatesPage() {
           </Link>
         </div>
 
-        <CertificateLedger issues={issues} employees={employees} />
+        <CertificateLedger
+          issues={issues}
+          employees={employees}
+          pending={pending}
+          isM0={access.isM0}
+        />
       </main>
     </>
   );

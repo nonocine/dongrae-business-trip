@@ -35,8 +35,9 @@ function boldFont(): Buffer {
 
 const NAVY = rgb(0.122, 0.227, 0.373);
 const INK = rgb(0.13, 0.15, 0.18);
-const LINE = rgb(0.62, 0.66, 0.72);
-const LABEL_BG = rgb(0.93, 0.95, 0.97);
+// 실물 양식 톤 — 검정 테두리 + 연회색(#E8E8E8) 라벨 음영.
+const LINE = rgb(0.1, 0.1, 0.1);
+const LABEL_BG = rgb(0.91, 0.91, 0.91);
 
 // 자간 넓힌 제목(예: "재 직 증 명 서").
 function spaced(s: string): string {
@@ -93,7 +94,7 @@ export async function buildCertificatePdf(
       height: h,
       color: opts.fill,
       borderColor: opts.border ? LINE : undefined,
-      borderWidth: opts.border ? 0.7 : 0,
+      borderWidth: opts.border ? 0.9 : 0,
     });
   };
   // 셀 안 좌측·세로중앙 텍스트.
@@ -136,22 +137,43 @@ export async function buildCertificatePdf(
     });
   };
 
-  const labelValueRow = (
-    yTop: number,
-    h: number,
-    label: string,
-    value: string,
-    labelW: number
-  ) => {
-    rect(M, yTop, labelW, h, { fill: LABEL_BG, border: true });
-    rect(M + labelW, yTop, contentW - labelW, h, { border: true });
-    cellText(M, yTop, h, label, { bold: true, color: NAVY });
-    cellText(M + labelW, yTop, h, value, {});
-  };
-
   const sectionBar = (yTop: number, h: number, title: string) => {
     rect(M, yTop, contentW, h, { fill: LABEL_BG, border: true });
-    cellText(M, yTop, h, title, { size: 10.5, bold: true, color: NAVY });
+    cellText(M, yTop, h, title, { size: 10.5, bold: true, color: INK });
+  };
+
+  // 좌측 세로 병합 섹션명 + (필드라벨|값) 행들. 실물 양식 구조.
+  const sectionW = 66;
+  const fieldW = 78;
+  const valueX = M + sectionW + fieldW;
+  const valueW = contentW - sectionW - fieldW;
+  const mergedBlock = (
+    yTop: number,
+    h: number,
+    titleLines: string[],
+    fields: { label: string; value: string }[]
+  ) => {
+    const blockH = h * fields.length;
+    // 좌측 병합 셀(세로 중앙, 여러 줄 지원).
+    rect(M, yTop, sectionW, blockH, { fill: LABEL_BG, border: true });
+    const lineGap = 13;
+    const startY = yTop + (blockH - (titleLines.length - 1) * lineGap) / 2 - 5;
+    titleLines.forEach((ln, i) => {
+      text(M + sectionW / 2, startY + i * lineGap, ln, {
+        size: 9.5,
+        bold: true,
+        color: INK,
+        align: "center",
+      });
+    });
+    // 필드 라벨 + 값 행.
+    fields.forEach((f, i) => {
+      const ry = yTop + i * h;
+      rect(M + sectionW, ry, fieldW, h, { fill: LABEL_BG, border: true });
+      rect(valueX, ry, valueW, h, { border: true });
+      cellText(M + sectionW, ry, h, f.label, { size: 9.5, bold: true, color: INK });
+      cellText(valueX, ry, h, f.value, { size: 9.5 });
+    });
   };
 
   // ---- 발급번호(좌상단) ----
@@ -161,29 +183,24 @@ export async function buildCertificatePdf(
   const titleLabel = snap.certType === "employment" ? "재직증명서" : "경력증명서";
   text(W / 2, 84, spaced(titleLabel), { size: 26, bold: true, align: "center", color: NAVY });
 
-  // ---- 표1: 신청인 인적사항 + 재직기관 ----
+  // ---- 표1: 신청인 인적사항 + 재직기관 (좌측 세로 병합 라벨) ----
   let y = 150;
-  const rowH = 26;
-  const labelW = 96;
+  const rowH = 27;
 
-  sectionBar(y, rowH, "신청인 인적사항");
-  y += rowH;
-  labelValueRow(y, rowH, "성명", snap.name, labelW);
-  y += rowH;
-  labelValueRow(y, rowH, "생년월일", snap.birthDate ?? "-", labelW);
-  y += rowH;
-  labelValueRow(y, rowH, "주소", snap.address ?? "-", labelW);
-  y += rowH;
+  mergedBlock(y, rowH, ["신청인", "인적사항"], [
+    { label: "성명", value: snap.name },
+    { label: "생년월일", value: snap.birthDate ?? "-" },
+    { label: "주소", value: snap.address ?? "-" },
+  ]);
+  y += rowH * 3;
 
   y += 10;
-  sectionBar(y, rowH, "재직기관");
-  y += rowH;
-  labelValueRow(y, rowH, "기관명", `${snap.org.name} (${snap.org.phone})`, labelW);
-  y += rowH;
-  labelValueRow(y, rowH, "주소", snap.org.address, labelW);
-  y += rowH;
-  labelValueRow(y, rowH, "대표자", snap.org.representative, labelW);
-  y += rowH;
+  mergedBlock(y, rowH, ["재직", "기관"], [
+    { label: "기관명", value: `${snap.org.name} (${snap.org.phone})` },
+    { label: "주소", value: snap.org.address },
+    { label: "대표자", value: snap.org.representative },
+  ]);
+  y += rowH * 3;
 
   // ---- 표2: 재직사항 ----
   y += 16;
@@ -201,7 +218,7 @@ export async function buildCertificatePdf(
   let cx = M;
   for (const c of cols) {
     rect(cx, y, c.w, rowH, { fill: LABEL_BG, border: true });
-    cellCenter(cx, y, c.w, rowH, c.label, { size: 9.5, bold: true, color: NAVY });
+    cellCenter(cx, y, c.w, rowH, c.label, { size: 9.5, bold: true, color: INK });
     cx += c.w;
   }
   y += rowH;

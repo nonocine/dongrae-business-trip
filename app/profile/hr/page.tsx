@@ -8,6 +8,7 @@ import { getMyProfile } from "@/app/profile/hr/actions";
 import { getMyTrainings } from "@/app/profile/hr/trainingActions";
 import {
   listMyCertificates,
+  listMyRequests,
   getMyCertificatePrefill,
 } from "@/app/hr/certificates/actions";
 import { enforcePasswordChange, getSession } from "@/app/actions";
@@ -23,12 +24,14 @@ export default async function MyHrPage() {
   // 관리자는 본인 인사기록카드 개념이 없음
   if (session.kind === "admin") redirect("/admin");
 
-  const [my, myTrainings, myCerts, certPrefill] = await Promise.all([
-    getMyProfile(),
-    getMyTrainings(),
-    listMyCertificates(),
-    getMyCertificatePrefill(),
-  ]);
+  const [my, myTrainings, myCerts, myCertRequests, certPrefill] =
+    await Promise.all([
+      getMyProfile(),
+      getMyTrainings(),
+      listMyCertificates(),
+      listMyRequests(),
+      getMyCertificatePrefill(),
+    ]);
   if (!my) redirect("/");
 
   return (
@@ -57,6 +60,7 @@ export default async function MyHrPage() {
         <div className="mt-5">
           <MyCertificatesSection
             history={myCerts}
+            requests={myCertRequests}
             defaultDuty={certPrefill?.defaultDuty ?? ""}
             canIssue={certPrefill?.canIssue ?? false}
           />

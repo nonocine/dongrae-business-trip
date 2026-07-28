@@ -62,6 +62,49 @@ export type CertificateIssue = {
   created_at: string | null;
 };
 
+// --- 승인 신청(certificate_requests) ----------------------------------
+export type CertRequestStatus = "pending" | "approved" | "rejected";
+export const CERT_REQUEST_STATUS_LABEL: Record<CertRequestStatus, string> = {
+  pending: "승인 대기",
+  approved: "승인됨",
+  rejected: "반려",
+};
+
+export type CertRequest = {
+  id: string;
+  driver_id: string | null;
+  employee_name: string;
+  cert_type: CertType;
+  purpose: string;
+  duty: string | null;
+  status: CertRequestStatus;
+  reject_reason: string | null;
+  requested_at: string | null;
+  decided_at: string | null;
+  decided_by: string | null;
+  issue_id: string | null;
+};
+
+export function toCertRequest(raw: Record<string, unknown>): CertRequest {
+  const st = raw.status;
+  const status: CertRequestStatus =
+    st === "approved" ? "approved" : st === "rejected" ? "rejected" : "pending";
+  return {
+    id: String(raw.id ?? ""),
+    driver_id: (raw.driver_id as string | null) ?? null,
+    employee_name: String(raw.employee_name ?? ""),
+    cert_type: raw.cert_type === "career" ? "career" : "employment",
+    purpose: String(raw.purpose ?? ""),
+    duty: (raw.duty as string | null) ?? null,
+    status,
+    reject_reason: (raw.reject_reason as string | null) ?? null,
+    requested_at: (raw.requested_at as string | null) ?? null,
+    decided_at: (raw.decided_at as string | null) ?? null,
+    decided_by: (raw.decided_by as string | null) ?? null,
+    issue_id: (raw.issue_id as string | null) ?? null,
+  };
+}
+
 // --- 발급번호 표기 ----------------------------------------------------
 const pad2 = (n: number) => String(n).padStart(2, "0");
 export function formatIssueLabel(year: number, seq: number): string {
