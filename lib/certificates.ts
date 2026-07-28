@@ -19,6 +19,7 @@ export const CERT_STATEMENT: Record<CertType, string> = {
 };
 
 // 기관 상수 — 추후 변경 대비 lib 단일 출처.
+//   * phone 은 기관 정보로 보존하나 증명서 PDF '기관명'에는 표기하지 않습니다.
 export const CERT_ORG = {
   name: "동래구청소년센터",
   phone: "051-988-0924",

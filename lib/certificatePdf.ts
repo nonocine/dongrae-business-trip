@@ -196,7 +196,7 @@ export async function buildCertificatePdf(
 
   y += 10;
   mergedBlock(y, rowH, ["재직", "기관"], [
-    { label: "기관명", value: `${snap.org.name} (${snap.org.phone})` },
+    { label: "기관명", value: snap.org.name },
     { label: "주소", value: snap.org.address },
     { label: "대표자", value: snap.org.representative },
   ]);

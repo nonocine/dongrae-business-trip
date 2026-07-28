@@ -608,6 +608,38 @@ export async function rejectRequest(
   }
 }
 
+// 저장 스냅샷 → PDF용 CertSnapshot 정규화.
+//   * 신형(내 발급): 그대로 사용(org.name 에 전화번호 없음 → 기관명 전화 미표기).
+//   * 구형(수기 이관 9건): {근무기간·근무부서·직위및담당업무} Korean 키 → 매핑.
+//     기관 정보·증명문구는 현재 상수(CERT_ORG/CERT_STATEMENT)로 채워 재발급 가능케.
+function pdfSnapshotFromRecord(rec: CertificateIssue): CertSnapshot | null {
+  const s = rec.snapshot as Record<string, unknown> | null;
+  if (!s) return null;
+  // 신형 판별 — certType 키 존재.
+  if (typeof (s as { certType?: unknown }).certType === "string") {
+    return s as unknown as CertSnapshot;
+  }
+  // 구형(수기 이관) 매핑.
+  const rawPeriod = String((s["근무기간"] as string) ?? "");
+  const [f, t] = rawPeriod.split("~").map((x) => x.trim());
+  return {
+    certType: rec.cert_type,
+    issueLabel: formatIssueLabel(rec.issue_year, rec.issue_seq),
+    name: rec.employee_name,
+    birthDate: null,
+    address: null,
+    department: (s["근무부서"] as string | null) ?? null,
+    duty: (s["직위및담당업무"] as string | null) ?? null,
+    periodFrom: f || null,
+    periodTo: !t || t === "현재" ? null : t,
+    periodText: "", // 구형엔 년·개월 없음 → 기간 칸 비움
+    purpose: rec.purpose,
+    issuedOn: rec.issued_on ?? "",
+    statement: CERT_STATEMENT[rec.cert_type],
+    org: CERT_ORG,
+  };
+}
+
 // --- 재발급(snapshot 그대로) — 대장에 새 행 만들지 않음 ----------------
 export type ReissueResult =
   | { ok: true; filename: string; pdfBase64: string }
@@ -628,17 +660,18 @@ export async function reissuePdf(id: string): Promise<ReissueResult> {
     if (error) throw new Error(error.message);
     if (!data) return { ok: false, message: "발급 기록을 찾을 수 없습니다." };
     const rec = toCertificateIssue(data as Record<string, unknown>);
-    if (!rec.snapshot)
+    const snapshot = pdfSnapshotFromRecord(rec);
+    if (!snapshot)
       return { ok: false, message: "재발급에 필요한 정보(snapshot)가 없습니다." };
 
     // 권한: 관리자(M0/hr) 또는 본인 것.
     const access = await resolveOwnershipOrAdmin(rec.driver_id, me.name.trim());
     if (!access) return { ok: false, message: "재발급 권한이 없습니다." };
 
-    const pdf = await buildCertificatePdf(rec.snapshot, await loadSeal());
+    const pdf = await buildCertificatePdf(snapshot, await loadSeal());
     return {
       ok: true,
-      filename: pdfFilename(rec.snapshot),
+      filename: pdfFilename(snapshot),
       pdfBase64: Buffer.from(pdf).toString("base64"),
     };
   } catch (e) {
