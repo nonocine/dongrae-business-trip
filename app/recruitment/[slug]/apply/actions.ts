@@ -2,6 +2,7 @@
 
 import { cookies } from "next/headers";
 import { revalidatePath } from "next/cache";
+import { sendSlack, siteBaseUrl, slackLink } from "@/lib/slack";
 import {
   supabase,
   parseEducationInput,
@@ -656,6 +657,30 @@ export async function submitApplication(
     const applicationId = String((appRow as { id: unknown }).id);
 
     revalidatePath(`/recruitment/${slug}/apply`);
+
+    // 관리자 채널 알림(부가기능) — 실패해도 지원 제출에는 절대 영향 없게 완전 격리.
+    //   (지원자 입장에서 제출이 막히면 안 됨이 최우선)
+    try {
+      const { count } = await supabaseAdmin
+        .from("recruitment_applications")
+        .select("id", { count: "exact", head: true })
+        .eq("posting_id", posting.id)
+        .neq("status", "draft");
+      const base = siteBaseUrl();
+      const link = base
+        ? `\n${slackLink(`${base}/hr/recruitment/${slug}`, "지원자 목록 보기")}`
+        : "";
+      await sendSlack(
+        "SLACK_WEBHOOK_ADMIN",
+        `📥 [${posting.title}] ${name}님 지원 완료 (누적 ${count ?? 0}명)${link}`
+      );
+    } catch (notifyErr) {
+      console.warn(
+        "[slack] 지원 완료 알림 실패:",
+        notifyErr instanceof Error ? notifyErr.message : notifyErr
+      );
+    }
+
     return {
       ok: true,
       applicantId,
