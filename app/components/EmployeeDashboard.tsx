@@ -168,6 +168,12 @@ function AdminArea({ trainingNotMet }: { trainingNotMet: number | null }) {
           title="외부 심사위원"
           desc="심사위원 명단 관리·채용별 배정"
         />
+        <MenuCard
+          href="/hr/certificates"
+          icon="🧾"
+          title="증명서 발급대장"
+          desc="재직·경력증명서 발급·발급 기록"
+        />
       </div>
     </section>
   );
@@ -457,10 +463,11 @@ export default async function EmployeeDashboard({
               }
             />
           )}
-          <PendingCard
+          <MenuCard
+            href="/profile/hr#my-certificates"
             icon="🧾"
-            title="증명서 신청"
-            desc="재직·경력증명서 신청"
+            title="증명서 발급"
+            desc="재직증명서 즉시 발급 · 발급 이력"
           />
         </div>
       </section>
@@ -520,10 +527,11 @@ export default async function EmployeeDashboard({
                     title="직원 인사관리"
                     desc="직원 인사기록카드 열람·입력"
                   />
-                  <PendingCard
+                  <MenuCard
+                    href="/hr/certificates"
                     icon="🧾"
-                    title="증명서 발급"
-                    desc="재직·경력증명서 발급"
+                    title="증명서 발급대장"
+                    desc="재직·경력증명서 발급·발급 기록"
                   />
                   <MenuCard
                     href="/hr/trainings"

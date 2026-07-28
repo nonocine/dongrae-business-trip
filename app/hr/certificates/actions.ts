@@ -320,6 +320,53 @@ export async function issueCareerCertificate(
   }
 }
 
+// 경력증명서 발급 대상 직원 목록(관리자) — 퇴사자 포함, 퇴사자 우선 정렬.
+export type CertEmployee = {
+  driverId: string;
+  name: string;
+  rank: string | null;
+  status: "active" | "resigned";
+  joinDate: string | null;
+  resignationDate: string | null;
+  defaultDuty: string | null;
+};
+
+export async function listCertificateEmployees(): Promise<CertEmployee[]> {
+  await requireCertificateAccess();
+  const [{ data: drivers }, { data: profs }] = await Promise.all([
+    supabaseAdmin.from("drivers").select("id, name, rank"),
+    supabaseAdmin
+      .from("employee_profiles")
+      .select("driver_id, join_date, employment_status, resignation_date, appointments"),
+  ]);
+  const pByD = new Map<string, Record<string, unknown>>();
+  for (const p of profs ?? [])
+    pByD.set(String((p as Record<string, unknown>).driver_id), p as Record<string, unknown>);
+
+  const list: CertEmployee[] = [];
+  for (const d of drivers ?? []) {
+    const dd = d as Record<string, unknown>;
+    const id = String(dd.id);
+    const p = pByD.get(id);
+    const appt = pickAppointment(p?.appointments);
+    list.push({
+      driverId: id,
+      name: String(dd.name ?? ""),
+      rank: (dd.rank as string | null) ?? null,
+      status: p?.employment_status === "resigned" ? "resigned" : "active",
+      joinDate: (p?.join_date as string | null) ?? null,
+      resignationDate: (p?.resignation_date as string | null) ?? null,
+      defaultDuty: appt.title,
+    });
+  }
+  // 퇴사자 우선 → 이름.
+  list.sort((a, b) => {
+    if (a.status !== b.status) return a.status === "resigned" ? -1 : 1;
+    return a.name.localeCompare(b.name, "ko");
+  });
+  return list;
+}
+
 // --- 발급대장 목록(관리자) -------------------------------------------
 export async function listCertificates(
   year?: number
