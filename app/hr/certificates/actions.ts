@@ -8,6 +8,7 @@ import {
   CERT_TYPES,
   CERT_STATEMENT,
   CERT_ORG,
+  CERT_SEAL_PATH,
   calcServicePeriod,
   formatIssueLabel,
   toCertificateIssue,
@@ -16,7 +17,13 @@ import {
   type CertificateIssue,
 } from "@/lib/certificates";
 import { buildCertificatePdf } from "@/lib/certificatePdf";
+import { downloadHrImage } from "@/lib/recruitmentApplicantDocData";
 import { kstTodayYmd } from "@/lib/trainings";
+
+// 관인 바이트 로드(비공개 hr-documents, service_role). 없으면 null(발급은 계속).
+async function loadSeal(): Promise<Uint8Array | null> {
+  return downloadHrImage(CERT_SEAL_PATH);
+}
 
 // =====================================================================
 // 증명서 발급 서버 액션 — /hr/certificates, /profile/hr
@@ -231,7 +238,7 @@ export async function issueMyCertificate(input: {
         }),
     });
 
-    const pdf = await buildCertificatePdf(snapshot);
+    const pdf = await buildCertificatePdf(snapshot, await loadSeal());
     revalidatePath("/profile/hr");
     revalidatePath("/hr/certificates");
     return {
@@ -295,7 +302,7 @@ export async function issueCareerCertificate(
         }),
     });
 
-    const pdf = await buildCertificatePdf(snapshot);
+    const pdf = await buildCertificatePdf(snapshot, await loadSeal());
     revalidatePath("/hr/certificates");
     return {
       ok: true,
@@ -373,7 +380,7 @@ export async function reissuePdf(id: string): Promise<ReissueResult> {
     const access = await resolveOwnershipOrAdmin(rec.driver_id, me.name.trim());
     if (!access) return { ok: false, message: "재발급 권한이 없습니다." };
 
-    const pdf = await buildCertificatePdf(rec.snapshot);
+    const pdf = await buildCertificatePdf(rec.snapshot, await loadSeal());
     return {
       ok: true,
       filename: pdfFilename(rec.snapshot),

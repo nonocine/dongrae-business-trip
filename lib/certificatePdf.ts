@@ -1,11 +1,14 @@
 // =====================================================================
 // 증명서(재직·경력) PDF 생성 — 명세서(salaryPayslip) 패턴 재사용.
 //   * pdf-lib + fontkit + 나눔고딕 통임베드(subset:false — Vercel 글리프 누락 대응).
-//   * C-1: 기본 레이아웃(증명문구·기간 정확). C-2에서 실물 표 양식 + 관인으로 고도화.
+//   * 실물 양식 재현: 발급번호 / 큰 제목(자간 넓게) / 인적사항·재직기관 표 /
+//     재직사항 표(1행 + "- 이 하 여 백 -") / 용도 / 증명문구 / 발급일 /
+//     "동래구청소년센터장" + 관인(글자 끝에 겹치게).
+//   * 관인은 storage 에서 service_role 로 읽어 전달(sealBytes). 없으면 자리 비우고 발급.
 //   * 계산 이원화 없음: snapshot 값을 그대로 렌더.
 // =====================================================================
 
-import { PDFDocument, rgb, type PDFFont } from "pdf-lib";
+import { PDFDocument, rgb, type PDFFont, type PDFImage } from "pdf-lib";
 import fontkit from "@pdf-lib/fontkit";
 import { readFileSync } from "fs";
 import path from "path";
@@ -32,15 +35,17 @@ function boldFont(): Buffer {
 
 const NAVY = rgb(0.122, 0.227, 0.373);
 const INK = rgb(0.13, 0.15, 0.18);
+const LINE = rgb(0.62, 0.66, 0.72);
+const LABEL_BG = rgb(0.93, 0.95, 0.97);
 
 // 자간 넓힌 제목(예: "재 직 증 명 서").
 function spaced(s: string): string {
-  return s.split("").join(" ");
+  return s.split("").join("  ");
 }
 
 export async function buildCertificatePdf(
   snap: CertSnapshot,
-  // 관인 바이트(C-2에서 storage 로드하여 전달). 없으면 관인 없이 발급.
+  // 관인 바이트(actions 에서 storage 로드하여 전달). 없으면 관인 없이 발급.
   sealBytes?: Uint8Array | null
 ): Promise<Uint8Array> {
   const pdf = await PDFDocument.create();
@@ -52,7 +57,9 @@ export async function buildCertificatePdf(
   const Hpt = 841.89;
   const page = pdf.addPage([W, Hpt]);
   const M = 56;
+  const contentW = W - 2 * M;
 
+  // top-origin 헬퍼.
   const text = (
     x: number,
     yTop: number,
@@ -64,7 +71,7 @@ export async function buildCertificatePdf(
       align?: "left" | "right" | "center";
     } = {}
   ) => {
-    const size = opts.size ?? 11;
+    const size = opts.size ?? 10;
     const f: PDFFont = opts.bold ? bold : font;
     const tw = f.widthOfTextAtSize(s, size);
     let dx = x;
@@ -72,72 +79,210 @@ export async function buildCertificatePdf(
     else if (opts.align === "center") dx = x - tw / 2;
     page.drawText(s, { x: dx, y: Hpt - yTop - size, size, font: f, color: opts.color ?? INK });
   };
-
-  // 발급번호(좌상단).
-  text(M, M, snap.issueLabel, { size: 10, color: INK });
-
-  // 제목(중앙, 자간 넓게).
-  const titleLabel = snap.certType === "employment" ? "재직증명서" : "경력증명서";
-  text(W / 2, M + 40, spaced(titleLabel), {
-    size: 24,
-    bold: true,
-    align: "center",
-    color: NAVY,
-  });
-
-  // 본문 필드.
-  let y = M + 110;
-  const line = (label: string, value: string) => {
-    text(M, y, label, { size: 11, bold: true, color: NAVY });
-    text(M + 110, y, value, { size: 11 });
-    y += 26;
+  const rect = (
+    x: number,
+    yTop: number,
+    w: number,
+    h: number,
+    opts: { fill?: ReturnType<typeof rgb>; border?: boolean } = {}
+  ) => {
+    page.drawRectangle({
+      x,
+      y: Hpt - yTop - h,
+      width: w,
+      height: h,
+      color: opts.fill,
+      borderColor: opts.border ? LINE : undefined,
+      borderWidth: opts.border ? 0.7 : 0,
+    });
+  };
+  // 셀 안 좌측·세로중앙 텍스트.
+  const cellText = (
+    x: number,
+    yTop: number,
+    h: number,
+    s: string,
+    opts: {
+      size?: number;
+      bold?: boolean;
+      color?: ReturnType<typeof rgb>;
+      padX?: number;
+    } = {}
+  ) => {
+    const size = opts.size ?? 10;
+    const padX = opts.padX ?? 8;
+    text(x + padX, yTop + (h - size) / 2, s, {
+      size,
+      bold: opts.bold,
+      color: opts.color,
+    });
   };
 
-  line("성명", snap.name);
-  line("생년월일", snap.birthDate ?? "-");
-  line("주소", snap.address ?? "-");
-  y += 6;
-  line("재직기관", `${snap.org.name} (${snap.org.phone})`);
-  line("기관주소", snap.org.address);
-  line("대표자", snap.org.representative);
-  y += 6;
-  line("근무부서", snap.department ?? "-");
-  line(
-    "근무기간",
-    `${snap.periodFrom ?? "-"} ~ ${periodToLabel(snap.periodTo)} (${snap.periodText})`
-  );
-  line("직위 및 담당업무", snap.duty ?? "-");
-  y += 4;
-  text(W / 2, y, "- 이 하 여 백 -", { size: 10, align: "center", color: INK });
-  y += 30;
-  line("용도", snap.purpose);
+  // 셀 중앙정렬 텍스트(셀 폭 명시).
+  const cellCenter = (
+    x: number,
+    yTop: number,
+    w: number,
+    h: number,
+    s: string,
+    opts: { size?: number; bold?: boolean; color?: ReturnType<typeof rgb> } = {}
+  ) => {
+    const size = opts.size ?? 10;
+    text(x + w / 2, yTop + (h - size) / 2, s, {
+      size,
+      bold: opts.bold,
+      color: opts.color,
+      align: "center",
+    });
+  };
 
-  // 증명문구(종류별 정확).
-  y += 20;
-  text(W / 2, y, snap.statement, { size: 13, bold: true, align: "center", color: INK });
+  const labelValueRow = (
+    yTop: number,
+    h: number,
+    label: string,
+    value: string,
+    labelW: number
+  ) => {
+    rect(M, yTop, labelW, h, { fill: LABEL_BG, border: true });
+    rect(M + labelW, yTop, contentW - labelW, h, { border: true });
+    cellText(M, yTop, h, label, { bold: true, color: NAVY });
+    cellText(M + labelW, yTop, h, value, {});
+  };
 
-  // 발급일.
-  y += 40;
+  const sectionBar = (yTop: number, h: number, title: string) => {
+    rect(M, yTop, contentW, h, { fill: LABEL_BG, border: true });
+    cellText(M, yTop, h, title, { size: 10.5, bold: true, color: NAVY });
+  };
+
+  // ---- 발급번호(좌상단) ----
+  text(M, 48, snap.issueLabel, { size: 10 });
+
+  // ---- 제목 ----
+  const titleLabel = snap.certType === "employment" ? "재직증명서" : "경력증명서";
+  text(W / 2, 84, spaced(titleLabel), { size: 26, bold: true, align: "center", color: NAVY });
+
+  // ---- 표1: 신청인 인적사항 + 재직기관 ----
+  let y = 150;
+  const rowH = 26;
+  const labelW = 96;
+
+  sectionBar(y, rowH, "신청인 인적사항");
+  y += rowH;
+  labelValueRow(y, rowH, "성명", snap.name, labelW);
+  y += rowH;
+  labelValueRow(y, rowH, "생년월일", snap.birthDate ?? "-", labelW);
+  y += rowH;
+  labelValueRow(y, rowH, "주소", snap.address ?? "-", labelW);
+  y += rowH;
+
+  y += 10;
+  sectionBar(y, rowH, "재직기관");
+  y += rowH;
+  labelValueRow(y, rowH, "기관명", `${snap.org.name} (${snap.org.phone})`, labelW);
+  y += rowH;
+  labelValueRow(y, rowH, "주소", snap.org.address, labelW);
+  y += rowH;
+  labelValueRow(y, rowH, "대표자", snap.org.representative, labelW);
+  y += rowH;
+
+  // ---- 표2: 재직사항 ----
+  y += 16;
+  sectionBar(y, rowH, "재직사항");
+  y += rowH;
+
+  const cols = [
+    { key: "dept", label: "근무부서", w: 92 },
+    { key: "name", label: "이름", w: 58 },
+    { key: "period", label: "근무기간", w: 138 },
+    { key: "span", label: "기간", w: 66 },
+    { key: "duty", label: "직위 및 담당업무", w: contentW - 92 - 58 - 138 - 66 },
+  ];
+  // 헤더행.
+  let cx = M;
+  for (const c of cols) {
+    rect(cx, y, c.w, rowH, { fill: LABEL_BG, border: true });
+    cellCenter(cx, y, c.w, rowH, c.label, { size: 9.5, bold: true, color: NAVY });
+    cx += c.w;
+  }
+  y += rowH;
+  // 데이터행(1행).
+  const periodStr = `${snap.periodFrom ?? "-"} ~ ${periodToLabel(snap.periodTo)}`;
+  const dataRowH = 34;
+  const values = [
+    snap.department ?? "-",
+    snap.name,
+    periodStr,
+    snap.periodText || "-",
+    snap.duty ?? "-",
+  ];
+  cx = M;
+  cols.forEach((c, i) => {
+    rect(cx, y, c.w, dataRowH, { border: true });
+    cellCenter(cx, y, c.w, dataRowH, values[i], { size: 9 });
+    cx += c.w;
+  });
+  y += dataRowH;
+  // 이하 여백행.
+  rect(M, y, contentW, rowH, { border: true });
+  cellCenter(M, y, contentW, rowH, "- 이 하 여 백 -", { size: 9.5, color: INK });
+  y += rowH;
+
+  // ---- 용도 ----
+  y += 18;
+  text(M, y, `용도 : ${snap.purpose}`, { size: 11, bold: true, color: INK });
+  y += 34;
+
+  // ---- 증명문구(종류별 정확) ----
+  text(W / 2, y, snap.statement, { size: 13.5, bold: true, align: "center", color: INK });
+  y += 42;
+
+  // ---- 발급일 ----
   text(W / 2, y, formatIssuedDate(snap.issuedOn), { size: 12, align: "center", color: INK });
+  y += 50;
 
-  // 발급 기관장 + 관인.
-  y += 44;
+  // ---- 기관장 + 관인 ----
   const certifier = snap.org.certifierTitle;
-  text(W / 2, y, certifier, { size: 18, bold: true, align: "center", color: NAVY });
+  const certSize = 20;
+  text(W / 2, y, certifier, { size: certSize, bold: true, align: "center", color: NAVY });
 
-  // 관인(있으면 기관장 글자 끝에 겹치게). C-1은 바이트 미전달이라 보통 생략.
   if (sealBytes && sealBytes.length > 0) {
-    try {
-      const png = await pdf.embedPng(sealBytes);
-      const certW = bold.widthOfTextAtSize(certifier, 18);
-      const sealSize = 68;
-      const sealX = W / 2 + certW / 2 - sealSize * 0.35;
-      const sealY = Hpt - y - 18 - sealSize * 0.55;
-      page.drawImage(png, { x: sealX, y: sealY, width: sealSize, height: sealSize });
-    } catch {
-      // 관인 삽입 실패해도 발급은 계속.
+    const img = await embedSeal(pdf, sealBytes);
+    if (img) {
+      const certW = bold.widthOfTextAtSize(certifier, certSize);
+      const sealSize = 74;
+      // 기관장 글자 끝(우측)에 겹치게.
+      const sealX = W / 2 + certW / 2 - sealSize * 0.4;
+      const sealYTop = y + certSize / 2 - sealSize / 2;
+      page.drawImage(img, {
+        x: sealX,
+        y: Hpt - sealYTop - sealSize,
+        width: sealSize,
+        height: sealSize,
+        opacity: 0.92,
+      });
     }
+  } else {
+    // 관인 미등록 — 발급은 계속(자리만 비움). 서버 로그로 경고.
+    console.warn(
+      `[certificatePdf] 관인 이미지가 없어 관인 없이 발급합니다. (${snap.issueLabel})`
+    );
   }
 
   return pdf.save();
+}
+
+// png/jpg 모두 시도(형식 자동 판별).
+async function embedSeal(
+  pdf: PDFDocument,
+  bytes: Uint8Array
+): Promise<PDFImage | null> {
+  try {
+    return await pdf.embedPng(bytes);
+  } catch {
+    try {
+      return await pdf.embedJpg(bytes);
+    } catch {
+      return null;
+    }
+  }
 }
