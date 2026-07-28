@@ -7,6 +7,7 @@ import { tabBarCls, tabNavCls, tabItemCls } from "@/lib/ui";
 const TABS = [
   { href: "/hr/facility/assets", label: "비품관리" },
   { href: "/hr/facility/locations", label: "장소관리" },
+  { href: "/hr/facility/safety", label: "안전점검" },
 ];
 
 export default function FacilityTabs() {

@@ -503,6 +503,12 @@ export default async function EmployeeDashboard({
                     title="비품관리"
                     desc="비품 대장·장소 관리·엑셀"
                   />
+                  <MenuCard
+                    href="/hr/facility/safety"
+                    icon="🦺"
+                    title="안전점검"
+                    desc="월별 안전점검표·PDF 출력"
+                  />
                   <PendingCard
                     icon="🤝"
                     title="거래처관리"
