@@ -3,8 +3,13 @@ import { redirect } from "next/navigation";
 import Header from "@/app/components/Header";
 import MyEmployeeProfileForm from "@/app/profile/hr/MyEmployeeProfileForm";
 import MyTrainingsSection from "@/app/profile/hr/MyTrainingsSection";
+import MyCertificatesSection from "@/app/profile/hr/MyCertificatesSection";
 import { getMyProfile } from "@/app/profile/hr/actions";
 import { getMyTrainings } from "@/app/profile/hr/trainingActions";
+import {
+  listMyCertificates,
+  getMyCertificatePrefill,
+} from "@/app/hr/certificates/actions";
 import { enforcePasswordChange, getSession } from "@/app/actions";
 
 export const dynamic = "force-dynamic";
@@ -18,9 +23,11 @@ export default async function MyHrPage() {
   // 관리자는 본인 인사기록카드 개념이 없음
   if (session.kind === "admin") redirect("/admin");
 
-  const [my, myTrainings] = await Promise.all([
+  const [my, myTrainings, myCerts, certPrefill] = await Promise.all([
     getMyProfile(),
     getMyTrainings(),
+    listMyCertificates(),
+    getMyCertificatePrefill(),
   ]);
   if (!my) redirect("/");
 
@@ -46,6 +53,14 @@ export default async function MyHrPage() {
           driverName={my.driver.name}
           profile={my.profile}
         />
+
+        <div className="mt-5">
+          <MyCertificatesSection
+            history={myCerts}
+            defaultDuty={certPrefill?.defaultDuty ?? ""}
+            canIssue={certPrefill?.canIssue ?? false}
+          />
+        </div>
 
         {myTrainings && (
           <div className="mt-5">

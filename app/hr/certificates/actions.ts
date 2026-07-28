@@ -353,6 +353,42 @@ export async function listMyCertificates(): Promise<CertificateIssue[]> {
   return (data ?? []).map((r) => toCertificateIssue(r as Record<string, unknown>));
 }
 
+// 마이페이지 셀프 발급 프리필 — 발급 가능 여부 + 직위/담당업무 기본값.
+//   * 기본값: 최근 발급 snapshot.duty 우선, 없으면 프로필(최신 발령) 직위.
+export async function getMyCertificatePrefill(): Promise<{
+  canIssue: boolean;
+  defaultDuty: string;
+  name: string;
+} | null> {
+  const me = await getSession();
+  if (!me || me.kind !== "employee" || !me.name.trim()) return null;
+  const { data: driver } = await supabaseAdmin
+    .from("drivers")
+    .select("id")
+    .eq("name", me.name.trim())
+    .maybeSingle();
+  const driverId = (driver as { id?: string } | null)?.id ?? null;
+  if (!driverId) return null;
+  const prof = await loadProfile(driverId);
+  if (!prof) return null;
+
+  const { data: last } = await supabaseAdmin
+    .from(TABLE)
+    .select("snapshot")
+    .eq("driver_id", driverId)
+    .order("issue_seq", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  const lastDuty =
+    ((last as { snapshot?: CertSnapshot } | null)?.snapshot?.duty) ?? null;
+
+  return {
+    canIssue: prof.employment_status === "active",
+    defaultDuty: lastDuty ?? prof.duty ?? "",
+    name: prof.name,
+  };
+}
+
 // --- 재발급(snapshot 그대로) — 대장에 새 행 만들지 않음 ----------------
 export type ReissueResult =
   | { ok: true; filename: string; pdfBase64: string }
