@@ -476,10 +476,11 @@ export default async function EmployeeDashboard({
                   시설관리
                 </p>
                 <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-                  <PendingCard
+                  <MenuCard
+                    href="/hr/facility/assets"
                     icon="📦"
                     title="비품관리"
-                    desc="비품 재고·신청"
+                    desc="비품 대장·장소 관리·엑셀"
                   />
                   <PendingCard
                     icon="🤝"
