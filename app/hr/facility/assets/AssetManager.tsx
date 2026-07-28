@@ -5,12 +5,14 @@ import { createPortal } from "react-dom";
 import { useRouter } from "next/navigation";
 import {
   ASSET_STATUS_OPTIONS,
+  ACQUISITION_TYPES,
   BUDGET_SOURCES,
   UNIT_OPTIONS,
   calcAmount,
   calcDisposalScheduled,
   formatNum,
   lifeBadge,
+  type AcquisitionType,
   type AssetInput,
   type AssetStatus,
   type FacilityAsset,
@@ -78,6 +80,7 @@ export default function AssetManager({
   const [year, setYear] = useState<string>("all");
   const [loc, setLoc] = useState<string>("all");
   const [budget, setBudget] = useState<string>("all");
+  const [acq, setAcq] = useState<string>("all");
   const [status, setStatus] = useState<AssetStatus>("all");
   const [q, setQ] = useState<string>("");
   const [sortKey, setSortKey] = useState<SortKey>("acquired_on");
@@ -99,6 +102,7 @@ export default function AssetManager({
       rows = rows.filter((a) => (a.acquired_on ?? "").slice(0, 4) === year);
     if (loc !== "all") rows = rows.filter((a) => a.location === loc);
     if (budget !== "all") rows = rows.filter((a) => a.budget_source === budget);
+    if (acq !== "all") rows = rows.filter((a) => a.acquisition_type === acq);
     if (status !== "all")
       rows =
         status === "disposed"
@@ -119,7 +123,7 @@ export default function AssetManager({
       return sortDir === "asc" ? cmp : -cmp;
     });
     return rows;
-  }, [assets, year, loc, budget, status, q, sortKey, sortDir]);
+  }, [assets, year, loc, budget, acq, status, q, sortKey, sortDir]);
 
   // 집계 — 현재 필터 결과 "전체" 기준(페이지 무관).
   const agg = useMemo(() => {
@@ -158,6 +162,7 @@ export default function AssetManager({
     year !== "all" ||
     loc !== "all" ||
     budget !== "all" ||
+    acq !== "all" ||
     status !== "all" ||
     q.trim() !== "";
 
@@ -167,16 +172,18 @@ export default function AssetManager({
     if (year !== "all") p.set("year", year);
     if (loc !== "all") p.set("location", loc);
     if (budget !== "all") p.set("budget", budget);
+    if (acq !== "all") p.set("acq", acq);
     if (status !== "all") p.set("status", status);
     if (q.trim()) p.set("q", q.trim());
     const qs = p.toString();
     return `/hr/facility/assets/export${qs ? `?${qs}` : ""}`;
-  }, [year, loc, budget, status, q]);
+  }, [year, loc, budget, acq, status, q]);
 
   function resetFilters() {
     setYear("all");
     setLoc("all");
     setBudget("all");
+    setAcq("all");
     setStatus("all");
     setQ("");
     setPage(1);
@@ -269,6 +276,23 @@ export default function AssetManager({
             {BUDGET_SOURCES.map((b) => (
               <option key={b} value={b}>
                 {b}
+              </option>
+            ))}
+          </select>
+
+          <select
+            value={acq}
+            onChange={(e) => {
+              setAcq(e.target.value);
+              setPage(1);
+            }}
+            className={selCls}
+            aria-label="취득구분"
+          >
+            <option value="all">전체 취득구분</option>
+            {ACQUISITION_TYPES.map((t) => (
+              <option key={t} value={t}>
+                {t}
               </option>
             ))}
           </select>
@@ -591,6 +615,7 @@ function AssetRow({
                 }
               />
               <DetailItem label="예산출처" value={asset.budget_source ?? "—"} />
+              <DetailItem label="취득구분" value={asset.acquisition_type} />
               <DetailItem label="비고" value={asset.note ?? "—"} />
             </dl>
           </td>
@@ -805,6 +830,7 @@ type FormValues = {
   unit_price: string;
   useful_life_years: string;
   budget_source: string;
+  acquisition_type: AcquisitionType;
   note: string;
 };
 
@@ -827,6 +853,8 @@ function initialForm(
       useful_life_years:
         asset.useful_life_years != null ? String(asset.useful_life_years) : "",
       budget_source: asset.budget_source ?? "",
+      // 복제 시에도 취득구분은 원본 값 유지.
+      acquisition_type: asset.acquisition_type,
       note: asset.note ?? "",
     };
   }
@@ -840,6 +868,7 @@ function initialForm(
     unit_price: "",
     useful_life_years: "",
     budget_source: "",
+    acquisition_type: "구매", // 신규 기본값
     note: "",
   };
 }
@@ -911,6 +940,7 @@ function AssetModal({
       useful_life_years:
         f.useful_life_years === "" ? null : Math.round(Number(f.useful_life_years)),
       budget_source: f.budget_source || null,
+      acquisition_type: f.acquisition_type,
       note: f.note.trim() || null,
     };
     start(async () => {
@@ -1046,6 +1076,21 @@ function AssetModal({
               {BUDGET_SOURCES.map((b) => (
                 <option key={b} value={b}>
                   {b}
+                </option>
+              ))}
+            </select>
+          </Field>
+          <Field label="취득구분">
+            <select
+              value={f.acquisition_type}
+              onChange={(e) =>
+                patch({ acquisition_type: e.target.value as AcquisitionType })
+              }
+              className={inCls}
+            >
+              {ACQUISITION_TYPES.map((t) => (
+                <option key={t} value={t}>
+                  {t}
                 </option>
               ))}
             </select>

@@ -2,7 +2,11 @@ import { requireFacilityAccess } from "@/lib/facilityAccess";
 import { listAssets } from "@/app/hr/facility/actions";
 import { buildFacilityAssetsWorkbook } from "@/lib/facilityLedger";
 import { kstTodayYmd } from "@/lib/trainings";
-import type { AssetFilters, AssetStatus } from "@/lib/facility";
+import type {
+  AssetFilters,
+  AssetStatus,
+  AcquisitionType,
+} from "@/lib/facility";
 
 // exceljs 는 Node 런타임 필요. 대장은 매 요청 최신값으로.
 export const runtime = "nodejs";
@@ -22,10 +26,15 @@ export async function GET(request: Request) {
   // 화면 필터를 쿼리로 받아 서버에서 동일 적용(단일 출처 listAssets).
   const yearRaw = p.get("year");
   const statusRaw = (p.get("status") ?? "all") as AssetStatus;
+  const acqRaw = p.get("acq");
   const filters: AssetFilters = {
     year: yearRaw && yearRaw !== "all" ? Number(yearRaw) : "all",
     location: p.get("location") || "all",
     budget_source: p.get("budget") || "all",
+    acquisition_type:
+      acqRaw === "구매" || acqRaw === "관리전환"
+        ? (acqRaw as AcquisitionType)
+        : "all",
     status: ["all", "active", "disposed"].includes(statusRaw)
       ? statusRaw
       : "all",
@@ -41,6 +50,8 @@ export async function GET(request: Request) {
   if (filters.location && filters.location !== "all") parts.push(String(filters.location));
   if (filters.budget_source && filters.budget_source !== "all")
     parts.push(String(filters.budget_source));
+  if (filters.acquisition_type && filters.acquisition_type !== "all")
+    parts.push(String(filters.acquisition_type));
   if (filters.status === "active") parts.push("사용중");
   else if (filters.status === "disposed") parts.push("불용");
   const suffix = parts.length ? ` (${parts.join(" · ")})` : "";

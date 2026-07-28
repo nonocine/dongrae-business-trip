@@ -55,6 +55,9 @@ export async function listAssets(
     if (f.budget_source && f.budget_source !== "all") {
       rows = rows.filter((r) => r.budget_source === f.budget_source);
     }
+    if (f.acquisition_type && f.acquisition_type !== "all") {
+      rows = rows.filter((r) => r.acquisition_type === f.acquisition_type);
+    }
     if (f.status && f.status !== "all") {
       rows =
         f.status === "disposed"
@@ -124,6 +127,7 @@ function assetPayload(input: AssetInput) {
     unit_price: unitPrice,
     useful_life_years: life,
     budget_source: cleanStr(input.budget_source),
+    acquisition_type: input.acquisition_type === "관리전환" ? "관리전환" : "구매",
     note: cleanStr(input.note),
   };
 }

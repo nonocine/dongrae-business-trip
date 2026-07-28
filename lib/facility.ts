@@ -18,6 +18,10 @@ export const BUDGET_SOURCES = [
   "기타",
 ] as const;
 
+// 취득구분 — DB acquisition_type(text, 기본 '구매').
+export const ACQUISITION_TYPES = ["구매", "관리전환"] as const;
+export type AcquisitionType = (typeof ACQUISITION_TYPES)[number];
+
 export type AssetStatus = "all" | "active" | "disposed";
 export const ASSET_STATUS_OPTIONS: { value: AssetStatus; label: string }[] = [
   { value: "all", label: "전체" },
@@ -39,6 +43,7 @@ export type FacilityAsset = {
   useful_life_years: number | null; // 내용연수(년)
   disposal_scheduled_on: string | null; // 폐기예정일 (DB GENERATED)
   budget_source: string | null; // 예산출처
+  acquisition_type: AcquisitionType; // 취득구분(구매/관리전환)
   is_registered: boolean; // 물품등록 여부
   disposed_on: string | null; // 불용(폐기)일자 — null 이면 사용중
   classification_no: string | null; // 분류번호
@@ -67,6 +72,7 @@ export type AssetInput = {
   unit_price: number;
   useful_life_years: number | null;
   budget_source: string | null;
+  acquisition_type: AcquisitionType;
   note: string | null;
 };
 
@@ -75,6 +81,7 @@ export type AssetFilters = {
   year?: number | "all";
   location?: string | "all";
   budget_source?: string | "all";
+  acquisition_type?: AcquisitionType | "all";
   status?: AssetStatus;
   q?: string; // 품목·규격 부분일치
 };
@@ -108,6 +115,7 @@ export function toFacilityAsset(raw: Record<string, unknown>): FacilityAsset {
     useful_life_years: intOrNull(raw.useful_life_years),
     disposal_scheduled_on: str(raw.disposal_scheduled_on),
     budget_source: str(raw.budget_source),
+    acquisition_type: raw.acquisition_type === "관리전환" ? "관리전환" : "구매",
     is_registered: raw.is_registered === true,
     disposed_on: str(raw.disposed_on),
     classification_no: str(raw.classification_no),

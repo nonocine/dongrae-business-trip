@@ -23,6 +23,7 @@ const HEADERS = [
   "내구연한",
   "폐기예정일",
   "예산출처",
+  "취득구분",
   "불용일자",
   "비고",
 ] as const;
@@ -84,6 +85,7 @@ export async function buildFacilityAssetsWorkbook(input: {
       a.useful_life_years ?? "",
       a.disposal_scheduled_on ?? "",
       a.budget_source ?? "",
+      a.acquisition_type ?? "",
       a.disposed_on ?? "",
       a.note ?? "",
     ]);
@@ -112,6 +114,7 @@ export async function buildFacilityAssetsWorkbook(input: {
     "",
     "",
     "",
+    "",
   ]);
   ws.mergeCells(totalRow.number, 1, totalRow.number, 5);
   totalRow.getCell(1).value = "합계";
@@ -127,7 +130,7 @@ export async function buildFacilityAssetsWorkbook(input: {
   });
 
   // 열 너비.
-  const widths = [12, 20, 26, 16, 7, 8, 12, 13, 9, 12, 11, 11, 20];
+  const widths = [12, 20, 26, 16, 7, 8, 12, 13, 9, 12, 11, 10, 11, 20];
   widths.forEach((w, i) => {
     ws.getColumn(i + 1).width = w;
   });
