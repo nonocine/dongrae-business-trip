@@ -24,6 +24,9 @@ import {
 import { buildCertificatePdf } from "@/lib/certificatePdf";
 import { downloadHrImage } from "@/lib/recruitmentApplicantDocData";
 import { kstTodayYmd } from "@/lib/trainings";
+import { sendSlack } from "@/lib/slack";
+
+const SLACK_ADMIN = "SLACK_WEBHOOK_ADMIN"; // 관장·부장 비공개 채널
 
 // 관인 바이트 로드(비공개 hr-documents, service_role). 없으면 null(발급은 계속).
 async function loadSeal(): Promise<Uint8Array | null> {
@@ -469,6 +472,13 @@ export async function requestMyCertificate(input: {
       requested_at: new Date().toISOString(),
     });
     if (error) throw new Error(error.message);
+
+    // 관리자 채널 알림(부가기능 — sendSlack 은 실패해도 throw 안 함).
+    await sendSlack(
+      SLACK_ADMIN,
+      `📄 ${prof.name}님 재직증명서 신청 (용도: ${purpose}) — 승인 대기`
+    );
+
     revalidatePath("/profile/hr");
     revalidatePath("/hr/certificates");
     return { ok: true, message: "재직증명서 발급을 신청했습니다. 승인 후 발급됩니다." };
@@ -562,6 +572,11 @@ export async function approveRequest(
       .eq("status", "pending"); // 동시 승인 방지
     if (upErr) throw new Error(upErr.message);
 
+    await sendSlack(
+      SLACK_ADMIN,
+      `✅ ${snapshot.issueLabel} 승인·발급 (처리: ${access.name})`
+    );
+
     revalidatePath("/hr/certificates");
     revalidatePath("/profile/hr");
     return { ok: true, label: snapshot.issueLabel };
@@ -586,7 +601,7 @@ export async function rejectRequest(
     const r = cleanStr(reason);
     if (!r) return { ok: false, message: "반려 사유를 입력하세요." };
 
-    const { error } = await supabaseAdmin
+    const { data: updated, error } = await supabaseAdmin
       .from(REQ_TABLE)
       .update({
         status: "rejected",
@@ -595,8 +610,14 @@ export async function rejectRequest(
         decided_by: access.name,
       })
       .eq("id", id)
-      .eq("status", "pending");
+      .eq("status", "pending")
+      .select("employee_name")
+      .maybeSingle();
     if (error) throw new Error(error.message);
+
+    const name = (updated as { employee_name?: string } | null)?.employee_name;
+    if (name) await sendSlack(SLACK_ADMIN, `❌ ${name}님 신청 반려`);
+
     revalidatePath("/hr/certificates");
     revalidatePath("/profile/hr");
     return { ok: true };

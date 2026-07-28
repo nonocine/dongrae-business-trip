@@ -10,6 +10,7 @@ import {
   HR_DOCUMENTS_BUCKET,
 } from "@/lib/supabase";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
+import { sendSlack, siteBaseUrl, slackLink } from "@/lib/slack";
 
 // =====================================================================
 // 공지사항(announcements) — 공식 공지(슬랙은 일상 소통, 동업자씨는 기록 공지).
@@ -175,13 +176,36 @@ export async function amIM0(): Promise<boolean> {
 }
 
 // =====================================================================
-// 슬랙 알림 훅 — 구조만(이번 버전은 실제 발송 X).
-//   TODO(slack): 슬랙 연동 작업에서 채널 webhook 호출 + announcements.notified_slack=true.
-//   현재는 no-op 스텁. 호출 위치는 createAnnouncement 참고.
+// 슬랙 알림 훅 — 전직원 #01_공지사항(SLACK_WEBHOOK_ANNOUNCE).
+//   * 부가기능: 실패·미설정이어도 공지 등록 자체는 성공 처리(내부에서 완전 격리).
+//   * 발송 성공 시 announcements.notified_slack=true 로 기록.
 // =====================================================================
-async function notifySlackAnnouncement(announcementId: string): Promise<void> {
-  // 의도적으로 비워둠 — 실제 슬랙 발송은 다음 작업에서 구현.
-  void announcementId;
+async function notifySlackAnnouncement(
+  announcementId: string,
+  title: string
+): Promise<void> {
+  try {
+    const base = siteBaseUrl();
+    const link = base
+      ? `\n${slackLink(`${base}/announcements`, "동업자씨에서 공지 보기")}`
+      : "";
+    const sent = await sendSlack(
+      "SLACK_WEBHOOK_ANNOUNCE",
+      `📢 새 공지: ${title}${link}`
+    );
+    if (sent) {
+      await supabaseAdmin
+        .from("announcements")
+        .update({ notified_slack: true })
+        .eq("id", announcementId);
+    }
+  } catch (e) {
+    // 알림 실패가 공지 등록을 막지 않도록 삼킴.
+    console.warn(
+      "[slack] 공지 알림 처리 실패:",
+      e instanceof Error ? e.message : e
+    );
+  }
 }
 
 // =====================================================================
@@ -251,8 +275,8 @@ export async function createAnnouncement(input: {
     }
     const id = String((data as { id: unknown }).id);
 
-    // 슬랙 알림 훅 — 현재 no-op 스텁(실제 발송은 다음 작업에서).
-    await notifySlackAnnouncement(id);
+    // 슬랙 알림(부가기능) — #01_공지사항 채널. 실패해도 등록은 성공.
+    await notifySlackAnnouncement(id, title);
 
     revalidatePath("/announcements");
     revalidatePath("/");
