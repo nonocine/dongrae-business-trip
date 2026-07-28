@@ -153,3 +153,41 @@ export function formatNum(n: number | null | undefined): string {
   if (n == null || !Number.isFinite(Number(n))) return "";
   return Math.round(Number(n)).toLocaleString("ko-KR");
 }
+
+// target(YYYY-MM-DD)까지 남은 일수. 양수=남음, 0=오늘, 음수=지남. 없으면 null.
+//   * todayYmd 는 서버에서 계산해 넘겨 하이드레이션 불일치를 막습니다.
+const MS_PER_DAY = 86_400_000;
+export function daysUntilYmd(
+  target: string | null,
+  todayYmd: string
+): number | null {
+  if (!target) return null;
+  const d = Date.parse(`${target}T00:00:00Z`);
+  const t = Date.parse(`${todayYmd}T00:00:00Z`);
+  if (Number.isNaN(d) || Number.isNaN(t)) return null;
+  return Math.round((d - t) / MS_PER_DAY);
+}
+
+// 내용연수 배지 — 폐기예정일(disposal_scheduled_on) 대비 오늘.
+//   * 불용(disposed_on) 있으면 '불용'(회색)으로 대체.
+//   * 지남 → '만료'(빨강), 6개월(183일) 이내 → '임박(D-일수)'(주황), 그 외 정상(회색).
+//   * 폐기예정일 없음(내용연수 미입력 등) → 'none'.
+export type LifeBadgeKind =
+  | "disposed"
+  | "expired"
+  | "soon"
+  | "normal"
+  | "none";
+export type LifeBadge = { kind: LifeBadgeKind; label: string; dday: number | null };
+
+export const LIFE_SOON_DAYS = 183; // 약 6개월
+
+export function lifeBadge(asset: FacilityAsset, todayYmd: string): LifeBadge {
+  if (asset.disposed_on) return { kind: "disposed", label: "불용", dday: null };
+  const dday = daysUntilYmd(asset.disposal_scheduled_on, todayYmd);
+  if (dday == null) return { kind: "none", label: "—", dday: null };
+  if (dday < 0) return { kind: "expired", label: "만료", dday };
+  if (dday <= LIFE_SOON_DAYS)
+    return { kind: "soon", label: `임박(D-${dday})`, dday };
+  return { kind: "normal", label: "정상", dday };
+}

@@ -36,6 +36,7 @@ export const badgeSuccess = `${badgeBase} bg-success-soft text-success`;
 export const badgeNeutral = `${badgeBase} bg-surface text-ink-muted`;
 export const badgeWarning = `${badgeBase} bg-warning-soft text-warning`;
 export const badgeNavy = `${badgeBase} bg-navy-soft text-navy`;
+export const badgeDanger = `${badgeBase} bg-stamp-soft text-stamp`;
 
 // --- 알림 메시지 ---
 export const noticeError =
