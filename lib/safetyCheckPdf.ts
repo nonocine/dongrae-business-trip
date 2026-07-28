@@ -1,9 +1,11 @@
 // =====================================================================
-// 청소년수련시설 안전점검표 PDF — 실물 점검표 양식 재현.
-//   * 머리(점검일시·점검자) / 부문별 표(구분·번호·점검항목·적합/부적합/해당없음
-//     체크·지적사항). 적합/해당 표기는 해당 칸에 "○".
-//   * pdf-lib + fontkit + 나눔고딕 통임베드(subset:false — 증명서 패턴 동일).
-//   * 관인 없음(점검표엔 서명·관인란 없음).
+// 청소년수련시설 안전점검표 PDF — 청소년활동 진흥법 시행규칙 [별표 4] 실물 재현.
+//   * 실측 치수(관장 제공 공식 빈양식 pdfplumber 측정, A4 595×841pt) 기준.
+//   * 6열: 구분 | 번호 | 항목별 | 적합 | 부적합 | 지적사항.
+//     ★"해당없음"은 별도 열이 아님 — result='na'는 적합·부적합 빈칸, 지적사항 열에
+//       "해당없음" 글자로 표기.
+//   * "점검사항"은 적합·부적합·지적사항 3열 위 2단 병합 헤더. 페이지 넘김 시 헤더 반복.
+//   * pdf-lib + fontkit + 나눔고딕 통임베드(subset:false). 관인 없음.
 // =====================================================================
 
 import { PDFDocument, rgb, type PDFFont } from "pdf-lib";
@@ -30,11 +32,31 @@ function boldFont(): Buffer {
   return _bold;
 }
 
-const NAVY = rgb(0.122, 0.227, 0.373);
-const INK = rgb(0.13, 0.15, 0.18);
-const LINE = rgb(0.2, 0.2, 0.2); // 검정에 가까운 테두리
-const HEAD_BG = rgb(0.88, 0.88, 0.88); // 표 머리 회색
-const SECTION_BG = rgb(0.83, 0.86, 0.9); // 부문 제목 음영(네이비 톤 옅게)
+const INK = rgb(0.1, 0.1, 0.1);
+const LINE = rgb(0, 0, 0);
+const HEAD_BG = rgb(0.91, 0.91, 0.91); // 헤더 연회색 #E8E8E8 수준
+
+// A4 & 표 실측.
+const W = 595;
+const H = 841;
+// 열 경계 x(좌→우): 69 · 125 · 145 · 418 · 445 · 470 · 521
+const X = { cat: 69, no: 125, content: 145, pass: 418, fail: 445, note: 470, end: 521 };
+const COL = {
+  cat: X.no - X.cat, // 56
+  no: X.content - X.no, // 20
+  content: X.pass - X.content, // 273
+  pass: X.fail - X.pass, // 27
+  fail: X.note - X.fail, // 25
+  note: X.end - X.note, // 51
+};
+
+const WD = ["일", "월", "화", "수", "목", "금", "토"];
+function weekday(ymd: string): string {
+  const m = ymd.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (!m) return "";
+  const d = new Date(Date.UTC(Number(m[1]), Number(m[2]) - 1, Number(m[3])));
+  return WD[d.getUTCDay()];
+}
 
 export function safetyPdfFilename(check: SafetyCheck): string {
   const mm = String(check.check_month).padStart(2, "0");
@@ -50,44 +72,29 @@ export async function buildSafetyCheckPdf(
   const font = await pdf.embedFont(regularFont(), { subset: false });
   const bold = await pdf.embedFont(boldFont(), { subset: false });
 
-  // A4 세로.
-  const W = 595.28;
-  const H = 841.89;
-  const M = 34;
-  const contentW = W - 2 * M;
-
   let page = pdf.addPage([W, H]);
-  let yTop = M;
 
+  // top-origin 헬퍼.
   const text = (
     x: number,
-    y: number,
+    yTop: number,
     s: string,
     opts: {
       size?: number;
       bold?: boolean;
       color?: ReturnType<typeof rgb>;
-      align?: "left" | "center" | "right";
-      maxW?: number;
+      align?: "left" | "center";
+      cellW?: number; // align center 시 셀 폭(중앙 = x + cellW/2)
     } = {}
   ) => {
-    const size = opts.size ?? 8;
+    const size = opts.size ?? 9;
     const f: PDFFont = opts.bold ? bold : font;
-    let str = s;
-    // 폭 초과 시 말줄임(간단 처리).
-    if (opts.maxW) {
-      while (str.length > 1 && f.widthOfTextAtSize(str, size) > opts.maxW) {
-        str = str.slice(0, -1);
-      }
-      if (str !== s && str.length > 1) str = str.slice(0, -1) + "…";
-    }
-    const tw = f.widthOfTextAtSize(str, size);
+    const tw = f.widthOfTextAtSize(s, size);
     let dx = x;
-    if (opts.align === "right") dx = x - tw;
-    else if (opts.align === "center") dx = x - tw / 2;
-    page.drawText(str, {
+    if (opts.align === "center") dx = x + (opts.cellW ?? 0) / 2 - tw / 2;
+    page.drawText(s, {
       x: dx,
-      y: H - y - size,
+      y: H - yTop - size,
       size,
       font: f,
       color: opts.color ?? INK,
@@ -95,210 +102,228 @@ export async function buildSafetyCheckPdf(
   };
   const rect = (
     x: number,
-    y: number,
+    yTop: number,
     w: number,
     h: number,
     opts: { fill?: ReturnType<typeof rgb>; border?: boolean } = {}
   ) => {
     page.drawRectangle({
       x,
-      y: H - y - h,
+      y: H - yTop - h,
       width: w,
       height: h,
       color: opts.fill,
       borderColor: opts.border ? LINE : undefined,
-      borderWidth: opts.border ? 0.8 : 0,
+      borderWidth: opts.border ? 0.5 : 0,
     });
   };
-
-  // 컬럼 레이아웃: 구분 | 번호 | 점검항목 | 적합 | 부적합 | 해당없음 | 지적사항
-  const cNo = 26;
-  const cChk = 30; // 적합/부적합/해당없음 각
-  const cNote = 96;
-  const cCat = 74;
-  const cContent = contentW - cCat - cNo - cChk * 3 - cNote;
-  const colX = {
-    cat: M,
-    no: M + cCat,
-    content: M + cCat + cNo,
-    pass: M + cCat + cNo + cContent,
-    fail: M + cCat + cNo + cContent + cChk,
-    na: M + cCat + cNo + cContent + cChk * 2,
-    note: M + cCat + cNo + cContent + cChk * 3,
-  };
-
-  // --- 제목 ---
-  text(W / 2, yTop, "청소년수련시설 안전점검표", {
-    size: 15,
-    bold: true,
-    align: "center",
-    color: NAVY,
-  });
-  yTop += 24;
-  text(
-    W / 2,
-    yTop,
-    `${check.check_year}년 ${check.check_month}월`,
-    { size: 10, align: "center", color: INK }
-  );
-  yTop += 20;
-
-  // --- 머리(점검일시·점검자) ---
-  const headH = 20;
-  rect(M, yTop, contentW, headH, { border: true });
-  text(M + 6, yTop + 6, `점검일시: ${check.checked_on ?? "-"}`, { size: 9 });
-  text(M + contentW / 2 + 6, yTop + 6, `점검자: ${check.inspector ?? "-"}`, {
-    size: 9,
-  });
-  yTop += headH + 8;
-
-  const headerRowH = 20;
-  const bottom = H - M;
-
-  // 표 머리행 — 페이지마다 반복.
-  const drawTableHeader = () => {
-    const cells: [number, number, string][] = [
-      [colX.cat, cCat, "구분"],
-      [colX.no, cNo, "번호"],
-      [colX.content, cContent, "점검항목"],
-      [colX.pass, cChk, "적합"],
-      [colX.fail, cChk, "부적합"],
-      [colX.na, cChk, "해당없음"],
-      [colX.note, cNote, "지적사항"],
-    ];
-    for (const [x, w] of cells)
-      rect(x, yTop, w, headerRowH, { fill: HEAD_BG, border: true });
-    for (const [x, w, label] of cells)
-      text(x + w / 2, yTop + (headerRowH - 8) / 2, label, {
-        size: label.length >= 3 ? 7 : 8.5,
-        bold: true,
-        align: "center",
-      });
-    yTop += headerRowH;
-  };
-
-  // 부문 제목 행(음영).
-  const sectionRowH = 16;
-  const drawSectionRow = (title: string) => {
-    rect(M, yTop, contentW, sectionRowH, { fill: SECTION_BG, border: true });
-    text(M + 6, yTop + (sectionRowH - 8.5) / 2, `【${title}】`, {
-      size: 8.5,
-      bold: true,
+  const underline = (cx: number, yTop: number, w: number) => {
+    page.drawLine({
+      start: { x: cx - w / 2, y: H - yTop },
+      end: { x: cx + w / 2, y: H - yTop },
+      thickness: 0.8,
       color: INK,
     });
-    yTop += sectionRowH;
   };
 
-  const lineH = 10;
-  const padY = 4;
-  const CONTENT_SIZE = 7.5;
-  const NOTE_SIZE = 7;
-
-  // 폭 기준 줄바꿈(최대 maxLines 줄).
-  const wrap = (s: string, maxW: number, size: number, maxLines: number): string[] => {
+  // 폭 기준 줄바꿈.
+  const wrap = (
+    s: string,
+    maxW: number,
+    size: number,
+    maxLines: number,
+    f: PDFFont = font
+  ): string[] => {
     if (!s) return [];
-    const lines: string[] = [];
+    const out: string[] = [];
     let cur = "";
     for (const ch of s) {
       const test = cur + ch;
-      if (font.widthOfTextAtSize(test, size) > maxW && cur) {
-        lines.push(cur);
+      if (f.widthOfTextAtSize(test, size) > maxW && cur) {
+        out.push(cur);
         cur = ch;
-        if (lines.length >= maxLines) return lines;
+        if (out.length >= maxLines) return out;
       } else cur = test;
     }
-    if (cur) lines.push(cur);
-    return lines.slice(0, maxLines);
+    if (cur) out.push(cur);
+    return out.slice(0, maxLines);
   };
 
-  const rowHeightOf = (it: SafetyItemWithResult): {
-    h: number;
-    contentLines: string[];
-    noteLines: string[];
-  } => {
-    const contentLines = wrap(it.content, cContent - 8, CONTENT_SIZE, 3);
-    const noteLines = it.note ? wrap(it.note, cNote - 6, NOTE_SIZE, 3) : [];
-    const maxLines = Math.max(contentLines.length, noteLines.length, 1);
-    return { h: Math.max(18, maxLines * lineH + padY * 2), contentLines, noteLines };
-  };
+  // === 상단 헤더(첫 페이지) ===
+  text(X.cat, 82, "■ 청소년활동 진흥법 시행규칙 [별표 4] <개정 2019. 8. 28.>", {
+    size: 9,
+  });
+  const title = "청소년수련시설 안전점검표(제8조의2 관련)";
+  text(W / 2, 123, title, { size: 12, bold: true, align: "center", cellW: 0 });
+  underline(W / 2, 123 + 12 + 3, bold.widthOfTextAtSize(title, 12));
 
-  const breakPage = (sectionTitle: string | null) => {
-    page = pdf.addPage([W, H]);
-    yTop = M;
-    drawTableHeader();
-    if (sectionTitle) drawSectionRow(sectionTitle);
-  };
+  const dateStr = (() => {
+    const on = check.checked_on;
+    const m = on?.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+    if (m)
+      return `${Number(m[1])}년 ${Number(m[2])}월 ${Number(m[3])}일 ( ${weekday(on!)} )`;
+    return `${check.check_year}년   월   일 (   )`;
+  })();
+  text(X.cat, 160, `◆ 점검일시 : ${dateStr}`, { size: 11 });
+  text(X.cat, 191, `◆ 점 검 자 : ${check.inspector ?? ""}`, { size: 11 });
 
-  // 항목 한 행 그리기(구분 셀 제외 — 구분은 카테고리 단위 병합으로 별도).
-  const drawItemRow = (
-    it: SafetyItemWithResult,
-    rowH: number,
-    contentLines: string[],
-    noteLines: string[]
-  ) => {
-    rect(colX.no, yTop, cNo, rowH, { border: true });
-    rect(colX.content, yTop, cContent, rowH, { border: true });
-    rect(colX.pass, yTop, cChk, rowH, { border: true });
-    rect(colX.fail, yTop, cChk, rowH, { border: true });
-    rect(colX.na, yTop, cChk, rowH, { border: true });
-    rect(colX.note, yTop, cNote, rowH, { border: true });
+  // 표 렌더 커서.
+  let yTop = 214;
+  const bottom = H - 40;
 
-    text(colX.no + cNo / 2, yTop + rowH / 2 - 4, String(it.item_no), {
-      size: 8,
-      align: "center",
+  // === 표 헤더행(2단) — 페이지 넘김 시 반복 ===
+  const headerH = 22;
+  const tierH = 11;
+  const drawTableHeader = () => {
+    // 구분·번호·항목별: 전체 높이 병합.
+    rect(X.cat, yTop, COL.cat, headerH, { fill: HEAD_BG, border: true });
+    rect(X.no, yTop, COL.no, headerH, { fill: HEAD_BG, border: true });
+    rect(X.content, yTop, COL.content, headerH, { fill: HEAD_BG, border: true });
+    // 점검사항: 상단 병합 + 하단 3열.
+    rect(X.pass, yTop, COL.pass + COL.fail + COL.note, tierH, {
+      fill: HEAD_BG,
+      border: true,
     });
-    contentLines.forEach((ln, li) => {
-      text(colX.content + 4, yTop + padY + li * lineH, ln, { size: CONTENT_SIZE });
-    });
-    // 결과별 ○ — result 값에 따라 정확한 열에.
-    const markX =
-      it.result === "fail" ? colX.fail : it.result === "na" ? colX.na : colX.pass;
-    text(markX + cChk / 2, yTop + rowH / 2 - 5, "○", {
-      size: 11,
+    rect(X.pass, yTop + tierH, COL.pass, tierH, { fill: HEAD_BG, border: true });
+    rect(X.fail, yTop + tierH, COL.fail, tierH, { fill: HEAD_BG, border: true });
+    rect(X.note, yTop + tierH, COL.note, tierH, { fill: HEAD_BG, border: true });
+    // 라벨.
+    const midY = yTop + (headerH - 9) / 2;
+    text(X.cat, midY, "구 분", { size: 9, bold: true, align: "center", cellW: COL.cat });
+    text(X.no, midY, "번호", { size: 9, bold: true, align: "center", cellW: COL.no });
+    text(X.content, midY, "항 목 별", {
+      size: 9,
       bold: true,
       align: "center",
-      color: NAVY,
+      cellW: COL.content,
     });
-    // 지적사항 — 결과 무관, 값 있으면 출력.
-    noteLines.forEach((ln, li) => {
-      text(colX.note + 3, yTop + padY + li * lineH, ln, { size: NOTE_SIZE });
+    text(X.pass, yTop + (tierH - 8) / 2, "점검사항", {
+      size: 8.5,
+      bold: true,
+      align: "center",
+      cellW: COL.pass + COL.fail + COL.note,
+    });
+    const subY = yTop + tierH + (tierH - 7.5) / 2;
+    text(X.pass, subY, "적합", { size: 8, bold: true, align: "center", cellW: COL.pass });
+    text(X.fail, subY, "부적합", { size: 7.5, bold: true, align: "center", cellW: COL.fail });
+    text(X.note, subY, "지적사항", { size: 7.5, bold: true, align: "center", cellW: COL.note });
+    yTop += headerH;
+  };
+
+  const breakPage = () => {
+    page = pdf.addPage([W, H]);
+    yTop = 48;
+    drawTableHeader();
+  };
+
+  // 데이터 행 계산.
+  const CONTENT_SIZE = 9;
+  const lineH = 11;
+  const vpad = 6;
+  const rowMetrics = (it: SafetyItemWithResult) => {
+    const contentLines = wrap(it.content, COL.content - 8, CONTENT_SIZE, 5);
+    // 지적사항 텍스트.
+    let noteText = "";
+    if (it.result === "na") noteText = it.note ? `해당없음 / ${it.note}` : "해당없음";
+    else if (it.note) noteText = it.note;
+    const noteLines = noteText ? wrap(noteText, COL.note - 6, 7.5, 5) : [];
+    const lines = Math.max(contentLines.length, noteLines.length, 1);
+    const h = Math.max(23, lines * lineH + vpad * 2);
+    return { h, contentLines, noteLines };
+  };
+
+  const drawItemRow = (
+    it: SafetyItemWithResult,
+    h: number,
+    contentLines: string[],
+    noteLines: string[],
+    showNo: boolean
+  ) => {
+    rect(X.no, yTop, COL.no, h, { border: true });
+    rect(X.content, yTop, COL.content, h, { border: true });
+    rect(X.pass, yTop, COL.pass, h, { border: true });
+    rect(X.fail, yTop, COL.fail, h, { border: true });
+    rect(X.note, yTop, COL.note, h, { border: true });
+
+    if (showNo)
+      text(X.no, yTop + h / 2 - 4.5, String(it.item_no), {
+        size: 9,
+        align: "center",
+        cellW: COL.no,
+      });
+    const cStart = yTop + (h - contentLines.length * lineH) / 2;
+    contentLines.forEach((ln, i) => {
+      text(X.content + 4, cStart + i * lineH, ln, { size: CONTENT_SIZE });
+    });
+    if (it.result === "pass")
+      text(X.pass, yTop + h / 2 - 5.5, "○", {
+        size: 11,
+        bold: true,
+        align: "center",
+        cellW: COL.pass,
+      });
+    else if (it.result === "fail")
+      text(X.fail, yTop + h / 2 - 5.5, "○", {
+        size: 11,
+        bold: true,
+        align: "center",
+        cellW: COL.fail,
+      });
+    // 지적사항(해당없음 포함).
+    const nStart = yTop + (h - noteLines.length * lineH) / 2;
+    noteLines.forEach((ln, i) => {
+      text(X.note + 3, nStart + i * lineH, ln, { size: 7.5 });
     });
   };
 
-  // --- 렌더 ---
-  drawTableHeader();
+  // === 부문별 렌더 ===
   const groups = groupSafetyItems(items);
   for (const g of groups) {
-    // 부문 제목(자리 없으면 개행 후).
-    if (yTop + sectionRowH + 18 > bottom) breakPage(null);
-    drawSectionRow(g.section);
+    // 부문 제목(자리 없으면 개행 — 헤더만 반복, 제목은 새 페이지 상단에).
+    const titleSize = g.section.includes("건축") ? 12 : 11;
+    if (yTop + titleSize + 8 + headerH + 24 > bottom) {
+      page = pdf.addPage([W, H]);
+      yTop = 48;
+    }
+    text(X.cat, yTop, `□ ${g.section}`, { size: titleSize, bold: true });
+    yTop += titleSize + 7;
+
+    drawTableHeader();
 
     for (const cat of g.categories) {
+      const showNo = cat.items.length > 1; // 단일 항목이면 번호 생략
       let idx = 0;
       while (idx < cat.items.length) {
-        // 최소 한 행은 현재 페이지에 들어가도록 보장.
-        const firstH = rowHeightOf(cat.items[idx]).h;
-        if (yTop + firstH > bottom) breakPage(g.section);
+        const firstH = rowMetrics(cat.items[idx]).h;
+        if (yTop + firstH > bottom) breakPage();
 
         const runStartY = yTop;
         while (idx < cat.items.length) {
           const it = cat.items[idx];
-          const { h, contentLines, noteLines } = rowHeightOf(it);
-          if (yTop + h > bottom) break; // 페이지 참 → 이 런 종료
-          drawItemRow(it, h, contentLines, noteLines);
+          const { h, contentLines, noteLines } = rowMetrics(it);
+          if (yTop + h > bottom) break;
+          drawItemRow(it, h, contentLines, noteLines, showNo);
           yTop += h;
           idx++;
         }
-        // 구분(category) 셀 — 이번 페이지 런 전체를 세로 병합처럼 한 칸으로.
-        rect(colX.cat, runStartY, cCat, yTop - runStartY, { border: true });
-        text(colX.cat + 4, runStartY + 6, cat.category, {
-          size: 7,
-          maxW: cCat - 8,
+        // 구분 셀(이 페이지 런 전체 세로 병합).
+        const mergedH = yTop - runStartY;
+        rect(X.cat, runStartY, COL.cat, mergedH, { border: true });
+        const catLines = wrap(cat.category, COL.cat - 6, 8, 5);
+        const catStart = runStartY + (mergedH - catLines.length * 10) / 2;
+        catLines.forEach((ln, i) => {
+          text(X.cat, catStart + i * 10, ln, {
+            size: 8,
+            align: "center",
+            cellW: COL.cat,
+          });
         });
 
-        if (idx < cat.items.length) breakPage(g.section); // 다음 페이지로 이어감
+        if (idx < cat.items.length) breakPage();
       }
     }
+
+    yTop += 10; // 부문 간 간격
   }
 
   return pdf.save();
