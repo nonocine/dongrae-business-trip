@@ -406,6 +406,12 @@ function TempPasswordModal({
   );
 }
 
+// 서류 출처 라벨 — 자동생성/강사 업로드/직원 업로드 구분.
+function docSource(doc: SaemInstructorDoc): string {
+  if ((doc.original_name ?? "").includes("자동생성")) return "자동 생성";
+  return doc.uploaded_by === "instructor" ? "강사 업로드" : "직원 업로드";
+}
+
 // --- 서류함(7슬롯) ---
 function DocsSection({
   instructorId,
@@ -470,9 +476,18 @@ function DocsSection({
 
   return (
     <section className={cardCls}>
-      <h3 className="mb-1 text-base font-bold text-ink">서류함</h3>
+      <div className="mb-1 flex items-center justify-between gap-2">
+        <h3 className="text-base font-bold text-ink">서류함</h3>
+        <a
+          href={`/hr/saems/instructors/${instructorId}/documents-zip`}
+          className="rounded border border-line px-2.5 py-1 text-xs font-semibold text-navy hover:bg-surface"
+        >
+          전체 다운로드(ZIP)
+        </a>
+      </div>
       <p className="mb-3 text-xs text-ink-hint">
         PDF·JPG·PNG·WEBP, 16MB 이하. 슬롯당 1건(업로드 시 교체). 비공개 저장.
+        강사가 동래샘들 앱에서 직접 올리거나 이력서를 자동 생성할 수도 있습니다.
       </p>
       {msg && (
         <p className={`mb-3 ${msg.ok ? noticeSuccess : noticeError}`}>{msg.text}</p>
@@ -487,7 +502,7 @@ function DocsSection({
                 <span className="text-sm font-semibold text-ink">{sl.label}</span>
                 {doc ? (
                   <span className="ml-2 truncate text-xs text-ink-hint">
-                    {doc.original_name ?? "업로드됨"}
+                    {doc.original_name ?? "업로드됨"} · {docSource(doc)}
                   </span>
                 ) : (
                   <span className="ml-2 text-xs text-ink-hint">미제출</span>
