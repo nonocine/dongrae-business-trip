@@ -25,48 +25,104 @@ const selCls =
   "rounded-md border border-line bg-card px-2.5 py-1.5 text-sm text-ink-body shadow-sm focus:border-navy focus:outline-none focus:ring-1 focus:ring-navy";
 const thCls = "px-2 py-2 text-left text-xs font-semibold text-navy whitespace-nowrap";
 const tdCls = "px-2 py-2 align-middle text-sm text-ink-body";
+const hhmm = (t: string | null) => (t ? t.slice(0, 5) : "");
+const mmdd = (d: string) => (d.length >= 10 ? d.slice(5).replace("-", "/") : d);
+
+type DateTab = {
+  date: string;
+  total: number;
+  submitted: number;
+  allConfirmed: boolean;
+  future: boolean;
+};
+
+function buildTabs(rows: LogRow[], today: string): DateTab[] {
+  const map = new Map<string, LogRow[]>();
+  for (const r of rows) {
+    if (!r.session_date) continue;
+    const list = map.get(r.session_date) ?? [];
+    list.push(r);
+    map.set(r.session_date, list);
+  }
+  return [...map.entries()]
+    .sort((a, b) => (a[0] < b[0] ? -1 : 1))
+    .map(([date, list]) => ({
+      date,
+      total: list.length,
+      submitted: list.filter((r) => r.submitted).length,
+      allConfirmed: list.length > 0 && list.every((r) => r.confirmed),
+      future: date > today,
+    }));
+}
+
+// 기본 선택 = 오늘 이하 중 가장 최근, 없으면 첫 탭.
+function defaultDate(tabs: DateTab[], today: string): string {
+  const past = tabs.filter((t) => t.date <= today);
+  if (past.length) return past[past.length - 1].date;
+  return tabs[0]?.date ?? "";
+}
 
 export default function LogsManager({
   termOptions,
   initial,
+  defaultTermId,
   isM0,
 }: {
   termOptions: TermOption[];
   initial: LogResult;
+  defaultTermId: string;
   isM0: boolean;
 }) {
-  const [termId, setTermId] = useState("");
-  const [date, setDate] = useState("");
+  const [termId, setTermId] = useState(defaultTermId);
   const [result, setResult] = useState<LogResult>(initial);
+  const [selectedDate, setSelectedDate] = useState<string>(() =>
+    defaultDate(buildTabs(initial.rows, initial.today), initial.today)
+  );
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [detail, setDetail] = useState<LogRow | null>(null);
   const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
+  const [summaryOpen, setSummaryOpen] = useState(false);
   const [pending, start] = useTransition();
 
-  function reload(nextTerm = termId, nextDate = date) {
+  const today = result.today;
+  const tabs = useMemo(() => buildTabs(result.rows, today), [result.rows, today]);
+
+  function loadTerm(nextTerm: string) {
+    setTermId(nextTerm);
+    setMsg(null);
     start(async () => {
-      const r = await getLogs({ termId: nextTerm || undefined, date: nextDate || undefined });
+      const r = await getLogs({ termId: nextTerm || undefined });
+      setResult(r);
+      setSelectedDate(defaultDate(buildTabs(r.rows, r.today), r.today));
+      setSelected(new Set());
+    });
+  }
+  function reload() {
+    start(async () => {
+      const r = await getLogs({ termId: termId || undefined });
       setResult(r);
       setSelected(new Set());
     });
   }
 
-  // 날짜별 그룹.
-  const groups = useMemo(() => {
-    const map = new Map<string, LogRow[]>();
-    for (const r of result.rows) {
-      const k = r.session_date ?? "미정";
-      const list = map.get(k) ?? [];
-      list.push(r);
-      map.set(k, list);
-    }
-    return [...map.entries()].sort((a, b) => (a[0] < b[0] ? -1 : 1));
-  }, [result.rows]);
+  // 선택 날짜의 행(교시→sort_order 정렬).
+  const dayRows = useMemo(() => {
+    return result.rows
+      .filter((r) => r.session_date === selectedDate)
+      .sort(
+        (a, b) =>
+          (a.periodNo ?? 9999) - (b.periodNo ?? 9999) || a.sortOrder - b.sortOrder
+      );
+  }, [result.rows, selectedDate]);
 
-  // 선택 가능(제출됨·미확정) 세션.
-  const selectableIds = useMemo(
-    () => result.rows.filter((r) => r.submitted && !r.confirmed).map((r) => r.id),
-    [result.rows]
+  // 교시 구분행 삽입 위치 표시(렌더 중 변수 변형 없이 미리 계산).
+  const dayItems = useMemo(
+    () =>
+      dayRows.map((r, i) => ({
+        r,
+        showDivider: i === 0 || r.periodNo !== dayRows[i - 1].periodNo,
+      })),
+    [dayRows]
   );
 
   function toggle(id: string) {
@@ -77,134 +133,180 @@ export default function LogsManager({
       return n;
     });
   }
-
   function confirmSelected() {
     if (selected.size === 0) return;
     setMsg(null);
     start(async () => {
       const res = await confirmSessions([...selected]);
-      if (!res.ok) {
-        setMsg({ ok: false, text: res.message });
-        return;
-      }
+      if (!res.ok) return setMsg({ ok: false, text: res.message });
       setMsg({ ok: true, text: `${res.confirmed}건을 확정했습니다.` });
       reload();
     });
   }
 
-  const rate =
+  const termRate =
     result.summary.elapsed > 0
       ? Math.round((result.summary.submitted / result.summary.elapsed) * 100)
       : null;
 
   return (
     <div className="space-y-5">
-      {/* 필터 + 요약 */}
+      {/* 차시 선택 + 요약 토글 */}
       <section className={cardCls}>
         <div className="flex flex-wrap items-center gap-2">
           <select
             value={termId}
-            onChange={(e) => {
-              setTermId(e.target.value);
-              reload(e.target.value, date);
-            }}
+            onChange={(e) => loadTerm(e.target.value)}
             className={selCls}
             aria-label="차시"
           >
-            <option value="">활성 차시 전체</option>
+            {termOptions.length === 0 && <option value="">차시 없음</option>}
             {termOptions.map((t) => (
               <option key={t.id} value={t.id}>
-                {t.projectName} · {t.name} ({TERM_STATUS_LABEL[t.status as TermStatus] ?? t.status})
+                {t.projectName} · {t.name} (
+                {TERM_STATUS_LABEL[t.status as TermStatus] ?? t.status})
               </option>
             ))}
           </select>
-          <input
-            type="date"
-            value={date}
-            onChange={(e) => {
-              setDate(e.target.value);
-              reload(termId, e.target.value);
-            }}
-            className={selCls}
-          />
-          {(termId || date) && (
-            <button
-              type="button"
-              onClick={() => {
-                setTermId("");
-                setDate("");
-                reload("", "");
-              }}
-              className="text-xs text-ink-muted hover:underline"
-            >
-              필터 초기화
-            </button>
-          )}
+          <button
+            type="button"
+            onClick={() => setSummaryOpen((v) => !v)}
+            className="ml-auto text-xs font-semibold text-ink-muted hover:underline"
+          >
+            차시 요약 {summaryOpen ? "접기 ▲" : "펼치기 ▼"}
+          </button>
         </div>
 
-        <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-3">
-          <Stat
-            label="제출률(경과 회차)"
-            value={rate == null ? "-" : `${rate}% (${result.summary.submitted}/${result.summary.elapsed})`}
-          />
-          <div className="rounded-lg border border-line bg-surface/60 px-3 py-2 sm:col-span-2">
-            <p className="text-[11px] text-ink-muted">미제출 강사</p>
-            <p className="mt-0.5 text-sm text-ink">
-              {result.summary.unsubmittedInstructors.length === 0
-                ? "없음 ✓"
-                : result.summary.unsubmittedInstructors.join(", ")}
-            </p>
+        {summaryOpen && (
+          <div className="mt-3 space-y-3">
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+              <Stat
+                label="제출률(경과 회차)"
+                value={
+                  termRate == null
+                    ? "-"
+                    : `${termRate}% (${result.summary.submitted}/${result.summary.elapsed})`
+                }
+              />
+              <div className="rounded-lg border border-line bg-surface/60 px-3 py-2 sm:col-span-2">
+                <p className="text-[11px] text-ink-muted">미제출 강사</p>
+                <p className="mt-0.5 text-sm text-ink">
+                  {result.summary.unsubmittedInstructors.length === 0
+                    ? "없음 ✓"
+                    : result.summary.unsubmittedInstructors.join(", ")}
+                </p>
+              </div>
+            </div>
+            {/* 회차별 제출률 미니 표 */}
+            <div className="flex flex-wrap gap-1.5">
+              {tabs.map((t) => (
+                <span
+                  key={t.date}
+                  className="rounded-md border border-line px-2 py-1 text-xs text-ink-muted"
+                >
+                  {mmdd(t.date)} {t.submitted}/{t.total}
+                  {t.allConfirmed ? " ✓" : ""}
+                </span>
+              ))}
+            </div>
+          </div>
+        )}
+      </section>
+
+      {/* 회차 날짜 탭 */}
+      {tabs.length > 0 && (
+        <div className="overflow-x-auto">
+          <div className="flex min-w-max gap-1.5">
+            {tabs.map((t) => {
+              const active = t.date === selectedDate;
+              return (
+                <button
+                  key={t.date}
+                  type="button"
+                  onClick={() => {
+                    setSelectedDate(t.date);
+                    setSelected(new Set());
+                  }}
+                  className={`whitespace-nowrap rounded-lg border px-3 py-2 text-sm font-semibold transition ${
+                    active
+                      ? "border-navy bg-navy text-white"
+                      : t.future
+                        ? "border-line bg-surface text-ink-hint"
+                        : "border-line bg-card text-ink-body hover:bg-surface"
+                  }`}
+                >
+                  {mmdd(t.date)}
+                  <span
+                    className={`ml-1.5 text-xs font-normal ${
+                      active ? "text-white/80" : "text-ink-hint"
+                    }`}
+                  >
+                    ({t.submitted}/{t.total}){t.allConfirmed ? " ✓" : ""}
+                  </span>
+                </button>
+              );
+            })}
           </div>
         </div>
-      </section>
+      )}
 
       {msg && <p className={msg.ok ? noticeSuccess : noticeError}>{msg.text}</p>}
 
-      {/* 일괄 확정 바 */}
-      <div className="flex items-center justify-between">
-        <p className="text-xs text-ink-hint">
-          선택 {selected.size}건 (확정 가능 {selectableIds.length}건)
-        </p>
-        <button
-          type="button"
-          onClick={confirmSelected}
-          disabled={pending || selected.size === 0}
-          className={btnPrimary}
-        >
-          선택 확정
-        </button>
-      </div>
+      {/* 선택 날짜 목록 */}
+      <section className={cardCls}>
+        <div className="mb-3 flex items-center justify-between">
+          <h3 className="text-sm font-bold text-ink">
+            {selectedDate ? `${selectedDate} 근무일지` : "회차를 선택하세요"}
+            {dayRows.length > 0 && (
+              <span className="ml-2 text-xs font-normal text-ink-hint">
+                {dayRows.length}개 프로그램
+              </span>
+            )}
+          </h3>
+          <button
+            type="button"
+            onClick={confirmSelected}
+            disabled={pending || selected.size === 0}
+            className={btnPrimary}
+          >
+            선택 확정 ({selected.size})
+          </button>
+        </div>
 
-      {/* 날짜별 그룹 */}
-      {groups.length === 0 ? (
-        <section className={cardCls}>
+        {dayRows.length === 0 ? (
           <p className="py-8 text-center text-sm text-ink-hint">
             표시할 근무일지가 없습니다.
           </p>
-        </section>
-      ) : (
-        groups.map(([day, rows]) => (
-          <section key={day} className={cardCls}>
-            <h3 className="mb-2 text-sm font-bold text-navy">{day}</h3>
-            <div className="overflow-x-auto">
-              <table className="w-full min-w-[720px] border-collapse">
-                <thead>
-                  <tr className="border-b border-line">
-                    <th className={`${thCls} w-8`}></th>
-                    <th className={thCls}>프로그램</th>
-                    <th className={thCls}>강사</th>
-                    <th className={thCls}>상태</th>
-                    <th className={`${thCls} text-right`}>인원</th>
-                    <th className={`${thCls} text-right`}>시간</th>
-                    <th className={thCls}>수업내용</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {rows.map((r) => {
-                    const canSelect = r.submitted && !r.confirmed;
-                    return (
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full min-w-[720px] border-collapse">
+              <thead>
+                <tr className="border-b border-line">
+                  <th className={`${thCls} w-8`}></th>
+                  <th className={thCls}>프로그램</th>
+                  <th className={thCls}>강사</th>
+                  <th className={thCls}>상태</th>
+                  <th className={`${thCls} text-right`}>인원</th>
+                  <th className={`${thCls} text-right`}>시간</th>
+                  <th className={thCls}>수업내용</th>
+                </tr>
+              </thead>
+              <tbody>
+                {dayItems.map(({ r, showDivider }) => {
+                  const canSelect = r.submitted && !r.confirmed;
+                  return (
+                    <FragmentRow key={r.id}>
+                      {showDivider && (
+                        <tr className="bg-surface/70">
+                          <td colSpan={7} className="px-2 py-1 text-xs font-bold text-navy">
+                            {r.periodNo != null ? `${r.periodNo}교시` : "교시 미지정"}
+                            {r.timeStart
+                              ? ` ${hhmm(r.timeStart)}~${hhmm(r.timeEnd)}`
+                              : ""}
+                          </td>
+                        </tr>
+                      )}
                       <tr
-                        key={r.id}
                         className="cursor-pointer border-b border-line/60 hover:bg-surface"
                         onClick={() => setDetail(r)}
                       >
@@ -240,14 +342,14 @@ export default function LogsManager({
                           {r.log_content || r.plan_content || "-"}
                         </td>
                       </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
-            </div>
-          </section>
-        ))
-      )}
+                    </FragmentRow>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </section>
 
       {detail && (
         <DetailModal
@@ -264,6 +366,11 @@ export default function LogsManager({
       )}
     </div>
   );
+}
+
+// tbody 직계 자식만 허용되므로 divider+row 를 함께 반환.
+function FragmentRow({ children }: { children: React.ReactNode }) {
+  return <>{children}</>;
 }
 
 function Stat({ label, value }: { label: string; value: string }) {
@@ -372,7 +479,9 @@ function Block({
       <p className="text-[11px] font-semibold text-navy">{title}</p>
       <p
         className={`mt-0.5 whitespace-pre-wrap rounded-lg border px-3 py-2 text-sm ${
-          highlight ? "border-navy/30 bg-navy-soft/30 text-ink" : "border-line bg-surface/50 text-ink-body"
+          highlight
+            ? "border-navy/30 bg-navy-soft/30 text-ink"
+            : "border-line bg-surface/50 text-ink-body"
         }`}
       >
         {text || "—"}

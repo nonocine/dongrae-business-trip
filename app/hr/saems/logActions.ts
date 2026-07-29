@@ -53,6 +53,10 @@ export type LogRow = {
   programName: string;
   instructorId: string | null;
   instructorName: string | null;
+  periodNo: number | null;
+  timeStart: string | null;
+  timeEnd: string | null;
+  sortOrder: number;
   submitted: boolean;
   confirmed: boolean;
   student_count: number | null;
@@ -94,12 +98,16 @@ export async function getLogs(input: {
   // 프로그램 + 강사명.
   const { data: progs } = await supabaseAdmin
     .from(PROG)
-    .select("id, name, instructor_id")
+    .select("id, name, instructor_id, period_no, time_start, time_end, sort_order")
     .in("term_id", termIds);
   const programs = (progs ?? []) as {
     id: string;
     name: string;
     instructor_id: string | null;
+    period_no: number | null;
+    time_start: string | null;
+    time_end: string | null;
+    sort_order: number | null;
   }[];
   if (programs.length === 0) {
     return { today, rows: [], summary: { elapsed: 0, submitted: 0, unsubmittedInstructors: [] } };
@@ -136,6 +144,10 @@ export async function getLogs(input: {
       programName: prog?.name ?? "",
       instructorId: prog?.instructor_id ?? null,
       instructorName: prog?.instructor_id ? insName.get(prog.instructor_id) ?? null : null,
+      periodNo: prog?.period_no ?? null,
+      timeStart: prog?.time_start ?? null,
+      timeEnd: prog?.time_end ?? null,
+      sortOrder: prog?.sort_order ?? 0,
       submitted: !!r.instructor_submitted_at,
       confirmed: !!r.staff_confirmed_at,
       student_count: (r.student_count as number | null) ?? null,
