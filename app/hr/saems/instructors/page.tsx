@@ -1,9 +1,9 @@
+import { listInstructors } from "@/app/hr/saems/instructorActions";
+import InstructorsManager from "@/app/hr/saems/instructors/InstructorsManager";
+
 export const dynamic = "force-dynamic";
 
-export default function InstructorsPlaceholder() {
-  return (
-    <p className="rounded-lg bg-surface px-4 py-10 text-center text-sm text-ink-hint">
-      강사 관리 — 준비 중 (SA-2에서 구현)
-    </p>
-  );
+export default async function InstructorsPage() {
+  const instructors = await listInstructors();
+  return <InstructorsManager instructors={instructors} />;
 }
