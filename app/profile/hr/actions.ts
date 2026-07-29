@@ -15,6 +15,7 @@ import {
   parseAppointmentInput,
   uploadProfilePhoto,
   uploadStampImage,
+  STAMP_IMAGE_MIME,
   removeHrDocuments,
   normalizeDocMap,
   signHrDocument,
@@ -342,6 +343,75 @@ export async function uploadMyStamp(
       ok: false,
       message:
         e instanceof Error ? e.message : "도장 저장 중 오류가 발생했습니다.",
+    };
+  }
+}
+
+// 본인 도장 "이미지 파일" 업로드 — 마우스 서명과 같은 stamp_path 슬롯(최신 것이 적용).
+//   * png/jpg 만(webp 금지 — 기존 도장 시스템이 webp 를 못 읽어 PDF/워드에 안 찍힘).
+//   * 8MB 이하. hr-documents 비공개 버킷, 공개 URL 노출 없음(service_role/서명 URL).
+export async function uploadMyStampImage(
+  formData: FormData
+): Promise<
+  { ok: true; stampUrl: string | null } | { ok: false; message: string }
+> {
+  try {
+    const driver = await getMyDriver();
+    if (!driver) throw new Error("직원 로그인이 필요합니다.");
+
+    const file = formData.get("stamp_file");
+    if (!(file instanceof File) || file.size === 0) {
+      return { ok: false, message: "업로드할 도장 이미지를 선택해주세요." };
+    }
+    if (file.size > 8 * 1024 * 1024) {
+      return { ok: false, message: "도장 이미지 용량은 8MB 이하여야 합니다." };
+    }
+    const ext = STAMP_IMAGE_MIME[file.type];
+    if (!ext) {
+      return {
+        ok: false,
+        message: "도장 이미지는 JPG·PNG 만 가능합니다. (WEBP 등은 사용할 수 없습니다)",
+      };
+    }
+
+    // 기존 stamp_path 확인(확장자 달라지면 옛 파일 정리).
+    const { data: existing, error: exErr } = await supabaseAdmin
+      .from("employee_profiles")
+      .select("stamp_path, is_locked")
+      .eq("driver_id", driver.id)
+      .maybeSingle();
+    if (exErr) throw new Error(exErr.message);
+    if (existing && (existing as { is_locked?: unknown }).is_locked === true) {
+      return { ok: false, message: "잠긴 인사기록카드입니다. 수정할 수 없습니다." };
+    }
+    const oldPath =
+      ((existing as { stamp_path?: unknown } | null)?.stamp_path as
+        | string
+        | null) ?? null;
+
+    const path = `stamps/employee/${driver.id}.${ext}`;
+    await uploadStampImage(path, file, file.type);
+
+    const { error } = await supabaseAdmin
+      .from("employee_profiles")
+      .upsert(
+        {
+          driver_id: driver.id,
+          stamp_path: path,
+          updated_at: new Date().toISOString(),
+        },
+        { onConflict: "driver_id" }
+      );
+    if (error) throw new Error(error.message);
+
+    if (oldPath && oldPath !== path) await removeHrDocuments([oldPath]);
+
+    revalidatePath("/profile/hr");
+    return { ok: true, stampUrl: await signHrDocument(path) };
+  } catch (e) {
+    return {
+      ok: false,
+      message: e instanceof Error ? e.message : "도장 업로드 중 오류가 발생했습니다.",
     };
   }
 }

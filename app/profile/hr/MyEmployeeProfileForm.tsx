@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState, useTransition } from "react";
+import { useEffect, useMemo, useRef, useState, useTransition } from "react";
 import {
   saveMyProfile,
   uploadMyProfilePhoto,
@@ -8,6 +8,7 @@ import {
   getMyPhotoUrl,
   getMyStampUrl,
   uploadMyStamp,
+  uploadMyStampImage,
   deleteMyStamp,
   uploadMyDocument,
   deleteMyDocument,
@@ -186,6 +187,28 @@ export default function MyEmployeeProfileForm({
     stampTransition(async () => {
       const res = await deleteMyStamp();
       if (res.ok) setStampUrl(null);
+      else setStampError(res.message);
+    });
+  }
+
+  // 도장 이미지 파일 업로드 — png/jpg 만(webp 금지), 8MB 이하.
+  const stampFileRef = useRef<HTMLInputElement>(null);
+  function handleStampImageUpload(file: File) {
+    setStampError(null);
+    // 클라이언트 1차 검증(서버에서도 재검증).
+    if (file.type !== "image/png" && file.type !== "image/jpeg") {
+      setStampError("도장 이미지는 JPG·PNG 만 가능합니다. (WEBP 등 불가)");
+      return;
+    }
+    if (file.size > 8 * 1024 * 1024) {
+      setStampError("도장 이미지 용량은 8MB 이하여야 합니다.");
+      return;
+    }
+    stampTransition(async () => {
+      const fd = new FormData();
+      fd.set("stamp_file", file);
+      const res = await uploadMyStampImage(fd);
+      if (res.ok) setStampUrl(res.stampUrl);
       else setStampError(res.message);
     });
   }
@@ -376,8 +399,10 @@ export default function MyEmployeeProfileForm({
               <div className="flex flex-col items-start gap-1.5">
                 <p className="text-xs font-bold text-navy">도장(사인)</p>
                 <p className="text-[11px] text-ink-hint">
-                  면접 심사표의 “(인)” 자리에 자동으로 들어갑니다.
+                  면접 심사표·결재의 “(인)” 자리에 자동으로 들어갑니다. 마우스로
+                  그리거나, 도장 이미지 파일을 올릴 수 있습니다.
                 </p>
+                {/* 방법 1 — 마우스로 그리기 */}
                 <div className="flex flex-wrap gap-1.5">
                   <button
                     type="button"
@@ -389,7 +414,30 @@ export default function MyEmployeeProfileForm({
                     disabled={stampPending}
                     className="rounded-lg border border-navy bg-card px-3 py-1.5 text-xs font-semibold text-navy hover:bg-navy-soft disabled:opacity-60"
                   >
-                    {stampUrl ? "다시 그리기" : "사인(도장) 넣기"}
+                    {stampUrl ? "다시 그리기" : "사인(도장) 그리기"}
+                  </button>
+                  {/* 방법 2 — 도장 이미지 파일 업로드 */}
+                  <input
+                    ref={stampFileRef}
+                    type="file"
+                    accept="image/png,image/jpeg"
+                    className="hidden"
+                    onChange={(e) => {
+                      const f = e.target.files?.[0];
+                      if (f) handleStampImageUpload(f);
+                      e.target.value = ""; // 같은 파일 재선택 허용
+                    }}
+                  />
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setStampError(null);
+                      stampFileRef.current?.click();
+                    }}
+                    disabled={stampPending}
+                    className="rounded-lg border border-navy bg-card px-3 py-1.5 text-xs font-semibold text-navy hover:bg-navy-soft disabled:opacity-60"
+                  >
+                    도장 이미지 업로드
                   </button>
                   {stampUrl && (
                     <button
@@ -402,6 +450,13 @@ export default function MyEmployeeProfileForm({
                     </button>
                   )}
                 </div>
+                <p className="text-[11px] text-ink-hint">
+                  이미지 업로드: <b>JPG·PNG만 (WEBP 불가)</b> · 8MB 이하. 그리기와
+                  이미지 중 <b>가장 최근 등록한 것</b>이 도장으로 사용됩니다.
+                </p>
+                {stampPending && (
+                  <p className="text-[11px] text-ink-hint">처리 중…</p>
+                )}
                 {stampError && (
                   <p className="text-xs text-stamp">{stampError}</p>
                 )}
