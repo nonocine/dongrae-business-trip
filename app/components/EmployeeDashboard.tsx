@@ -185,6 +185,12 @@ function AdminArea({
               : "재직·경력증명서 발급·발급 기록"
           }
         />
+        <MenuCard
+          href="/hr/saems/instructors"
+          icon="🧑‍🏫"
+          title="강사·프로그램 관리"
+          desc="외부 강사 등록·초대, 프로그램·근무일지(동래샘들)"
+        />
       </div>
     </section>
   );
@@ -562,6 +568,12 @@ export default async function EmployeeDashboard({
                         ? `미이수 총 ${trainingAdminSummary.totalNotMet}건 — 등록·현황판`
                         : "법정 의무교육 등록·이수 현황"
                     }
+                  />
+                  <MenuCard
+                    href="/hr/saems/instructors"
+                    icon="🧑‍🏫"
+                    title="강사·프로그램 관리"
+                    desc="외부 강사 등록·초대, 프로그램·근무일지"
                   />
                 </div>
               </div>
