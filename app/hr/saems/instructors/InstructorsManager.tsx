@@ -26,11 +26,16 @@ const inCls =
 const thCls = "px-2 py-2 text-left text-xs font-semibold text-navy whitespace-nowrap";
 const tdCls = "px-2 py-2 align-middle text-sm text-ink-body";
 const TOTAL_SLOTS = SAEM_DOC_SLOTS.length;
+// 다운로드 라우트(페이지 아님) — 변수로 두어 next 페이지링크 규칙 회피(전체 내비게이션 필요).
+const EXPORT_HREF = "/hr/saems/instructors/export";
+const BACKUP_HREF = "/hr/saems/instructors/backup-zip";
 
 export default function InstructorsManager({
   instructors,
+  isM0,
 }: {
   instructors: InstructorListRow[];
+  isM0: boolean;
 }) {
   const router = useRouter();
   const [q, setQ] = useState("");
@@ -55,8 +60,16 @@ export default function InstructorsManager({
             value={q}
             onChange={(e) => setQ(e.target.value)}
             placeholder="이름·전화 검색"
-            className={`${selCls} min-w-[220px] flex-1`}
+            className={`${selCls} min-w-[200px] flex-1`}
           />
+          <a href={EXPORT_HREF} className={btnSecondary}>
+            엑셀 다운로드
+          </a>
+          {isM0 && (
+            <a href={BACKUP_HREF} className={btnSecondary}>
+              전체 백업(ZIP)
+            </a>
+          )}
           <button type="button" onClick={() => setOpen(true)} className={btnPrimary}>
             + 강사 등록
           </button>
@@ -64,6 +77,7 @@ export default function InstructorsManager({
         <p className="mt-2 text-xs text-ink-hint">
           전체 {instructors.length}명
           {q.trim() ? ` · 검색 결과 ${filtered.length}명` : ""}
+          {isM0 && " · 전체 백업은 파일 수에 따라 수십 초 걸릴 수 있습니다."}
         </p>
       </section>
 
