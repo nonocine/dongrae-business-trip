@@ -34,6 +34,7 @@ export default function MyTrainingsSection({
   );
   const fileRef = useRef<HTMLInputElement>(null);
   const [targetId, setTargetId] = useState<string | null>(null);
+  const [dragOverId, setDragOverId] = useState<string | null>(null);
 
   function patchItem(trainingId: string, patch: Partial<MyTrainingItem>) {
     setItems((list) =>
@@ -46,7 +47,22 @@ export default function MyTrainingsSection({
     fileRef.current?.click();
   }
 
+  // 클라이언트 1차 검증(서버에서도 재검증) — PDF·JPG·PNG, 16MB 이하.
+  function certFileError(file: File): string | null {
+    const ok = ["application/pdf", "image/jpeg", "image/png"];
+    if (!ok.includes(file.type))
+      return "PDF·JPG·PNG 파일만 올릴 수 있습니다.";
+    if (file.size > 16 * 1024 * 1024)
+      return "파일 용량은 16MB 이하여야 합니다.";
+    return null;
+  }
+
   function doUpload(trainingId: string, file: File) {
+    const err = certFileError(file);
+    if (err) {
+      setMsg({ kind: "err", text: err });
+      return;
+    }
     startBusy(async () => {
       const fd = new FormData();
       fd.set("training_id", trainingId);
@@ -128,15 +144,45 @@ export default function MyTrainingsSection({
         <ul className="space-y-2">
           {items.map((it) => {
             const soon = !it.completed && isDueSoon(it.dday);
+            const dragging = dragOverId === it.training_id;
             return (
               <li
                 key={it.training_id}
-                className={`rounded-lg border p-3 ${
-                  soon
-                    ? "border-stamp/50 bg-stamp-soft/40"
-                    : "border-line bg-card"
+                onDragOver={(e) => {
+                  e.preventDefault();
+                  if (dragOverId !== it.training_id) setDragOverId(it.training_id);
+                }}
+                onDragEnter={(e) => {
+                  e.preventDefault();
+                  setDragOverId(it.training_id);
+                }}
+                onDragLeave={(e) => {
+                  // 카드 바깥으로 나갈 때만 해제(자식 이동은 무시).
+                  if (!e.currentTarget.contains(e.relatedTarget as Node | null)) {
+                    setDragOverId((cur) =>
+                      cur === it.training_id ? null : cur
+                    );
+                  }
+                }}
+                onDrop={(e) => {
+                  e.preventDefault();
+                  setDragOverId(null);
+                  const f = e.dataTransfer.files?.[0];
+                  if (f) doUpload(it.training_id, f);
+                }}
+                className={`relative rounded-lg border p-3 transition ${
+                  dragging
+                    ? "border-2 border-navy bg-navy-soft/40 ring-2 ring-navy/30"
+                    : soon
+                      ? "border-stamp/50 bg-stamp-soft/40"
+                      : "border-line bg-card"
                 }`}
               >
+                {dragging && (
+                  <div className="pointer-events-none absolute inset-0 z-10 flex items-center justify-center rounded-lg bg-navy-soft/70 text-sm font-bold text-navy">
+                    여기에 놓으면 수료증 업로드
+                  </div>
+                )}
                 <div className="flex flex-wrap items-start justify-between gap-2">
                   <div className="min-w-0">
                     <div className="flex flex-wrap items-center gap-2">
@@ -215,7 +261,8 @@ export default function MyTrainingsSection({
       )}
 
       <p className="mt-3 text-[11px] text-ink-hint">
-        수료증(PDF·JPG·PNG, 16MB 이하)을 올리면 즉시 이수 처리됩니다. 잘못
+        수료증(PDF·JPG·PNG, 16MB 이하)을 올리면 즉시 이수 처리됩니다. 버튼으로
+        선택하거나, 파일을 <b>교육 카드 위로 끌어다 놓아</b>도 됩니다. 잘못
         올렸다면 재업로드하거나 취소할 수 있습니다.
       </p>
 
