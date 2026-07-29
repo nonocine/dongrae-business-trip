@@ -104,11 +104,13 @@ export default function InstructorsManager({
                       </span>
                     </td>
                     <td className={tdCls}>
-                      <span
-                        className={i.password_set_at ? badgeSuccess : badgeWarning}
-                      >
-                        {i.password_set_at ? "가입완료" : "미가입"}
-                      </span>
+                      {!i.password_set_at ? (
+                        <span className={badgeNeutral}>미가입</span>
+                      ) : i.must_change_password ? (
+                        <span className={badgeWarning}>임시비번</span>
+                      ) : (
+                        <span className={badgeSuccess}>가입완료</span>
+                      )}
                     </td>
                     <td className={`${tdCls} text-right font-mono`}>
                       {i.docCount}/{TOTAL_SLOTS}

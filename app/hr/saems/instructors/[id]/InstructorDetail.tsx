@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import {
   updateInstructor,
   generateInvite,
+  generateTempPassword,
   uploadInstructorDoc,
   getInstructorDocUrl,
   deleteInstructorDoc,
@@ -24,6 +25,7 @@ import {
   badgeNavy,
   badgeSuccess,
   badgeNeutral,
+  badgeWarning,
   noticeError,
   noticeSuccess,
   noticeWarning,
@@ -81,13 +83,13 @@ export default function InstructorDetail({
           <h3 className="text-base font-bold text-ink">
             {instructor.name}
             <span className="ml-2 align-middle">
-              <span
-                className={
-                  instructor.password_set_at ? badgeSuccess : badgeNeutral
-                }
-              >
-                {instructor.password_set_at ? "가입완료" : "미가입"}
-              </span>
+              {!instructor.password_set_at ? (
+                <span className={badgeNeutral}>미가입</span>
+              ) : instructor.must_change_password ? (
+                <span className={badgeWarning}>임시비번</span>
+              ) : (
+                <span className={badgeSuccess}>가입완료</span>
+              )}
             </span>
           </h3>
         </div>
@@ -141,9 +143,10 @@ export default function InstructorDetail({
         </div>
       </section>
 
-      {/* 초대 링크 */}
+      {/* 초대 링크 / 임시비밀번호 */}
       <InviteSection
         instructorId={instructor.id}
+        name={instructor.name}
         alreadyRegistered={!!instructor.password_set_at}
       />
 
@@ -194,18 +197,22 @@ export default function InstructorDetail({
   );
 }
 
-// --- 초대 링크 발급 ---
+// --- 초대 링크 / 임시비밀번호 발급 ---
 function InviteSection({
   instructorId,
+  name,
   alreadyRegistered,
 }: {
   instructorId: string;
+  name: string;
   alreadyRegistered: boolean;
 }) {
+  const router = useRouter();
   const [url, setUrl] = useState<string | null>(null);
   const [reset, setReset] = useState(false);
   const [copied, setCopied] = useState(false);
   const [err, setErr] = useState<string | null>(null);
+  const [tempOpen, setTempOpen] = useState(false);
   const [pending, start] = useTransition();
 
   function issue() {
@@ -224,19 +231,32 @@ function InviteSection({
 
   return (
     <section className={cardCls}>
-      <div className="flex items-center justify-between gap-2">
-        <h3 className="text-base font-bold text-ink">초대 링크</h3>
-        <button type="button" onClick={issue} disabled={pending} className={btnPrimary}>
-          {pending ? "발급 중…" : "초대 링크 발급"}
-        </button>
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <h3 className="text-base font-bold text-ink">온보딩(로그인 준비)</h3>
+        <div className="flex flex-wrap gap-2">
+          <button type="button" onClick={issue} disabled={pending} className={btnPrimary}>
+            {pending ? "발급 중…" : "초대 링크 발급"}
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              setErr(null);
+              setTempOpen(true);
+            }}
+            className={btnSecondary}
+          >
+            임시비밀번호 발급
+          </button>
+        </div>
       </div>
       <p className="mt-1 text-xs text-ink-hint">
-        강사가 이 링크로 비밀번호를 설정하면 동래샘들 앱에 로그인합니다. (유효 7일)
+        초대 링크: 강사가 직접 비번 설정(유효 7일). 임시비밀번호: 직원이 임시비번을
+        걸어주고 전화번호+임시비번으로 로그인하게 안내(첫 로그인 시 비번 변경 강제).
       </p>
 
       {(alreadyRegistered || reset) && (
         <p className={`mt-3 ${noticeWarning}`}>
-          이미 가입한 강사입니다 — 이 링크는 <b>비밀번호 재설정</b> 링크로 동작합니다.
+          이미 가입한 강사입니다 — 초대 링크는 <b>비밀번호 재설정</b> 링크로 동작합니다.
         </p>
       )}
 
@@ -266,7 +286,123 @@ function InviteSection({
           </button>
         </div>
       )}
+
+      {tempOpen && (
+        <TempPasswordModal
+          instructorId={instructorId}
+          name={name}
+          onClose={() => setTempOpen(false)}
+          onDone={() => router.refresh()}
+        />
+      )}
     </section>
+  );
+}
+
+function TempPasswordModal({
+  instructorId,
+  name,
+  onClose,
+  onDone,
+}: {
+  instructorId: string;
+  name: string;
+  onClose: () => void;
+  onDone: () => void;
+}) {
+  const [pw, setPw] = useState("0000");
+  const [err, setErr] = useState<string | null>(null);
+  const [guide, setGuide] = useState<string | null>(null);
+  const [copied, setCopied] = useState(false);
+  const [pending, start] = useTransition();
+
+  function submit() {
+    setErr(null);
+    if (pw.trim().length < 4) {
+      setErr("임시비밀번호는 4자 이상이어야 합니다.");
+      return;
+    }
+    start(async () => {
+      const res = await generateTempPassword(instructorId, pw.trim());
+      if (!res.ok) {
+        setErr(res.message);
+        return;
+      }
+      setGuide(
+        `${name} 강사님께 안내: 동래샘들(${res.appUrl}) 에서 전화번호 + 임시비밀번호 "${pw.trim()}" 로 로그인한 뒤, 안내에 따라 새 비밀번호를 설정하세요.`
+      );
+      onDone();
+    });
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
+      <div className="w-full max-w-md rounded-xl border border-line bg-card p-5 shadow-lg">
+        <div className="mb-3 flex items-center justify-between">
+          <h3 className="text-base font-bold text-ink">임시비밀번호 발급</h3>
+          <button type="button" onClick={onClose} className="text-sm text-ink-muted hover:underline">
+            닫기
+          </button>
+        </div>
+
+        {guide ? (
+          <>
+            <p className={`${noticeSuccess}`}>임시비밀번호를 설정했습니다.</p>
+            <textarea
+              readOnly
+              value={guide}
+              rows={4}
+              onFocus={(e) => e.currentTarget.select()}
+              className={`${inCls} mt-3 text-xs`}
+            />
+            <div className="mt-3 flex gap-2">
+              <button
+                type="button"
+                onClick={async () => {
+                  try {
+                    await navigator.clipboard.writeText(guide);
+                    setCopied(true);
+                  } catch {
+                    setCopied(false);
+                  }
+                }}
+                className={btnPrimary}
+              >
+                {copied ? "복사됨 ✓" : "안내문 복사"}
+              </button>
+              <button type="button" onClick={onClose} className={btnSecondary}>
+                닫기
+              </button>
+            </div>
+          </>
+        ) : (
+          <>
+            <p className="mb-3 text-xs text-ink-hint">
+              임시비밀번호를 걸어주면 강사가 전화번호+임시비번으로 로그인하고, 첫
+              로그인 시 새 비밀번호를 강제로 설정합니다. (원문은 저장하지 않으므로 이
+              화면의 안내문을 강사에게 그대로 전달하세요.)
+            </p>
+            <label className="block text-[11px] font-semibold text-navy">
+              임시비밀번호 (4자 이상)
+            </label>
+            <input
+              value={pw}
+              onChange={(e) => setPw(e.target.value)}
+              className={`${inCls} mt-1`}
+            />
+            {err && <p className={`mt-3 ${noticeError}`}>{err}</p>}
+            <div className="mt-4 flex gap-2">
+              <button type="button" onClick={submit} disabled={pending} className={btnPrimary}>
+                {pending ? "발급 중…" : "임시비번 설정"}
+              </button>
+              <button type="button" onClick={onClose} className={btnSecondary}>
+                취소
+              </button>
+            </div>
+          </>
+        )}
+      </div>
+    </div>
   );
 }
 

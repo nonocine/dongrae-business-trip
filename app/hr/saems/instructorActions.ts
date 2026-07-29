@@ -1,6 +1,7 @@
 "use server";
 
 import { randomUUID } from "node:crypto";
+import bcrypt from "bcryptjs";
 import { revalidatePath } from "next/cache";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
 import {
@@ -345,6 +346,49 @@ export async function generateInvite(
     return {
       ok: false,
       message: e instanceof Error ? e.message : "초대 발급 중 오류가 발생했습니다.",
+    };
+  }
+}
+
+// 임시비밀번호 발급 — bcrypt 해시 저장 + must_change_password=true. 원문은 즉시 폐기.
+export async function generateTempPassword(
+  instructorId: string,
+  tempPassword: string
+): Promise<{ ok: true; appUrl: string } | { ok: false; message: string }> {
+  try {
+    await requireSaemAccess();
+    if (!instructorId) return { ok: false, message: "대상이 없습니다." };
+    const pw = (tempPassword ?? "").trim();
+    if (pw.length < 4)
+      return { ok: false, message: "임시비밀번호는 4자 이상이어야 합니다." };
+
+    const { data: ins } = await supabaseAdmin
+      .from(INSTR)
+      .select("id")
+      .eq("id", instructorId)
+      .maybeSingle();
+    if (!ins) return { ok: false, message: "강사를 찾을 수 없습니다." };
+
+    const password_hash = await bcrypt.hash(pw, 10);
+    const { error } = await supabaseAdmin
+      .from(INSTR)
+      .update({
+        password_hash,
+        password_set_at: new Date().toISOString(),
+        must_change_password: true,
+        invite_token: null,
+        invite_expires_at: null,
+      })
+      .eq("id", instructorId);
+    if (error) throw new Error(error.message);
+    // pw(원문)는 여기서 스코프 종료로 폐기 — 로그·DB 저장 없음.
+    revalidatePath(`/hr/saems/instructors/${instructorId}`);
+    revalidatePath("/hr/saems/instructors");
+    return { ok: true, appUrl: saemAppUrl() };
+  } catch (e) {
+    return {
+      ok: false,
+      message: e instanceof Error ? e.message : "임시비번 발급 중 오류가 발생했습니다.",
     };
   }
 }

@@ -55,6 +55,7 @@ export type SaemInstructor = {
   bank_account: string | null;
   account_holder: string | null;
   password_set_at: string | null;
+  must_change_password: boolean;
   invite_token: string | null;
   invite_expires_at: string | null;
   status: SaemStatus;
@@ -126,6 +127,7 @@ export function toInstructor(r: Record<string, unknown>): SaemInstructor {
     bank_account: s(r.bank_account),
     account_holder: s(r.account_holder),
     password_set_at: s(r.password_set_at),
+    must_change_password: r.must_change_password === true,
     invite_token: s(r.invite_token),
     invite_expires_at: s(r.invite_expires_at),
     status: r.status === "inactive" ? "inactive" : "active",
