@@ -1,6 +1,7 @@
 // =====================================================================
 // 강사·프로그램 관리(동래샘들 연동) 접근 게이트 — /hr/saems
-//   * 접근: M0(관장·부장·master) 또는 hr(인사) 직무. (salaryAccess/facilityAccess 패턴)
+//   * 접근: M0(관장·부장·master) 또는 saem(강사관리) 직무.
+//     (강사관리는 인사가 아닌 각 사업 담당이 쓰므로 hr 와 분리한 전용 직무)
 //   * saem_* 테이블은 RLS 0개 → service_role 경유. 이 게이트가 유일 방어선.
 //   * 확정취소 등 M0 전용 동작을 위해 isM0 반환. onlyM0 옵션 지원.
 //   * 서버 전용 모듈 — 액션/페이지가 import.
@@ -46,7 +47,7 @@ export async function resolveSaemAccess(): Promise<SaemAccess | null> {
 
   const isM0 = isM0Grant({ rank, email: g?.email, authLevel });
   const roles = driverId ? await listRolesForDriver(driverId) : [];
-  const canAccess = isM0 || roles.includes("hr");
+  const canAccess = isM0 || roles.includes("saem");
   if (!canAccess) return null;
   return { name: me.name.trim(), driverId, isM0 };
 }
@@ -56,7 +57,7 @@ export async function requireSaemAccess(opts?: {
 }): Promise<SaemAccess> {
   const ctx = await resolveSaemAccess();
   if (!ctx) {
-    throw new Error("강사·프로그램 관리 권한이 없습니다. (관장·부장 또는 인사 담당자)");
+    throw new Error("강사·프로그램 관리 권한이 없습니다. (관장·부장 또는 강사관리 담당자)");
   }
   if (opts?.onlyM0 && !ctx.isM0) {
     throw new Error("이 작업은 관장·부장만 할 수 있습니다.");

@@ -21,6 +21,11 @@ export const EMPLOYEE_ROLES: EmployeeRole[] = [
     description: "직원정보·증명서·의무교육 현황",
   },
   { key: "recruitment", label: "채용", description: "지원자 심사" },
+  {
+    key: "saem",
+    label: "강사관리",
+    description: "외부 강사·프로그램·근무일지(동래샘들)",
+  },
 ];
 
 // 정의된 직무 key 인지 검증 (저장 시 허용 key 체크).

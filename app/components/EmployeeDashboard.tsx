@@ -569,6 +569,16 @@ export default async function EmployeeDashboard({
                         : "법정 의무교육 등록·이수 현황"
                     }
                   />
+                </div>
+              </div>
+            )}
+
+            {roleSet.has("saem") && (
+              <div>
+                <p className="mb-2 text-xs font-semibold text-ink-muted">
+                  강사관리
+                </p>
+                <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
                   <MenuCard
                     href="/hr/saems/instructors"
                     icon="🧑‍🏫"
