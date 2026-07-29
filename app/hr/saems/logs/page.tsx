@@ -1,9 +1,20 @@
+import { resolveSaemAccess } from "@/lib/saemAccess";
+import { getTermOptions, getLogs } from "@/app/hr/saems/logActions";
+import LogsManager from "@/app/hr/saems/logs/LogsManager";
+
 export const dynamic = "force-dynamic";
 
-export default function LogsPlaceholder() {
+export default async function LogsPage() {
+  const access = await resolveSaemAccess();
+  const [termOptions, initial] = await Promise.all([
+    getTermOptions(),
+    getLogs({}),
+  ]);
   return (
-    <p className="rounded-lg bg-surface px-4 py-10 text-center text-sm text-ink-hint">
-      근무일지 확정 — 준비 중 (SA-5에서 구현)
-    </p>
+    <LogsManager
+      termOptions={termOptions}
+      initial={initial}
+      isM0={access?.isM0 ?? false}
+    />
   );
 }
