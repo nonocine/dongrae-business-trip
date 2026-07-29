@@ -636,7 +636,7 @@ export default function TrainingsManager({
                 type="button"
                 onClick={runReminderNow}
                 disabled={reminding}
-                className={btnSecondary}
+                className="inline-flex h-[38px] items-center justify-center gap-1.5 rounded-lg border border-transparent bg-[#800020] px-4 text-sm font-semibold text-white shadow-sm transition hover:bg-[#66001a] disabled:opacity-60"
                 title="마감 D-7 이내 미이수자에게 슬랙 독촉 DM + 관리자 요약을 즉시 발송"
               >
                 {reminding ? "발송 중…" : "지금 독촉 보내기"}
