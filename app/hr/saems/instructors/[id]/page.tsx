@@ -1,7 +1,6 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { getInstructorDetail } from "@/app/hr/saems/instructorActions";
-import { resolveSaemAccess } from "@/lib/saemAccess";
 import InstructorDetail from "@/app/hr/saems/instructors/[id]/InstructorDetail";
 
 export const dynamic = "force-dynamic";
@@ -11,7 +10,6 @@ export default async function InstructorDetailPage({
 }: {
   params: Promise<{ id: string }>;
 }) {
-  const access = await resolveSaemAccess();
   const { id } = await params;
   const detail = await getInstructorDetail(id);
   if (!detail) notFound();
@@ -28,7 +26,6 @@ export default async function InstructorDetailPage({
         instructor={detail.instructor}
         programs={detail.programs}
         docs={detail.docs}
-        isM0={access?.isM0 ?? false}
       />
     </div>
   );

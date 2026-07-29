@@ -1,16 +1,32 @@
 "use server";
 
+import { randomUUID } from "node:crypto";
 import { revalidatePath } from "next/cache";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
+import {
+  supabase,
+  HR_DOCUMENTS_BUCKET,
+  signHrDocument,
+  removeHrDocuments,
+} from "@/lib/supabase";
 import { requireSaemAccess } from "@/lib/saemAccess";
 import {
   normalizePhone,
+  saemAppUrl,
+  isSaemDocSlot,
   toInstructor,
   toProgram,
   toInstructorDoc,
   type SaemInstructor,
   type SaemInstructorDoc,
 } from "@/lib/saem";
+
+const DOC_EXT: Record<string, string> = {
+  "application/pdf": "pdf",
+  "image/jpeg": "jpg",
+  "image/png": "png",
+  "image/webp": "webp",
+};
 
 const INSTR = "saem_instructors";
 const DOCS = "saem_instructor_documents";
@@ -287,4 +303,159 @@ export async function getInstructorDetail(
   );
 
   return { instructor, programs: programRows, docs };
+}
+
+// =====================================================================
+// SA-3. 초대 링크 발급 + 서류함
+// =====================================================================
+
+// 초대(비밀번호 설정) 링크 발급 — 토큰 생성 + 7일 만료. 가입자면 재설정 링크.
+export async function generateInvite(
+  instructorId: string
+): Promise<
+  | { ok: true; url: string; alreadyRegistered: boolean }
+  | { ok: false; message: string }
+> {
+  try {
+    await requireSaemAccess();
+    if (!instructorId) return { ok: false, message: "대상이 없습니다." };
+
+    const { data: ins } = await supabaseAdmin
+      .from(INSTR)
+      .select("id, password_set_at, status")
+      .eq("id", instructorId)
+      .maybeSingle();
+    if (!ins) return { ok: false, message: "강사를 찾을 수 없습니다." };
+
+    const token = randomUUID().replace(/-/g, "");
+    const expires = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString();
+    const { error } = await supabaseAdmin
+      .from(INSTR)
+      .update({ invite_token: token, invite_expires_at: expires })
+      .eq("id", instructorId);
+    if (error) throw new Error(error.message);
+
+    revalidatePath(`/hr/saems/instructors/${instructorId}`);
+    return {
+      ok: true,
+      url: `${saemAppUrl()}/invite/${token}`,
+      alreadyRegistered: !!(ins as { password_set_at?: string | null }).password_set_at,
+    };
+  } catch (e) {
+    return {
+      ok: false,
+      message: e instanceof Error ? e.message : "초대 발급 중 오류가 발생했습니다.",
+    };
+  }
+}
+
+// 서류 업로드(슬롯당 1건 — 교체 시 기존 파일·행 정리). uploaded_by='staff'.
+export async function uploadInstructorDoc(
+  formData: FormData
+): Promise<
+  { ok: true; doc: SaemInstructorDoc } | { ok: false; message: string }
+> {
+  try {
+    await requireSaemAccess();
+    const instructorId = String(formData.get("instructor_id") ?? "").trim();
+    const slot = String(formData.get("slot") ?? "").trim();
+    if (!instructorId || !isSaemDocSlot(slot))
+      return { ok: false, message: "잘못된 요청입니다." };
+
+    const file = formData.get("file");
+    if (!(file instanceof File) || file.size === 0)
+      return { ok: false, message: "업로드할 파일을 선택하세요." };
+    if (file.size > 16 * 1024 * 1024)
+      return { ok: false, message: "파일 용량은 16MB 이하여야 합니다." };
+    const ext = DOC_EXT[file.type];
+    if (!ext)
+      return { ok: false, message: "PDF·JPG·PNG·WEBP 만 업로드할 수 있습니다." };
+
+    // 기존 슬롯 문서(교체) — 파일·행 정리.
+    const { data: prev } = await supabaseAdmin
+      .from(DOCS)
+      .select("id, file_path")
+      .eq("instructor_id", instructorId)
+      .eq("slot", slot);
+    const oldPaths = (prev ?? [])
+      .map((r) => (r as { file_path?: string }).file_path)
+      .filter(Boolean) as string[];
+
+    const path = `instructors/${instructorId}/${slot}_${Date.now()}.${ext}`;
+    const { error: upErr } = await supabase.storage
+      .from(HR_DOCUMENTS_BUCKET)
+      .upload(path, file, { contentType: file.type, upsert: true });
+    if (upErr) return { ok: false, message: `업로드 실패: ${upErr.message}` };
+
+    const { data: inserted, error: insErr } = await supabaseAdmin
+      .from(DOCS)
+      .insert({
+        instructor_id: instructorId,
+        slot,
+        file_path: path,
+        original_name: file.name,
+        uploaded_by: "staff",
+      })
+      .select("*")
+      .single();
+    if (insErr) throw new Error(insErr.message);
+
+    // 이전 행/파일 삭제(신규 성공 후).
+    if (prev && prev.length > 0) {
+      await supabaseAdmin
+        .from(DOCS)
+        .delete()
+        .eq("instructor_id", instructorId)
+        .eq("slot", slot)
+        .neq("id", (inserted as { id: string }).id);
+      if (oldPaths.length) await removeHrDocuments(oldPaths);
+    }
+
+    revalidatePath(`/hr/saems/instructors/${instructorId}`);
+    return { ok: true, doc: toInstructorDoc(inserted as Record<string, unknown>) };
+  } catch (e) {
+    return {
+      ok: false,
+      message: e instanceof Error ? e.message : "업로드 중 오류가 발생했습니다.",
+    };
+  }
+}
+
+// 서류 임시 열람 URL(1시간). 소속 검증 후 서명 URL.
+export async function getInstructorDocUrl(docId: string): Promise<string | null> {
+  await requireSaemAccess();
+  if (!docId) return null;
+  const { data } = await supabaseAdmin
+    .from(DOCS)
+    .select("file_path")
+    .eq("id", docId)
+    .maybeSingle();
+  return signHrDocument((data as { file_path?: string | null } | null)?.file_path ?? null);
+}
+
+// 서류 삭제(행 + 파일).
+export async function deleteInstructorDoc(
+  docId: string
+): Promise<{ ok: true } | { ok: false; message: string }> {
+  try {
+    await requireSaemAccess();
+    if (!docId) return { ok: false, message: "대상이 없습니다." };
+    const { data } = await supabaseAdmin
+      .from(DOCS)
+      .select("id, instructor_id, file_path")
+      .eq("id", docId)
+      .maybeSingle();
+    if (!data) return { ok: true };
+    const row = data as { instructor_id: string; file_path: string };
+    const { error } = await supabaseAdmin.from(DOCS).delete().eq("id", docId);
+    if (error) throw new Error(error.message);
+    if (row.file_path) await removeHrDocuments([row.file_path]);
+    revalidatePath(`/hr/saems/instructors/${row.instructor_id}`);
+    return { ok: true };
+  } catch (e) {
+    return {
+      ok: false,
+      message: e instanceof Error ? e.message : "삭제 중 오류가 발생했습니다.",
+    };
+  }
 }

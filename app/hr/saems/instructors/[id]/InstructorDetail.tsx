@@ -1,10 +1,17 @@
 "use client";
 
-import { useState, useTransition } from "react";
+import { useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { updateInstructor } from "@/app/hr/saems/instructorActions";
+import {
+  updateInstructor,
+  generateInvite,
+  uploadInstructorDoc,
+  getInstructorDocUrl,
+  deleteInstructorDoc,
+} from "@/app/hr/saems/instructorActions";
 import {
   TERM_STATUS_LABEL,
+  SAEM_DOC_SLOTS,
   type SaemInstructor,
   type SaemInstructorDoc,
   type TermStatus,
@@ -13,11 +20,13 @@ import type { InstructorProgramRow } from "@/app/hr/saems/instructorActions";
 import {
   cardCls,
   btnPrimary,
+  btnSecondary,
   badgeNavy,
   badgeSuccess,
   badgeNeutral,
   noticeError,
   noticeSuccess,
+  noticeWarning,
 } from "@/lib/ui";
 
 const inCls =
@@ -28,12 +37,10 @@ export default function InstructorDetail({
   instructor,
   programs,
   docs,
-  isM0,
 }: {
   instructor: SaemInstructor;
   programs: InstructorProgramRow[];
   docs: SaemInstructorDoc[];
-  isM0: boolean;
 }) {
   const router = useRouter();
   const [f, setF] = useState({
@@ -134,8 +141,14 @@ export default function InstructorDetail({
         </div>
       </section>
 
-      {/* 서류함·초대는 SA-3에서 추가 예정 */}
-      <InviteAndDocsSlot instructorId={instructor.id} docs={docs} isM0={isM0} />
+      {/* 초대 링크 */}
+      <InviteSection
+        instructorId={instructor.id}
+        alreadyRegistered={!!instructor.password_set_at}
+      />
+
+      {/* 서류함 */}
+      <DocsSection instructorId={instructor.id} docs={docs} />
 
       {/* 담당 프로그램 */}
       <section className={cardCls}>
@@ -181,20 +194,224 @@ export default function InstructorDetail({
   );
 }
 
-// SA-3에서 초대 링크·서류함 UI 로 대체됩니다(자리표시).
-function InviteAndDocsSlot({
+// --- 초대 링크 발급 ---
+function InviteSection({
+  instructorId,
+  alreadyRegistered,
+}: {
+  instructorId: string;
+  alreadyRegistered: boolean;
+}) {
+  const [url, setUrl] = useState<string | null>(null);
+  const [reset, setReset] = useState(false);
+  const [copied, setCopied] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+  const [pending, start] = useTransition();
+
+  function issue() {
+    setErr(null);
+    setCopied(false);
+    start(async () => {
+      const res = await generateInvite(instructorId);
+      if (!res.ok) {
+        setErr(res.message);
+        return;
+      }
+      setUrl(res.url);
+      setReset(res.alreadyRegistered);
+    });
+  }
+
+  return (
+    <section className={cardCls}>
+      <div className="flex items-center justify-between gap-2">
+        <h3 className="text-base font-bold text-ink">초대 링크</h3>
+        <button type="button" onClick={issue} disabled={pending} className={btnPrimary}>
+          {pending ? "발급 중…" : "초대 링크 발급"}
+        </button>
+      </div>
+      <p className="mt-1 text-xs text-ink-hint">
+        강사가 이 링크로 비밀번호를 설정하면 동래샘들 앱에 로그인합니다. (유효 7일)
+      </p>
+
+      {(alreadyRegistered || reset) && (
+        <p className={`mt-3 ${noticeWarning}`}>
+          이미 가입한 강사입니다 — 이 링크는 <b>비밀번호 재설정</b> 링크로 동작합니다.
+        </p>
+      )}
+
+      {err && <p className={`mt-3 ${noticeError}`}>{err}</p>}
+
+      {url && (
+        <div className="mt-3 flex flex-wrap items-center gap-2">
+          <input
+            readOnly
+            value={url}
+            onFocus={(e) => e.currentTarget.select()}
+            className={`${inCls} min-w-[240px] flex-1 font-mono text-xs`}
+          />
+          <button
+            type="button"
+            onClick={async () => {
+              try {
+                await navigator.clipboard.writeText(url);
+                setCopied(true);
+              } catch {
+                setCopied(false);
+              }
+            }}
+            className={btnSecondary}
+          >
+            {copied ? "복사됨 ✓" : "복사"}
+          </button>
+        </div>
+      )}
+    </section>
+  );
+}
+
+// --- 서류함(7슬롯) ---
+function DocsSection({
+  instructorId,
   docs,
 }: {
   instructorId: string;
   docs: SaemInstructorDoc[];
-  isM0: boolean;
 }) {
+  const router = useRouter();
+  const fileRef = useRef<HTMLInputElement>(null);
+  const [slot, setSlot] = useState<string | null>(null);
+  const [busy, setBusy] = useState<string | null>(null);
+  const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
+  const [pending, start] = useTransition();
+
+  const bySlot = new Map(docs.map((d) => [d.slot, d]));
+
+  function pick(slotKey: string) {
+    setSlot(slotKey);
+    setMsg(null);
+    fileRef.current?.click();
+  }
+  function onFile(file: File) {
+    if (!slot) return;
+    setBusy(slot);
+    start(async () => {
+      const fd = new FormData();
+      fd.set("instructor_id", instructorId);
+      fd.set("slot", slot);
+      fd.set("file", file);
+      const res = await uploadInstructorDoc(fd);
+      setBusy(null);
+      if (!res.ok) {
+        setMsg({ ok: false, text: res.message });
+        return;
+      }
+      setMsg({ ok: true, text: "업로드했습니다." });
+      router.refresh();
+    });
+  }
+  function view(docId: string) {
+    start(async () => {
+      const u = await getInstructorDocUrl(docId);
+      if (u) window.open(u, "_blank", "noopener,noreferrer");
+      else setMsg({ ok: false, text: "파일을 찾을 수 없습니다." });
+    });
+  }
+  function remove(docId: string) {
+    if (!confirm("이 서류를 삭제할까요?")) return;
+    setBusy(docId);
+    start(async () => {
+      const res = await deleteInstructorDoc(docId);
+      setBusy(null);
+      if (!res.ok) {
+        setMsg({ ok: false, text: res.message });
+        return;
+      }
+      setMsg({ ok: true, text: "삭제했습니다." });
+      router.refresh();
+    });
+  }
+
   return (
     <section className={cardCls}>
-      <p className="text-sm text-ink-hint">
-        초대 링크 발급·서류함(현재 {docs.length}건)은 다음 커밋(SA-3)에서
-        활성화됩니다.
+      <h3 className="mb-1 text-base font-bold text-ink">서류함</h3>
+      <p className="mb-3 text-xs text-ink-hint">
+        PDF·JPG·PNG·WEBP, 16MB 이하. 슬롯당 1건(업로드 시 교체). 비공개 저장.
       </p>
+      {msg && (
+        <p className={`mb-3 ${msg.ok ? noticeSuccess : noticeError}`}>{msg.text}</p>
+      )}
+      <ul className="divide-y divide-line/60">
+        {SAEM_DOC_SLOTS.map((sl) => {
+          const doc = bySlot.get(sl.key);
+          const rowBusy = pending && (busy === sl.key || (doc && busy === doc.id));
+          return (
+            <li key={sl.key} className="flex items-center justify-between gap-2 py-2">
+              <div className="min-w-0">
+                <span className="text-sm font-semibold text-ink">{sl.label}</span>
+                {doc ? (
+                  <span className="ml-2 truncate text-xs text-ink-hint">
+                    {doc.original_name ?? "업로드됨"}
+                  </span>
+                ) : (
+                  <span className="ml-2 text-xs text-ink-hint">미제출</span>
+                )}
+              </div>
+              <div className="flex shrink-0 items-center gap-1">
+                {doc ? (
+                  <>
+                    <span className={badgeSuccess}>제출</span>
+                    <button
+                      type="button"
+                      onClick={() => view(doc.id)}
+                      disabled={pending}
+                      className="rounded border border-line px-2 py-1 text-xs text-ink-muted hover:bg-surface disabled:opacity-50"
+                    >
+                      보기
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => pick(sl.key)}
+                      disabled={rowBusy}
+                      className="rounded border border-line px-2 py-1 text-xs text-ink-muted hover:bg-surface disabled:opacity-50"
+                    >
+                      교체
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => remove(doc.id)}
+                      disabled={rowBusy}
+                      className="rounded border border-stamp px-2 py-1 text-xs text-stamp hover:bg-stamp-soft disabled:opacity-50"
+                    >
+                      삭제
+                    </button>
+                  </>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={() => pick(sl.key)}
+                    disabled={rowBusy}
+                    className="rounded border border-navy px-2.5 py-1 text-xs font-semibold text-navy hover:bg-navy-soft disabled:opacity-50"
+                  >
+                    {rowBusy ? "업로드 중…" : "업로드"}
+                  </button>
+                )}
+              </div>
+            </li>
+          );
+        })}
+      </ul>
+      <input
+        ref={fileRef}
+        type="file"
+        accept="application/pdf,image/jpeg,image/png,image/webp"
+        className="hidden"
+        onChange={(e) => {
+          const f = e.target.files?.[0];
+          e.target.value = "";
+          if (f) onFile(f);
+        }}
+      />
     </section>
   );
 }
