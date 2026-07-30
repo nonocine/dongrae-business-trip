@@ -107,6 +107,9 @@ export type AdminApplicant = {
   screening_reject_reason: string | null;
   // 직원 전환 시 연결된 drivers.id (없으면 미전환). 전환 버튼/배지 분기에 사용.
   converted_to_employee_id: string | null;
+  // 전환일 표시용 — 전환된 경우 recruitment_applications.updated_at(전환 시점)을 담음.
+  //   전환 후에는 이 행이 갱신되지 않으므로 updated_at 이 곧 전환 시각이다. 미전환이면 null.
+  converted_at: string | null;
 };
 
 export type ScoreEntry = {
@@ -229,7 +232,7 @@ export async function listApplicantsForAdmin(
   const { data: apps, error: aErr } = await supabaseAdmin
     .from("recruitment_applications")
     .select(
-      "id, applicant_id, status, submitted_at, screening_reject_reason, converted_to_employee_id, applicant:recruitment_applicants(*)"
+      "id, applicant_id, status, submitted_at, screening_reject_reason, converted_to_employee_id, updated_at, applicant:recruitment_applicants(*)"
     )
     .eq("posting_id", posting.id)
     // 임시저장(draft) 상태는 노출하지 않음 — 접수 완료된 지원서만.
@@ -299,6 +302,10 @@ export async function listApplicantsForAdmin(
         (r.screening_reject_reason as string | null) ?? null,
       converted_to_employee_id:
         (r.converted_to_employee_id as string | null) ?? null,
+      converted_at:
+        r.converted_to_employee_id != null
+          ? ((r.updated_at as string | null) ?? null)
+          : null,
     });
   }
   return result;

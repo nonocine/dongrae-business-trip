@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useMemo, useState, useTransition } from "react";
 import {
   cardCls,
@@ -18,7 +19,7 @@ import {
   splitRecruitmentFields,
   fieldBadgeCls,
 } from "@/lib/ui";
-import { fmtKstDateTime } from "@/lib/datetime";
+import { fmtKstDateTime, fmtKstDate } from "@/lib/datetime";
 import {
   SCREENING_ITEMS,
   SCREENING_GROUPS,
@@ -144,6 +145,7 @@ export default function ScreeningDashboard({
           aggregated={aggregated}
           reviewers={reviewers}
           onOpen={openDetail}
+          canManageAuth={canManageAuth}
         />
       )}
 
@@ -156,6 +158,7 @@ export default function ScreeningDashboard({
               (s) => s.application_id === selected.application_id
             )}
             myReviewerName={myReviewerName}
+            canManageAuth={canManageAuth}
           />
         ) : (
           <EmptyDetail onGoList={() => setTab("list")} />
@@ -344,11 +347,13 @@ function ApplicantListView({
   aggregated,
   reviewers,
   onOpen,
+  canManageAuth,
 }: {
   applicants: AdminApplicant[];
   aggregated: Map<string, Aggregate>;
   reviewers: { screening: string[]; interview: string[] };
   onOpen: (applicationId: string) => void;
+  canManageAuth: boolean;
 }) {
   type SortKey = "name" | "submitted" | "screening" | "interview" | "total";
   // 기본은 이름 가나다순(한글 오름차순) — 총괄표와 동일한 순서로 통일.
@@ -451,6 +456,14 @@ function ApplicantListView({
                     <span className={statusBadgeOf(a.status)}>
                       {APPLICATION_STATUS_LABEL[a.status]}
                     </span>
+                    {/* 최종합격 + 미전환 + M0 → 목록에서도 눈에 띄게 "전환 대기" 배지. */}
+                    {canManageAuth &&
+                      a.status === "final_passed" &&
+                      a.converted_to_employee_id == null && (
+                        <span className={`${badgeWarning} ml-1.5`}>
+                          전환 대기
+                        </span>
+                      )}
                   </td>
                   <td className="px-3 py-2 text-right align-top">
                     <div className="font-semibold text-brand-blue">
@@ -514,11 +527,13 @@ function ApplicantDetailView({
   applicant,
   scoresForApp,
   myReviewerName,
+  canManageAuth,
 }: {
   posting: AdminPosting;
   applicant: AdminApplicant;
   scoresForApp: ScoreEntry[];
   myReviewerName: string;
+  canManageAuth: boolean;
 }) {
   // 내 서류 채점 — 없으면 빈 선택으로 시작.
   const myScreening =
@@ -547,6 +562,10 @@ function ApplicantDetailView({
           applicationId={applicant.application_id}
           currentStatus={applicant.status}
           rejectReasonInitial={applicant.screening_reject_reason ?? ""}
+          applicantName={applicant.name}
+          convertedEmployeeId={applicant.converted_to_employee_id}
+          convertedAt={applicant.converted_at}
+          canManageAuth={canManageAuth}
         />
         <OtherReviewersCard
           scoresForApp={scoresForApp}
@@ -1032,14 +1051,50 @@ function StatusActionsCard({
   applicationId,
   currentStatus,
   rejectReasonInitial,
+  applicantName,
+  convertedEmployeeId,
+  convertedAt,
+  canManageAuth,
 }: {
   slug: string;
   applicationId: string;
   currentStatus: AppStatus;
   rejectReasonInitial: string;
+  applicantName: string;
+  convertedEmployeeId: string | null;
+  convertedAt: string | null;
+  canManageAuth: boolean;
 }) {
   const [pending, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
+
+  // 직원 전환 — 최종 집계 탭의 로직을 그대로 재사용(convertApplicantToEmployee).
+  const [converting, startConvert] = useTransition();
+  const [convertError, setConvertError] = useState<string | null>(null);
+  const converted = convertedEmployeeId != null;
+
+  function handleConvert() {
+    if (
+      !confirm(
+        `${applicantName} 님을 직원으로 전환합니다.\n이메일은 전환 후 인사기록카드에서 입력하세요.`
+      )
+    )
+      return;
+    setConvertError(null);
+    startConvert(async () => {
+      try {
+        const res = await convertApplicantToEmployee(applicationId);
+        if (!res.ok) setConvertError(res.message);
+        // 성공 시 revalidate 로 상태가 갱신되어 "전환됨" 배지로 바뀜.
+      } catch (e) {
+        setConvertError(
+          e instanceof Error
+            ? `전환 실패: ${e.message}`
+            : "직원 전환 중 오류가 발생했습니다."
+        );
+      }
+    });
+  }
 
   // 불합격 사유 — 상태와 독립. 합격으로 바꿔도 입력값은 state 에 보존되어
   // 다시 불합격하면 그대로 복원됩니다(DB 에도 별도 컬럼으로 보존).
@@ -1096,6 +1151,44 @@ function StatusActionsCard({
           {APPLICATION_STATUS_LABEL[currentStatus]}
         </span>
       </p>
+
+      {/* 직원 전환 강조 블록 — 최종합격자에게만 카드 최상단에 노출.
+          공고 상태(종결/archived)와 무관하게 동작(전환 로직·서버 액션에 공고 status 가드 없음). */}
+      {currentStatus === "final_passed" && (converted || canManageAuth) && (
+        <div className="mt-3 rounded-lg border border-navy/40 bg-navy-soft/40 p-3">
+          {converted ? (
+            <>
+              <p className="text-sm font-semibold text-navy">
+                ✓ 직원으로 전환됨
+                {convertedAt ? ` (${fmtKstDate(convertedAt)})` : ""}
+              </p>
+              <Link
+                href="/hr?tab=records"
+                className="mt-1 inline-block text-xs font-semibold text-navy underline hover:opacity-80"
+              >
+                인사기록카드로 이동 →
+              </Link>
+            </>
+          ) : (
+            <>
+              <p className="text-xs font-semibold text-navy">
+                최종합격자입니다. 직원으로 전환하세요.
+              </p>
+              <button
+                type="button"
+                onClick={handleConvert}
+                disabled={converting}
+                className={`${btnPrimary} mt-2 w-full`}
+              >
+                {converting ? "전환 중…" : "직원으로 전환"}
+              </button>
+              {convertError && (
+                <p className={`mt-2 ${noticeError}`}>{convertError}</p>
+              )}
+            </>
+          )}
+        </div>
+      )}
 
       <div className="mt-3 space-y-2">
         <div>
