@@ -23,6 +23,7 @@ const PROJ = "saem_projects";
 const TERM = "saem_terms";
 const PROG = "saem_programs";
 const SESS = "saem_sessions";
+const SETT = "saem_settlements";
 
 function clean(v: string | null | undefined): string | null {
   const s = (v ?? "").trim();
@@ -730,27 +731,103 @@ export async function generateProgramSessions(
   }
 }
 
-// 삭제 — 제출 기록(instructor_submitted_at)이 있는 회차가 없을 때만.
+// =====================================================================
+// SA-15. 프로그램 삭제 판정 — 정산 근거 보존을 위해 기록이 있으면 삭제 불가.
+//   사유를 건수로 돌려주어 화면이 "왜 안 되는지"와 해제 절차를 보여줄 수 있게 한다.
+// =====================================================================
+export type ProgramDeletability = {
+  deletable: boolean;
+  sessionCount: number; // 회차 수(삭제 시 함께 지워짐)
+  submittedLogs: number; // 강사 제출 일지
+  confirmedLogs: number; // 직원 확정 일지
+  settlementLinks: number; // 정산에 묶인 회차(전체)
+  confirmedSettlementLinks: number; // 그중 확정된 정산
+};
+
+async function judgeProgramDeletable(id: string): Promise<ProgramDeletability> {
+  const { data: sess } = await supabaseAdmin
+    .from(SESS)
+    .select("id, instructor_submitted_at, staff_confirmed_at, settlement_id")
+    .eq("program_id", id);
+
+  const rows = (sess ?? []).map((r) => r as Record<string, unknown>);
+  const submittedLogs = rows.filter((r) => r.instructor_submitted_at != null).length;
+  const confirmedLogs = rows.filter((r) => r.staff_confirmed_at != null).length;
+  const settIds = [
+    ...new Set(
+      rows
+        .map((r) => (r.settlement_id as string | null) ?? null)
+        .filter(Boolean) as string[]
+    ),
+  ];
+  const settlementLinks = rows.filter((r) => r.settlement_id != null).length;
+
+  // 묶인 정산 중 확정된 것 개수(회차 단위로 센다).
+  let confirmedSettlementLinks = 0;
+  if (settIds.length) {
+    const { data: setts } = await supabaseAdmin
+      .from(SETT)
+      .select("id, status")
+      .in("id", settIds);
+    const confirmedSet = new Set(
+      (setts ?? [])
+        .filter((s) => (s as { status: string }).status === "confirmed")
+        .map((s) => String((s as { id: string }).id))
+    );
+    confirmedSettlementLinks = rows.filter(
+      (r) =>
+        r.settlement_id != null && confirmedSet.has(String(r.settlement_id))
+    ).length;
+  }
+
+  return {
+    deletable:
+      submittedLogs === 0 && confirmedLogs === 0 && settlementLinks === 0,
+    sessionCount: rows.length,
+    submittedLogs,
+    confirmedLogs,
+    settlementLinks,
+    confirmedSettlementLinks,
+  };
+}
+
+export async function checkProgramDeletable(
+  id: string
+): Promise<ProgramDeletability> {
+  await requireSaemAccess();
+  return judgeProgramDeletable(id);
+}
+
+// 삭제 — 판정을 서버에서 재수행(화면 판정만 믿지 않음). 회차도 함께 삭제.
 export async function deleteProgram(
   id: string
-): Promise<{ ok: true } | { ok: false; message: string }> {
+): Promise<
+  | { ok: true; deletedSessions: number }
+  | { ok: false; message: string; deletability?: ProgramDeletability }
+> {
   try {
     await requireSaemAccess();
     if (!id) return { ok: false, message: "대상이 없습니다." };
-    const { data: submitted } = await supabaseAdmin
+
+    const d = await judgeProgramDeletable(id);
+    if (!d.deletable)
+      return {
+        ok: false,
+        message:
+          "제출·확정된 근무일지 또는 정산 연결이 있어 삭제할 수 없습니다.",
+        deletability: d,
+      };
+
+    // 회차 삭제 — 실패를 삼키지 않는다(조용한 실패 경로 제거).
+    const { error: sErr } = await supabaseAdmin
       .from(SESS)
-      .select("id")
-      .eq("program_id", id)
-      .not("instructor_submitted_at", "is", null)
-      .limit(1)
-      .maybeSingle();
-    if (submitted)
-      return { ok: false, message: "제출된 근무일지가 있어 삭제할 수 없습니다." };
-    await supabaseAdmin.from(SESS).delete().eq("program_id", id);
+      .delete()
+      .eq("program_id", id);
+    if (sErr) throw new Error(`회차 삭제 실패: ${sErr.message}`);
     const { error } = await supabaseAdmin.from(PROG).delete().eq("id", id);
     if (error) throw new Error(error.message);
     revalidatePath("/hr/saems/programs");
-    return { ok: true };
+    return { ok: true, deletedSessions: d.sessionCount };
   } catch (e) {
     return { ok: false, message: e instanceof Error ? e.message : "삭제 중 오류가 발생했습니다." };
   }

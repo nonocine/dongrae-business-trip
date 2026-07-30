@@ -13,10 +13,12 @@ import {
   addProgram,
   updateProgram,
   deleteProgram,
+  checkProgramDeletable,
   generateProgramSessions,
   type ProgramRow,
   type InstructorOption,
   type ProgramInput,
+  type ProgramDeletability,
 } from "@/app/hr/saems/programActions";
 import {
   TERM_STATUS_LABEL,
@@ -35,6 +37,7 @@ import {
   cardCls,
   btnPrimary,
   btnSecondary,
+  btnDanger,
   badgeDanger,
   badgeNeutral,
   noticeError,
@@ -56,6 +59,7 @@ type Modal =
   | { kind: "copy" }
   | { kind: "program"; program: ProgramRow | null }
   | { kind: "sessions"; program: ProgramRow }
+  | { kind: "delete"; program: ProgramRow; check: ProgramDeletability }
   | null;
 
 // =====================================================================
@@ -255,17 +259,12 @@ export default function ProgramsManager({
     });
   }
 
+  // 삭제 — 서버 판정을 먼저 받아 모달로 결과를 보여준다(조용한 실패 없음).
   function onDeleteProgram(p: ProgramRow) {
-    if (!confirm(`[${p.name}] 프로그램을 삭제할까요?`)) return;
     setMsg(null);
     start(async () => {
-      const res = await deleteProgram(p.id);
-      if (!res.ok) {
-        setMsg({ ok: false, text: res.message });
-        return;
-      }
-      await reloadPrograms();
-      setMsg({ ok: true, text: "삭제했습니다." });
+      const check = await checkProgramDeletable(p.id);
+      setModal({ kind: "delete", program: p, check });
     });
   }
 
@@ -521,7 +520,132 @@ export default function ProgramsManager({
           }}
         />
       )}
+      {modal?.kind === "delete" && (
+        <DeleteProgramModal
+          program={modal.program}
+          check={modal.check}
+          onClose={() => setModal(null)}
+          onDone={async (text) => {
+            setModal(null);
+            await reloadPrograms();
+            setMsg({ ok: true, text });
+          }}
+        />
+      )}
     </div>
+  );
+}
+
+// =====================================================================
+// SA-15. 삭제 안내 — 가능하면 확인, 불가하면 사유와 해제 절차를 보여준다.
+// =====================================================================
+function DeleteProgramModal({
+  program,
+  check,
+  onClose,
+  onDone,
+}: {
+  program: ProgramRow;
+  check: ProgramDeletability;
+  onClose: () => void;
+  onDone: (text: string) => void;
+}) {
+  const [err, setErr] = useState<string | null>(null);
+  const [pending, start] = useTransition();
+
+  // 불가 사유 — 0건인 항목은 나열하지 않는다.
+  const reasons: string[] = [];
+  if (check.submittedLogs > 0)
+    reasons.push(`제출된 근무일지 ${check.submittedLogs}건`);
+  if (check.confirmedLogs > 0)
+    reasons.push(`확정된 근무일지 ${check.confirmedLogs}건`);
+  if (check.settlementLinks > 0)
+    reasons.push(
+      `정산에 묶인 회차 ${check.settlementLinks}건` +
+        (check.confirmedSettlementLinks > 0
+          ? ` (그중 확정 정산 ${check.confirmedSettlementLinks}건)`
+          : "")
+    );
+
+  if (!check.deletable) {
+    return (
+      <ModalShell title="삭제할 수 없습니다" onClose={onClose}>
+        <p className="text-sm text-ink-body">
+          <b>{program.name}</b> 은 정산 근거가 되는 기록이 있어 삭제할 수 없습니다.
+        </p>
+        <ul className="mt-3 space-y-1 rounded-md border border-stamp/40 bg-stamp-soft p-3">
+          {reasons.map((r) => (
+            <li key={r} className="text-sm text-stamp">
+              • {r}
+            </li>
+          ))}
+        </ul>
+        <div className="mt-3 rounded-md border border-line bg-surface p-3">
+          <p className="text-[11px] font-semibold text-navy">정리하려면</p>
+          <p className="mt-1 text-xs text-ink-body">
+            정산 확정취소(M0) → 정산 삭제 → 일지 확정취소 → 삭제
+          </p>
+          <p className="mt-1.5 text-[11px] text-ink-hint">
+            기록을 남겨야 한다면 삭제하지 말고 프로그램을 그대로 두세요. 회차만
+            정리하려면 프로그램 수정에서 스케줄을 바꾸면 미제출 회차만 정리됩니다.
+          </p>
+        </div>
+        <div className="mt-4 flex gap-2">
+          <button type="button" onClick={onClose} className={btnSecondary}>
+            닫기
+          </button>
+        </div>
+      </ModalShell>
+    );
+  }
+
+  return (
+    <ModalShell title="프로그램 삭제" onClose={onClose}>
+      <p className="text-sm text-ink-body">
+        <b>{program.name}</b> 을 삭제할까요?
+      </p>
+      <p className="mt-2 text-xs text-ink-muted">
+        제출·확정된 근무일지와 정산 연결이 없어 삭제할 수 있습니다.
+        {check.sessionCount > 0
+          ? ` 회차 ${check.sessionCount}건이 함께 삭제됩니다.`
+          : " 삭제할 회차는 없습니다."}
+      </p>
+      {err && <p className={`mt-3 ${noticeError}`}>{err}</p>}
+      <div className="mt-4 flex gap-2">
+        <button
+          type="button"
+          disabled={pending}
+          className={btnDanger}
+          onClick={() =>
+            start(async () => {
+              setErr(null);
+              const res = await deleteProgram(program.id);
+              if (!res.ok) {
+                // 서버 재판정에서 막혔으면 사유까지 그대로 보여준다.
+                setErr(
+                  res.deletability
+                    ? `${res.message} (제출 ${res.deletability.submittedLogs} · 확정 ${res.deletability.confirmedLogs} · 정산 연결 ${res.deletability.settlementLinks})`
+                    : res.message
+                );
+                return;
+              }
+              onDone(
+                `삭제했습니다.${
+                  res.deletedSessions > 0
+                    ? ` (회차 ${res.deletedSessions}건 함께 삭제)`
+                    : ""
+                }`
+              );
+            })
+          }
+        >
+          {pending ? "삭제 중…" : "삭제"}
+        </button>
+        <button type="button" onClick={onClose} className={btnSecondary}>
+          취소
+        </button>
+      </div>
+    </ModalShell>
   );
 }
 

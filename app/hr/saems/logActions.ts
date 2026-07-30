@@ -210,13 +210,26 @@ export async function confirmSessions(
   }
 }
 
-// 확정 취소 — M0 전용.
+// 확정 취소 — M0 전용. 정산에 묶인 회차는 정산부터 풀어야 한다(SA-15).
 export async function unconfirmSession(
   id: string
 ): Promise<{ ok: true } | { ok: false; message: string }> {
   try {
     await requireSaemAccess({ onlyM0: true });
     if (!id) return { ok: false, message: "대상이 없습니다." };
+
+    const { data: row } = await supabaseAdmin
+      .from(SESS)
+      .select("id, settlement_id")
+      .eq("id", id)
+      .maybeSingle();
+    if (!row) return { ok: false, message: "회차를 찾을 수 없습니다." };
+    if ((row as { settlement_id: string | null }).settlement_id != null)
+      return {
+        ok: false,
+        message: "정산에 묶여 있어 정산부터 취소하세요. (정산 탭 → 확정취소 또는 삭제)",
+      };
+
     const { error } = await supabaseAdmin
       .from(SESS)
       .update({ staff_confirmed_at: null, confirmed_by: null })
