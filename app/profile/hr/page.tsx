@@ -4,6 +4,7 @@ import Header from "@/app/components/Header";
 import MyEmployeeProfileForm from "@/app/profile/hr/MyEmployeeProfileForm";
 import MyTrainingsSection from "@/app/profile/hr/MyTrainingsSection";
 import MyCertificatesSection from "@/app/profile/hr/MyCertificatesSection";
+import MyHrTabs from "@/app/profile/hr/MyHrTabs";
 import { getMyProfile } from "@/app/profile/hr/actions";
 import { getMyTrainings } from "@/app/profile/hr/trainingActions";
 import {
@@ -51,26 +52,33 @@ export default async function MyHrPage() {
             ← 목록
           </Link>
         </div>
-        <MyEmployeeProfileForm
-          driverId={my.driver.id}
-          driverName={my.driver.name}
-          profile={my.profile}
+        {/* 한 페이지 세로 나열이 너무 길어 3개 탭으로 나눔(내용은 그대로 이동). */}
+        <MyHrTabs
+          info={
+            <MyEmployeeProfileForm
+              driverId={my.driver.id}
+              driverName={my.driver.name}
+              profile={my.profile}
+            />
+          }
+          certs={
+            <MyCertificatesSection
+              history={myCerts}
+              requests={myCertRequests}
+              defaultDuty={certPrefill?.defaultDuty ?? ""}
+              canIssue={certPrefill?.canIssue ?? false}
+            />
+          }
+          trainings={
+            myTrainings ? (
+              <MyTrainingsSection initial={myTrainings} />
+            ) : (
+              <p className="py-6 text-center text-sm text-ink-hint">
+                올해 등록된 의무교육이 없습니다.
+              </p>
+            )
+          }
         />
-
-        <div className="mt-5">
-          <MyCertificatesSection
-            history={myCerts}
-            requests={myCertRequests}
-            defaultDuty={certPrefill?.defaultDuty ?? ""}
-            canIssue={certPrefill?.canIssue ?? false}
-          />
-        </div>
-
-        {myTrainings && (
-          <div className="mt-5">
-            <MyTrainingsSection initial={myTrainings} />
-          </div>
-        )}
       </main>
     </>
   );
