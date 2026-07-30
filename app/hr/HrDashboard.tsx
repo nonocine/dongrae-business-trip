@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useMemo, useState } from "react";
 import EmployeeProfileForm from "@/app/hr/EmployeeProfileForm";
 import RecruitmentPostingsTab from "@/app/hr/RecruitmentPostingsTab";
+import RowChevron from "@/app/components/RowChevron";
 import type { Driver, EmployeeProfile } from "@/lib/supabase";
 import type { RecruitmentPostingAdmin } from "@/app/hr/actions";
 import { cardCls, inputCls, tabBarCls, tabNavCls, tabItemCls } from "@/lib/ui";
@@ -97,14 +98,14 @@ function Tabs({
 // =====================================================================
 function QuickAccess({ onTab }: { onTab: (t: TabKey) => void }) {
   const base =
-    "flex items-start gap-3 rounded-xl border border-line bg-card p-4 text-left shadow-sm transition hover:border-navy hover:bg-navy-soft/40";
+    "group flex items-start gap-3 rounded-xl border border-line bg-card p-4 text-left shadow-sm transition hover:border-navy hover:bg-navy-soft/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-navy focus-visible:ring-offset-2";
   return (
     <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
       <button type="button" onClick={() => onTab("recruitment")} className={base}>
         <span aria-hidden className="text-2xl">
           📢
         </span>
-        <span>
+        <span className="min-w-0">
           <span className="block text-sm font-semibold text-ink">
             채용 공고 관리
           </span>
@@ -112,13 +113,14 @@ function QuickAccess({ onTab }: { onTab: (t: TabKey) => void }) {
             공고 작성·게시, 지원자 전형 관리
           </span>
         </span>
+        <RowChevron className="ml-auto self-center" />
       </button>
 
       <Link href="/hr/external-judges" className={base}>
         <span aria-hidden className="text-2xl">
           👥
         </span>
-        <span>
+        <span className="min-w-0">
           <span className="block text-sm font-semibold text-ink">
             외부 심사위원 등록
           </span>
@@ -126,13 +128,14 @@ function QuickAccess({ onTab }: { onTab: (t: TabKey) => void }) {
             심사위원 명단 관리·채용별 배정
           </span>
         </span>
+        <RowChevron className="ml-auto self-center" />
       </Link>
 
       <button type="button" onClick={() => onTab("records")} className={base}>
         <span aria-hidden className="text-2xl">
           🗂
         </span>
-        <span>
+        <span className="min-w-0">
           <span className="block text-sm font-semibold text-ink">
             직원 인사 관리
           </span>
@@ -140,6 +143,7 @@ function QuickAccess({ onTab }: { onTab: (t: TabKey) => void }) {
             인사기록카드 입력·열람
           </span>
         </span>
+        <RowChevron className="ml-auto self-center" />
       </button>
     </div>
   );

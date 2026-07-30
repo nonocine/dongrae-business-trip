@@ -19,14 +19,24 @@ export const btnPrimary = `${btnBase} bg-navy font-semibold text-white hover:bg-
 export const btnSecondary = `${btnBase} border border-line bg-card font-medium text-ink-body hover:bg-surface focus-visible:ring-navy`;
 export const btnDanger = `${btnBase} border border-stamp bg-card font-semibold text-stamp hover:bg-stamp-soft focus-visible:ring-stamp`;
 
-// --- 탭 ---
+// --- 텍스트 링크 --- 색(네이비)+hover 밑줄 통일.
+export const linkCls =
+  "font-medium text-navy underline-offset-2 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-navy focus-visible:ring-offset-1 rounded-sm";
+
+// --- 클릭 가능한 행/카드 (목록→상세) ---
+//   정보용(클릭 불가) 카드와 구분: 커서 포인터 + hover 배경 + 포커스 링.
+//   우측에 옅은 → 아이콘(RowChevron)을 함께 배치해 "눌러서 이동"을 명시한다.
+export const rowLinkCls =
+  "group cursor-pointer transition-colors hover:bg-surface focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-navy";
+
+// --- 탭 --- 활성 탭 하단 굵은 인디케이터+글자 굵게, 비활성 muted+hover 배경.
 export const tabBarCls = "overflow-x-auto border-b border-line";
 export const tabNavCls = "flex min-w-max gap-1";
 export function tabItemCls(active: boolean): string {
-  return `relative -mb-px whitespace-nowrap border-b-2 px-3 py-2 text-sm font-semibold transition ${
+  return `relative -mb-px whitespace-nowrap rounded-t-md border-b-2 px-3 py-2 text-sm transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-navy ${
     active
-      ? "border-navy text-navy"
-      : "border-transparent text-ink-muted hover:text-ink"
+      ? "border-navy font-bold text-navy"
+      : "border-transparent font-semibold text-ink-muted hover:bg-surface hover:text-ink"
   }`;
 }
 

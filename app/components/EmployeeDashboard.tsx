@@ -69,7 +69,7 @@ function MenuCard({
   return (
     <Link
       href={href}
-      className="group flex items-start gap-3 rounded-xl border border-line bg-card p-4 text-left shadow-sm transition hover:border-navy hover:bg-navy-soft/40"
+      className="group flex items-start gap-3 rounded-xl border border-line bg-card p-4 text-left shadow-sm transition hover:border-navy hover:bg-navy-soft/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-navy focus-visible:ring-offset-2"
     >
       <span aria-hidden className="text-2xl">
         {icon}
@@ -310,7 +310,7 @@ export default async function EmployeeDashboard({
               <li key={a.slug}>
                 <Link
                   href={`/recruitment/${a.slug}/interview`}
-                  className="group flex items-center gap-3 rounded-xl border border-brand-blue/40 bg-brand-blue-soft/30 p-4 text-left transition hover:border-brand-blue hover:bg-brand-blue-soft/60"
+                  className="group flex items-center gap-3 rounded-xl border border-brand-blue/40 bg-brand-blue-soft/30 p-4 text-left transition hover:border-brand-blue hover:bg-brand-blue-soft/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-blue focus-visible:ring-offset-2"
                 >
                   <span aria-hidden className="text-2xl">
                     🧑‍⚖️

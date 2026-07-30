@@ -10,6 +10,7 @@ import {
 } from "@/app/hr/saems/instructorActions";
 import { SAEM_DOC_SLOTS } from "@/lib/saem";
 import Button from "@/app/components/Button";
+import RowChevron from "@/app/components/RowChevron";
 import {
   cardCls,
   btnPrimary,
@@ -98,6 +99,7 @@ export default function InstructorsManager({
                   <th className={thCls}>가입</th>
                   <th className={`${thCls} text-right`}>서류</th>
                   <th className={`${thCls} text-right`}>프로그램</th>
+                  <th className={`${thCls} w-6`} aria-label="이동" />
                 </tr>
               </thead>
               <tbody>
@@ -105,7 +107,7 @@ export default function InstructorsManager({
                   <tr
                     key={i.id}
                     onClick={() => router.push(`/hr/saems/instructors/${i.id}`)}
-                    className="cursor-pointer border-b border-line/60 hover:bg-surface"
+                    className="group cursor-pointer border-b border-line/60 hover:bg-surface"
                   >
                     <td className={`${tdCls} font-medium text-ink`}>{i.name}</td>
                     <td className={`${tdCls} font-mono text-xs`}>
@@ -132,6 +134,9 @@ export default function InstructorsManager({
                     </td>
                     <td className={`${tdCls} text-right font-mono`}>
                       {i.programCount}
+                    </td>
+                    <td className={`${tdCls} pr-1 text-right`}>
+                      <RowChevron />
                     </td>
                   </tr>
                 ))}
