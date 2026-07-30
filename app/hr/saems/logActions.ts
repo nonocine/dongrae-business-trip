@@ -210,12 +210,13 @@ export async function confirmSessions(
   }
 }
 
-// 확정 취소 — M0 전용. 정산에 묶인 회차는 정산부터 풀어야 한다(SA-15).
+// 확정 취소 — SA-17: 일상 운영이므로 saem 직무도 가능(M0 병목 해소).
+//   단 정산에 묶인 회차는 정산부터 풀어야 한다(SA-15). 정산 확정취소는 M0 유지.
 export async function unconfirmSession(
   id: string
 ): Promise<{ ok: true } | { ok: false; message: string }> {
   try {
-    await requireSaemAccess({ onlyM0: true });
+    await requireSaemAccess();
     if (!id) return { ok: false, message: "대상이 없습니다." };
 
     const { data: row } = await supabaseAdmin
@@ -227,7 +228,8 @@ export async function unconfirmSession(
     if ((row as { settlement_id: string | null }).settlement_id != null)
       return {
         ok: false,
-        message: "정산에 묶여 있어 정산부터 취소하세요. (정산 탭 → 확정취소 또는 삭제)",
+        message:
+          "정산에 묶여 있습니다. 정산 확정취소(관장)→정산 삭제 후 가능",
       };
 
     const { error } = await supabaseAdmin
@@ -241,6 +243,56 @@ export async function unconfirmSession(
     return {
       ok: false,
       message: e instanceof Error ? e.message : "확정 취소 중 오류가 발생했습니다.",
+    };
+  }
+}
+
+// SA-17. 작성 내용 초기화 — 강사가 처음부터 다시 쓰게 되돌린다(saem 또는 M0).
+//   지우는 값: log_content · note · student_count · work_hours · instructor_submitted_at
+//   보존하는 값: plan_content · session_date · session_no (계획/일정은 센터가 정한 것)
+//   확정된 회차는 대상 아님 — 먼저 확정 취소해야 한다.
+export async function resetSession(
+  id: string
+): Promise<{ ok: true } | { ok: false; message: string }> {
+  try {
+    await requireSaemAccess();
+    if (!id) return { ok: false, message: "대상이 없습니다." };
+
+    const { data: row } = await supabaseAdmin
+      .from(SESS)
+      .select("id, staff_confirmed_at")
+      .eq("id", id)
+      .maybeSingle();
+    if (!row) return { ok: false, message: "회차를 찾을 수 없습니다." };
+    if ((row as { staff_confirmed_at: string | null }).staff_confirmed_at != null)
+      return {
+        ok: false,
+        message: "확정된 회차입니다. 먼저 확정을 취소하세요.",
+      };
+
+    // 서버 재검증 — 조건을 update 절에도 걸어 경합 상황에서도 확정본을 건드리지 않는다.
+    const { data, error } = await supabaseAdmin
+      .from(SESS)
+      .update({
+        log_content: null,
+        note: null,
+        student_count: null,
+        work_hours: null,
+        instructor_submitted_at: null,
+      })
+      .eq("id", id)
+      .is("staff_confirmed_at", null)
+      .select("id");
+    if (error) throw new Error(error.message);
+    if ((data ?? []).length === 0)
+      return { ok: false, message: "초기화하지 못했습니다. (확정 여부를 확인하세요)" };
+
+    revalidatePath("/hr/saems/logs");
+    return { ok: true };
+  } catch (e) {
+    return {
+      ok: false,
+      message: e instanceof Error ? e.message : "초기화 중 오류가 발생했습니다.",
     };
   }
 }

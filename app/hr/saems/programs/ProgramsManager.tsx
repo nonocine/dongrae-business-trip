@@ -583,7 +583,11 @@ function DeleteProgramModal({
         <div className="mt-3 rounded-md border border-line bg-surface p-3">
           <p className="text-[11px] font-semibold text-navy">정리하려면</p>
           <p className="mt-1 text-xs text-ink-body">
-            정산 확정취소(M0) → 정산 삭제 → 일지 확정취소 → 삭제
+            정산 확정취소(관장) → 정산 삭제 → 일지 확정취소 → (필요시 일지
+            초기화) → 프로그램 삭제
+          </p>
+          <p className="mt-1 text-[11px] text-ink-muted">
+            정산 확정취소 외에는 강사관리 담당자가 직접 가능합니다.
           </p>
           <p className="mt-1.5 text-[11px] text-ink-hint">
             기록을 남겨야 한다면 삭제하지 말고 프로그램을 그대로 두세요. 회차만

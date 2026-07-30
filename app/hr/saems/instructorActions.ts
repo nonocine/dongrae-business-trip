@@ -559,11 +559,12 @@ async function judgeInstructorDeletable(
   };
 }
 
-// 삭제 가능 여부 조회(M0 전용) — 화면에서 확인/사유 모달 분기에 사용.
+// 삭제 가능 여부 조회 — 판정은 읽기 전용이라 saem 직무도 볼 수 있다(SA-17).
+//   실제 완전 삭제만 M0 유지(SA-12 설계 존중).
 export async function checkInstructorDeletable(
   id: string
 ): Promise<InstructorDeletability> {
-  await requireSaemAccess({ onlyM0: true });
+  await requireSaemAccess();
   return judgeInstructorDeletable(id);
 }
 

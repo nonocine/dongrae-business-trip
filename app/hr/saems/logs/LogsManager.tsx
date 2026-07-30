@@ -5,6 +5,7 @@ import {
   getLogs,
   confirmSessions,
   unconfirmSession,
+  resetSession,
   type LogResult,
   type LogRow,
   type TermOption,
@@ -14,6 +15,7 @@ import {
   cardCls,
   btnPrimary,
   btnSecondary,
+  btnDanger,
   badgeSuccess,
   badgeWarning,
   badgeNeutral,
@@ -66,12 +68,10 @@ export default function LogsManager({
   termOptions,
   initial,
   defaultTermId,
-  isM0,
 }: {
   termOptions: TermOption[];
   initial: LogResult;
   defaultTermId: string;
-  isM0: boolean;
 }) {
   const [termId, setTermId] = useState(defaultTermId);
   const [result, setResult] = useState<LogResult>(initial);
@@ -354,7 +354,6 @@ export default function LogsManager({
       {detail && (
         <DetailModal
           row={detail}
-          isM0={isM0}
           onClose={() => setDetail(null)}
           onChanged={(text) => {
             setDetail(null);
@@ -384,18 +383,24 @@ function Stat({ label, value }: { label: string; value: string }) {
 
 function DetailModal({
   row,
-  isM0,
   onClose,
   onChanged,
   onError,
 }: {
   row: LogRow;
-  isM0: boolean;
   onClose: () => void;
   onChanged: (text: string) => void;
   onError: (text: string) => void;
 }) {
   const [pending, start] = useTransition();
+  const [askReset, setAskReset] = useState(false);
+  // 초기화 대상 = 미확정 + 지울 내용이 있는 회차(계획만 있는 빈 회차는 제외).
+  const hasWritten =
+    row.submitted ||
+    row.log_content != null ||
+    row.note != null ||
+    row.student_count != null ||
+    row.work_hours != null;
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
       <div className="max-h-[88vh] w-full max-w-lg overflow-y-auto rounded-xl border border-line bg-card p-5 shadow-lg">
@@ -419,47 +424,97 @@ function DetailModal({
           <Block title="특이사항" text={row.note} />
         </div>
 
-        <div className="mt-4 flex gap-2">
+        <div className="mt-4 flex flex-wrap gap-2">
           {!row.confirmed ? (
-            <button
-              type="button"
-              disabled={pending || !row.submitted}
-              className={btnPrimary}
-              title={!row.submitted ? "강사 제출 후 확정할 수 있습니다." : ""}
-              onClick={() =>
-                start(async () => {
-                  const res = await confirmSessions([row.id]);
-                  if (!res.ok) return onError(res.message);
-                  if (res.confirmed === 0)
-                    return onError("확정할 수 없습니다(미제출이거나 이미 확정).");
-                  onChanged("확정했습니다.");
-                })
-              }
-            >
-              확정
-            </button>
-          ) : (
-            isM0 && (
+            <>
               <button
                 type="button"
-                disabled={pending}
-                className={btnSecondary}
+                disabled={pending || !row.submitted}
+                className={btnPrimary}
+                title={!row.submitted ? "강사 제출 후 확정할 수 있습니다." : ""}
                 onClick={() =>
                   start(async () => {
-                    const res = await unconfirmSession(row.id);
+                    const res = await confirmSessions([row.id]);
                     if (!res.ok) return onError(res.message);
-                    onChanged("확정을 취소했습니다.");
+                    if (res.confirmed === 0)
+                      return onError("확정할 수 없습니다(미제출이거나 이미 확정).");
+                    onChanged("확정했습니다.");
                   })
                 }
               >
-                확정 취소
+                확정
               </button>
-            )
+              {hasWritten && (
+                <button
+                  type="button"
+                  disabled={pending}
+                  className={btnSecondary}
+                  onClick={() => setAskReset(true)}
+                >
+                  작성 내용 초기화
+                </button>
+              )}
+            </>
+          ) : (
+            <button
+              type="button"
+              disabled={pending}
+              className={btnSecondary}
+              onClick={() =>
+                start(async () => {
+                  const res = await unconfirmSession(row.id);
+                  if (!res.ok) return onError(res.message);
+                  onChanged("확정을 취소했습니다.");
+                })
+              }
+            >
+              확정 취소
+            </button>
           )}
           <button type="button" onClick={onClose} className={btnSecondary}>
             닫기
           </button>
         </div>
+
+        {askReset && (
+          <div className="mt-4 rounded-lg border border-stamp/40 bg-stamp-soft p-3">
+            <p className="text-sm text-stamp">
+              {row.instructorName ?? "담당 강사"} 선생님의 {row.session_no}회차
+              작성 내용을 초기화합니다.
+            </p>
+            <p className="mt-1 text-[11px] text-ink-muted">
+              수업내용·특이사항·인원·시간·제출 기록이 지워지고 미제출 상태로
+              돌아갑니다. 계획(plan)과 날짜·회차는 그대로 남습니다.
+            </p>
+            <div className="mt-3 flex gap-2">
+              <button
+                type="button"
+                disabled={pending}
+                className={btnDanger}
+                onClick={() =>
+                  start(async () => {
+                    const res = await resetSession(row.id);
+                    if (!res.ok) {
+                      setAskReset(false);
+                      return onError(res.message);
+                    }
+                    onChanged("작성 내용을 초기화했습니다.");
+                  })
+                }
+              >
+                초기화
+              </button>
+              <button
+                type="button"
+                disabled={pending}
+                onClick={() => setAskReset(false)}
+                className={btnSecondary}
+              >
+                취소
+              </button>
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );

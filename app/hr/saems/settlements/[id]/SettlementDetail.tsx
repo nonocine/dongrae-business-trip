@@ -152,6 +152,12 @@ export default function SettlementDetail({
                     확정 취소
                   </button>
                 )}
+                {!detail.isM0 && (
+                  // 회계로 넘어간 문서의 번복은 상위 승인 — 급여 확정취소와 같은 설계.
+                  <span className="self-center text-xs text-ink-hint">
+                    확정 취소는 관장·부장만 할 수 있습니다.
+                  </span>
+                )}
               </>
             )}
           </div>
