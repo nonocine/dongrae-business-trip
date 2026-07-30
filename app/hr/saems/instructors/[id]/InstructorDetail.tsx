@@ -23,6 +23,12 @@ import {
 } from "@/lib/saem";
 import type { InstructorProgramRow } from "@/app/hr/saems/instructorActions";
 import {
+  CRIME_CHECK_SLOT,
+  crimeCheckState,
+  crimeCheckLabel,
+  isCrimeCheckOverdue,
+} from "@/lib/saemDocExpiry";
+import {
   cardCls,
   btnPrimary,
   btnSecondary,
@@ -31,6 +37,7 @@ import {
   badgeSuccess,
   badgeNeutral,
   badgeWarning,
+  badgeDanger,
   noticeError,
   noticeSuccess,
   noticeWarning,
@@ -45,11 +52,13 @@ export default function InstructorDetail({
   programs,
   docs,
   isM0,
+  today,
 }: {
   instructor: SaemInstructor;
   programs: InstructorProgramRow[];
   docs: SaemInstructorDoc[];
   isM0: boolean;
+  today: string; // KST 오늘(서버 계산) — 만료 판정 기준
 }) {
   const router = useRouter();
   const [f, setF] = useState({
@@ -158,7 +167,7 @@ export default function InstructorDetail({
       />
 
       {/* 서류함 */}
-      <DocsSection instructorId={instructor.id} docs={docs} />
+      <DocsSection instructorId={instructor.id} docs={docs} today={today} />
 
       {/* 담당 프로그램 */}
       <section className={cardCls}>
@@ -600,9 +609,11 @@ function docSource(doc: SaemInstructorDoc): string {
 function DocsSection({
   instructorId,
   docs,
+  today,
 }: {
   instructorId: string;
   docs: SaemInstructorDoc[];
+  today: string;
 }) {
   const router = useRouter();
   const fileRef = useRef<HTMLInputElement>(null);
@@ -610,10 +621,21 @@ function DocsSection({
   const [busy, setBusy] = useState<string | null>(null);
   const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
   const [pending, start] = useTransition();
+  // 성범죄경력조회 발급일 — 이 슬롯만 필수. 파일 선택 전에 먼저 받는다.
+  const [issuedOn, setIssuedOn] = useState("");
 
   const bySlot = new Map(docs.map((d) => [d.slot, d]));
+  const crimeDoc = bySlot.get(CRIME_CHECK_SLOT) ?? null;
+  const crime = crimeCheckState(crimeDoc?.issued_on ?? null, today);
 
   function pick(slotKey: string) {
+    if (slotKey === CRIME_CHECK_SLOT && !issuedOn) {
+      setMsg({
+        ok: false,
+        text: "성범죄경력조회는 발급일을 먼저 입력하세요.",
+      });
+      return;
+    }
     setSlot(slotKey);
     setMsg(null);
     fileRef.current?.click();
@@ -626,12 +648,14 @@ function DocsSection({
       fd.set("instructor_id", instructorId);
       fd.set("slot", slot);
       fd.set("file", file);
+      if (slot === CRIME_CHECK_SLOT) fd.set("issued_on", issuedOn);
       const res = await uploadInstructorDoc(fd);
       setBusy(null);
       if (!res.ok) {
         setMsg({ ok: false, text: res.message });
         return;
       }
+      setIssuedOn("");
       setMsg({ ok: true, text: "업로드했습니다." });
       router.refresh();
     });
@@ -691,11 +715,67 @@ function DocsSection({
                 ) : (
                   <span className="ml-2 text-xs text-ink-hint">미제출</span>
                 )}
+                {/* 성범죄경력조회 — 발급일·만료일과 상태를 함께 보여준다. */}
+                {sl.key === CRIME_CHECK_SLOT && (
+                  <div className="mt-1">
+                    {crime.issuedOn ? (
+                      <p className="text-[11px] text-ink-muted">
+                        발급일 {crime.issuedOn} · 만료일 {crime.expiresOn}
+                        <span
+                          className={`ml-1.5 ${
+                            isCrimeCheckOverdue(crime.status)
+                              ? "font-semibold text-stamp"
+                              : crime.status === "warning"
+                                ? "font-semibold text-warning"
+                                : "text-ink-hint"
+                          }`}
+                        >
+                          ({crimeCheckLabel(crime)})
+                        </span>
+                      </p>
+                    ) : (
+                      <p className="text-[11px] font-semibold text-stamp">
+                        {doc
+                          ? "발급일이 없습니다 — 만료 추적이 안 됩니다. 발급일과 함께 다시 올려주세요."
+                          : "1년마다 갱신이 필요한 법정 서류입니다."}
+                      </p>
+                    )}
+                    <div className="mt-1 flex flex-wrap items-center gap-1.5">
+                      <label className="text-[11px] font-semibold text-navy">
+                        발급일
+                      </label>
+                      <input
+                        type="date"
+                        value={issuedOn}
+                        max={today}
+                        onChange={(e) => setIssuedOn(e.target.value)}
+                        className="rounded-md border border-line bg-card px-2 py-1 text-[11px] text-ink-body shadow-sm focus:border-navy focus:outline-none focus:ring-1 focus:ring-navy"
+                      />
+                      <span className="text-[11px] text-ink-hint">
+                        입력 후 {doc ? "교체" : "업로드"} 버튼을 누르세요(필수).
+                      </span>
+                    </div>
+                  </div>
+                )}
               </div>
               <div className="flex shrink-0 items-center gap-1">
                 {doc ? (
                   <>
-                    <span className={badgeSuccess}>제출</span>
+                    {sl.key === CRIME_CHECK_SLOT ? (
+                      <span
+                        className={
+                          isCrimeCheckOverdue(crime.status)
+                            ? badgeDanger
+                            : crime.status === "warning"
+                              ? badgeWarning
+                              : badgeSuccess
+                        }
+                      >
+                        {crime.status === "ok" ? "제출" : crimeCheckLabel(crime)}
+                      </span>
+                    ) : (
+                      <span className={badgeSuccess}>제출</span>
+                    )}
                     <button
                       type="button"
                       onClick={() => view(doc.id)}

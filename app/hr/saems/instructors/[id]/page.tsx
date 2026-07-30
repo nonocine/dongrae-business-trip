@@ -2,6 +2,7 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { getInstructorDetail } from "@/app/hr/saems/instructorActions";
 import InstructorDetail from "@/app/hr/saems/instructors/[id]/InstructorDetail";
+import { kstTodayYmd } from "@/lib/trainings";
 
 export const dynamic = "force-dynamic";
 
@@ -27,6 +28,7 @@ export default async function InstructorDetailPage({
         programs={detail.programs}
         docs={detail.docs}
         isM0={detail.isM0}
+        today={kstTodayYmd()}
       />
     </div>
   );

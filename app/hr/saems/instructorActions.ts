@@ -21,6 +21,12 @@ import {
   type SaemInstructor,
   type SaemInstructorDoc,
 } from "@/lib/saem";
+import {
+  CRIME_CHECK_SLOT,
+  crimeCheckState,
+  type CrimeCheckState,
+} from "@/lib/saemDocExpiry";
+import { kstTodayYmd } from "@/lib/trainings";
 
 const DOC_EXT: Record<string, string> = {
   "application/pdf": "pdf",
@@ -42,6 +48,7 @@ function clean(v: string | null | undefined): string | null {
 export type InstructorListRow = SaemInstructor & {
   docCount: number;
   programCount: number;
+  crimeCheck: CrimeCheckState; // 성범죄경력조회 만료 상태(오늘 기준)
 };
 
 // --- 목록(서류·프로그램 수 집계) ---
@@ -49,15 +56,23 @@ export async function listInstructors(): Promise<InstructorListRow[]> {
   await requireSaemAccess();
   const [{ data: ins }, { data: docs }, { data: progs }] = await Promise.all([
     supabaseAdmin.from(INSTR).select("*"),
-    supabaseAdmin.from(DOCS).select("instructor_id, slot"),
+    supabaseAdmin.from(DOCS).select("instructor_id, slot, issued_on"),
     supabaseAdmin.from(PROG).select("instructor_id"),
   ]);
+  const today = kstTodayYmd();
   const slotsByInstr = new Map<string, Set<string>>();
+  const crimeIssued = new Map<string, string | null>();
   for (const d of docs ?? []) {
-    const r = d as { instructor_id: string; slot: string };
+    const r = d as {
+      instructor_id: string;
+      slot: string;
+      issued_on: string | null;
+    };
     const set = slotsByInstr.get(r.instructor_id) ?? new Set<string>();
     set.add(r.slot);
     slotsByInstr.set(r.instructor_id, set);
+    if (r.slot === CRIME_CHECK_SLOT)
+      crimeIssued.set(r.instructor_id, r.issued_on ?? null);
   }
   const progCount = new Map<string, number>();
   for (const p of progs ?? []) {
@@ -71,6 +86,7 @@ export async function listInstructors(): Promise<InstructorListRow[]> {
         ...i,
         docCount: slotsByInstr.get(i.id)?.size ?? 0,
         programCount: progCount.get(i.id) ?? 0,
+        crimeCheck: crimeCheckState(crimeIssued.get(i.id) ?? null, today),
       };
     })
     .sort((a, b) => a.name.localeCompare(b.name, "ko"));
@@ -408,6 +424,17 @@ export async function uploadInstructorDoc(
     if (!instructorId || !isSaemDocSlot(slot))
       return { ok: false, message: "잘못된 요청입니다." };
 
+    // 성범죄경력조회는 발급일 필수(만료 = 발급일+1년 추적). 다른 슬롯은 받지 않음.
+    const issuedRaw = String(formData.get("issued_on") ?? "").trim();
+    let issuedOn: string | null = null;
+    if (slot === CRIME_CHECK_SLOT) {
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(issuedRaw))
+        return { ok: false, message: "성범죄경력조회는 발급일을 입력해야 합니다." };
+      if (issuedRaw > kstTodayYmd())
+        return { ok: false, message: "발급일은 미래 날짜일 수 없습니다." };
+      issuedOn = issuedRaw;
+    }
+
     const file = formData.get("file");
     if (!(file instanceof File) || file.size === 0)
       return { ok: false, message: "업로드할 파일을 선택하세요." };
@@ -441,6 +468,7 @@ export async function uploadInstructorDoc(
         file_path: path,
         original_name: file.name,
         uploaded_by: "staff",
+        issued_on: issuedOn,
       })
       .select("*")
       .single();

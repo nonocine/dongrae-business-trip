@@ -9,6 +9,12 @@ import {
   type InstructorHit,
 } from "@/app/hr/saems/instructorActions";
 import { SAEM_DOC_SLOTS } from "@/lib/saem";
+import {
+  crimeCheckBadgeText,
+  crimeCheckLabel,
+  isCrimeCheckOverdue,
+  needsCrimeCheckAction,
+} from "@/lib/saemDocExpiry";
 import Button from "@/app/components/Button";
 import RowChevron from "@/app/components/RowChevron";
 import {
@@ -18,6 +24,7 @@ import {
   badgeSuccess,
   badgeNeutral,
   badgeWarning,
+  badgeDanger,
   noticeError,
 } from "@/lib/ui";
 
@@ -43,25 +50,40 @@ export default function InstructorsManager({
   const [q, setQ] = useState("");
   const [open, setOpen] = useState(false);
   const [showInactive, setShowInactive] = useState(false);
+  // 성범죄경력조회 만료·임박만 보기(상단 요약 클릭 토글).
+  const [onlyCrime, setOnlyCrime] = useState(false);
 
   const inactiveCount = useMemo(
     () => instructors.filter((i) => i.status === "inactive").length,
     [instructors]
   );
 
+  // 만료·임박 집계 — 비활성 강사는 제외.
+  const crimeAlertCount = useMemo(
+    () =>
+      instructors.filter(
+        (i) => i.status !== "inactive" && needsCrimeCheckAction(i.crimeCheck.status)
+      ).length,
+    [instructors]
+  );
+
   const filtered = useMemo(() => {
     const kw = q.trim().toLowerCase();
     const digits = kw.replace(/\D/g, "");
-    const base = showInactive
+    let base = showInactive
       ? instructors
       : instructors.filter((i) => i.status !== "inactive");
+    if (onlyCrime)
+      base = base.filter(
+        (i) => i.status !== "inactive" && needsCrimeCheckAction(i.crimeCheck.status)
+      );
     if (!kw) return base;
     return base.filter(
       (i) =>
         i.name.toLowerCase().includes(kw) ||
         (digits && (i.phone ?? "").includes(digits))
     );
-  }, [instructors, q, showInactive]);
+  }, [instructors, q, showInactive, onlyCrime]);
 
   return (
     <div className="space-y-5">
@@ -103,6 +125,27 @@ export default function InstructorsManager({
         </div>
       </section>
 
+      {/* 성범죄경력조회 만료·임박 요약 — 대상 있을 때만. 클릭 시 해당 강사만. */}
+      {crimeAlertCount > 0 && (
+        <button
+          type="button"
+          onClick={() => setOnlyCrime((v) => !v)}
+          className={`flex w-full items-center justify-between gap-2 rounded-lg border px-3 py-2.5 text-left text-sm transition-colors ${
+            onlyCrime
+              ? "border-stamp bg-stamp-soft"
+              : "border-stamp/50 bg-card hover:bg-stamp-soft"
+          }`}
+          aria-pressed={onlyCrime}
+        >
+          <span className="font-semibold text-stamp">
+            ⚠️ 성범죄경력조회 만료·임박 {crimeAlertCount}명
+          </span>
+          <span className="shrink-0 text-xs text-ink-muted">
+            {onlyCrime ? "전체 보기" : "해당 강사만 보기"}
+          </span>
+        </button>
+      )}
+
       <section className={cardCls}>
         {filtered.length === 0 ? (
           <div className="py-10 text-center text-sm text-ink-hint">
@@ -117,6 +160,9 @@ export default function InstructorsManager({
                   <th className={thCls}>전화</th>
                   <th className={thCls}>상태</th>
                   <th className={thCls}>가입</th>
+                  <th className={thCls} title="성범죄경력조회 — 발급일+1년">
+                    성범죄경력
+                  </th>
                   <th className={`${thCls} text-right`}>서류</th>
                   <th className={`${thCls} text-right`}>프로그램</th>
                   <th className={`${thCls} w-6`} aria-label="이동" />
@@ -147,6 +193,24 @@ export default function InstructorsManager({
                         <span className={badgeWarning}>임시비번</span>
                       ) : (
                         <span className={badgeSuccess}>가입완료</span>
+                      )}
+                    </td>
+                    <td className={tdCls}>
+                      {isCrimeCheckOverdue(i.crimeCheck.status) ? (
+                        <span className={badgeDanger} title={crimeCheckLabel(i.crimeCheck)}>
+                          만료·미제출
+                        </span>
+                      ) : i.crimeCheck.status === "warning" ? (
+                        <span
+                          className={badgeWarning}
+                          title={`만료일 ${i.crimeCheck.expiresOn}`}
+                        >
+                          {crimeCheckBadgeText(i.crimeCheck)}
+                        </span>
+                      ) : (
+                        <span className={badgeSuccess} title="발급일+1년">
+                          {i.crimeCheck.expiresOn}
+                        </span>
                       )}
                     </td>
                     <td className={`${tdCls} text-right font-mono`}>

@@ -72,6 +72,7 @@ export type SaemInstructorDoc = {
   original_name: string | null;
   uploaded_by: string | null;
   created_at: string | null;
+  issued_on: string | null; // 발급일 — crime_check(성범죄경력조회) 필수
 };
 
 export type SaemProject = {
@@ -156,6 +157,7 @@ export function toInstructorDoc(r: Record<string, unknown>): SaemInstructorDoc {
     original_name: s(r.original_name),
     uploaded_by: s(r.uploaded_by),
     created_at: s(r.created_at),
+    issued_on: s(r.issued_on),
   };
 }
 

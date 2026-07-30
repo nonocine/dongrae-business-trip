@@ -6,6 +6,12 @@
 import ExcelJS from "exceljs";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
 import { SAEM_DOC_SLOTS } from "@/lib/saem";
+import {
+  CRIME_CHECK_SLOT,
+  crimeCheckState,
+  crimeCheckLabel,
+} from "@/lib/saemDocExpiry";
+import { kstTodayYmd } from "@/lib/trainings";
 
 export type InstructorExportRow = {
   id: string;
@@ -21,24 +27,38 @@ export type InstructorExportRow = {
   slots: Record<string, boolean>; // slotKey → 업로드 여부
   programs: string; // "프로젝트·차시·프로그램; ..."
   createdAt: string;
+  // 성범죄경력조회 만료 관리(SA-14).
+  crimeIssuedOn: string;
+  crimeExpiresOn: string;
+  crimeStatusLabel: string;
 };
 
 export async function loadInstructorExportRows(): Promise<InstructorExportRow[]> {
   const [{ data: ins }, { data: docs }, { data: progs }, { data: terms }, { data: projs }] =
     await Promise.all([
       supabaseAdmin.from("saem_instructors").select("*"),
-      supabaseAdmin.from("saem_instructor_documents").select("instructor_id, slot"),
+      supabaseAdmin
+        .from("saem_instructor_documents")
+        .select("instructor_id, slot, issued_on"),
       supabaseAdmin.from("saem_programs").select("instructor_id, name, term_id, period_no, sort_order"),
       supabaseAdmin.from("saem_terms").select("id, name, project_id"),
       supabaseAdmin.from("saem_projects").select("id, name"),
     ]);
 
+  const today = kstTodayYmd();
   const slotsByInstr = new Map<string, Set<string>>();
+  const crimeIssued = new Map<string, string | null>();
   for (const d of docs ?? []) {
-    const r = d as { instructor_id: string; slot: string };
+    const r = d as {
+      instructor_id: string;
+      slot: string;
+      issued_on: string | null;
+    };
     const s = slotsByInstr.get(r.instructor_id) ?? new Set<string>();
     s.add(r.slot);
     slotsByInstr.set(r.instructor_id, s);
+    if (r.slot === CRIME_CHECK_SLOT)
+      crimeIssued.set(r.instructor_id, r.issued_on ?? null);
   }
   const projName = new Map(
     (projs ?? []).map((p) => [(p as { id: string }).id, (p as { name: string }).name])
@@ -82,6 +102,7 @@ export async function loadInstructorExportRows(): Promise<InstructorExportRow[]>
     for (const sl of SAEM_DOC_SLOTS) slots[sl.key] = slotSet.has(sl.key);
     const passwordSet = !!r.password_set_at;
     const mustChange = r.must_change_password === true;
+    const crime = crimeCheckState(crimeIssued.get(id) ?? null, today);
     const myProgs = (progsByInstr.get(id) ?? [])
       .sort((a, b) => (a.period_no ?? 9999) - (b.period_no ?? 9999) || a.sort_order - b.sort_order)
       .map((p) => {
@@ -102,6 +123,9 @@ export async function loadInstructorExportRows(): Promise<InstructorExportRow[]>
       slots,
       programs: myProgs.join("; "),
       createdAt: String(r.created_at ?? "").slice(0, 10),
+      crimeIssuedOn: crime.issuedOn ?? "",
+      crimeExpiresOn: crime.expiresOn ?? "",
+      crimeStatusLabel: crimeCheckLabel(crime),
     };
   });
   rows.sort((a, b) => a.name.localeCompare(b.name, "ko"));
@@ -127,6 +151,9 @@ export async function buildInstructorsWorkbook(
     "상태",
     "가입상태",
     ...SAEM_DOC_SLOTS.map((s) => s.label),
+    "성범죄경력 발급일",
+    "성범죄경력 만료일",
+    "성범죄경력 상태",
     "담당 프로그램",
     "등록일",
   ];
@@ -149,6 +176,9 @@ export async function buildInstructorsWorkbook(
       r.statusLabel,
       r.joinState,
       ...SAEM_DOC_SLOTS.map((s) => (r.slots[s.key] ? "O" : "X")),
+      r.crimeIssuedOn,
+      r.crimeExpiresOn,
+      r.crimeStatusLabel,
       r.programs,
       r.createdAt,
     ]);
@@ -157,6 +187,7 @@ export async function buildInstructorsWorkbook(
   const widths = [
     10, 13, 20, 10, 16, 9, 7, 9,
     ...SAEM_DOC_SLOTS.map(() => 8),
+    15, 15, 16,
     40, 12,
   ];
   widths.forEach((w, i) => {

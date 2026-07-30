@@ -107,8 +107,16 @@ export default function TrainingsManager({
         return;
       }
       const s = res.summary;
+      // 성범죄경력조회 만료 알림은 의무교육 대상이 없어도 별도로 발송된다(SA-14).
+      const crimeTail =
+        s.crimeCheckTargets > 0
+          ? ` · 성범죄경력조회 갱신 필요 ${s.crimeCheckTargets}명 알림`
+          : "";
       if (s.targetEmployees === 0) {
-        setMsg({ kind: "ok", text: "독촉 대상이 없습니다. (D-7 이내 미이수 없음)" });
+        setMsg({
+          kind: "ok",
+          text: `독촉 대상이 없습니다. (D-7 이내 미이수 없음)${crimeTail}`,
+        });
         return;
       }
       const tail =
@@ -117,7 +125,7 @@ export default function TrainingsManager({
           : "";
       setMsg({
         kind: "ok",
-        text: `DM ${s.dmSent}건 발송 / 미연결 ${s.dmFailed}명${tail} · 관리자 요약 발송`,
+        text: `DM ${s.dmSent}건 발송 / 미연결 ${s.dmFailed}명${tail} · 관리자 요약 발송${crimeTail}`,
       });
     });
   }
