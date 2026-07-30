@@ -11,12 +11,13 @@ export const inputCls =
 export const labelCls = "block text-xs font-medium text-ink-muted";
 
 // --- 버튼 ---
-export const btnPrimary =
-  "inline-flex h-[38px] items-center justify-center gap-1.5 rounded-lg bg-navy px-4 text-sm font-semibold text-white shadow-sm transition hover:bg-navy-strong disabled:opacity-60";
-export const btnSecondary =
-  "inline-flex h-[38px] items-center justify-center gap-1.5 rounded-lg border border-line bg-card px-4 text-sm font-medium text-ink-body shadow-sm transition hover:bg-surface disabled:opacity-60";
-export const btnDanger =
-  "inline-flex h-[38px] items-center justify-center gap-1.5 rounded-lg border border-stamp bg-card px-4 text-sm font-semibold text-stamp transition hover:bg-stamp-soft disabled:opacity-60";
+//   클릭 어포던스 통일: 배경 있는 명확한 형태 + hover 진해짐 + 클릭 시 눌림(active:scale)
+//   + 키보드 포커스 링. 중복 클릭 방지가 필요한 제출 버튼은 <Button loading> 사용.
+const btnBase =
+  "inline-flex h-[38px] items-center justify-center gap-1.5 rounded-lg px-4 text-sm shadow-sm transition active:scale-[0.98] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-offset-white disabled:pointer-events-none disabled:opacity-60";
+export const btnPrimary = `${btnBase} bg-navy font-semibold text-white hover:bg-navy-strong focus-visible:ring-navy`;
+export const btnSecondary = `${btnBase} border border-line bg-card font-medium text-ink-body hover:bg-surface focus-visible:ring-navy`;
+export const btnDanger = `${btnBase} border border-stamp bg-card font-semibold text-stamp hover:bg-stamp-soft focus-visible:ring-stamp`;
 
 // --- 탭 ---
 export const tabBarCls = "overflow-x-auto border-b border-line";

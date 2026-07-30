@@ -1,6 +1,7 @@
 import type { Metadata, Viewport } from "next";
 import "./globals.css";
 import SplashScreen from "@/app/components/SplashScreen";
+import RouteProgress from "@/app/components/RouteProgress";
 
 export const metadata: Metadata = {
   title: "동업자씨 - 동래구청소년센터",
@@ -47,6 +48,7 @@ export default function RootLayout({
   return (
     <html lang="ko" className="h-full antialiased">
       <body className="min-h-full flex flex-col bg-white text-slate-900">
+        <RouteProgress />
         <SplashScreen />
         {children}
       </body>

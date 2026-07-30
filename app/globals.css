@@ -106,6 +106,49 @@ button {
   font: inherit;
 }
 
+/* 라우트 전환 진행바 (RouteProgress) — 화면 최상단 3px 네이비 바. */
+.route-progress {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 3px;
+  z-index: 9999;
+  pointer-events: none;
+}
+.route-progress__bar {
+  height: 100%;
+  width: 0;
+  background: var(--navy);
+  box-shadow: 0 0 8px rgba(30, 58, 95, 0.5);
+  border-top-right-radius: 3px;
+  border-bottom-right-radius: 3px;
+}
+/* 진행 중: 0 → 90% 로 흐르듯 감속(응답 대기 체감). */
+.route-progress[data-phase="1"] .route-progress__bar {
+  animation: route-progress-flow 10s cubic-bezier(0.05, 0.7, 0.1, 1) forwards;
+}
+/* 마무리: 100% 채운 뒤 페이드아웃. */
+.route-progress[data-phase="2"] .route-progress__bar {
+  width: 100%;
+  opacity: 0;
+  transition: width 0.2s ease, opacity 0.35s ease 0.1s;
+}
+@keyframes route-progress-flow {
+  0% {
+    width: 0;
+  }
+  100% {
+    width: 90%;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .route-progress[data-phase="1"] .route-progress__bar {
+    animation-duration: 0.01s;
+    width: 90%;
+  }
+}
+
 @media (max-width: 640px) {
   input,
   select,

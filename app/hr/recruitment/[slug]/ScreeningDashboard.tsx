@@ -20,6 +20,7 @@ import {
   fieldBadgeCls,
 } from "@/lib/ui";
 import { fmtKstDateTime, fmtKstDate } from "@/lib/datetime";
+import Button from "@/app/components/Button";
 import {
   SCREENING_ITEMS,
   SCREENING_GROUPS,
@@ -1174,14 +1175,14 @@ function StatusActionsCard({
               <p className="text-xs font-semibold text-navy">
                 최종합격자입니다. 직원으로 전환하세요.
               </p>
-              <button
-                type="button"
+              <Button
+                variant="primary"
                 onClick={handleConvert}
-                disabled={converting}
-                className={`${btnPrimary} mt-2 w-full`}
+                loading={converting}
+                className="mt-2 w-full"
               >
                 {converting ? "전환 중…" : "직원으로 전환"}
-              </button>
+              </Button>
               {convertError && (
                 <p className={`mt-2 ${noticeError}`}>{convertError}</p>
               )}

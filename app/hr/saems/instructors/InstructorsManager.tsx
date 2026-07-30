@@ -9,6 +9,7 @@ import {
   type InstructorHit,
 } from "@/app/hr/saems/instructorActions";
 import { SAEM_DOC_SLOTS } from "@/lib/saem";
+import Button from "@/app/components/Button";
 import {
   cardCls,
   btnPrimary,
@@ -301,12 +302,12 @@ function RegisterModal({
         )}
 
         <div className="mt-4 flex gap-2">
-          <button type="button" onClick={create} disabled={pending} className={btnPrimary}>
+          <Button variant="primary" onClick={create} loading={pending}>
             {pending ? "등록 중…" : "신규 등록"}
-          </button>
-          <button type="button" onClick={onClose} className={btnSecondary}>
+          </Button>
+          <Button variant="secondary" onClick={onClose}>
             취소
-          </button>
+          </Button>
         </div>
       </div>
     </div>
