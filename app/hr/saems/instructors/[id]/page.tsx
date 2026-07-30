@@ -26,6 +26,7 @@ export default async function InstructorDetailPage({
         instructor={detail.instructor}
         programs={detail.programs}
         docs={detail.docs}
+        isM0={detail.isM0}
       />
     </div>
   );

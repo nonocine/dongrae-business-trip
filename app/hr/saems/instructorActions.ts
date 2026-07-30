@@ -32,6 +32,7 @@ const DOC_EXT: Record<string, string> = {
 const INSTR = "saem_instructors";
 const DOCS = "saem_instructor_documents";
 const PROG = "saem_programs";
+const SESS = "saem_sessions";
 
 function clean(v: string | null | undefined): string | null {
   const s = (v ?? "").trim();
@@ -230,12 +231,13 @@ export type InstructorDetail = {
   instructor: SaemInstructor;
   programs: InstructorProgramRow[];
   docs: SaemInstructorDoc[];
+  isM0: boolean; // 삭제 버튼 노출 게이트(관장·부장·master 전용)
 };
 
 export async function getInstructorDetail(
   id: string
 ): Promise<InstructorDetail | null> {
-  await requireSaemAccess();
+  const ctx = await requireSaemAccess();
   if (!id) return null;
   const { data: insRow } = await supabaseAdmin
     .from(INSTR)
@@ -303,7 +305,7 @@ export async function getInstructorDetail(
     toInstructorDoc(r as Record<string, unknown>)
   );
 
-  return { instructor, programs: programRows, docs };
+  return { instructor, programs: programRows, docs, isM0: ctx.isM0 };
 }
 
 // =====================================================================
@@ -475,6 +477,114 @@ export async function getInstructorDocUrl(docId: string): Promise<string | null>
     .eq("id", docId)
     .maybeSingle();
   return signHrDocument((data as { file_path?: string | null } | null)?.file_path ?? null);
+}
+
+// =====================================================================
+// SA-12. 강사 삭제 — 기록 있으면 삭제 불가(비활성 유도), 없으면 완전 삭제.
+//   판정 근거(모두 saem_* 실시간 count):
+//     1) saem_programs 에 instructor_id 로 배정된 프로그램(과거 차시 포함)
+//     2) saem_instructor_documents 서류 1건 이상
+//     3) 배정 프로그램의 saem_sessions 중 instructor_submitted_at 존재(근무일지 흔적)
+// =====================================================================
+export type InstructorDeletability = {
+  deletable: boolean;
+  programs: number;
+  docs: number;
+  submittedLogs: number;
+};
+
+// 삭제 가능 판정(서버 실시간 count). check·delete 양쪽에서 재사용.
+async function judgeInstructorDeletable(
+  id: string
+): Promise<InstructorDeletability> {
+  // 1) 배정 프로그램 id 목록(과거 차시 포함).
+  const { data: progRows } = await supabaseAdmin
+    .from(PROG)
+    .select("id")
+    .eq("instructor_id", id);
+  const programIds = (progRows ?? []).map((r) => (r as { id: string }).id);
+
+  // 2) 서류 수.
+  const { count: docCount } = await supabaseAdmin
+    .from(DOCS)
+    .select("id", { count: "exact", head: true })
+    .eq("instructor_id", id);
+
+  // 3) 제출 일지 흔적 — 배정 프로그램 세션 중 instructor_submitted_at 존재.
+  let submittedLogs = 0;
+  if (programIds.length) {
+    const { count } = await supabaseAdmin
+      .from(SESS)
+      .select("id", { count: "exact", head: true })
+      .in("program_id", programIds)
+      .not("instructor_submitted_at", "is", null);
+    submittedLogs = count ?? 0;
+  }
+
+  const programs = programIds.length;
+  const docs = docCount ?? 0;
+  return {
+    deletable: programs === 0 && docs === 0 && submittedLogs === 0,
+    programs,
+    docs,
+    submittedLogs,
+  };
+}
+
+// 삭제 가능 여부 조회(M0 전용) — 화면에서 확인/사유 모달 분기에 사용.
+export async function checkInstructorDeletable(
+  id: string
+): Promise<InstructorDeletability> {
+  await requireSaemAccess({ onlyM0: true });
+  return judgeInstructorDeletable(id);
+}
+
+// 강사 완전 삭제(M0 전용) — 서버에서 판정 재수행(화면 판정만 믿지 않음) + 이름 확인.
+export async function deleteInstructor(
+  id: string,
+  confirmName: string
+): Promise<
+  | { ok: true }
+  | { ok: false; message: string; deletability?: InstructorDeletability }
+> {
+  try {
+    await requireSaemAccess({ onlyM0: true });
+    if (!id) return { ok: false, message: "대상이 없습니다." };
+
+    const { data: insRow } = await supabaseAdmin
+      .from(INSTR)
+      .select("id, name")
+      .eq("id", id)
+      .maybeSingle();
+    if (!insRow) return { ok: false, message: "강사를 찾을 수 없습니다." };
+    const name = String((insRow as { name: string }).name ?? "");
+
+    // 오삭제 방지 — 이름 정확 일치 요구.
+    if (confirmName.trim() !== name.trim()) {
+      return { ok: false, message: "이름이 일치하지 않습니다." };
+    }
+
+    // 판정 재수행 — 기록 있으면 삭제 거부(비활성 유도).
+    const d = await judgeInstructorDeletable(id);
+    if (!d.deletable) {
+      return {
+        ok: false,
+        message:
+          "기록이 있어 삭제할 수 없습니다. 비활성 처리로 전환하세요.",
+        deletability: d,
+      };
+    }
+
+    const { error } = await supabaseAdmin.from(INSTR).delete().eq("id", id);
+    if (error) throw new Error(error.message);
+    revalidatePath("/hr/saems/instructors");
+    return { ok: true };
+  } catch (e) {
+    return {
+      ok: false,
+      message: e instanceof Error ? e.message : "삭제 중 오류가 발생했습니다.",
+    };
+  }
 }
 
 // 서류 삭제(행 + 파일).

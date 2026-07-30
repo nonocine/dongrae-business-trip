@@ -9,6 +9,10 @@ import {
   uploadInstructorDoc,
   getInstructorDocUrl,
   deleteInstructorDoc,
+  checkInstructorDeletable,
+  deleteInstructor,
+  type InstructorInput,
+  type InstructorDeletability,
 } from "@/app/hr/saems/instructorActions";
 import {
   TERM_STATUS_LABEL,
@@ -22,6 +26,7 @@ import {
   cardCls,
   btnPrimary,
   btnSecondary,
+  btnDanger,
   badgeNavy,
   badgeSuccess,
   badgeNeutral,
@@ -39,10 +44,12 @@ export default function InstructorDetail({
   instructor,
   programs,
   docs,
+  isM0,
 }: {
   instructor: SaemInstructor;
   programs: InstructorProgramRow[];
   docs: SaemInstructorDoc[];
+  isM0: boolean;
 }) {
   const router = useRouter();
   const [f, setF] = useState({
@@ -193,7 +200,184 @@ export default function InstructorDetail({
           </ul>
         )}
       </section>
+
+      {/* 강사 삭제 — M0 전용. 기록 있으면 삭제 불가·비활성 유도. */}
+      {isM0 && (
+        <DeleteSection
+          instructorId={instructor.id}
+          instructorName={instructor.name}
+          alreadyInactive={f.status === "inactive"}
+          form={f}
+        />
+      )}
     </div>
+  );
+}
+
+// --- 강사 삭제 구역(M0 전용) ---
+function DeleteSection({
+  instructorId,
+  instructorName,
+  alreadyInactive,
+  form,
+}: {
+  instructorId: string;
+  instructorName: string;
+  alreadyInactive: boolean;
+  form: InstructorInput & { status: "active" | "inactive" };
+}) {
+  const router = useRouter();
+  const [open, setOpen] = useState(false);
+  const [d, setD] = useState<InstructorDeletability | null>(null);
+  const [nameInput, setNameInput] = useState("");
+  const [err, setErr] = useState<string | null>(null);
+  const [pending, start] = useTransition();
+
+  function openModal() {
+    setErr(null);
+    setNameInput("");
+    setD(null);
+    setOpen(true);
+    start(async () => {
+      const res = await checkInstructorDeletable(instructorId);
+      setD(res);
+    });
+  }
+  function confirmDelete() {
+    setErr(null);
+    start(async () => {
+      const res = await deleteInstructor(instructorId, nameInput.trim());
+      if (!res.ok) {
+        setErr(res.message);
+        if (res.deletability) setD(res.deletability);
+        return;
+      }
+      router.push("/hr/saems/instructors");
+      router.refresh();
+    });
+  }
+  function deactivate() {
+    setErr(null);
+    start(async () => {
+      const res = await updateInstructor(instructorId, {
+        ...form,
+        status: "inactive",
+      });
+      if (!res.ok) {
+        setErr(res.message);
+        return;
+      }
+      setOpen(false);
+      router.refresh();
+    });
+  }
+
+  const nameOk = nameInput.trim() === instructorName.trim();
+
+  return (
+    <section className={cardCls}>
+      <h3 className="text-base font-bold text-stamp">강사 삭제</h3>
+      <p className="mt-1 text-xs text-ink-hint">
+        배정 프로그램·서류·제출한 근무일지가 하나도 없는 강사만 완전히 삭제할 수
+        있습니다. 기록이 있으면 삭제 대신 비활성 처리하세요.
+      </p>
+      <div className="mt-3">
+        <button type="button" onClick={openModal} className={btnDanger}>
+          강사 삭제
+        </button>
+      </div>
+
+      {open && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
+          <div className="w-full max-w-md rounded-xl border border-line bg-card p-5 shadow-lg">
+            <div className="mb-3 flex items-center justify-between">
+              <h3 className="text-base font-bold text-ink">강사 삭제</h3>
+              <button
+                type="button"
+                onClick={() => setOpen(false)}
+                className="text-sm text-ink-muted hover:underline"
+              >
+                닫기
+              </button>
+            </div>
+
+            {d === null ? (
+              <p className="py-4 text-center text-sm text-ink-muted">
+                삭제 가능 여부 확인 중…
+              </p>
+            ) : d.deletable ? (
+              <>
+                <p className={noticeWarning}>
+                  {instructorName} 선생님을 완전히 삭제합니다. 되돌릴 수 없습니다.
+                </p>
+                <label className="mt-3 block text-[11px] font-semibold text-navy">
+                  확인을 위해 이름(<b>{instructorName}</b>)을 입력하세요
+                </label>
+                <input
+                  value={nameInput}
+                  onChange={(e) => setNameInput(e.target.value)}
+                  className={`${inCls} mt-1`}
+                  placeholder={instructorName}
+                />
+                {err && <p className={`mt-3 ${noticeError}`}>{err}</p>}
+                <div className="mt-4 flex gap-2">
+                  <button
+                    type="button"
+                    onClick={confirmDelete}
+                    disabled={pending || !nameOk}
+                    className={btnDanger}
+                  >
+                    {pending ? "삭제 중…" : "완전히 삭제"}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setOpen(false)}
+                    className={btnSecondary}
+                  >
+                    취소
+                  </button>
+                </div>
+              </>
+            ) : (
+              <>
+                <p className={noticeError}>
+                  배정 프로그램 {d.programs}건 / 서류 {d.docs}건 / 제출 일지{" "}
+                  {d.submittedLogs}건 이 있어 삭제할 수 없습니다.
+                </p>
+                <p className="mt-3 text-sm text-ink-body">
+                  기록 보존을 위해 삭제 대신 <b>비활성 처리</b>하세요. 비활성
+                  강사는 목록에서 기본 숨김됩니다.
+                </p>
+                {err && <p className={`mt-3 ${noticeError}`}>{err}</p>}
+                <div className="mt-4 flex gap-2">
+                  {alreadyInactive ? (
+                    <span className={`${badgeNeutral} self-center`}>
+                      이미 비활성
+                    </span>
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={deactivate}
+                      disabled={pending}
+                      className={btnPrimary}
+                    >
+                      {pending ? "처리 중…" : "비활성으로 전환"}
+                    </button>
+                  )}
+                  <button
+                    type="button"
+                    onClick={() => setOpen(false)}
+                    className={btnSecondary}
+                  >
+                    닫기
+                  </button>
+                </div>
+              </>
+            )}
+          </div>
+        </div>
+      )}
+    </section>
   );
 }
 

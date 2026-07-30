@@ -42,17 +42,26 @@ export default function InstructorsManager({
   const router = useRouter();
   const [q, setQ] = useState("");
   const [open, setOpen] = useState(false);
+  const [showInactive, setShowInactive] = useState(false);
+
+  const inactiveCount = useMemo(
+    () => instructors.filter((i) => i.status === "inactive").length,
+    [instructors]
+  );
 
   const filtered = useMemo(() => {
     const kw = q.trim().toLowerCase();
     const digits = kw.replace(/\D/g, "");
-    if (!kw) return instructors;
-    return instructors.filter(
+    const base = showInactive
+      ? instructors
+      : instructors.filter((i) => i.status !== "inactive");
+    if (!kw) return base;
+    return base.filter(
       (i) =>
         i.name.toLowerCase().includes(kw) ||
         (digits && (i.phone ?? "").includes(digits))
     );
-  }, [instructors, q]);
+  }, [instructors, q, showInactive]);
 
   return (
     <div className="space-y-5">
@@ -76,11 +85,22 @@ export default function InstructorsManager({
             + 강사 등록
           </button>
         </div>
-        <p className="mt-2 text-xs text-ink-hint">
-          전체 {instructors.length}명
-          {q.trim() ? ` · 검색 결과 ${filtered.length}명` : ""}
-          {isM0 && " · 전체 백업은 파일 수에 따라 수십 초 걸릴 수 있습니다."}
-        </p>
+        <div className="mt-2 flex flex-wrap items-center justify-between gap-2">
+          <p className="text-xs text-ink-hint">
+            {showInactive ? "전체" : "활성"} {filtered.length}명
+            {q.trim() ? ` · 검색 결과 표시` : ""}
+            {isM0 && " · 전체 백업은 파일 수에 따라 수십 초 걸릴 수 있습니다."}
+          </p>
+          <label className="flex shrink-0 items-center gap-1.5 text-xs text-ink-muted">
+            <input
+              type="checkbox"
+              checked={showInactive}
+              onChange={(e) => setShowInactive(e.target.checked)}
+              className="h-3.5 w-3.5 accent-navy"
+            />
+            비활성 포함{inactiveCount > 0 ? ` (${inactiveCount})` : ""}
+          </label>
+        </div>
       </section>
 
       <section className={cardCls}>
