@@ -534,6 +534,8 @@ function ProgramModal({
     tuition: program?.tuition != null ? String(program.tuition) : "",
     room: program?.room ?? "",
     hourly_rate: program?.hourly_rate != null ? String(program.hourly_rate) : "",
+    deduction_rate:
+      program?.deduction_rate != null ? String(program.deduction_rate) : "3.3",
   });
   const [err, setErr] = useState<string | null>(null);
   const [pending, start] = useTransition();
@@ -553,6 +555,7 @@ function ProgramModal({
       tuition: numOrNull(f.tuition),
       room: f.room || null,
       hourly_rate: numOrNull(f.hourly_rate),
+      deduction_rate: numOrNull(f.deduction_rate),
     };
     start(async () => {
       const res = program
@@ -600,6 +603,18 @@ function ProgramModal({
         </FieldP>
         <FieldP label="시급">
           <input type="number" value={f.hourly_rate} onChange={(e) => set({ hourly_rate: e.target.value })} className={inCls} />
+        </FieldP>
+        <FieldP label="공제율(%)">
+          <input
+            type="number"
+            step="0.1"
+            value={f.deduction_rate}
+            onChange={(e) => set({ deduction_rate: e.target.value })}
+            className={inCls}
+          />
+          <p className="mt-1 text-[11px] text-ink-hint">
+            원천징수. 사업소득 3.3%가 기본.
+          </p>
         </FieldP>
       </div>
       {err && <p className={`mt-3 ${noticeError}`}>{err}</p>}

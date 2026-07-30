@@ -261,6 +261,7 @@ export async function copyTerm(input: {
           tuition: p.tuition,
           room: p.room,
           hourly_rate: p.hourly_rate,
+          deduction_rate: p.deduction_rate,
           status: "active",
           sort_order: p.sort_order,
         })
@@ -299,6 +300,7 @@ export type ProgramInput = {
   tuition: number | null;
   room: string | null;
   hourly_rate: number | null;
+  deduction_rate: number | null;
 };
 function progPayload(i: ProgramInput) {
   const num = (v: number | null) => (v == null || Number.isNaN(v) ? null : v);
@@ -313,6 +315,7 @@ function progPayload(i: ProgramInput) {
     tuition: num(i.tuition),
     room: clean(i.room),
     hourly_rate: num(i.hourly_rate),
+    deduction_rate: num(i.deduction_rate),
   };
 }
 

@@ -102,6 +102,7 @@ export type SaemProgram = {
   tuition: number | null;
   room: string | null;
   hourly_rate: number | null;
+  deduction_rate: number | null; // 원천징수 공제율(%) — 기본 3.30
   status: string;
   sort_order: number;
 };
@@ -183,6 +184,7 @@ export function toProgram(r: Record<string, unknown>): SaemProgram {
     tuition: nOrNull(r.tuition),
     room: s(r.room),
     hourly_rate: nOrNull(r.hourly_rate),
+    deduction_rate: nOrNull(r.deduction_rate),
     status: String(r.status ?? "active"),
     sort_order: Number(r.sort_order ?? 0),
   };
