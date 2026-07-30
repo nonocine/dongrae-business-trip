@@ -7,11 +7,13 @@ import {
   listPrograms,
   createProject,
   createTerm,
+  updateTerm,
   updateTermStatus,
   copyTerm,
   addProgram,
   updateProgram,
   deleteProgram,
+  generateProgramSessions,
   type ProgramRow,
   type InstructorOption,
   type ProgramInput,
@@ -24,11 +26,20 @@ import {
   type TermStatus,
 } from "@/lib/saem";
 import {
+  buildSessionDates,
+  firstWeekdayOnOrAfter,
+  weekdayOf,
+  WEEKDAY_LABELS,
+} from "@/lib/saemSchedule";
+import {
   cardCls,
   btnPrimary,
   btnSecondary,
+  badgeDanger,
+  badgeNeutral,
   noticeError,
   noticeSuccess,
+  noticeWarning,
 } from "@/lib/ui";
 
 const selCls =
@@ -41,10 +52,139 @@ const hhmm = (t: string | null) => (t ? t.slice(0, 5) : "");
 
 type Modal =
   | { kind: "project" }
-  | { kind: "term" }
+  | { kind: "term"; term: SaemTerm | null }
   | { kind: "copy" }
   | { kind: "program"; program: ProgramRow | null }
+  | { kind: "sessions"; program: ProgramRow }
   | null;
+
+// =====================================================================
+// 스케줄 입력 공용 — 차시(기본값)·프로그램(실제값)·차시 복사가 같이 쓴다.
+// =====================================================================
+type ScheduleForm = {
+  start: string; // 프로그램·복사에서만 사용(차시 기본값에는 없음)
+  weekday: string;
+  weeks: string;
+  holidays: string[];
+};
+
+function WeekdaySelect({
+  value,
+  onChange,
+}: {
+  value: string;
+  onChange: (v: string) => void;
+}) {
+  return (
+    <select value={value} onChange={(e) => onChange(e.target.value)} className={inCls}>
+      {WEEKDAY_LABELS.map((label, i) => (
+        <option key={i} value={String(i)}>
+          {label}요일
+        </option>
+      ))}
+    </select>
+  );
+}
+
+// 휴강일 — 날짜 하나씩 추가/삭제.
+function HolidayPicker({
+  value,
+  onChange,
+}: {
+  value: string[];
+  onChange: (v: string[]) => void;
+}) {
+  const [pick, setPick] = useState("");
+  function add() {
+    if (!pick) return;
+    if (!value.includes(pick)) onChange([...value, pick].sort());
+    setPick("");
+  }
+  return (
+    <div>
+      <div className="flex gap-2">
+        <input
+          type="date"
+          value={pick}
+          onChange={(e) => setPick(e.target.value)}
+          className={inCls}
+        />
+        <button type="button" onClick={add} disabled={!pick} className={btnSecondary}>
+          추가
+        </button>
+      </div>
+      {value.length > 0 && (
+        <ul className="mt-2 flex flex-wrap gap-1.5">
+          {value.map((d) => (
+            <li
+              key={d}
+              className="inline-flex items-center gap-1 rounded-full bg-surface px-2 py-0.5 text-[11px] text-ink-muted"
+            >
+              {d}
+              <button
+                type="button"
+                onClick={() => onChange(value.filter((x) => x !== d))}
+                className="text-stamp hover:underline"
+                aria-label={`${d} 삭제`}
+              >
+                ×
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
+  );
+}
+
+// 생성될 회차 날짜 실시간 미리보기(급여 미리보기 패턴).
+function SessionPreview({
+  start,
+  weekday,
+  weeks,
+  holidays,
+}: {
+  start: string;
+  weekday: string;
+  weeks: string;
+  holidays: string[];
+}) {
+  const n = Number(weeks);
+  const dates =
+    start && Number.isFinite(n) && n > 0
+      ? buildSessionDates({
+          start,
+          weekday: Number(weekday),
+          weeks: n,
+          holidays,
+        })
+      : [];
+  return (
+    <div className="mt-2 rounded-md border border-line bg-surface p-2.5">
+      <p className="text-[11px] font-semibold text-navy">
+        생성될 회차 {dates.length > 0 ? `${dates.length}건` : ""}
+      </p>
+      {dates.length === 0 ? (
+        <p className="mt-1 text-[11px] text-ink-hint">
+          시작일과 회차 수를 입력하면 날짜가 표시됩니다.
+        </p>
+      ) : (
+        <ol className="mt-1 grid grid-cols-2 gap-x-3 gap-y-0.5 sm:grid-cols-3">
+          {dates.map((d, i) => (
+            <li key={d} className="font-mono text-[11px] text-ink-body">
+              <span className="text-ink-hint">{i + 1}.</span> {d}
+            </li>
+          ))}
+        </ol>
+      )}
+      {holidays.length > 0 && (
+        <p className="mt-1.5 text-[11px] text-ink-hint">
+          휴강일 {holidays.length}건은 건너뛰고 다음 주로 밀려 회차 수를 채웁니다.
+        </p>
+      )}
+    </div>
+  );
+}
 
 export default function ProgramsManager({
   projects,
@@ -179,17 +319,35 @@ export default function ProgramsManager({
             <button type="button" onClick={() => setModal({ kind: "project" })} className={btnSecondary}>
               프로젝트 추가
             </button>
-            <button type="button" onClick={() => setModal({ kind: "term" })} className={btnSecondary} disabled={!projectId}>
+            <button type="button" onClick={() => setModal({ kind: "term", term: null })} className={btnSecondary} disabled={!projectId}>
               차시 추가
+            </button>
+            <button
+              type="button"
+              onClick={() => term && setModal({ kind: "term", term })}
+              className={btnSecondary}
+              disabled={!term}
+              title="기간·기본 스케줄 수정(기존 회차는 그대로)"
+            >
+              차시 수정
             </button>
             <button type="button" onClick={() => setModal({ kind: "copy" })} className={btnSecondary} disabled={!termId}>
               차시 복사
             </button>
           </div>
         </div>
-        {term && (term.start_date || term.end_date) && (
+        {term && (term.start_date || term.end_date || term.default_weeks != null) && (
           <p className="mt-2 text-xs text-ink-hint">
             기간 {term.start_date ?? "-"} ~ {term.end_date ?? "-"}
+            {term.default_weeks != null && (
+              <>
+                {" · 기본 스케줄 "}
+                {WEEKDAY_LABELS[term.default_weekday ?? 6]}요일 ·{" "}
+                {term.default_weeks}회
+                {term.default_holidays.length > 0 &&
+                  ` · 휴강 ${term.default_holidays.length}건`}
+              </>
+            )}
           </p>
         )}
       </section>
@@ -230,6 +388,7 @@ export default function ProgramsManager({
                   <th className={thCls}>교시</th>
                   <th className={thCls}>시간</th>
                   <th className={thCls}>장소</th>
+                  <th className={thCls}>회차</th>
                   <th className={`${thCls} text-right`}>정원</th>
                   <th className={`${thCls} text-right`}>수강료</th>
                   <th className={`${thCls} text-right`}>시급</th>
@@ -246,6 +405,29 @@ export default function ProgramsManager({
                       {p.time_start ? `${hhmm(p.time_start)}~${hhmm(p.time_end)}` : "-"}
                     </td>
                     <td className={tdCls}>{p.room ?? "-"}</td>
+                    <td className={tdCls}>
+                      {p.sessionCount === 0 ? (
+                        <button
+                          type="button"
+                          onClick={() => setModal({ kind: "sessions", program: p })}
+                          className={`${badgeDanger} hover:underline`}
+                          title="회차가 없어 강사 계획서·근무일지가 비어 있습니다"
+                        >
+                          0회차 — 회차 생성
+                        </button>
+                      ) : (
+                        <span className="inline-flex items-center gap-1">
+                          <span className="text-xs text-ink-body">
+                            {p.sessionCount}회
+                          </span>
+                          {p.lockedCount > 0 && (
+                            <span className={badgeNeutral} title="제출·확정·정산된 회차">
+                              확정 {p.lockedCount}
+                            </span>
+                          )}
+                        </span>
+                      )}
+                    </td>
                     <td className={`${tdCls} text-right`}>{p.capacity ?? "-"}</td>
                     <td className={`${tdCls} text-right font-mono`}>
                       {formatKRW(p.tuition)}
@@ -293,11 +475,12 @@ export default function ProgramsManager({
       {modal?.kind === "term" && (
         <TermModal
           projectId={projectId}
+          term={modal.term}
           onClose={() => setModal(null)}
-          onDone={async (id) => {
+          onDone={async (id, text) => {
             setModal(null);
             await reloadTerms(id);
-            setMsg({ ok: true, text: "차시를 추가했습니다." });
+            setMsg({ ok: true, text });
           }}
         />
       )}
@@ -315,8 +498,21 @@ export default function ProgramsManager({
       {modal?.kind === "program" && (
         <ProgramModal
           termId={termId}
+          term={term}
           instructors={instructors}
           program={modal.program}
+          onClose={() => setModal(null)}
+          onDone={async (text) => {
+            setModal(null);
+            await reloadPrograms();
+            setMsg({ ok: true, text });
+          }}
+        />
+      )}
+      {modal?.kind === "sessions" && (
+        <SessionsModal
+          program={modal.program}
+          term={term}
           onClose={() => setModal(null)}
           onDone={async (text) => {
             setModal(null);
@@ -394,20 +590,35 @@ function ProjectModal({
 
 function TermModal({
   projectId,
+  term,
   onClose,
   onDone,
 }: {
   projectId: string;
+  term: SaemTerm | null; // null 이면 추가, 있으면 수정
   onClose: () => void;
-  onDone: (id: string) => void;
+  onDone: (id: string, text: string) => void;
 }) {
-  const [name, setName] = useState("");
-  const [start1, setStart] = useState("");
-  const [end, setEnd] = useState("");
+  const [name, setName] = useState(term?.name ?? "");
+  const [start1, setStart] = useState(term?.start_date ?? "");
+  const [end, setEnd] = useState(term?.end_date ?? "");
+  const [weekday, setWeekday] = useState(
+    String(term?.default_weekday ?? 6)
+  );
+  const [weeks, setWeeks] = useState(
+    term?.default_weeks != null ? String(term.default_weeks) : "8"
+  );
+  const [holidays, setHolidays] = useState<string[]>(term?.default_holidays ?? []);
   const [err, setErr] = useState<string | null>(null);
   const [pending, startT] = useTransition();
+
+  // 기본 스케줄이 만들 날짜 — 차시 시작일 기준으로 참고용 표시.
+  const previewStart = start1
+    ? firstWeekdayOnOrAfter(start1, Number(weekday)) ?? ""
+    : "";
+
   return (
-    <ModalShell title="차시 추가" onClose={onClose}>
+    <ModalShell title={term ? "차시 수정" : "차시 추가"} onClose={onClose}>
       <label className="block text-[11px] font-semibold text-navy">차시명 *</label>
       <input value={name} onChange={(e) => setName(e.target.value)} className={`${inCls} mt-1`} placeholder="예: 4차시" />
       <div className="mt-3 grid grid-cols-2 gap-3">
@@ -420,6 +631,46 @@ function TermModal({
           <input type="date" value={end} onChange={(e) => setEnd(e.target.value)} className={`${inCls} mt-1`} />
         </div>
       </div>
+
+      <div className="mt-4 rounded-lg border border-line p-3">
+        <p className="text-[11px] font-semibold text-navy">
+          기본 스케줄 (기본값 — 프로그램마다 변경 가능)
+        </p>
+        <p className="mt-0.5 text-[11px] text-ink-hint">
+          프로그램을 추가할 때 이 값이 채워집니다. 실제 회차는 프로그램별 스케줄이
+          결정합니다.
+        </p>
+        <div className="mt-2 grid grid-cols-2 gap-3">
+          <div>
+            <label className="block text-[11px] font-semibold text-navy">요일</label>
+            <div className="mt-1">
+              <WeekdaySelect value={weekday} onChange={setWeekday} />
+            </div>
+          </div>
+          <div>
+            <label className="block text-[11px] font-semibold text-navy">회차 수</label>
+            <input type="number" min={1} value={weeks} onChange={(e) => setWeeks(e.target.value)} className={`${inCls} mt-1`} />
+          </div>
+        </div>
+        <label className="mt-3 block text-[11px] font-semibold text-navy">휴강일</label>
+        <div className="mt-1">
+          <HolidayPicker value={holidays} onChange={setHolidays} />
+        </div>
+        {previewStart && (
+          <SessionPreview
+            start={previewStart}
+            weekday={weekday}
+            weeks={weeks}
+            holidays={holidays}
+          />
+        )}
+      </div>
+
+      {term && (
+        <p className={`mt-3 ${noticeWarning}`}>
+          기본값만 바뀝니다. 이미 만든 프로그램의 회차는 그대로 유지됩니다.
+        </p>
+      )}
       {err && <p className={`mt-3 ${noticeError}`}>{err}</p>}
       <div className="mt-4 flex gap-2">
         <button
@@ -428,13 +679,27 @@ function TermModal({
           className={btnPrimary}
           onClick={() =>
             startT(async () => {
-              const res = await createTerm({ projectId, name, startDate: start1, endDate: end });
+              const payload = {
+                name,
+                startDate: start1,
+                endDate: end,
+                defaultWeekday: Number(weekday),
+                defaultWeeks: weeks === "" ? null : Number(weeks),
+                defaultHolidays: holidays,
+              };
+              if (term) {
+                const res = await updateTerm(term.id, payload);
+                if (!res.ok) return setErr(res.message);
+                onDone(term.id, "차시를 수정했습니다.");
+                return;
+              }
+              const res = await createTerm({ projectId, ...payload });
               if (!res.ok) return setErr(res.message);
-              onDone(res.id);
+              onDone(res.id, "차시를 추가했습니다.");
             })
           }
         >
-          {pending ? "추가 중…" : "추가"}
+          {pending ? "저장 중…" : term ? "저장" : "추가"}
         </button>
         <button type="button" onClick={onClose} className={btnSecondary}>취소</button>
       </div>
@@ -453,32 +718,45 @@ function CopyModal({
 }) {
   const [name, setName] = useState("");
   const [startDate, setStartDate] = useState("");
+  const [weekday, setWeekday] = useState("6");
   const [weeks, setWeeks] = useState("8");
-  const [holidays, setHolidays] = useState("");
+  const [holidays, setHolidays] = useState<string[]>([]);
   const [err, setErr] = useState<string | null>(null);
   const [pending, start] = useTransition();
   return (
     <ModalShell title="차시 복사" onClose={onClose}>
       <p className="mb-3 text-xs text-ink-hint">
-        선택한 차시의 프로그램(강사·시간·정원·요금)을 새 차시로 복제하고, 시작일부터
-        토요일 회차를 자동 생성합니다.
+        선택한 차시의 프로그램(강사·시간·정원·요금)을 새 차시로 복제하고, 아래 스케줄로
+        회차를 자동 생성합니다.
       </p>
       <label className="block text-[11px] font-semibold text-navy">새 차시명 *</label>
       <input value={name} onChange={(e) => setName(e.target.value)} className={`${inCls} mt-1`} placeholder="예: 4차시" />
-      <div className="mt-3 grid grid-cols-2 gap-3">
+      <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-3">
         <div>
           <label className="block text-[11px] font-semibold text-navy">시작일 *</label>
           <input type="date" value={startDate} onChange={(e) => setStartDate(e.target.value)} className={`${inCls} mt-1`} />
         </div>
         <div>
-          <label className="block text-[11px] font-semibold text-navy">주차 수</label>
+          <label className="block text-[11px] font-semibold text-navy">요일</label>
+          <div className="mt-1">
+            <WeekdaySelect value={weekday} onChange={setWeekday} />
+          </div>
+        </div>
+        <div>
+          <label className="block text-[11px] font-semibold text-navy">회차 수</label>
           <input type="number" min={1} value={weeks} onChange={(e) => setWeeks(e.target.value)} className={`${inCls} mt-1`} />
         </div>
       </div>
-      <label className="mt-3 block text-[11px] font-semibold text-navy">
-        휴강일(쉼표로 여러 개, YYYY-MM-DD)
-      </label>
-      <input value={holidays} onChange={(e) => setHolidays(e.target.value)} className={`${inCls} mt-1`} placeholder="2026-09-20, 2026-10-04" />
+      <label className="mt-3 block text-[11px] font-semibold text-navy">휴강일</label>
+      <div className="mt-1">
+        <HolidayPicker value={holidays} onChange={setHolidays} />
+      </div>
+      <SessionPreview
+        start={startDate}
+        weekday={weekday}
+        weeks={weeks}
+        holidays={holidays}
+      />
       {err && <p className={`mt-3 ${noticeError}`}>{err}</p>}
       <div className="mt-4 flex gap-2">
         <button
@@ -491,11 +769,9 @@ function CopyModal({
                 sourceTermId,
                 name,
                 startDate,
+                weekday: Number(weekday),
                 weeks: Number(weeks),
-                holidays: holidays
-                  .split(",")
-                  .map((s) => s.trim())
-                  .filter(Boolean),
+                holidays,
               });
               if (!res.ok) return setErr(res.message);
               onDone(res.id, `프로그램 ${res.programs}개·회차 ${res.sessions}개를 복사했습니다.`);
@@ -510,19 +786,68 @@ function CopyModal({
   );
 }
 
+// 프로그램 스케줄 초기값 — 수정이면 프로그램 값, 추가면 차시 기본값에서 프리필.
+//   구 프로그램(스케줄 컬럼 비어 있음)은 실제 회차에서 역산해 채운다.
+function initialSchedule(
+  program: ProgramRow | null,
+  term: SaemTerm | null
+): ScheduleForm {
+  const termWeekday = term?.default_weekday ?? 6;
+  if (program) {
+    // 자기 스케줄이 이미 있으면 그 값을 그대로 신뢰한다(휴강일을 비워 둔 것도 의도).
+    const hasOwn =
+      program.session_start != null || program.session_weeks != null;
+    const wd =
+      program.session_weekday ??
+      (program.firstSessionDate ? weekdayOf(program.firstSessionDate) : null) ??
+      termWeekday;
+    const start =
+      program.session_start ?? program.firstSessionDate ?? term?.start_date ?? "";
+    const weeks =
+      program.session_weeks ??
+      (program.sessionCount > 0 ? program.sessionCount : term?.default_weeks ?? 8);
+    return {
+      start,
+      weekday: String(wd),
+      weeks: String(weeks),
+      holidays: hasOwn
+        ? program.session_holidays
+        : program.session_holidays.length
+          ? program.session_holidays
+          : term?.default_holidays ?? [],
+    };
+  }
+  // 추가 — 시작일 기본값은 차시 시작일 이후 첫 기본요일.
+  const start = term?.start_date
+    ? firstWeekdayOnOrAfter(term.start_date, termWeekday) ?? ""
+    : "";
+  return {
+    start,
+    weekday: String(termWeekday),
+    weeks: String(term?.default_weeks ?? 8),
+    holidays: term?.default_holidays ?? [],
+  };
+}
+
 function ProgramModal({
   termId,
+  term,
   instructors,
   program,
   onClose,
   onDone,
 }: {
   termId: string;
+  term: SaemTerm | null;
   instructors: InstructorOption[];
   program: ProgramRow | null;
   onClose: () => void;
   onDone: (text: string) => void;
 }) {
+  const [sc, setSc] = useState<ScheduleForm>(() =>
+    initialSchedule(program, term)
+  );
+  const setScf = (p: Partial<ScheduleForm>) => setSc((prev) => ({ ...prev, ...p }));
   const [f, setF] = useState({
     name: program?.name ?? "",
     instructor_id: program?.instructor_id ?? "",
@@ -556,13 +881,28 @@ function ProgramModal({
       room: f.room || null,
       hourly_rate: numOrNull(f.hourly_rate),
       deduction_rate: numOrNull(f.deduction_rate),
+      session_start: sc.start || null,
+      session_weekday: sc.weekday === "" ? null : Number(sc.weekday),
+      session_weeks: sc.weeks === "" ? null : Number(sc.weeks),
+      session_holidays: sc.holidays,
     };
     start(async () => {
-      const res = program
-        ? await updateProgram(program.id, input)
-        : await addProgram(termId, input);
+      if (program) {
+        const res = await updateProgram(program.id, input);
+        if (!res.ok) return setErr(res.message);
+        const s = res.sync;
+        onDone(
+          s
+            ? `수정했습니다. 회차 ${s.created}건 생성` +
+                (s.deleted ? `·${s.deleted}건 삭제` : "") +
+                (s.kept ? `·제출·확정분 ${s.kept}건 보존` : "")
+            : "수정했습니다."
+        );
+        return;
+      }
+      const res = await addProgram(termId, input);
       if (!res.ok) return setErr(res.message);
-      onDone(program ? "수정했습니다." : "프로그램을 추가했습니다.");
+      onDone(`프로그램을 추가했습니다. 회차 ${res.sessions}건 생성.`);
     });
   }
 
@@ -617,10 +957,166 @@ function ProgramModal({
           </p>
         </FieldP>
       </div>
+
+      {/* 실제 스케줄 — 이 값으로 회차(근무일지·계획서 칸)가 만들어진다. */}
+      <div className="mt-4 rounded-lg border border-line p-3">
+        <p className="text-[11px] font-semibold text-navy">스케줄 (회차 생성)</p>
+        <p className="mt-0.5 text-[11px] text-ink-hint">
+          차시 기본값이 채워져 있습니다. 이 프로그램만 다르면 여기서 바꾸세요.
+        </p>
+        <div className="mt-2 grid grid-cols-1 gap-3 sm:grid-cols-3">
+          <div>
+            <label className="block text-[11px] font-semibold text-navy">
+              시작일(1회차)
+            </label>
+            <input
+              type="date"
+              value={sc.start}
+              onChange={(e) => setScf({ start: e.target.value })}
+              className={`${inCls} mt-1`}
+            />
+          </div>
+          <div>
+            <label className="block text-[11px] font-semibold text-navy">요일</label>
+            <div className="mt-1">
+              <WeekdaySelect
+                value={sc.weekday}
+                onChange={(v) => setScf({ weekday: v })}
+              />
+            </div>
+          </div>
+          <div>
+            <label className="block text-[11px] font-semibold text-navy">회차 수</label>
+            <input
+              type="number"
+              min={1}
+              value={sc.weeks}
+              onChange={(e) => setScf({ weeks: e.target.value })}
+              className={`${inCls} mt-1`}
+            />
+          </div>
+        </div>
+        <label className="mt-3 block text-[11px] font-semibold text-navy">휴강일</label>
+        <div className="mt-1">
+          <HolidayPicker
+            value={sc.holidays}
+            onChange={(v) => setScf({ holidays: v })}
+          />
+        </div>
+        <SessionPreview
+          start={sc.start}
+          weekday={sc.weekday}
+          weeks={sc.weeks}
+          holidays={sc.holidays}
+        />
+        {program && (
+          <p className={`mt-2 ${noticeWarning}`}>
+            {program.lockedCount > 0
+              ? `스케줄을 바꾸면 제출·확정된 회차 ${program.lockedCount}건은 그대로 보존하고, 나머지 회차만 새 스케줄로 다시 만듭니다. 회차 번호는 날짜순으로 재정렬됩니다.`
+              : `스케줄을 바꾸면 기존 회차 ${program.sessionCount}건을 모두 지우고 새로 만듭니다. (제출·확정된 회차가 없어 안전합니다)`}
+          </p>
+        )}
+      </div>
+
       {err && <p className={`mt-3 ${noticeError}`}>{err}</p>}
       <div className="mt-4 flex gap-2">
         <button type="button" onClick={submit} disabled={pending} className={btnPrimary}>
           {pending ? "저장 중…" : "저장"}
+        </button>
+        <button type="button" onClick={onClose} className={btnSecondary}>취소</button>
+      </div>
+    </ModalShell>
+  );
+}
+
+// 회차 0건 프로그램 구제 — 스케줄만 받아 회차를 생성한다.
+function SessionsModal({
+  program,
+  term,
+  onClose,
+  onDone,
+}: {
+  program: ProgramRow;
+  term: SaemTerm | null;
+  onClose: () => void;
+  onDone: (text: string) => void;
+}) {
+  const [sc, setSc] = useState<ScheduleForm>(() => initialSchedule(program, term));
+  const setScf = (p: Partial<ScheduleForm>) => setSc((prev) => ({ ...prev, ...p }));
+  const [err, setErr] = useState<string | null>(null);
+  const [pending, start] = useTransition();
+
+  return (
+    <ModalShell title={`회차 생성 — ${program.name}`} onClose={onClose}>
+      <p className="text-xs text-ink-hint">
+        이 프로그램에 회차가 {program.sessionCount}건입니다. 스케줄을 지정하면 회차를
+        만들고, 강사의 계획서·근무일지 칸이 생깁니다.
+      </p>
+      <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-3">
+        <div>
+          <label className="block text-[11px] font-semibold text-navy">
+            시작일(1회차) *
+          </label>
+          <input
+            type="date"
+            value={sc.start}
+            onChange={(e) => setScf({ start: e.target.value })}
+            className={`${inCls} mt-1`}
+          />
+        </div>
+        <div>
+          <label className="block text-[11px] font-semibold text-navy">요일</label>
+          <div className="mt-1">
+            <WeekdaySelect value={sc.weekday} onChange={(v) => setScf({ weekday: v })} />
+          </div>
+        </div>
+        <div>
+          <label className="block text-[11px] font-semibold text-navy">회차 수 *</label>
+          <input
+            type="number"
+            min={1}
+            value={sc.weeks}
+            onChange={(e) => setScf({ weeks: e.target.value })}
+            className={`${inCls} mt-1`}
+          />
+        </div>
+      </div>
+      <label className="mt-3 block text-[11px] font-semibold text-navy">휴강일</label>
+      <div className="mt-1">
+        <HolidayPicker value={sc.holidays} onChange={(v) => setScf({ holidays: v })} />
+      </div>
+      <SessionPreview
+        start={sc.start}
+        weekday={sc.weekday}
+        weeks={sc.weeks}
+        holidays={sc.holidays}
+      />
+      {program.lockedCount > 0 && (
+        <p className={`mt-2 ${noticeWarning}`}>
+          제출·확정된 회차 {program.lockedCount}건은 보존됩니다.
+        </p>
+      )}
+      {err && <p className={`mt-3 ${noticeError}`}>{err}</p>}
+      <div className="mt-4 flex gap-2">
+        <button
+          type="button"
+          disabled={pending}
+          className={btnPrimary}
+          onClick={() =>
+            start(async () => {
+              setErr(null);
+              const res = await generateProgramSessions(program.id, {
+                start: sc.start,
+                weekday: Number(sc.weekday),
+                weeks: Number(sc.weeks),
+                holidays: sc.holidays,
+              });
+              if (!res.ok) return setErr(res.message);
+              onDone(`회차 ${res.sync.created}건을 생성했습니다.`);
+            })
+          }
+        >
+          {pending ? "생성 중…" : "회차 생성"}
         </button>
         <button type="button" onClick={onClose} className={btnSecondary}>취소</button>
       </div>

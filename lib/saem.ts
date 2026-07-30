@@ -3,6 +3,8 @@
 //   * 같은 Supabase 의 saem_* 테이블 공유. RLS 0개 → service_role 경유.
 // =====================================================================
 
+import { normalizeHolidays } from "@/lib/saemSchedule";
+
 // 동래샘들 앱 베이스 URL(초대 링크용). env 우선, 기본값 배포 주소.
 export function saemAppUrl(): string {
   return (process.env.SAEM_APP_URL ?? "https://dongrae-saems.vercel.app").replace(
@@ -87,6 +89,10 @@ export type SaemTerm = {
   start_date: string | null;
   end_date: string | null;
   status: TermStatus;
+  // 기본 스케줄 — 프로그램 추가 모달 프리필용. 실제 회차는 프로그램이 결정한다.
+  default_weekday: number | null; // 0 일 ~ 6 토
+  default_weeks: number | null;
+  default_holidays: string[];
 };
 
 export type SaemProgram = {
@@ -105,6 +111,11 @@ export type SaemProgram = {
   deduction_rate: number | null; // 원천징수 공제율(%) — 기본 3.30
   status: string;
   sort_order: number;
+  // 실제 스케줄(진실의 원천) — 이 값으로 saem_sessions 를 생성·재생성한다.
+  session_start: string | null; // 1회차 날짜
+  session_weekday: number | null; // 0 일 ~ 6 토
+  session_weeks: number | null;
+  session_holidays: string[];
 };
 
 // --- 정규화 ---
@@ -167,6 +178,9 @@ export function toTerm(r: Record<string, unknown>): SaemTerm {
     start_date: s(r.start_date),
     end_date: s(r.end_date),
     status: st === "active" ? "active" : st === "closed" ? "closed" : "draft",
+    default_weekday: nOrNull(r.default_weekday),
+    default_weeks: nOrNull(r.default_weeks),
+    default_holidays: normalizeHolidays(r.default_holidays),
   };
 }
 
@@ -187,6 +201,10 @@ export function toProgram(r: Record<string, unknown>): SaemProgram {
     deduction_rate: nOrNull(r.deduction_rate),
     status: String(r.status ?? "active"),
     sort_order: Number(r.sort_order ?? 0),
+    session_start: s(r.session_start),
+    session_weekday: nOrNull(r.session_weekday),
+    session_weeks: nOrNull(r.session_weeks),
+    session_holidays: normalizeHolidays(r.session_holidays),
   };
 }
 

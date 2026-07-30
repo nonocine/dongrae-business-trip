@@ -12,6 +12,12 @@ import {
   type SaemProgram,
   type TermStatus,
 } from "@/lib/saem";
+import {
+  buildSessionDates,
+  lastSessionDate,
+  normalizeHolidays,
+  normalizeWeekday,
+} from "@/lib/saemSchedule";
 
 const PROJ = "saem_projects";
 const TERM = "saem_terms";
@@ -22,34 +28,34 @@ function clean(v: string | null | undefined): string | null {
   const s = (v ?? "").trim();
   return s.length ? s : null;
 }
-const p2 = (n: number) => String(n).padStart(2, "0");
-function ymd(ms: number): string {
-  const d = new Date(ms);
-  return `${d.getUTCFullYear()}-${p2(d.getUTCMonth() + 1)}-${p2(d.getUTCDate())}`;
+
+// 회차 스케줄 입력(차시 기본값·프로그램 실제값 공용).
+export type SessionSchedule = {
+  start: string | null;
+  weekday: number | null;
+  weeks: number | null;
+  holidays: string[];
+};
+
+// 스케줄이 회차를 만들 수 있는 상태인지. 시작일·회차수가 있어야 한다.
+function scheduleDates(sc: SessionSchedule): string[] {
+  if (!sc.start || !sc.weeks || sc.weeks <= 0) return [];
+  return buildSessionDates({
+    start: sc.start,
+    weekday: normalizeWeekday(sc.weekday ?? 6),
+    weeks: sc.weeks,
+    holidays: sc.holidays,
+  });
 }
-function parseYmdMs(s: string): number | null {
-  const m = s.match(/^(\d{4})-(\d{2})-(\d{2})$/);
-  return m ? Date.UTC(Number(m[1]), Number(m[2]) - 1, Number(m[3])) : null;
-}
-// 시작일 이후(포함) 첫 토요일부터 weeks 주간의 토요일. 휴강일 제외.
-function computeSaturdays(
-  startYmd: string,
-  weeks: number,
-  holidays: Set<string>
-): { dates: string[]; endYmd: string | null } {
-  const startMs = parseYmdMs(startYmd);
-  if (startMs == null || weeks <= 0) return { dates: [], endYmd: null };
-  const dow = new Date(startMs).getUTCDay(); // 0 일 ~ 6 토
-  const firstSat = startMs + (((6 - dow) % 7) + 7) % 7 * 86400000;
-  const dates: string[] = [];
-  let lastMs = firstSat;
-  for (let i = 0; i < weeks; i++) {
-    const cur = firstSat + i * 7 * 86400000;
-    lastMs = cur;
-    const d = ymd(cur);
-    if (!holidays.has(d)) dates.push(d);
-  }
-  return { dates, endYmd: ymd(lastMs) };
+
+function normSchedule(sc: Partial<SessionSchedule> | undefined): SessionSchedule {
+  const weeks = sc?.weeks == null ? null : Math.max(0, Math.round(Number(sc.weeks) || 0));
+  return {
+    start: clean(sc?.start),
+    weekday: sc?.weekday == null ? null : normalizeWeekday(sc.weekday),
+    weeks: weeks && weeks > 0 ? weeks : null,
+    holidays: normalizeHolidays(sc?.holidays),
+  };
 }
 
 // --- 조회 ---
@@ -74,7 +80,13 @@ export async function listTerms(projectId: string): Promise<SaemTerm[]> {
   return (data ?? []).map((r) => toTerm(r as Record<string, unknown>));
 }
 
-export type ProgramRow = SaemProgram & { instructorName: string | null };
+export type ProgramRow = SaemProgram & {
+  instructorName: string | null;
+  sessionCount: number;
+  lockedCount: number; // 제출·확정·정산 귀속 회차 — 재생성 시 보존된다
+  firstSessionDate: string | null;
+  lastSessionDate: string | null;
+};
 export async function listPrograms(termId: string): Promise<ProgramRow[]> {
   await requireSaemAccess();
   if (!termId) return [];
@@ -97,10 +109,54 @@ export async function listPrograms(termId: string): Promise<ProgramRow[]> {
     for (const r of ins ?? [])
       nameById.set((r as { id: string }).id, (r as { name: string }).name);
   }
-  return programs.map((p) => ({
-    ...p,
-    instructorName: p.instructor_id ? nameById.get(p.instructor_id) ?? null : null,
-  }));
+
+  // 회차 현황 한 번에 — 0회차 프로그램 판별·재생성 경고용.
+  const stat = new Map<
+    string,
+    { count: number; locked: number; first: string | null; last: string | null }
+  >();
+  if (programs.length) {
+    const { data: sess } = await supabaseAdmin
+      .from(SESS)
+      .select(
+        "program_id, session_date, instructor_submitted_at, staff_confirmed_at, settlement_id"
+      )
+      .in(
+        "program_id",
+        programs.map((p) => p.id)
+      );
+    for (const r of sess ?? []) {
+      const row = r as Record<string, unknown>;
+      const pid = String(row.program_id ?? "");
+      const cur =
+        stat.get(pid) ?? { count: 0, locked: 0, first: null, last: null };
+      cur.count += 1;
+      if (
+        row.instructor_submitted_at != null ||
+        row.staff_confirmed_at != null ||
+        row.settlement_id != null
+      )
+        cur.locked += 1;
+      const d = (row.session_date as string | null) ?? null;
+      if (d) {
+        if (!cur.first || d < cur.first) cur.first = d;
+        if (!cur.last || d > cur.last) cur.last = d;
+      }
+      stat.set(pid, cur);
+    }
+  }
+
+  return programs.map((p) => {
+    const st = stat.get(p.id);
+    return {
+      ...p,
+      instructorName: p.instructor_id ? nameById.get(p.instructor_id) ?? null : null,
+      sessionCount: st?.count ?? 0,
+      lockedCount: st?.locked ?? 0,
+      firstSessionDate: st?.first ?? null,
+      lastSessionDate: st?.last ?? null,
+    };
+  });
 }
 
 export type InstructorOption = { id: string; name: string };
@@ -145,13 +201,32 @@ export async function createProject(
   }
 }
 
-export async function createTerm(input: {
-  projectId: string;
+export type TermInput = {
   name: string;
   startDate?: string;
   endDate?: string;
   status?: TermStatus;
-}): Promise<{ ok: true; id: string } | { ok: false; message: string }> {
+  // 기본 스케줄(프리필용) — 이미 만든 프로그램의 회차는 건드리지 않는다.
+  defaultWeekday?: number | null;
+  defaultWeeks?: number | null;
+  defaultHolidays?: string[];
+};
+
+function termSchedulePayload(input: TermInput) {
+  return {
+    default_weekday:
+      input.defaultWeekday == null ? null : normalizeWeekday(input.defaultWeekday),
+    default_weeks:
+      input.defaultWeeks == null || Number(input.defaultWeeks) <= 0
+        ? null
+        : Math.round(Number(input.defaultWeeks)),
+    default_holidays: normalizeHolidays(input.defaultHolidays),
+  };
+}
+
+export async function createTerm(
+  input: TermInput & { projectId: string }
+): Promise<{ ok: true; id: string } | { ok: false; message: string }> {
   try {
     await requireSaemAccess();
     const nm = clean(input.name);
@@ -165,12 +240,39 @@ export async function createTerm(input: {
         start_date: clean(input.startDate),
         end_date: clean(input.endDate),
         status: input.status ?? "draft",
+        ...termSchedulePayload(input),
       })
       .select("id")
       .single();
     if (error) throw new Error(error.message);
     revalidatePath("/hr/saems/programs");
     return { ok: true, id: String((data as { id: string }).id) };
+  } catch (e) {
+    return { ok: false, message: e instanceof Error ? e.message : "오류가 발생했습니다." };
+  }
+}
+
+// 차시 수정 — 기간·기본 스케줄만 변경. 이미 만든 프로그램의 회차는 그대로.
+export async function updateTerm(
+  termId: string,
+  input: TermInput
+): Promise<{ ok: true } | { ok: false; message: string }> {
+  try {
+    await requireSaemAccess();
+    const nm = clean(input.name);
+    if (!termId || !nm) return { ok: false, message: "차시명을 입력하세요." };
+    const { error } = await supabaseAdmin
+      .from(TERM)
+      .update({
+        name: nm,
+        start_date: clean(input.startDate),
+        end_date: clean(input.endDate),
+        ...termSchedulePayload(input),
+      })
+      .eq("id", termId);
+    if (error) throw new Error(error.message);
+    revalidatePath("/hr/saems/programs");
+    return { ok: true };
   } catch (e) {
     return { ok: false, message: e instanceof Error ? e.message : "오류가 발생했습니다." };
   }
@@ -201,6 +303,7 @@ export async function copyTerm(input: {
   sourceTermId: string;
   name: string;
   startDate: string;
+  weekday?: number | null;
   weeks: number;
   holidays: string[];
 }): Promise<{ ok: true; id: string; programs: number; sessions: number } | { ok: false; message: string }> {
@@ -210,8 +313,16 @@ export async function copyTerm(input: {
     if (!input.sourceTermId || !nm || !input.startDate)
       return { ok: false, message: "차시명·시작일을 입력하세요." };
     const weeks = Math.max(1, Math.round(Number(input.weeks) || 0));
-    const holidays = new Set((input.holidays ?? []).filter(Boolean));
-    const { dates, endYmd } = computeSaturdays(input.startDate, weeks, holidays);
+    const weekday = normalizeWeekday(input.weekday ?? 6);
+    const holidays = normalizeHolidays(input.holidays);
+    // 공용 계산 사용 — 휴강일은 건너뛰되 회차 수를 채운다(SA-13).
+    const dates = buildSessionDates({
+      start: input.startDate,
+      weekday,
+      weeks,
+      holidays,
+    });
+    const endYmd = lastSessionDate(dates);
     if (dates.length === 0)
       return { ok: false, message: "생성할 회차 날짜가 없습니다. 시작일·주차를 확인하세요." };
 
@@ -233,6 +344,10 @@ export async function copyTerm(input: {
         start_date: input.startDate,
         end_date: endYmd,
         status: "draft",
+        // 복사에 쓴 스케줄을 새 차시의 기본값으로 남긴다.
+        default_weekday: weekday,
+        default_weeks: weeks,
+        default_holidays: holidays,
       })
       .select("id")
       .single();
@@ -264,6 +379,11 @@ export async function copyTerm(input: {
           deduction_rate: p.deduction_rate,
           status: "active",
           sort_order: p.sort_order,
+          // 복제 프로그램도 자기 스케줄을 갖는다(이후 개별 수정 가능).
+          session_start: dates[0] ?? input.startDate,
+          session_weekday: weekday,
+          session_weeks: weeks,
+          session_holidays: holidays,
         })
         .select("id")
         .single();
@@ -301,9 +421,20 @@ export type ProgramInput = {
   room: string | null;
   hourly_rate: number | null;
   deduction_rate: number | null;
+  // 실제 스케줄 — 저장 시 이 값으로 회차를 생성·재생성한다.
+  session_start: string | null;
+  session_weekday: number | null;
+  session_weeks: number | null;
+  session_holidays: string[];
 };
 function progPayload(i: ProgramInput) {
   const num = (v: number | null) => (v == null || Number.isNaN(v) ? null : v);
+  const sc = normSchedule({
+    start: i.session_start,
+    weekday: i.session_weekday,
+    weeks: i.session_weeks,
+    holidays: i.session_holidays,
+  });
   return {
     name: (i.name ?? "").trim(),
     instructor_id: i.instructor_id || null,
@@ -316,18 +447,171 @@ function progPayload(i: ProgramInput) {
     room: clean(i.room),
     hourly_rate: num(i.hourly_rate),
     deduction_rate: num(i.deduction_rate),
+    session_start: sc.start,
+    session_weekday: sc.weekday,
+    session_weeks: sc.weeks,
+    session_holidays: sc.holidays,
   };
+}
+
+// 프로그램의 회차 현황 — 잠긴 회차(제출·확정·정산 귀속)는 지우지 않는다.
+type SessionRow = {
+  id: string;
+  session_no: number;
+  session_date: string | null;
+  locked: boolean;
+};
+async function loadSessions(programId: string): Promise<SessionRow[]> {
+  const { data } = await supabaseAdmin
+    .from(SESS)
+    .select(
+      "id, session_no, session_date, instructor_submitted_at, staff_confirmed_at, settlement_id"
+    )
+    .eq("program_id", programId)
+    .order("session_date", { ascending: true })
+    .order("session_no", { ascending: true });
+  return (data ?? []).map((r) => {
+    const row = r as Record<string, unknown>;
+    return {
+      id: String(row.id ?? ""),
+      session_no: Number(row.session_no ?? 0),
+      session_date: (row.session_date as string | null) ?? null,
+      locked:
+        row.instructor_submitted_at != null ||
+        row.staff_confirmed_at != null ||
+        row.settlement_id != null,
+    };
+  });
+}
+
+// 회차 일괄 생성. 실패 시 예외를 던진다(호출자가 보상 처리).
+async function insertSessions(
+  programId: string,
+  dates: string[],
+  startNo = 1
+): Promise<number> {
+  if (!dates.length) return 0;
+  const rows = dates.map((d, i) => ({
+    program_id: programId,
+    session_no: startNo + i,
+    session_date: d,
+  }));
+  const { error } = await supabaseAdmin.from(SESS).insert(rows);
+  if (error) throw new Error(error.message);
+  return rows.length;
+}
+
+export type SessionSyncResult = {
+  created: number;
+  deleted: number;
+  kept: number; // 보존된 잠긴 회차
+};
+
+// 스케줄대로 회차를 맞춘다.
+//   * 잠긴 회차(제출·확정·정산)가 없으면 전부 지우고 새로 만든다.
+//   * 있으면 잠긴 회차는 보존하고 나머지만 지운 뒤 새 스케줄로 채우고,
+//     날짜 오름차순으로 회차 번호를 재정렬한다.
+// (program_id, session_no) 유니크 제약이 있어도 안전하게 번호를 재배치하기 위한
+// 임시 번호 시작값 — 재정렬 중 기존 번호와 겹치지 않게 한 번 비켜 둔다.
+const TEMP_NO_BASE = 10000;
+
+async function setSessionNo(id: string, no: number): Promise<void> {
+  const { error } = await supabaseAdmin
+    .from(SESS)
+    .update({ session_no: no })
+    .eq("id", id);
+  if (error) throw new Error(error.message);
+}
+
+async function syncSessions(
+  programId: string,
+  sc: SessionSchedule
+): Promise<SessionSyncResult> {
+  const dates = scheduleDates(sc);
+  const existing = await loadSessions(programId);
+  const locked = existing.filter((s) => s.locked);
+  const unlocked = existing.filter((s) => !s.locked);
+
+  if (unlocked.length) {
+    const { error } = await supabaseAdmin
+      .from(SESS)
+      .delete()
+      .in(
+        "id",
+        unlocked.map((s) => s.id)
+      );
+    if (error) throw new Error(error.message);
+  }
+
+  // 보존분을 임시 번호로 비켜 둔다 → 낮은 번호대가 비어 신규 삽입·재정렬이 안전.
+  for (let i = 0; i < locked.length; i++) {
+    await setSessionNo(locked[i].id, TEMP_NO_BASE + i);
+  }
+
+  // 잠긴 회차가 이미 차지한 날짜는 새로 만들지 않는다.
+  const lockedDates = new Set(
+    locked.map((s) => s.session_date).filter(Boolean) as string[]
+  );
+  const toCreate = dates.filter((d) => !lockedDates.has(d));
+  const created = await insertSessions(
+    programId,
+    toCreate,
+    TEMP_NO_BASE + locked.length
+  );
+
+  // 번호 재정렬 — 보존분 + 신규분을 날짜순으로 1..n.
+  const all = await loadSessions(programId);
+  const ordered = [...all].sort((a, b) => {
+    const ad = a.session_date ?? "9999-12-31";
+    const bd = b.session_date ?? "9999-12-31";
+    if (ad !== bd) return ad < bd ? -1 : 1;
+    return a.session_no - b.session_no;
+  });
+  for (let i = 0; i < ordered.length; i++) {
+    const want = i + 1;
+    if (ordered[i].session_no !== want) await setSessionNo(ordered[i].id, want);
+  }
+
+  return { created, deleted: unlocked.length, kept: locked.length };
+}
+
+// 스케줄 필드가 실제로 바뀌었는지.
+function scheduleChanged(before: SaemProgram, after: SessionSchedule): boolean {
+  const b = normSchedule({
+    start: before.session_start,
+    weekday: before.session_weekday,
+    weeks: before.session_weeks,
+    holidays: before.session_holidays,
+  });
+  return (
+    b.start !== after.start ||
+    b.weekday !== after.weekday ||
+    b.weeks !== after.weeks ||
+    b.holidays.join(",") !== after.holidays.join(",")
+  );
 }
 
 export async function addProgram(
   termId: string,
   input: ProgramInput
-): Promise<{ ok: true; id: string } | { ok: false; message: string }> {
+): Promise<
+  { ok: true; id: string; sessions: number } | { ok: false; message: string }
+> {
   try {
     await requireSaemAccess();
     const payload = progPayload(input);
     if (!termId || !payload.name)
       return { ok: false, message: "차시와 프로그램명을 확인하세요." };
+    const sc: SessionSchedule = {
+      start: payload.session_start,
+      weekday: payload.session_weekday,
+      weeks: payload.session_weeks,
+      holidays: payload.session_holidays,
+    };
+    if (sc.weeks && !sc.start)
+      return { ok: false, message: "회차 수를 넣었으면 시작일도 지정하세요." };
+    const dates = scheduleDates(sc);
+
     // sort_order = 현재 최대+1.
     const { data: maxRow } = await supabaseAdmin
       .from(PROG)
@@ -346,30 +630,18 @@ export async function addProgram(
     if (error) throw new Error(error.message);
     const newId = String((data as { id: string }).id);
 
-    // 같은 차시의 기존 프로그램 회차 날짜를 그대로 부여(있으면).
-    const { data: sibling } = await supabaseAdmin
-      .from(PROG)
-      .select("id")
-      .eq("term_id", termId)
-      .neq("id", newId)
-      .limit(1)
-      .maybeSingle();
-    if (sibling) {
-      const { data: sess } = await supabaseAdmin
-        .from(SESS)
-        .select("session_no, session_date")
-        .eq("program_id", (sibling as { id: string }).id)
-        .order("session_no", { ascending: true });
-      const rows = (sess ?? []).map((s) => ({
-        program_id: newId,
-        session_no: (s as { session_no: number }).session_no,
-        session_date: (s as { session_date: string | null }).session_date,
-      }));
-      if (rows.length) await supabaseAdmin.from(SESS).insert(rows);
+    // 회차 생성 — 실패하면 프로그램도 지운다(회차 없는 프로그램을 남기지 않음).
+    let sessions = 0;
+    try {
+      sessions = await insertSessions(newId, dates, 1);
+    } catch (e) {
+      await supabaseAdmin.from(SESS).delete().eq("program_id", newId);
+      await supabaseAdmin.from(PROG).delete().eq("id", newId);
+      throw e;
     }
 
     revalidatePath("/hr/saems/programs");
-    return { ok: true, id: newId };
+    return { ok: true, id: newId, sessions };
   } catch (e) {
     return { ok: false, message: e instanceof Error ? e.message : "추가 중 오류가 발생했습니다." };
   }
@@ -378,17 +650,83 @@ export async function addProgram(
 export async function updateProgram(
   id: string,
   input: ProgramInput
-): Promise<{ ok: true } | { ok: false; message: string }> {
+): Promise<
+  { ok: true; sync: SessionSyncResult | null } | { ok: false; message: string }
+> {
   try {
     await requireSaemAccess();
     const payload = progPayload(input);
     if (!id || !payload.name) return { ok: false, message: "프로그램명을 확인하세요." };
+    const sc: SessionSchedule = {
+      start: payload.session_start,
+      weekday: payload.session_weekday,
+      weeks: payload.session_weeks,
+      holidays: payload.session_holidays,
+    };
+    if (sc.weeks && !sc.start)
+      return { ok: false, message: "회차 수를 넣었으면 시작일도 지정하세요." };
+
+    // 변경 전 스케줄과 비교 — 스케줄이 바뀐 경우에만 회차를 다시 맞춘다.
+    const { data: beforeRow } = await supabaseAdmin
+      .from(PROG)
+      .select("*")
+      .eq("id", id)
+      .maybeSingle();
+    if (!beforeRow) return { ok: false, message: "프로그램을 찾을 수 없습니다." };
+    const before = toProgram(beforeRow as Record<string, unknown>);
+
     const { error } = await supabaseAdmin.from(PROG).update(payload).eq("id", id);
     if (error) throw new Error(error.message);
+
+    let sync: SessionSyncResult | null = null;
+    if (scheduleChanged(before, sc)) sync = await syncSessions(id, sc);
+
     revalidatePath("/hr/saems/programs");
-    return { ok: true };
+    return { ok: true, sync };
   } catch (e) {
     return { ok: false, message: e instanceof Error ? e.message : "수정 중 오류가 발생했습니다." };
+  }
+}
+
+// 회차 0건 프로그램 구제 — 스케줄을 받아 회차를 생성한다(기존 회차가 있으면
+// 같은 규칙으로 맞춘다: 잠긴 회차 보존 + 나머지 재생성).
+export async function generateProgramSessions(
+  programId: string,
+  schedule: {
+    start: string;
+    weekday: number;
+    weeks: number;
+    holidays: string[];
+  }
+): Promise<
+  { ok: true; sync: SessionSyncResult } | { ok: false; message: string }
+> {
+  try {
+    await requireSaemAccess();
+    if (!programId) return { ok: false, message: "대상 프로그램이 없습니다." };
+    const sc = normSchedule(schedule);
+    if (!sc.start || !sc.weeks)
+      return { ok: false, message: "시작일과 회차 수를 지정하세요." };
+    if (scheduleDates(sc).length === 0)
+      return { ok: false, message: "생성할 회차 날짜가 없습니다. 시작일·회차 수를 확인하세요." };
+
+    // 프로그램에도 스케줄을 기록(이후 수정 기준값).
+    const { error: pErr } = await supabaseAdmin
+      .from(PROG)
+      .update({
+        session_start: sc.start,
+        session_weekday: sc.weekday,
+        session_weeks: sc.weeks,
+        session_holidays: sc.holidays,
+      })
+      .eq("id", programId);
+    if (pErr) throw new Error(pErr.message);
+
+    const sync = await syncSessions(programId, sc);
+    revalidatePath("/hr/saems/programs");
+    return { ok: true, sync };
+  } catch (e) {
+    return { ok: false, message: e instanceof Error ? e.message : "회차 생성 중 오류가 발생했습니다." };
   }
 }
 
