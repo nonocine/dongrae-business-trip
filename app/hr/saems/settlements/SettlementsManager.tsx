@@ -10,6 +10,7 @@ import {
   type SettlementPreview,
 } from "@/app/hr/saems/settlementActions";
 import { formatKRW } from "@/lib/saem";
+import { deductionRateLabel } from "@/lib/settlement";
 import {
   cardCls,
   btnPrimary,
@@ -307,6 +308,13 @@ function CreateModal({
                               <li key={i} className="text-xs text-ink-muted">
                                 {d.program_name} · {d.sessions}회 · {d.hours}h ×{" "}
                                 {formatKRW(d.rate)} = {formatKRW(d.amount)}
+                                {d.deduction_amount != null && (
+                                  <span className="text-stamp">
+                                    {" "}
+                                    · 공제 {d.deduction_rate}% -
+                                    {formatKRW(d.deduction_amount)}
+                                  </span>
+                                )}
                               </li>
                             ))}
                           </ul>
@@ -317,7 +325,7 @@ function CreateModal({
                         <td className={`${tdCls} text-right text-stamp`}>
                           -{formatKRW(row.deduction_amount)}
                           <span className="ml-1 text-[10px] text-ink-hint">
-                            ({row.deduction_rate}%)
+                            ({deductionRateLabel(row.detail, row.deduction_rate)}%)
                           </span>
                         </td>
                         <td className={`${tdCls} text-right font-semibold text-navy`}>

@@ -5,21 +5,40 @@
 
 import ExcelJS from "exceljs";
 import type { SettlementDetail } from "@/app/hr/saems/settlementActions";
+import { uniqueDeductionRates } from "@/lib/settlement";
 
 const NAVY = "FF1F3A5F";
 const MONEY = "#,##0";
 
+const krw = (n: number) => n.toLocaleString("ko-KR");
+
+// 프로그램 요약 — 프로그램별 단가 내역과 공제(율·액)를 함께 적는다.
+//   공제 표기는 ST-4 이후 항목만 가능(이전 정산 jsonb 에는 프로그램별 공제 없음).
 function programSummary(
   detail: SettlementDetail["items"][number]["detail"]
 ): string {
   return detail
-    .map(
-      (d) =>
-        `${d.program_name}(${d.sessions}회·${d.hours}h×${d.rate.toLocaleString(
-          "ko-KR"
-        )})`
-    )
+    .map((d) => {
+      const base = `${d.program_name}(${d.sessions}회·${d.hours}h×${krw(
+        d.rate
+      )}=${krw(d.amount)}`;
+      const ded =
+        d.deduction_amount != null
+          ? `, 공제 ${d.deduction_rate}% ${krw(d.deduction_amount)}`
+          : "";
+      return `${base}${ded})`;
+    })
     .join("; ");
+}
+
+// 공제율 셀 — 단일 율이면 숫자로, 프로그램별로 다르면 "3.3/8.8" 문자열로.
+function rateCell(
+  item: SettlementDetail["items"][number]
+): number | string {
+  const rates = uniqueDeductionRates(item.detail);
+  if (rates.length === 0) return item.deduction_rate;
+  if (rates.length === 1) return rates[0];
+  return rates.join("/");
 }
 
 export async function buildSettlementWorkbook(
@@ -56,6 +75,13 @@ export async function buildSettlementWorkbook(
   ]);
   ws.mergeCells(2, 1, 2, COLS);
   periodRow.getCell(1).font = { size: 10, color: { argb: "FF6B7280" } };
+
+  // 공제 산출 방식 안내(회계 담당 확인용).
+  const noteRow = ws.addRow([
+    "공제는 프로그램별 공제율로 각각 계산하며, 강사별 합계에 10원 미만 절사를 1회 적용합니다.",
+  ]);
+  ws.mergeCells(3, 1, 3, COLS);
+  noteRow.getCell(1).font = { size: 9, color: { argb: "FF6B7280" } };
   ws.addRow([]);
 
   // 표 헤더.
@@ -76,11 +102,13 @@ export async function buildSettlementWorkbook(
       it.account_holder ?? "",
       programSummary(it.detail),
       it.gross_amount,
-      it.deduction_rate,
+      rateCell(it),
       it.deduction_amount,
       it.net_amount,
     ]);
+    row.getCell(6).alignment = { wrapText: true, vertical: "top" };
     row.getCell(7).numFmt = MONEY;
+    row.getCell(8).alignment = { horizontal: "center" };
     row.getCell(9).numFmt = MONEY;
     row.getCell(10).numFmt = MONEY;
   }
@@ -103,7 +131,7 @@ export async function buildSettlementWorkbook(
   totalRow.getCell(9).numFmt = MONEY;
   totalRow.getCell(10).numFmt = MONEY;
 
-  const widths = [12, 14, 10, 18, 9, 40, 13, 9, 12, 13];
+  const widths = [12, 14, 10, 18, 9, 56, 13, 11, 12, 13];
   widths.forEach((w, i) => {
     ws.getColumn(i + 1).width = w;
   });

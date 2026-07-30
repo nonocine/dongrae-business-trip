@@ -10,6 +10,7 @@ import {
   type SettlementDetail as SettlementDetailData,
 } from "@/app/hr/saems/settlementActions";
 import { formatKRW } from "@/lib/saem";
+import { deductionRateLabel } from "@/lib/settlement";
 import { fmtKstDateTime } from "@/lib/datetime";
 import {
   cardCls,
@@ -202,6 +203,13 @@ export default function SettlementDetail({
                           <li key={i} className="text-xs text-ink-muted">
                             {d.program_name} · {d.sessions}회 · {d.hours}h ×{" "}
                             {formatKRW(d.rate)} = {formatKRW(d.amount)}
+                            {d.deduction_amount != null && (
+                              <span className="text-stamp">
+                                {" "}
+                                · 공제 {d.deduction_rate}% -
+                                {formatKRW(d.deduction_amount)}
+                              </span>
+                            )}
                           </li>
                         ))}
                       </ul>
@@ -212,7 +220,7 @@ export default function SettlementDetail({
                     <td className={`${tdCls} text-right text-stamp`}>
                       -{formatKRW(it.deduction_amount)}
                       <span className="ml-1 text-[10px] text-ink-hint">
-                        ({it.deduction_rate}%)
+                        ({deductionRateLabel(it.detail, it.deduction_rate)}%)
                       </span>
                     </td>
                     <td className={`${tdCls} text-right font-semibold text-navy`}>
