@@ -8,6 +8,7 @@ const TABS = [
   { href: "/hr/saems/instructors", label: "강사 관리" },
   { href: "/hr/saems/programs", label: "프로그램 관리" },
   { href: "/hr/saems/logs", label: "근무일지 확정" },
+  { href: "/hr/saems/settlements", label: "정산" },
 ];
 
 export default function SaemTabs() {
