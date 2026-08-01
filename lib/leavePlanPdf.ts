@@ -47,20 +47,17 @@ const LABEL_BG = rgb(0.91, 0.91, 0.91);
 const W = 595.28; // A4
 const H = 841.89;
 
-// --- 서명란 배치(LP-7) ------------------------------------------------
-//   원본 서식 A26 "      제출자 :        …        (서명  또는  인)" 의 표시폭을
-//   재서 얻은 비례. 내용 폭(CW)에 곱해 쓴다.
-//     · "제출자" 시작        = 8.0%
-//     · "(서명 또는 인)" 시작 = 67.0%
-//   괄호 문구를 우측 여백까지 밀면 이름과의 간격이 원본보다 벌어진다.
-const SIGN_LABEL_RATIO = 0.08;
-const SIGN_PAREN_RATIO = 0.67;
+// --- 서명란 배치(LP-9) ------------------------------------------------
+//   "제출자 : 이름 (서명 또는 인)" 을 한 덩어리로 붙여 페이지 중앙축(W/2)에
+//   맞춘다 — 위 날짜 줄, 아래 "동래구청소년센터장 귀중" 과 같은 축.
+//   이름 길이가 달라져도 덩어리 전체가 중앙에 오고, 도장은 괄호 문구의 실제
+//   좌표에서 계산하므로 덩어리를 따라 움직인다.
+//   (원본 서식의 좌·우 벌린 배치는 손글씨용 빈칸 때문이라 인쇄본에서는
+//    중앙 정렬이 더 자연스럽다 — LP-7/LP-8 의 비례 상수는 그래서 걷어냈다.)
+const SIGN_GAP_RATIO = 1.5; // 조각 사이 여백(글자 크기 배수)
 // 도장 크기·불투명도 — 증명서 관인과 같은 톤. 글자가 아래로 비친다.
 const STAMP_SIZE = 52;
 const STAMP_OPACITY = 0.92;
-// 이름과 "(서명 또는 인)" 사이 여백(글자 크기 배수). 이름은 괄호 문구 기준
-//   오른쪽 정렬이라 2~4자로 길이가 달라도 이 간격이 일정하게 유지된다(LP-8).
-const NAME_GAP_RATIO = 1.5;
 
 // 자간 넓힌 제목.
 function spaced(s: string): string {
@@ -311,39 +308,32 @@ async function drawPlanPage(
   );
   y += 34;
 
-  // ---- 제출자 + (서명 또는 인) + 도장 ----
-  //   위치는 원본 서식(A26 병합셀 "      제출자 :        …        (서명  또는  인)")의
-  //   표시폭 비례를 그대로 따른다 — "제출자" 시작 8.0%, "(서명" 시작 67.0%.
-  //   괄호 문구를 우측 여백까지 밀면 이름과의 간격이 원본보다 넓어진다(LP-7 교정).
+  // ---- "제출자 : 이름 (서명 또는 인)" — 한 덩어리로 중앙 정렬 ----
+  //   위 날짜 줄·아래 수신 줄과 같은 중앙축(W/2). 조각 사이는 1.5글자 폭.
   const signSize = 11.5;
-  const signX = M + CW * SIGN_LABEL_RATIO;
+  const gap = signSize * SIGN_GAP_RATIO;
+  const label = "제출자 :";
   const paren = "(서명  또는  인)";
-  const parenX = M + CW * SIGN_PAREN_RATIO;
+  const labelW = font.widthOfTextAtSize(label, signSize);
+  const nameW = font.widthOfTextAtSize(d.name, signSize);
+  const parenW = font.widthOfTextAtSize(paren, signSize);
 
-  // "제출자 :" 라벨은 원본 비례 자리에 그대로 둔다.
-  p.text(signX, y, "제출자 :", { size: signSize });
+  const blockW = labelW + gap + nameW + gap + parenW;
+  const labelX = W / 2 - blockW / 2;
+  const nameX = labelX + labelW + gap;
+  const parenX = nameX + nameW + gap;
+
+  p.text(labelX, y, label, { size: signSize });
+  p.text(nameX, y, d.name, { size: signSize });
   p.text(parenX, y, paren, { size: signSize });
 
-  // LP-8. 이름은 라벨에 붙이지 않고 "(서명 또는 인)" 왼쪽에 오른쪽 정렬로 붙인다.
-  //   원본은 라벨과 괄호 사이가 손글씨용 빈칸이라, 이름을 라벨에 붙여 쓰면
-  //   괄호까지 지나치게 멀어진다. 오른쪽 정렬이라 이름이 2~4자로 달라져도
-  //   괄호와의 간격이 일정하다. 라벨과 겹칠 만큼 긴 이름은 라벨 뒤로 물린다.
-  const nameLabelEnd = signX + font.widthOfTextAtSize("제출자 :", signSize);
-  const nameRightLimit = parenX - signSize * NAME_GAP_RATIO;
-  const nameW = font.widthOfTextAtSize(d.name, signSize);
-  const nameX =
-    nameRightLimit - nameW >= nameLabelEnd + signSize * 0.5
-      ? nameRightLimit
-      : nameLabelEnd + signSize * 0.5 + nameW; // 우측 정렬 기준점(=오른쪽 끝)
-  p.text(nameX, y, d.name, { size: signSize, align: "right" });
-
   // 도장은 "(서명 또는 인)" 문구 위에, 문구 중앙에 중심을 맞춰 찍는다.
-  //   실제 결재 관행과 같은 자리다. 문구를 먼저 그리고 도장을 반투명으로 얹어
-  //   글자가 도장 아래로 비친다(불투명도는 증명서 관인과 동일하게 유지).
+  //   좌표를 괄호 문구의 실제 위치(parenX)에서 뽑으므로, 이름 길이 때문에
+  //   덩어리가 좌우로 움직여도 도장이 문구를 따라간다.
+  //   문구를 먼저 그리고 도장을 반투명으로 얹어 글자가 도장 아래로 비친다.
   if (d.stampBytes && d.stampBytes.length > 0) {
     const img = await embedImage(pdf, d.stampBytes);
     if (img) {
-      const parenW = font.widthOfTextAtSize(paren, signSize);
       const centerX = parenX + parenW / 2;
       const sx = centerX - STAMP_SIZE / 2;
       // 문구가 차지하는 줄의 세로 중앙에 도장 중심을 맞춘다.

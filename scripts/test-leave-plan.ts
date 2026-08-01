@@ -558,7 +558,7 @@ async function main() {
   });
   expectEq("16칸 초과도 생성", await pdfPageCount(over), 1);
 
-  console.log("\n--- LP-7 날인 위치(괄호 문구 중앙) ---");
+  console.log("\n--- LP-9 서명줄 중앙 정렬 ---");
   // 빌더와 같은 폰트 지표로 기대 좌표를 계산한다.
   const probe = await PDFDocument.create();
   probe.registerFontkit(fontkit);
@@ -566,98 +566,87 @@ async function main() {
     readFileSync("lib/fonts/NanumGothic-Regular.ttf"),
     { subset: false }
   );
+  const nanumBold = await probe.embedFont(
+    readFileSync("lib/fonts/NanumGothic-Bold.ttf"),
+    { subset: false }
+  );
   const PW = 595.28;
-  const MARGIN = 56;
-  const CONTENT = PW - 2 * MARGIN;
+  const AXIS = PW / 2; // 페이지 중앙축
   const SIGN_SIZE = 11.5;
+  const SIGN_GAP = SIGN_SIZE * 1.5; // SIGN_GAP_RATIO
+  const LABEL = "제출자 :";
   const PAREN = "(서명  또는  인)";
-  const parenX = MARGIN + CONTENT * 0.67; // SIGN_PAREN_RATIO
+  const labelW = nanum.widthOfTextAtSize(LABEL, SIGN_SIZE);
   const parenW = nanum.widthOfTextAtSize(PAREN, SIGN_SIZE);
-  const parenCenterX = parenX + parenW / 2;
-  const signX = MARGIN + CONTENT * 0.08; // SIGN_LABEL_RATIO
-  const labelEndX = signX + nanum.widthOfTextAtSize("제출자 :", SIGN_SIZE);
-  // LP-8. 이름은 괄호 문구 기준 오른쪽 정렬 — 끝이 괄호에서 1.5글자 앞.
-  const NAME_GAP = SIGN_SIZE * 1.5;
-  const nameEndX = parenX - NAME_GAP;
 
+  // 그리는 순서: … 날짜 → 라벨 → 이름 → 괄호 → (도장) → 수신
+  //   뒤에서 수신 1 · 괄호 2 · 이름 3 · 라벨 4 · 날짜 5 번째 Tm.
+  const tms = await pdfTextPositions(withStamp, 0);
+  const dateTm = tms[tms.length - 5];
+  const labelTm = tms[tms.length - 4];
+  const nameTm = tms[tms.length - 3];
+  const parenTm = tms[tms.length - 2];
+  const toTm = tms[tms.length - 1];
+  const nameW = nanum.widthOfTextAtSize(pdfBase.name, SIGN_SIZE);
+
+  // 덩어리 = 라벨 시작 ~ 괄호 끝.
+  const blockStart = labelTm.x;
+  const blockEnd = parenTm.x + parenW;
+  expectEq(
+    "서명줄 덩어리가 페이지 중앙",
+    Math.abs((blockStart + blockEnd) / 2 - AXIS) < 0.01,
+    true
+  );
+  expectEq(
+    "라벨–이름 간격 1.5글자",
+    Math.abs(nameTm.x - (labelTm.x + labelW) - SIGN_GAP) < 0.1,
+    true
+  );
+  expectEq(
+    "이름–괄호 간격 1.5글자",
+    Math.abs(parenTm.x - (nameTm.x + nameW) - SIGN_GAP) < 0.1,
+    true
+  );
+
+  // 위 날짜 줄·아래 수신 줄과 같은 중앙축이어야 한다.
+  const dateW = nanum.widthOfTextAtSize("2026 년      8 월      3 일", SIGN_SIZE);
+  const toW = nanumBold.widthOfTextAtSize(
+    "동 래 구 청 소 년 센 터 장   귀 중",
+    13.5
+  );
+  expectEq("날짜 줄도 같은 중앙축", Math.abs(dateTm.x + dateW / 2 - AXIS) < 0.6, true);
+  expectEq("수신 줄도 같은 중앙축", Math.abs(toTm.x + toW / 2 - AXIS) < 0.6, true);
+
+  console.log("\n--- LP-9 도장(괄호 문구를 따라감) ---");
   const place = (await pdfImagePlacement(withStamp, 0))!;
   expectEq("도장 크기 52 유지", [place.w, place.h], [52, 52]);
   expectEq(
     "도장 중심 X = 괄호 문구 중앙",
-    Math.abs(place.x + place.w / 2 - parenCenterX) < 0.5,
+    Math.abs(place.x + place.w / 2 - (parenTm.x + parenW / 2)) < 0.01,
     true
   );
-  // 괄호 문구를 실제로 덮는다(가로 범위가 겹친다).
-  expectEq(
-    "도장이 괄호 문구를 덮는다",
-    place.x < parenX + parenW && place.x + place.w > parenX,
-    true
-  );
-  // 이름 옆이 아니라 그 줄 오른쪽 끝이다(LP-7 교정의 핵심).
-  expectEq("도장이 이름 끝보다 오른쪽", place.x > nameEndX, true);
-  expectEq(
-    "도장이 내용 폭 안",
-    place.x >= MARGIN && place.x + place.w <= MARGIN + CONTENT,
-    true
-  );
-
-  // 세로 — 괄호 문구 baseline 의 시각적 중앙에 도장 중심이 온다.
-  //   그리는 순서: … 라벨 → 괄호 → 이름 → (도장) → 수신
-  //   따라서 뒤에서 이름 = 2번째, 괄호 = 3번째, 라벨 = 4번째 Tm.
-  const tms = await pdfTextPositions(withStamp, 0);
-  const nameTm = tms[tms.length - 2];
-  const parenTm = tms[tms.length - 3];
-  const labelTm = tms[tms.length - 4];
-  expectEq("괄호 문구 x 가 비례 위치와 일치", Math.abs(parenTm.x - parenX) < 0.5, true);
   expectEq(
     "도장 중심 Y = 괄호 문구 세로 중앙",
     Math.abs(place.y + place.h / 2 - (parenTm.y + SIGN_SIZE / 2)) < 0.5,
     true
   );
-
-  // 이름 길이가 달라도 도장 위치는 그대로여야 한다(이름 옆 배치가 아니라는 증거).
-  const longName = await buildLeavePlanPdf({
-    ...pdfBase,
-    name: "남궁민수하늘",
-    stampBytes: stamp,
-  });
-  const placeLong = (await pdfImagePlacement(longName, 0))!;
   expectEq(
-    "긴 이름에도 도장 위치 불변",
-    [
-      Math.abs(placeLong.x - place.x) < 0.01,
-      Math.abs(placeLong.y - place.y) < 0.01,
-    ],
-    [true, true]
-  );
-
-  // 원본 서식 비례 — "제출자" 8.0% / "(서명" 67.0%.
-  expectEq(
-    "제출자·괄호 시작 위치가 원본 비례",
-    [
-      Math.round(((labelTm.x - MARGIN) / CONTENT) * 1000) / 10,
-      Math.round(((parenTm.x - MARGIN) / CONTENT) * 1000) / 10,
-    ],
-    [8, 67]
-  );
-
-  console.log("\n--- LP-8 이름 우측 정렬 ---");
-  const nameW0 = nanum.widthOfTextAtSize(pdfBase.name, SIGN_SIZE);
-  expectEq(
-    "이름 끝이 괄호에서 1.5글자 앞",
-    Math.abs(nameTm.x + nameW0 - nameEndX) < 0.1,
+    "도장이 괄호 문구를 덮는다",
+    place.x < parenTm.x + parenW && place.x + place.w > parenTm.x,
     true
   );
-  expectEq("이름이 라벨 뒤에 온다", nameTm.x > labelEndX, true);
-  expectEq("이름이 괄호를 침범하지 않는다", nameTm.x + nameW0 < parenX, true);
+  expectEq("도장이 이름 끝보다 오른쪽", place.x > nameTm.x + nameW, true);
+
+  // 도장 없으면 서명란은 그대로 비어 있다.
   expectEq(
-    "이름이 줄 가운데~우측(45% 이상)",
-    (nameTm.x - MARGIN) / CONTENT > 0.45,
-    true
+    "도장 미등록이면 이미지 0",
+    (await pdfPageOps(noStamp, 0)).images,
+    0
   );
 
-  // 2~4자로 길이가 달라도 이름 끝과 도장 위치가 같아야 한다.
-  const byLen: { end: number; stampX: number }[] = [];
+  // 이름 길이가 달라도 덩어리는 늘 중앙, 도장은 괄호를 따라 이동한다.
+  const centers: number[] = [];
+  const stampXs: number[] = [];
   for (const nm of ["김가", "허일수", "남궁민수"]) {
     const doc = await buildLeavePlanPdf({
       ...pdfBase,
@@ -665,21 +654,32 @@ async function main() {
       stampBytes: stamp,
     });
     const t = await pdfTextPositions(doc, 0);
-    byLen.push({
-      end: t[t.length - 2].x + nanum.widthOfTextAtSize(nm, SIGN_SIZE),
-      stampX: (await pdfImagePlacement(doc, 0))!.x,
-    });
+    const pl = (await pdfImagePlacement(doc, 0))!;
+    centers.push((t[t.length - 4].x + t[t.length - 2].x + parenW) / 2);
+    stampXs.push(pl.x);
+    // 각 경우마다 도장이 그 페이지의 괄호 중앙에 있어야 한다.
+    expectEq(
+      `${nm}: 도장이 괄호 중앙`,
+      Math.abs(pl.x + pl.w / 2 - (t[t.length - 2].x + parenW / 2)) < 0.01,
+      true
+    );
   }
   expectEq(
-    "2~4자 모두 이름 끝이 동일",
-    Math.max(...byLen.map((b) => b.end)) -
-      Math.min(...byLen.map((b) => b.end)) <
-      0.01,
+    "2~4자 모두 덩어리 중앙이 페이지 중앙",
+    centers.every((c) => Math.abs(c - AXIS) < 0.01),
     true
   );
   expectEq(
-    "이름 길이가 달라도 도장은 그대로",
-    byLen.every((b) => Math.abs(b.stampX - place.x) < 0.01),
+    "이름이 길수록 도장이 오른쪽으로(고정 아님)",
+    stampXs[0] < stampXs[1] && stampXs[1] < stampXs[2],
+    true
+  );
+  // 덩어리가 중앙이라 이름이 한 글자 늘면 괄호·도장은 그 절반만 이동한다.
+  expectEq(
+    "이동량 = 이름 증가폭의 절반",
+    Math.abs(
+      stampXs[1] - stampXs[0] - nanum.widthOfTextAtSize("수", SIGN_SIZE) / 2
+    ) < 0.2,
     true
   );
 
@@ -712,13 +712,25 @@ async function main() {
     ],
     [1, 1, 0]
   );
-  // LP-7. 합본도 같은 서명란 배치를 쓴다(drawPlanPage 공용).
+  // LP-9. 합본도 같은 서명란 배치를 쓴다(drawPlanPage 공용).
+  //   덩어리가 중앙 정렬이라 도장 x 는 이름 길이에 따라 달라진다 —
+  //   "1인 PDF 와 같은 x" 가 아니라 "그 면의 괄호 중앙" 을 기준으로 확인한다.
   const bundlePlace = (await pdfImagePlacement(bundle, 1))!;
+  const bundleTms = await pdfTextPositions(bundle, 1);
+  const bundleParen = bundleTms[bundleTms.length - 2];
+  const bundleLabel = bundleTms[bundleTms.length - 4];
   expectEq(
-    "합본 날인 위치 = 1인 PDF 와 동일",
+    "합본 각 면도 덩어리 중앙 정렬",
+    Math.abs((bundleLabel.x + bundleParen.x + parenW) / 2 - AXIS) < 0.01,
+    true
+  );
+  expectEq(
+    "합본 도장도 그 면의 괄호 중앙",
     [
-      Math.abs(bundlePlace.x - place.x) < 0.01,
-      Math.abs(bundlePlace.y - place.y) < 0.01,
+      Math.abs(
+        bundlePlace.x + bundlePlace.w / 2 - (bundleParen.x + parenW / 2)
+      ) < 0.01,
+      Math.abs(bundlePlace.y - place.y) < 0.01, // 세로는 동일
       bundlePlace.w,
     ],
     [true, true, 52]
