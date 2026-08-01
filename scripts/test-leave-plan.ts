@@ -574,9 +574,11 @@ async function main() {
   const parenX = MARGIN + CONTENT * 0.67; // SIGN_PAREN_RATIO
   const parenW = nanum.widthOfTextAtSize(PAREN, SIGN_SIZE);
   const parenCenterX = parenX + parenW / 2;
-  const nameLabel = `제출자 :  ${pdfBase.name}`;
   const signX = MARGIN + CONTENT * 0.08; // SIGN_LABEL_RATIO
-  const nameEndX = signX + nanum.widthOfTextAtSize(nameLabel, SIGN_SIZE);
+  const labelEndX = signX + nanum.widthOfTextAtSize("제출자 :", SIGN_SIZE);
+  // LP-8. 이름은 괄호 문구 기준 오른쪽 정렬 — 끝이 괄호에서 1.5글자 앞.
+  const NAME_GAP = SIGN_SIZE * 1.5;
+  const nameEndX = parenX - NAME_GAP;
 
   const place = (await pdfImagePlacement(withStamp, 0))!;
   expectEq("도장 크기 52 유지", [place.w, place.h], [52, 52]);
@@ -600,11 +602,12 @@ async function main() {
   );
 
   // 세로 — 괄호 문구 baseline 의 시각적 중앙에 도장 중심이 온다.
-  //   그리는 순서가 … 제출자 → 괄호 → (도장) → 수신 이므로
-  //   괄호는 뒤에서 두 번째, 제출자는 세 번째 Tm 이다.
+  //   그리는 순서: … 라벨 → 괄호 → 이름 → (도장) → 수신
+  //   따라서 뒤에서 이름 = 2번째, 괄호 = 3번째, 라벨 = 4번째 Tm.
   const tms = await pdfTextPositions(withStamp, 0);
-  const parenTm = tms[tms.length - 2];
-  const nameTm = tms[tms.length - 3];
+  const nameTm = tms[tms.length - 2];
+  const parenTm = tms[tms.length - 3];
+  const labelTm = tms[tms.length - 4];
   expectEq("괄호 문구 x 가 비례 위치와 일치", Math.abs(parenTm.x - parenX) < 0.5, true);
   expectEq(
     "도장 중심 Y = 괄호 문구 세로 중앙",
@@ -632,10 +635,52 @@ async function main() {
   expectEq(
     "제출자·괄호 시작 위치가 원본 비례",
     [
-      Math.round(((nameTm.x - MARGIN) / CONTENT) * 1000) / 10,
+      Math.round(((labelTm.x - MARGIN) / CONTENT) * 1000) / 10,
       Math.round(((parenTm.x - MARGIN) / CONTENT) * 1000) / 10,
     ],
     [8, 67]
+  );
+
+  console.log("\n--- LP-8 이름 우측 정렬 ---");
+  const nameW0 = nanum.widthOfTextAtSize(pdfBase.name, SIGN_SIZE);
+  expectEq(
+    "이름 끝이 괄호에서 1.5글자 앞",
+    Math.abs(nameTm.x + nameW0 - nameEndX) < 0.1,
+    true
+  );
+  expectEq("이름이 라벨 뒤에 온다", nameTm.x > labelEndX, true);
+  expectEq("이름이 괄호를 침범하지 않는다", nameTm.x + nameW0 < parenX, true);
+  expectEq(
+    "이름이 줄 가운데~우측(45% 이상)",
+    (nameTm.x - MARGIN) / CONTENT > 0.45,
+    true
+  );
+
+  // 2~4자로 길이가 달라도 이름 끝과 도장 위치가 같아야 한다.
+  const byLen: { end: number; stampX: number }[] = [];
+  for (const nm of ["김가", "허일수", "남궁민수"]) {
+    const doc = await buildLeavePlanPdf({
+      ...pdfBase,
+      name: nm,
+      stampBytes: stamp,
+    });
+    const t = await pdfTextPositions(doc, 0);
+    byLen.push({
+      end: t[t.length - 2].x + nanum.widthOfTextAtSize(nm, SIGN_SIZE),
+      stampX: (await pdfImagePlacement(doc, 0))!.x,
+    });
+  }
+  expectEq(
+    "2~4자 모두 이름 끝이 동일",
+    Math.max(...byLen.map((b) => b.end)) -
+      Math.min(...byLen.map((b) => b.end)) <
+      0.01,
+    true
+  );
+  expectEq(
+    "이름 길이가 달라도 도장은 그대로",
+    byLen.every((b) => Math.abs(b.stampX - place.x) < 0.01),
+    true
   );
 
   console.log("\n--- LP-6 합본 ---");
