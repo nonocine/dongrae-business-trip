@@ -40,6 +40,10 @@ const selCls =
 const thCls = "px-2 py-2 text-left text-xs font-semibold text-navy whitespace-nowrap";
 const tdCls = "px-2 py-2 align-middle text-sm text-ink-body";
 
+// 서식 출력(라우트) — employeeId 없으면 그 연도 전체(직원당 1시트).
+const EXCEL_HREF = (year: number, employeeId?: string) =>
+  `/hr/leave-plans/excel?year=${year}${employeeId ? `&employeeId=${employeeId}` : ""}`;
+
 export default function LeavePlansManager({
   initial,
 }: {
@@ -153,6 +157,15 @@ export default function LeavePlansManager({
             >
               미제출 독촉 ({data.pendingNames.length})
             </button>
+            {data.issuedCount > 0 && (
+              <a
+                href={EXCEL_HREF(data.year)}
+                className={btnSecondary}
+                title="발부된 전원의 서식을 한 파일로(직원당 1시트)"
+              >
+                서식 출력(전체)
+              </a>
+            )}
           </div>
         </div>
 
@@ -268,6 +281,12 @@ export default function LeavePlansManager({
                           >
                             보기
                           </button>
+                          <a
+                            href={EXCEL_HREF(data.year, r.employee_id)}
+                            className="rounded border border-line px-2 py-1 text-xs text-navy hover:bg-surface"
+                          >
+                            서식
+                          </a>
                           {submitted ? (
                             <button
                               type="button"
@@ -773,6 +792,9 @@ function PlanDetailModal({
         )}
 
         <div className="mt-4 flex gap-2">
+          <a href={EXCEL_HREF(row.year, row.employee_id)} className={btnPrimary}>
+            서식 출력
+          </a>
           <button type="button" onClick={onClose} className={btnSecondary}>
             닫기
           </button>
