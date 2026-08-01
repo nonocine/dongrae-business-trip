@@ -14,6 +14,8 @@ import {
   revokeLeavePlan,
   unsubmitLeavePlan,
   remindLeavePlans,
+  buildLeavePlanPdfFor,
+  buildLeavePlanBundle,
   type LeavePlanOverview,
   type LeavePlanRow,
   type IssueTarget,
@@ -40,9 +42,31 @@ const selCls =
 const thCls = "px-2 py-2 text-left text-xs font-semibold text-navy whitespace-nowrap";
 const tdCls = "px-2 py-2 align-middle text-sm text-ink-body";
 
-// 서식 출력(라우트) — employeeId 없으면 그 연도 전체(직원당 1시트).
+// 엑셀 서식 출력(라우트) — employeeId 없으면 그 연도 전체(직원당 1시트).
 const EXCEL_HREF = (year: number, employeeId?: string) =>
   `/hr/leave-plans/excel?year=${year}${employeeId ? `&employeeId=${employeeId}` : ""}`;
+
+// base64 PDF → 브라우저에서 볼 수 있는 blob URL (증명서 패턴).
+function pdfObjectUrl(b64: string): string {
+  const bin = atob(b64);
+  const bytes = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+  return URL.createObjectURL(new Blob([bytes], { type: "application/pdf" }));
+}
+function downloadUrl(url: string, filename: string) {
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  a.click();
+}
+
+// LP-5/LP-6. 미리보기 대상.
+type PdfPreview = {
+  url: string;
+  filename: string;
+  title: string;
+  note: string | null;
+};
 
 export default function LeavePlansManager({
   initial,
@@ -53,8 +77,57 @@ export default function LeavePlansManager({
   const [data, setData] = useState<LeavePlanOverview>(initial);
   const [issueOpen, setIssueOpen] = useState(false);
   const [detail, setDetail] = useState<LeavePlanRow | null>(null);
+  const [pdf, setPdf] = useState<PdfPreview | null>(null);
   const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
   const [pending, start] = useTransition();
+
+  // 미리보기를 닫을 때 blob URL 을 해제한다(메모리 누수 방지).
+  function closePdf() {
+    setPdf((prev) => {
+      if (prev) URL.revokeObjectURL(prev.url);
+      return null;
+    });
+  }
+
+  // LP-5. 직원 1명 날인 PDF — 미리보기부터 띄운다.
+  function openPdf(row: LeavePlanRow) {
+    setMsg(null);
+    start(async () => {
+      const res = await buildLeavePlanPdfFor({
+        year: data.year,
+        employeeId: row.employee_id,
+      });
+      if (!res.ok) return setMsg({ ok: false, text: res.message });
+      setPdf({
+        url: pdfObjectUrl(res.pdfBase64),
+        filename: res.filename,
+        title: `${row.name} · ${data.year}년 사용계획서 (날인본)`,
+        note: res.hasStamp
+          ? null
+          : `${row.name} 님의 도장 이미지가 등록되어 있지 않아 서명란이 비어 있습니다. (마이페이지 → 내 정보에서 등록)`,
+      });
+    });
+  }
+
+  // LP-6. 제출 완료자 전원 합본.
+  function openBundle() {
+    setMsg(null);
+    start(async () => {
+      const res = await buildLeavePlanBundle(data.year);
+      if (!res.ok) return setMsg({ ok: false, text: res.message });
+      setPdf({
+        url: pdfObjectUrl(res.pdfBase64),
+        filename: res.filename,
+        title: `${data.year}년 전체 날인본 (표지 + ${res.included}명, ${res.pages}면)`,
+        note:
+          res.withoutStamp.length > 0
+            ? `도장 미등록 ${res.withoutStamp.length}명(${res.withoutStamp.join(
+                ", "
+              )})은 서명란이 비어 있습니다.`
+            : null,
+      });
+    });
+  }
 
   async function reload(year = data.year) {
     setData(await getLeavePlanOverview(year));
@@ -157,13 +230,24 @@ export default function LeavePlansManager({
             >
               미제출 독촉 ({data.pendingNames.length})
             </button>
+            {data.submittedCount > 0 && (
+              <button
+                type="button"
+                onClick={openBundle}
+                disabled={pending}
+                className={btnPrimary}
+                title="제출 완료자 전원의 날인 PDF를 한 파일로(표지 + 1인 1면)"
+              >
+                전체 날인본 다운로드 ({data.submittedCount})
+              </button>
+            )}
             {data.issuedCount > 0 && (
               <a
                 href={EXCEL_HREF(data.year)}
                 className={btnSecondary}
-                title="발부된 전원의 서식을 한 파일로(직원당 1시트)"
+                title="발부된 전원의 서식을 엑셀 한 파일로(직원당 1시트)"
               >
-                서식 출력(전체)
+                엑셀(전체)
               </a>
             )}
           </div>
@@ -281,11 +365,20 @@ export default function LeavePlansManager({
                           >
                             보기
                           </button>
+                          <button
+                            type="button"
+                            disabled={pending}
+                            onClick={() => openPdf(r)}
+                            className="rounded border border-navy px-2 py-1 text-xs font-semibold text-navy hover:bg-navy-soft"
+                            title="날인 PDF 미리보기 → 다운로드"
+                          >
+                            PDF
+                          </button>
                           <a
                             href={EXCEL_HREF(data.year, r.employee_id)}
-                            className="rounded border border-line px-2 py-1 text-xs text-navy hover:bg-surface"
+                            className="rounded border border-line px-2 py-1 text-xs text-ink-muted hover:bg-surface"
                           >
-                            서식
+                            엑셀
                           </a>
                           {submitted ? (
                             <button
@@ -343,8 +436,74 @@ export default function LeavePlansManager({
       )}
 
       {detail && (
-        <PlanDetailModal row={detail} onClose={() => setDetail(null)} />
+        <PlanDetailModal
+          row={detail}
+          onClose={() => setDetail(null)}
+          onPdf={() => {
+            const row = detail;
+            setDetail(null);
+            openPdf(row);
+          }}
+        />
       )}
+
+      {/* LP-5/LP-6. 다운로드 전 브라우저 미리보기(증명서 패턴) */}
+      {pdf && (
+        <PdfPreviewModal
+          preview={pdf}
+          onClose={closePdf}
+          onDownload={() => downloadUrl(pdf.url, pdf.filename)}
+        />
+      )}
+    </div>
+  );
+}
+
+// 미리보기 모달 — iframe 으로 PDF 를 띄우고, 확인 후 다운로드/새 창.
+function PdfPreviewModal({
+  preview,
+  onClose,
+  onDownload,
+}: {
+  preview: PdfPreview;
+  onClose: () => void;
+  onDownload: () => void;
+}) {
+  return (
+    <div className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-black/50 p-4">
+      <div className="my-4 w-full max-w-3xl rounded-xl border border-line bg-card p-4 shadow-lg">
+        <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+          <h3 className="text-sm font-bold text-ink">{preview.title}</h3>
+          <div className="flex flex-wrap gap-2">
+            <a
+              href={preview.url}
+              target="_blank"
+              rel="noreferrer"
+              className="self-center text-xs font-semibold text-navy hover:underline"
+            >
+              새 창 ↗
+            </a>
+            <button type="button" onClick={onDownload} className={btnPrimary}>
+              다운로드
+            </button>
+            <button type="button" onClick={onClose} className={btnSecondary}>
+              닫기
+            </button>
+          </div>
+        </div>
+        {preview.note && (
+          <p className={`mb-2 ${noticeWarning}`}>{preview.note}</p>
+        )}
+        <iframe
+          src={preview.url}
+          title={preview.title}
+          className="h-[70vh] w-full rounded-lg border border-line bg-white"
+        />
+        <p className="mt-2 text-[11px] text-ink-hint">
+          제출자의 도장 이미지(마이페이지 등록분)가 서명란에 자동 합성됩니다.
+          미등록이면 빈칸으로 출력되니 인쇄 후 손도장을 받으세요.
+        </p>
+      </div>
     </div>
   );
 }
@@ -713,9 +872,11 @@ function IssueModal({
 function PlanDetailModal({
   row,
   onClose,
+  onPdf,
 }: {
   row: LeavePlanRow;
   onClose: () => void;
+  onPdf: () => void;
 }) {
   const total = row.total_days ?? 0;
   const mismatch = row.submitted_at != null && planMismatch(total, row.unused_days);
@@ -791,9 +952,15 @@ function PlanDetailModal({
           </div>
         )}
 
-        <div className="mt-4 flex gap-2">
-          <a href={EXCEL_HREF(row.year, row.employee_id)} className={btnPrimary}>
-            서식 출력
+        <div className="mt-4 flex flex-wrap gap-2">
+          <button type="button" onClick={onPdf} className={btnPrimary}>
+            날인 PDF 미리보기
+          </button>
+          <a
+            href={EXCEL_HREF(row.year, row.employee_id)}
+            className={btnSecondary}
+          >
+            엑셀 서식
           </a>
           <button type="button" onClick={onClose} className={btnSecondary}>
             닫기
