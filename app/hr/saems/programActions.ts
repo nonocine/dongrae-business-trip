@@ -7,10 +7,12 @@ import {
   toProject,
   toTerm,
   toProgram,
+  normalizePayType,
   type SaemProject,
   type SaemTerm,
   type SaemProgram,
   type TermStatus,
+  type PayType,
 } from "@/lib/saem";
 import {
   buildSessionDates,
@@ -378,6 +380,8 @@ export async function copyTerm(input: {
           room: p.room,
           hourly_rate: p.hourly_rate,
           deduction_rate: p.deduction_rate,
+          pay_type: p.pay_type,
+          share_rate: p.share_rate,
           status: "active",
           sort_order: p.sort_order,
           // 복제 프로그램도 자기 스케줄을 갖는다(이후 개별 수정 가능).
@@ -422,6 +426,9 @@ export type ProgramInput = {
   room: string | null;
   hourly_rate: number | null;
   deduction_rate: number | null;
+  // ST-5. 정산 방식 + 분배율. hourly 면 share_rate 는 무시된다(값은 보존).
+  pay_type: PayType;
+  share_rate: number | null;
   // 실제 스케줄 — 저장 시 이 값으로 회차를 생성·재생성한다.
   session_start: string | null;
   session_weekday: number | null;
@@ -448,6 +455,12 @@ function progPayload(i: ProgramInput) {
     room: clean(i.room),
     hourly_rate: num(i.hourly_rate),
     deduction_rate: num(i.deduction_rate),
+    pay_type: normalizePayType(i.pay_type),
+    // 분배율은 0~100 으로 제한(음수·초과 입력 방어).
+    share_rate:
+      i.share_rate == null || Number.isNaN(i.share_rate)
+        ? null
+        : Math.min(100, Math.max(0, Number(i.share_rate))),
     session_start: sc.start,
     session_weekday: sc.weekday,
     session_weeks: sc.weeks,

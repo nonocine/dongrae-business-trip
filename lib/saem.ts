@@ -47,6 +47,31 @@ export const TERM_STATUS_LABEL: Record<TermStatus, string> = {
   closed: "종료",
 };
 
+// ST-5. 정산 방식 — 시급제(기본) / 수강료 분배제.
+//   계산 규칙은 lib/settlement.ts(양쪽 저장소 공용)에 있다.
+export type PayType = "hourly" | "revenue_share";
+export const PAY_TYPE_LABEL: Record<PayType, string> = {
+  hourly: "시급제",
+  revenue_share: "수강료 분배",
+};
+export function normalizePayType(v: unknown): PayType {
+  return v === "revenue_share" ? "revenue_share" : "hourly";
+}
+// 목록용 짧은 표기 — "시급 40,000" / "분배 70%".
+export function payTypeSummary(p: {
+  pay_type: PayType;
+  hourly_rate: number | null;
+  share_rate: number | null;
+}): string {
+  if (p.pay_type === "revenue_share")
+    return `분배 ${p.share_rate == null ? "-" : trimRate(p.share_rate)}%`;
+  return `시급 ${formatKRW(p.hourly_rate)}`;
+}
+// 비율 표기 — 70.00 → "70", 66.67 → "66.67".
+export function trimRate(n: number): string {
+  return String(Math.round(Number(n) * 100) / 100);
+}
+
 // --- 타입 ---
 export type SaemInstructor = {
   id: string;
@@ -110,6 +135,9 @@ export type SaemProgram = {
   room: string | null;
   hourly_rate: number | null;
   deduction_rate: number | null; // 원천징수 공제율(%) — 기본 3.30
+  // ST-5. 정산 방식. hourly 면 hourly_rate, revenue_share 면 share_rate 를 쓴다.
+  pay_type: PayType;
+  share_rate: number | null; // 강사 분배 비율(%) — 기본 70.00
   status: string;
   sort_order: number;
   // 실제 스케줄(진실의 원천) — 이 값으로 saem_sessions 를 생성·재생성한다.
@@ -201,6 +229,8 @@ export function toProgram(r: Record<string, unknown>): SaemProgram {
     room: s(r.room),
     hourly_rate: nOrNull(r.hourly_rate),
     deduction_rate: nOrNull(r.deduction_rate),
+    pay_type: normalizePayType(r.pay_type),
+    share_rate: nOrNull(r.share_rate),
     status: String(r.status ?? "active"),
     sort_order: Number(r.sort_order ?? 0),
     session_start: s(r.session_start),

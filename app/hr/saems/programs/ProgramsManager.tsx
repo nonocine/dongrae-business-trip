@@ -22,7 +22,11 @@ import {
 } from "@/app/hr/saems/programActions";
 import {
   TERM_STATUS_LABEL,
+  PAY_TYPE_LABEL,
   formatKRW,
+  payTypeSummary,
+  trimRate,
+  type PayType,
   type SaemProject,
   type SaemTerm,
   type TermStatus,
@@ -40,6 +44,7 @@ import {
   btnDanger,
   badgeDanger,
   badgeNeutral,
+  badgeNavy,
   noticeError,
   noticeSuccess,
   noticeWarning,
@@ -390,7 +395,7 @@ export default function ProgramsManager({
                   <th className={thCls}>회차</th>
                   <th className={`${thCls} text-right`}>정원</th>
                   <th className={`${thCls} text-right`}>수강료</th>
-                  <th className={`${thCls} text-right`}>시급</th>
+                  <th className={`${thCls} text-right`}>정산 방식</th>
                   <th className={`${thCls} text-right`}>관리</th>
                 </tr>
               </thead>
@@ -431,8 +436,19 @@ export default function ProgramsManager({
                     <td className={`${tdCls} text-right font-mono`}>
                       {formatKRW(p.tuition)}
                     </td>
-                    <td className={`${tdCls} text-right font-mono`}>
-                      {formatKRW(p.hourly_rate)}
+                    <td className={`${tdCls} text-right`}>
+                      <span
+                        className={
+                          p.pay_type === "revenue_share" ? badgeNavy : badgeNeutral
+                        }
+                        title={
+                          p.pay_type === "revenue_share"
+                            ? "등록 인원 × 수강료 × 분배율"
+                            : "확정 근무일지 시간 × 시급"
+                        }
+                      >
+                        {payTypeSummary(p)}
+                      </span>
                     </td>
                     <td className={`${tdCls} text-right`}>
                       <div className="flex justify-end gap-1">
@@ -989,6 +1005,10 @@ function ProgramModal({
     hourly_rate: program?.hourly_rate != null ? String(program.hourly_rate) : "",
     deduction_rate:
       program?.deduction_rate != null ? String(program.deduction_rate) : "3.3",
+    pay_type: (program?.pay_type ?? "hourly") as PayType,
+    // 분배율 기본 70 — 분배제로 바꿀 때 바로 쓸 수 있게 미리 채운다.
+    share_rate:
+      program?.share_rate != null ? trimRate(program.share_rate) : "70",
   });
   const [err, setErr] = useState<string | null>(null);
   const [pending, start] = useTransition();
@@ -1009,6 +1029,8 @@ function ProgramModal({
       room: f.room || null,
       hourly_rate: numOrNull(f.hourly_rate),
       deduction_rate: numOrNull(f.deduction_rate),
+      pay_type: f.pay_type,
+      share_rate: numOrNull(f.share_rate),
       session_start: sc.start || null,
       session_weekday: sc.weekday === "" ? null : Number(sc.weekday),
       session_weeks: sc.weeks === "" ? null : Number(sc.weeks),
@@ -1069,9 +1091,37 @@ function ProgramModal({
         <FieldP label="수강료">
           <input type="number" value={f.tuition} onChange={(e) => set({ tuition: e.target.value })} className={inCls} />
         </FieldP>
-        <FieldP label="시급">
-          <input type="number" value={f.hourly_rate} onChange={(e) => set({ hourly_rate: e.target.value })} className={inCls} />
+        {/* ST-5. 정산 방식 — 시급/분배율 중 쓰는 칸만 보여 준다. */}
+        <FieldP label="정산 방식 *">
+          <select
+            value={f.pay_type}
+            onChange={(e) => set({ pay_type: e.target.value as PayType })}
+            className={inCls}
+          >
+            <option value="hourly">{PAY_TYPE_LABEL.hourly}</option>
+            <option value="revenue_share">{PAY_TYPE_LABEL.revenue_share}</option>
+          </select>
         </FieldP>
+        {f.pay_type === "revenue_share" ? (
+          <FieldP label="강사 비율(%)">
+            <input
+              type="number"
+              step="0.01"
+              min={0}
+              max={100}
+              value={f.share_rate}
+              onChange={(e) => set({ share_rate: e.target.value })}
+              className={inCls}
+            />
+            <p className="mt-1 text-[11px] text-ink-hint">
+              등록 인원 × 수강료 × 비율. 근무일지 확정과 무관하게 산출됩니다.
+            </p>
+          </FieldP>
+        ) : (
+          <FieldP label="시급">
+            <input type="number" value={f.hourly_rate} onChange={(e) => set({ hourly_rate: e.target.value })} className={inCls} />
+          </FieldP>
+        )}
         <FieldP label="공제율(%)">
           <input
             type="number"

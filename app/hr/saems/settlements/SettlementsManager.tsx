@@ -5,12 +5,17 @@ import { useRouter } from "next/navigation";
 import {
   createSettlement,
   previewSettlement,
+  type SettlementAdjustment,
   type SettlementListRow,
   type SettlementProjectOption,
   type SettlementPreview,
 } from "@/app/hr/saems/settlementActions";
+import {
+  ProgramLine,
+  AdjustControl,
+} from "@/app/hr/saems/settlements/ProgramLine";
 import { formatKRW } from "@/lib/saem";
-import { deductionRateLabel } from "@/lib/settlement";
+import { deductionRateLabel, detailMethod } from "@/lib/settlement";
 import {
   cardCls,
   btnPrimary,
@@ -44,8 +49,9 @@ export default function SettlementsManager({
           <div>
             <h3 className="text-base font-bold text-ink">강사비 정산</h3>
             <p className="mt-1 text-xs text-ink-hint">
-              확정된 근무일지를 기간별로 모아 정산을 생성합니다. 항목 조정은
-              근무일지를 고친 뒤 재계산으로 반영합니다.
+              시급제는 확정된 근무일지를, 수강료 분배제는 등록 인원을 기준으로
+              기간별 정산을 생성합니다. 분배제 항목만 담당자가 인원·금액을 조정할
+              수 있고, 시급제는 근무일지를 고친 뒤 재계산으로 반영합니다.
             </p>
           </div>
           <button
@@ -134,15 +140,21 @@ function CreateModal({
   const [start, setStart] = useState("");
   const [end, setEnd] = useState("");
   const [preview, setPreview] = useState<SettlementPreview | null>(null);
+  // 저장 전 조정값 — (강사|프로그램) → 인원/금액. 저장 시 그대로 넘긴다.
+  const [adjustments, setAdjustments] = useState<SettlementAdjustment[]>([]);
   const [err, setErr] = useState<string | null>(null);
   const [pendingPreview, startPreview] = useTransition();
   const [pendingSave, startSave] = useTransition();
 
   const canQuery = projectId && start && end;
 
-  function doPreview() {
-    setErr(null);
+  function reset() {
     setPreview(null);
+    setAdjustments([]);
+  }
+
+  function load(next: SettlementAdjustment[]) {
+    setErr(null);
     if (!canQuery) {
       setErr("프로젝트와 기간을 선택하세요.");
       return;
@@ -153,12 +165,28 @@ function CreateModal({
           projectId,
           periodStart: start,
           periodEnd: end,
+          adjustments: next,
         });
         setPreview(p);
       } catch (e) {
         setErr(e instanceof Error ? e.message : "미리보기 실패");
       }
     });
+  }
+
+  function doPreview() {
+    setPreview(null);
+    load(adjustments);
+  }
+
+  // 조정 적용/해제 → 서버에 다시 계산을 맡긴다(공제·차인지급까지 일관되게).
+  function applyAdjustment(a: SettlementAdjustment) {
+    const next = adjustments.filter(
+      (x) => !(x.instructor_id === a.instructor_id && x.program_id === a.program_id)
+    );
+    if (a.enrolled != null || a.amount != null) next.push(a);
+    setAdjustments(next);
+    load(next);
   }
 
   function save() {
@@ -169,6 +197,7 @@ function CreateModal({
         title,
         periodStart: start,
         periodEnd: end,
+        adjustments,
       });
       if (!res.ok) {
         setErr(res.message);
@@ -201,7 +230,7 @@ function CreateModal({
               value={projectId}
               onChange={(e) => {
                 setProjectId(e.target.value);
-                setPreview(null);
+                reset();
               }}
               className={`${inCls} mt-1`}
             >
@@ -231,7 +260,7 @@ function CreateModal({
               value={start}
               onChange={(e) => {
                 setStart(e.target.value);
-                setPreview(null);
+                reset();
               }}
               className={`${inCls} mt-1`}
             />
@@ -245,7 +274,7 @@ function CreateModal({
               value={end}
               onChange={(e) => {
                 setEnd(e.target.value);
-                setPreview(null);
+                reset();
               }}
               className={`${inCls} mt-1`}
             />
@@ -276,13 +305,21 @@ function CreateModal({
         {preview && (
           <div className="mt-4">
             <p className="mb-2 text-xs text-ink-hint">
-              대상 세션 {preview.sessionCount}건 · 강사 {preview.rows.length}명 ·
-              차인지급 합계{" "}
+              대상 세션 {preview.sessionCount}건
+              {preview.revenueProgramCount > 0 &&
+                ` · 분배제 프로그램 ${preview.revenueProgramCount}개`}{" "}
+              · 강사 {preview.rows.length}명 · 차인지급 합계{" "}
               <b className="text-navy">{formatKRW(preview.totalNet)}</b>원
+              {adjustments.length > 0 && (
+                <span className="ml-1 text-warning">
+                  · 조정 {adjustments.length}건 반영
+                </span>
+              )}
             </p>
             {preview.rows.length === 0 ? (
               <p className={noticeError}>
-                대상 세션이 없습니다. (해당 기간에 확정된 미정산 근무일지가 없음)
+                대상이 없습니다. (해당 기간에 확정된 미정산 근무일지도, 세션이 있는
+                분배제 프로그램도 없음)
               </p>
             ) : (
               <div className="overflow-x-auto rounded-lg border border-line">
@@ -303,17 +340,23 @@ function CreateModal({
                           {row.instructorName}
                         </td>
                         <td className={tdCls}>
-                          <ul className="space-y-0.5">
+                          <ul className="space-y-1">
                             {row.detail.map((d, i) => (
-                              <li key={i} className="text-xs text-ink-muted">
-                                {d.program_name} · {d.sessions}회 · {d.hours}h ×{" "}
-                                {formatKRW(d.rate)} = {formatKRW(d.amount)}
-                                {d.deduction_amount != null && (
-                                  <span className="text-stamp">
-                                    {" "}
-                                    · 공제 {d.deduction_rate}% -
-                                    {formatKRW(d.deduction_amount)}
-                                  </span>
+                              <li key={d.program_id ?? i}>
+                                <ProgramLine d={d} />
+                                {detailMethod(d) === "revenue_share" && (
+                                  <AdjustControl
+                                    d={d}
+                                    disabled={pendingPreview}
+                                    onApply={(enrolled, amount) =>
+                                      applyAdjustment({
+                                        instructor_id: row.instructor_id,
+                                        program_id: d.program_id ?? "",
+                                        enrolled,
+                                        amount,
+                                      })
+                                    }
+                                  />
                                 )}
                               </li>
                             ))}

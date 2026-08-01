@@ -10,33 +10,19 @@
 
 import ExcelJS from "exceljs";
 import type { SettlementDetail } from "@/app/hr/saems/settlementActions";
+import { calcFormula } from "@/lib/settlement";
 
 const NAVY = "FF1F3A5F";
 const MONEY = "#,##0";
 const GRAY = "FF6B7280";
 const SUBTOTAL_BG = "FFF3F4F6";
 
-const krw = (n: number) => n.toLocaleString("ko-KR");
-
-// 소수점 두 자리까지, 불필요한 0 은 떼고.
-function trimNum(n: number): string {
-  return String(Math.round(n * 100) / 100);
-}
-
-// 산출내역 — "4회 × 3h × 40,000" 단순 표기(h 는 회차당 시간).
-function calcText(d: {
-  sessions: number;
-  hours: number;
-  rate: number;
-}): string {
-  const per = d.sessions > 0 ? d.hours / d.sessions : d.hours;
-  return `${d.sessions}회 × ${trimNum(per)}h × ${krw(d.rate)}`;
-}
+// 산출내역 표기는 lib/settlement 의 calcFormula 를 쓴다(화면·엑셀·강사앱 동일 문장).
+//   시급제 "4회 × 3h × 40,000" / 분배제 "13명 × 88,000 × 70%" / 조정건 "(조정)" 접미.
 
 type Item = SettlementDetail["items"][number];
 
 const COLS = 11;
-const C_PROGRAM = 6;
 const C_CALC = 7;
 const C_GROSS = 8;
 const C_RATE = 9;
@@ -67,7 +53,8 @@ export async function buildSettlementWorkbook(
   periodRow.getCell(1).font = { size: 10, color: { argb: GRAY } };
 
   const noteRow = ws.addRow([
-    "공제는 프로그램별 공제율로 계산하고, 10원 미만 절사는 강사 합계에 한 번만 적용합니다.",
+    "공제는 프로그램별 공제율로 계산하고, 10원 미만 절사는 강사 합계에 한 번만 적용합니다. " +
+      "산출내역은 시급제 '회 × 시간 × 시급', 수강료 분배제 '인원 × 수강료 × 비율'이며 담당자가 고친 항목에는 (조정)이 붙습니다.",
   ]);
   ws.mergeCells(3, 1, 3, COLS);
   noteRow.getCell(1).font = { size: 9, color: { argb: GRAY } };
@@ -146,7 +133,7 @@ export async function buildSettlementWorkbook(
       const row = ws.addRow([
         ...(i === 0 ? person(it) : blankPerson),
         d.program_name,
-        calcText(d),
+        calcFormula(d),
         single ? it.gross_amount : d.amount,
         single
           ? it.deduction_rate
