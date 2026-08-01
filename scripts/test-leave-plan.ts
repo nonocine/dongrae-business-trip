@@ -33,7 +33,9 @@ import {
   buildLeavePlanBundlePdf,
 } from "../lib/leavePlanPdf";
 import { PDFDocument, PDFRawStream } from "pdf-lib";
+import fontkit from "@pdf-lib/fontkit";
 import { inflateSync } from "node:zlib";
+import { readFileSync } from "node:fs";
 
 let failures = 0;
 function expectEq(label: string, actual: unknown, expected: unknown) {
@@ -56,10 +58,10 @@ async function pdfPageSize(bytes: Uint8Array): Promise<[number, number]> {
   const p = (await PDFDocument.load(bytes)).getPage(0);
   return [Math.round(p.getWidth()), Math.round(p.getHeight())];
 }
-async function pdfPageOps(
+async function pdfPageStream(
   bytes: Uint8Array,
   pageIndex: number
-): Promise<{ fills: number; strokes: number; images: number }> {
+): Promise<string> {
   const doc = await PDFDocument.load(bytes);
   const page = doc.getPage(pageIndex);
   const contents = page.node.Contents();
@@ -81,11 +83,63 @@ async function pdfPageOps(
     }
     raw += buf.toString("latin1");
   }
+  return raw;
+}
+
+async function pdfPageOps(
+  bytes: Uint8Array,
+  pageIndex: number
+): Promise<{ fills: number; strokes: number; images: number }> {
+  const raw = await pdfPageStream(bytes, pageIndex);
   return {
     fills: raw.split("f\n").length - 1,
     strokes: raw.split("S\n").length - 1,
     images: raw.split(" Do").length - 1,
   };
+}
+
+// LP-7. 도장 이미지의 실제 배치 — pdf-lib 는 drawImage 를
+//   `1 0 0 1 x y cm` (이동) → `w 0 0 h 0 0 cm` (크기) 순서로 내보내고
+//   그 뒤에 항등 cm 이 하나 더 붙는다. 마지막 cm 만 보면 항등이 잡히므로
+//   블록 안의 모든 cm 을 훑어 이동·크기를 따로 뽑는다.
+async function pdfImagePlacement(
+  bytes: Uint8Array,
+  pageIndex: number
+): Promise<{ x: number; y: number; w: number; h: number } | null> {
+  const raw = await pdfPageStream(bytes, pageIndex);
+  const doIdx = raw.indexOf(" Do");
+  if (doIdx < 0) return null;
+  const blockStart = raw.lastIndexOf("q\n", doIdx);
+  const block = raw.slice(blockStart, doIdx);
+  const cms = [...block.matchAll(/([\d.\-]+) ([\d.\-]+) ([\d.\-]+) ([\d.\-]+) ([\d.\-]+) ([\d.\-]+) cm/g)]
+    .map((m) => m.slice(1).map(Number));
+  let x = 0;
+  let y = 0;
+  let w = 0;
+  let h = 0;
+  for (const [a, , , d, e, f] of cms) {
+    if (e !== 0 || f !== 0) {
+      x = e;
+      y = f;
+    }
+    if (a !== 1 || d !== 1) {
+      w = a;
+      h = d;
+    }
+  }
+  return { x, y, w, h };
+}
+
+// 텍스트의 Tm x·y 목록(그린 순서). 한글은 CID 라 내용은 못 읽지만 좌표는 읽힌다.
+async function pdfTextPositions(
+  bytes: Uint8Array,
+  pageIndex: number
+): Promise<{ x: number; y: number }[]> {
+  const raw = await pdfPageStream(bytes, pageIndex);
+  return [...raw.matchAll(/1 0 0 1 ([\d.\-]+) ([\d.\-]+) Tm/g)].map((m) => ({
+    x: Number(m[1]),
+    y: Number(m[2]),
+  }));
 }
 
 async function main() {
@@ -504,6 +558,86 @@ async function main() {
   });
   expectEq("16칸 초과도 생성", await pdfPageCount(over), 1);
 
+  console.log("\n--- LP-7 날인 위치(괄호 문구 중앙) ---");
+  // 빌더와 같은 폰트 지표로 기대 좌표를 계산한다.
+  const probe = await PDFDocument.create();
+  probe.registerFontkit(fontkit);
+  const nanum = await probe.embedFont(
+    readFileSync("lib/fonts/NanumGothic-Regular.ttf"),
+    { subset: false }
+  );
+  const PW = 595.28;
+  const MARGIN = 56;
+  const CONTENT = PW - 2 * MARGIN;
+  const SIGN_SIZE = 11.5;
+  const PAREN = "(서명  또는  인)";
+  const parenX = MARGIN + CONTENT * 0.67; // SIGN_PAREN_RATIO
+  const parenW = nanum.widthOfTextAtSize(PAREN, SIGN_SIZE);
+  const parenCenterX = parenX + parenW / 2;
+  const nameLabel = `제출자 :  ${pdfBase.name}`;
+  const signX = MARGIN + CONTENT * 0.08; // SIGN_LABEL_RATIO
+  const nameEndX = signX + nanum.widthOfTextAtSize(nameLabel, SIGN_SIZE);
+
+  const place = (await pdfImagePlacement(withStamp, 0))!;
+  expectEq("도장 크기 52 유지", [place.w, place.h], [52, 52]);
+  expectEq(
+    "도장 중심 X = 괄호 문구 중앙",
+    Math.abs(place.x + place.w / 2 - parenCenterX) < 0.5,
+    true
+  );
+  // 괄호 문구를 실제로 덮는다(가로 범위가 겹친다).
+  expectEq(
+    "도장이 괄호 문구를 덮는다",
+    place.x < parenX + parenW && place.x + place.w > parenX,
+    true
+  );
+  // 이름 옆이 아니라 그 줄 오른쪽 끝이다(LP-7 교정의 핵심).
+  expectEq("도장이 이름 끝보다 오른쪽", place.x > nameEndX, true);
+  expectEq(
+    "도장이 내용 폭 안",
+    place.x >= MARGIN && place.x + place.w <= MARGIN + CONTENT,
+    true
+  );
+
+  // 세로 — 괄호 문구 baseline 의 시각적 중앙에 도장 중심이 온다.
+  //   그리는 순서가 … 제출자 → 괄호 → (도장) → 수신 이므로
+  //   괄호는 뒤에서 두 번째, 제출자는 세 번째 Tm 이다.
+  const tms = await pdfTextPositions(withStamp, 0);
+  const parenTm = tms[tms.length - 2];
+  const nameTm = tms[tms.length - 3];
+  expectEq("괄호 문구 x 가 비례 위치와 일치", Math.abs(parenTm.x - parenX) < 0.5, true);
+  expectEq(
+    "도장 중심 Y = 괄호 문구 세로 중앙",
+    Math.abs(place.y + place.h / 2 - (parenTm.y + SIGN_SIZE / 2)) < 0.5,
+    true
+  );
+
+  // 이름 길이가 달라도 도장 위치는 그대로여야 한다(이름 옆 배치가 아니라는 증거).
+  const longName = await buildLeavePlanPdf({
+    ...pdfBase,
+    name: "남궁민수하늘",
+    stampBytes: stamp,
+  });
+  const placeLong = (await pdfImagePlacement(longName, 0))!;
+  expectEq(
+    "긴 이름에도 도장 위치 불변",
+    [
+      Math.abs(placeLong.x - place.x) < 0.01,
+      Math.abs(placeLong.y - place.y) < 0.01,
+    ],
+    [true, true]
+  );
+
+  // 원본 서식 비례 — "제출자" 8.0% / "(서명" 67.0%.
+  expectEq(
+    "제출자·괄호 시작 위치가 원본 비례",
+    [
+      Math.round(((nameTm.x - MARGIN) / CONTENT) * 1000) / 10,
+      Math.round(((parenTm.x - MARGIN) / CONTENT) * 1000) / 10,
+    ],
+    [8, 67]
+  );
+
   console.log("\n--- LP-6 합본 ---");
   // 도장: 김가 O / 이나 X / 박다 O. 합본은 가나다순(김가·박다·이나)으로 정렬된다.
   const bundle = await buildLeavePlanBundlePdf({
@@ -532,6 +666,17 @@ async function main() {
       (await pdfPageOps(bundle, 3)).images,
     ],
     [1, 1, 0]
+  );
+  // LP-7. 합본도 같은 서명란 배치를 쓴다(drawPlanPage 공용).
+  const bundlePlace = (await pdfImagePlacement(bundle, 1))!;
+  expectEq(
+    "합본 날인 위치 = 1인 PDF 와 동일",
+    [
+      Math.abs(bundlePlace.x - place.x) < 0.01,
+      Math.abs(bundlePlace.y - place.y) < 0.01,
+      bundlePlace.w,
+    ],
+    [true, true, 52]
   );
 
   console.log("\n--- 동명이인 시트명 ---");

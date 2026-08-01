@@ -47,6 +47,18 @@ const LABEL_BG = rgb(0.91, 0.91, 0.91);
 const W = 595.28; // A4
 const H = 841.89;
 
+// --- 서명란 배치(LP-7) ------------------------------------------------
+//   원본 서식 A26 "      제출자 :        …        (서명  또는  인)" 의 표시폭을
+//   재서 얻은 비례. 내용 폭(CW)에 곱해 쓴다.
+//     · "제출자" 시작        = 8.0%
+//     · "(서명 또는 인)" 시작 = 67.0%
+//   괄호 문구를 우측 여백까지 밀면 이름과의 간격이 원본보다 벌어진다.
+const SIGN_LABEL_RATIO = 0.08;
+const SIGN_PAREN_RATIO = 0.67;
+// 도장 크기·불투명도 — 증명서 관인과 같은 톤. 글자가 아래로 비친다.
+const STAMP_SIZE = 52;
+const STAMP_OPACITY = 0.92;
+
 // 자간 넓힌 제목.
 function spaced(s: string): string {
   return s.split("").join(" ");
@@ -296,29 +308,35 @@ async function drawPlanPage(
   );
   y += 34;
 
-  // ---- 제출자 + 도장 ----
-  const signLabel = `제출자 :  ${d.name}`;
+  // ---- 제출자 + (서명 또는 인) + 도장 ----
+  //   위치는 원본 서식(A26 병합셀 "      제출자 :        …        (서명  또는  인)")의
+  //   표시폭 비례를 그대로 따른다 — "제출자" 시작 8.0%, "(서명" 시작 67.0%.
+  //   괄호 문구를 우측 여백까지 밀면 이름과의 간격이 원본보다 넓어진다(LP-7 교정).
   const signSize = 11.5;
-  const signX = M + 40;
-  p.text(signX, y, signLabel, { size: signSize });
+  const signLabel = `제출자 :  ${d.name}`;
+  const signX = M + CW * SIGN_LABEL_RATIO;
   const paren = "(서명  또는  인)";
-  const parenX = M + CW - 30;
-  p.text(parenX, y, paren, { size: signSize, align: "right" });
+  const parenX = M + CW * SIGN_PAREN_RATIO;
+  p.text(signX, y, signLabel, { size: signSize });
+  p.text(parenX, y, paren, { size: signSize });
 
-  // 도장은 이름 바로 뒤·괄호 앞 사이에 얹는다(원본에서 손도장을 찍는 위치).
+  // 도장은 "(서명 또는 인)" 문구 위에, 문구 중앙에 중심을 맞춰 찍는다.
+  //   실제 결재 관행과 같은 자리다. 문구를 먼저 그리고 도장을 반투명으로 얹어
+  //   글자가 도장 아래로 비친다(불투명도는 증명서 관인과 동일하게 유지).
   if (d.stampBytes && d.stampBytes.length > 0) {
     const img = await embedImage(pdf, d.stampBytes);
     if (img) {
-      const nameW = font.widthOfTextAtSize(signLabel, signSize);
-      const stampSize = 52;
-      const sx = signX + nameW + 16;
-      const syTop = y + signSize / 2 - stampSize / 2;
+      const parenW = font.widthOfTextAtSize(paren, signSize);
+      const centerX = parenX + parenW / 2;
+      const sx = centerX - STAMP_SIZE / 2;
+      // 문구가 차지하는 줄의 세로 중앙에 도장 중심을 맞춘다.
+      const syTop = y + signSize / 2 - STAMP_SIZE / 2;
       page.drawImage(img, {
         x: sx,
-        y: H - syTop - stampSize,
-        width: stampSize,
-        height: stampSize,
-        opacity: 0.92,
+        y: H - syTop - STAMP_SIZE,
+        width: STAMP_SIZE,
+        height: STAMP_SIZE,
+        opacity: STAMP_OPACITY,
       });
     }
   }
