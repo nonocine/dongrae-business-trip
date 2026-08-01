@@ -514,6 +514,39 @@ export const APPOINTMENT_TYPES = [
 ] as const;
 export type AppointmentType = (typeof APPOINTMENT_TYPES)[number];
 
+// =====================================================================
+// 부서(DP-1) — 인사발령의 부서 칸 선택지.
+//   * 부서는 employee_profiles 에 별도 컬럼이 없고 appointments jsonb 안의
+//     department 필드로만 존재한다(최신 발령의 값이 그 직원의 현재 부서).
+//   * 자유 텍스트라 오타·표기 흔들림이 생기기 쉬워 선택지를 고정한다. 다만
+//     조직 개편으로 새 부서가 생길 수 있으므로 "직접 입력"도 함께 둔다.
+//   * 관장·부장처럼 팀 소속이 없는 자리는 발령을 만들지 않는다 — 그 경우
+//     화면은 drivers.rank 로 폴백해 직책을 보여 준다.
+// =====================================================================
+export const DEPARTMENTS = [
+  "교육문화사업팀",
+  "청소년사업팀",
+  "방과후아카데미팀",
+] as const;
+
+// 셀렉트 선택지 — 상수 부서를 앞에 고정하고, 기존 데이터에만 있는 부서명을
+//   뒤에 가나다순으로 덧붙인다(과거 표기를 잃지 않기 위함).
+export function departmentOptions(
+  ...sources: (readonly (string | null | undefined)[] | undefined)[]
+): string[] {
+  const extra = new Set<string>();
+  for (const list of sources) {
+    for (const v of list ?? []) {
+      const s = (v ?? "").trim();
+      if (s && !(DEPARTMENTS as readonly string[]).includes(s)) extra.add(s);
+    }
+  }
+  return [
+    ...DEPARTMENTS,
+    ...[...extra].sort((a, b) => a.localeCompare(b, "ko")),
+  ];
+}
+
 export type EmployeeAppointment = {
   type: AppointmentType;
   title: string;

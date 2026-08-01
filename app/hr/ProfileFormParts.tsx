@@ -1,10 +1,11 @@
 "use client";
 
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import {
   EDUCATION_DEGREES,
   FAMILY_RELATIONS,
   APPOINTMENT_TYPES,
+  departmentOptions,
   type EmployeeEducation,
   type EmployeeFamily,
   type EmployeeLicense,
@@ -943,19 +944,49 @@ function emptyAppointment(): EmployeeAppointment {
   };
 }
 
+// 부서 셀렉트에서 "직접 입력"을 고른 상태를 나타내는 표식(실제 값이 아님).
+const DEPT_CUSTOM = "__custom__";
+
 export function AppointmentTab({
   appointments,
   onChange,
   readOnly,
+  knownDepartments,
 }: {
   appointments: EmployeeAppointment[];
   onChange: (next: EmployeeAppointment[]) => void;
   readOnly: boolean;
+  /** 조직 전체의 기존 부서명(다른 직원 발령에 쓰인 값 포함). */
+  knownDepartments?: string[];
 }) {
   const fieldCls = fieldClsOf(readOnly);
   function update(idx: number, patch: Partial<EmployeeAppointment>) {
     onChange(appointments.map((e, i) => (i === idx ? { ...e, ...patch } : e)));
   }
+
+  // DP-1. 선택지 = 상수 부서 + 조직 전체 기존값 + 이 직원 발령에 쓰인 값.
+  const deptOptions = useMemo(
+    () =>
+      departmentOptions(
+        knownDepartments,
+        appointments.map((a) => a.department)
+      ),
+    [knownDepartments, appointments]
+  );
+  // "직접 입력"을 눌렀지만 아직 값을 안 적은 행(값이 비어 있어도 입력칸 유지).
+  const [customRows, setCustomRows] = useState<Set<number>>(new Set());
+  const isCustom = (idx: number, value: string) => {
+    const v = value.trim();
+    // 목록에 없는 기존 값은 자동으로 직접입력 모드로 열어 준다(과거 표기 보존).
+    return customRows.has(idx) || (v !== "" && !deptOptions.includes(v));
+  };
+  const setCustom = (idx: number, on: boolean) =>
+    setCustomRows((prev) => {
+      const next = new Set(prev);
+      if (on) next.add(idx);
+      else next.delete(idx);
+      return next;
+    });
 
   return (
     <div className="space-y-3">
@@ -1015,16 +1046,65 @@ export function AppointmentTab({
                   className={`mt-0.5 font-semibold ${fieldCls}`}
                 />
               </div>
+              {/* DP-1. 부서 — 선택식 + 직접 입력 병행(오타·표기 흔들림 방지). */}
               <div>
                 <label className={subLabelCls}>부서</label>
-                <input
-                  type="text"
-                  value={apt.department}
-                  onChange={(e) => update(idx, { department: e.target.value })}
-                  readOnly={readOnly}
-                  placeholder="활동지원팀"
-                  className={`mt-0.5 ${fieldCls}`}
-                />
+                {isCustom(idx, apt.department) ? (
+                  <div className="mt-0.5 flex gap-1">
+                    <input
+                      type="text"
+                      value={apt.department}
+                      onChange={(e) =>
+                        update(idx, { department: e.target.value })
+                      }
+                      readOnly={readOnly}
+                      placeholder="새 부서명"
+                      className={fieldCls}
+                      autoFocus={customRows.has(idx)}
+                    />
+                    {!readOnly && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setCustom(idx, false);
+                          update(idx, { department: "" });
+                        }}
+                        className="shrink-0 rounded-md border border-line px-2 text-xs text-ink-muted hover:bg-surface"
+                        title="목록에서 고르기"
+                      >
+                        목록
+                      </button>
+                    )}
+                  </div>
+                ) : (
+                  <select
+                    value={apt.department}
+                    onChange={(e) => {
+                      if (e.target.value === DEPT_CUSTOM) {
+                        setCustom(idx, true);
+                        update(idx, { department: "" });
+                        return;
+                      }
+                      setCustom(idx, false);
+                      update(idx, { department: e.target.value });
+                    }}
+                    disabled={readOnly}
+                    className={`mt-0.5 ${fieldCls}`}
+                  >
+                    <option value="">(부서 없음)</option>
+                    {deptOptions.map((d) => (
+                      <option key={d} value={d}>
+                        {d}
+                      </option>
+                    ))}
+                    {!readOnly && (
+                      <option value={DEPT_CUSTOM}>+ 직접 입력…</option>
+                    )}
+                  </select>
+                )}
+                <p className="mt-0.5 text-[11px] text-ink-hint">
+                  관장·부장처럼 팀 소속이 없으면 (부서 없음)으로 두세요.
+                </p>
               </div>
               <div>
                 <label className={subLabelCls}>발령일</label>

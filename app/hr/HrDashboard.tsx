@@ -173,6 +173,19 @@ function RecordsTab({
     return m;
   }, [profiles]);
 
+  // DP-1. 조직 전체 발령에 쓰인 부서명 — 인사발령 탭 부서 셀렉트의 선택지로
+  //   내려보낸다(상수 DEPARTMENTS 에 없는 과거 표기도 고를 수 있게).
+  const knownDepartments = useMemo(() => {
+    const out: string[] = [];
+    for (const p of profiles) {
+      for (const a of p.appointments ?? []) {
+        const d = (a?.department ?? "").trim();
+        if (d) out.push(d);
+      }
+    }
+    return out;
+  }, [profiles]);
+
   // 직원의 재직 상태 — 인사기록카드의 employment_status 기준(없으면 재직).
   const statusOf = (driverId: string): "active" | "resigned" =>
     profileMap.get(driverId)?.employment_status ?? "active";
@@ -252,6 +265,7 @@ function RecordsTab({
               driver={selectedDriver}
               profile={selectedProfile}
               canManageAuth={canManageAuth}
+              knownDepartments={knownDepartments}
               onDeleted={() => setSelectedId("")}
             />
           ) : (

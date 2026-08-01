@@ -85,8 +85,10 @@ export default function EmployeeProfileForm({
   driver,
   profile,
   canManageAuth,
+  knownDepartments,
   onDeleted,
 }: {
+  knownDepartments?: string[];
   driver: Driver;
   profile: EmployeeProfile | null;
   // 권한등급(auth_level) 변경 가능 여부 — 관장(최고권한)만 true.
@@ -634,6 +636,7 @@ export default function EmployeeProfileForm({
               appointments={appointments}
               onChange={setAppointments}
               readOnly={locked}
+              knownDepartments={knownDepartments}
             />
           </div>
 
