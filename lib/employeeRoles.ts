@@ -26,6 +26,12 @@ export const EMPLOYEE_ROLES: EmployeeRole[] = [
     label: "강사관리",
     description: "외부 강사·프로그램·근무일지(동래샘들)",
   },
+  {
+    // 직원 자치 상조회. 회장이 교체되는 조직이라 회계와 분리한 전용 직무.
+    key: "mutual",
+    label: "상조회",
+    description: "회비·장부·경조사 지출",
+  },
 ];
 
 // 정의된 직무 key 인지 검증 (저장 시 허용 key 체크).

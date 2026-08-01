@@ -231,6 +231,12 @@ function AdminArea({
           desc="심사위원 명단 관리·채용별 배정"
         />
         <MenuCard
+          href="/hr/mutual/ledger"
+          icon="🤲"
+          title="상조회"
+          desc="회비·장부, 경조사 지출 (상조회 담당과 공유)"
+        />
+        <MenuCard
           href="/hr/certificates"
           icon="🧾"
           title="증명서 발급대장"
@@ -661,6 +667,22 @@ export default async function EmployeeDashboard({
                     icon="🧑‍🏫"
                     title="강사·프로그램 관리"
                     desc="외부 강사 등록·초대, 프로그램·근무일지"
+                  />
+                </div>
+              </div>
+            )}
+
+            {roleSet.has("mutual") && (
+              <div>
+                <p className="mb-2 text-xs font-semibold text-ink-muted">
+                  상조회
+                </p>
+                <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                  <MenuCard
+                    href="/hr/mutual/ledger"
+                    icon="🤲"
+                    title="상조회 관리"
+                    desc="회비·장부, 경조사 지출, 연도 마감"
                   />
                 </div>
               </div>
