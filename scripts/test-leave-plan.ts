@@ -28,6 +28,12 @@ import {
   monthsInRange,
   restDayReason,
 } from "../lib/koreanHolidays";
+import {
+  buildLeavePlanPdf,
+  buildLeavePlanBundlePdf,
+} from "../lib/leavePlanPdf";
+import { PDFDocument, PDFRawStream } from "pdf-lib";
+import { inflateSync } from "node:zlib";
 
 let failures = 0;
 function expectEq(label: string, actual: unknown, expected: unknown) {
@@ -38,6 +44,48 @@ function expectEq(label: string, actual: unknown, expected: unknown) {
       ok ? "" : ` (기대 ${JSON.stringify(expected)})`
     }`
   );
+}
+
+// --- PDF 검사 헬퍼 -----------------------------------------------------
+//   pdf-lib 에는 텍스트 추출이 없어 콘텐츠 스트림의 연산자를 센다.
+//   fill/stroke = 표 칸·테두리, " Do" = 이미지(도장) 배치.
+async function pdfPageCount(bytes: Uint8Array): Promise<number> {
+  return (await PDFDocument.load(bytes)).getPageCount();
+}
+async function pdfPageSize(bytes: Uint8Array): Promise<[number, number]> {
+  const p = (await PDFDocument.load(bytes)).getPage(0);
+  return [Math.round(p.getWidth()), Math.round(p.getHeight())];
+}
+async function pdfPageOps(
+  bytes: Uint8Array,
+  pageIndex: number
+): Promise<{ fills: number; strokes: number; images: number }> {
+  const doc = await PDFDocument.load(bytes);
+  const page = doc.getPage(pageIndex);
+  const contents = page.node.Contents();
+  const refs =
+    contents && "asArray" in contents
+      ? (contents as { asArray: () => unknown[] }).asArray()
+      : [contents];
+  let raw = "";
+  for (const ref of refs) {
+    const looked =
+      ref instanceof PDFRawStream ? ref : doc.context.lookup(ref as never);
+    const stream = looked as PDFRawStream | undefined;
+    if (!stream?.contents) continue;
+    let buf = Buffer.from(stream.contents);
+    try {
+      buf = inflateSync(buf);
+    } catch {
+      // 비압축 스트림 — 그대로 읽는다.
+    }
+    raw += buf.toString("latin1");
+  }
+  return {
+    fills: raw.split("f\n").length - 1,
+    strokes: raw.split("S\n").length - 1,
+    images: raw.split(" Do").length - 1,
+  };
 }
 
 async function main() {
@@ -396,6 +444,94 @@ async function main() {
     "기간이 뒤집혀도 한 달은 준다",
     monthsInRange("2026-06-01", "2026-01-01", 2026).length,
     1
+  );
+
+  // =====================================================================
+  console.log("\n--- LP-5/LP-6 날인 PDF ---");
+  // 도장 자리에 넣을 최소 유효 PNG(1x1). 실제 도장 이미지와 경로가 같다.
+  const stamp = new Uint8Array(
+    Buffer.from(
+      "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8DwHwAFAAH/q842iQAAAABJRU5ErkJggg==",
+      "base64"
+    )
+  );
+  const pdfBase = {
+    name: "홍길동",
+    department: "청소년사업팀",
+    year: 2026,
+    unused_days: 2.5,
+    period_start: PERIOD.start,
+    period_end: PERIOD.end,
+    plan: PLAN,
+    total_days: sumLeavePlan(PLAN),
+    submitted_at: "2026-08-02T23:00:00.000Z",
+  };
+
+  const withStamp = await buildLeavePlanPdf({ ...pdfBase, stampBytes: stamp });
+  const noStamp = await buildLeavePlanPdf({ ...pdfBase, stampBytes: null });
+  const one = await pdfPageOps(withStamp, 0);
+  expectEq("1인 PDF 1페이지", await pdfPageCount(withStamp), 1);
+  expectEq("A4 크기", await pdfPageSize(withStamp), [595, 842]);
+  expectEq("표 칸이 그려진다(fill 50+)", one.fills >= 50, true);
+  expectEq("테두리가 그려진다(stroke 30+)", one.strokes >= 30, true);
+  expectEq("도장 이미지 1개 합성", one.images, 1);
+  // 나눔고딕 통임베드(subset:false) — 폰트가 통째로 들어가 1MB 를 넘는다.
+  expectEq("나눔고딕 통임베드", withStamp.length > 1_000_000, true);
+
+  const none = await pdfPageOps(noStamp, 0);
+  expectEq("도장 미등록이면 서명란 빈칸(이미지 0)", none.images, 0);
+  expectEq("도장본이 더 큼", withStamp.length > noStamp.length, true);
+
+  // 미제출자도 빈 서식으로 출력된다(종이 배포용).
+  const blank = await buildLeavePlanPdf({
+    ...pdfBase,
+    plan: [],
+    total_days: null,
+    submitted_at: null,
+    stampBytes: null,
+  });
+  expectEq("미제출도 1페이지 생성", await pdfPageCount(blank), 1);
+
+  // 서식 칸수(16) 초과도 생성은 되고 경고 문구가 붙는다.
+  const over = await buildLeavePlanPdf({
+    ...pdfBase,
+    plan: Array.from({ length: 20 }, (_, i) => ({
+      date: `2026-05-${String(i + 1).padStart(2, "0")}`,
+      days: 1,
+    })),
+    total_days: 20,
+    stampBytes: null,
+  });
+  expectEq("16칸 초과도 생성", await pdfPageCount(over), 1);
+
+  console.log("\n--- LP-6 합본 ---");
+  // 도장: 김가 O / 이나 X / 박다 O. 합본은 가나다순(김가·박다·이나)으로 정렬된다.
+  const bundle = await buildLeavePlanBundlePdf({
+    year: 2026,
+    orgName: "동래구청소년센터",
+    issuedCount: 14,
+    submittedCount: 3,
+    pendingNames: ["최라", "정마", "한바"],
+    generatedAt: "2026-08-01T05:00:00.000Z",
+    items: [
+      { ...pdfBase, name: "김가", stampBytes: stamp },
+      { ...pdfBase, name: "이나", stampBytes: null },
+      { ...pdfBase, name: "박다", stampBytes: stamp },
+    ],
+  });
+  expectEq("표지 1 + 3명 = 4페이지", await pdfPageCount(bundle), 4);
+  const cover = await pdfPageOps(bundle, 0);
+  expectEq("표지에 요약표", cover.fills >= 5, true);
+  expectEq("표지에는 도장 없음", cover.images, 0);
+  // 가나다순 정렬 결과: p2 김가(O) · p3 박다(O) · p4 이나(X)
+  expectEq(
+    "가나다순 정렬 + 도장 유무가 사람별로 맞는다",
+    [
+      (await pdfPageOps(bundle, 1)).images,
+      (await pdfPageOps(bundle, 2)).images,
+      (await pdfPageOps(bundle, 3)).images,
+    ],
+    [1, 1, 0]
   );
 
   console.log("\n--- 동명이인 시트명 ---");

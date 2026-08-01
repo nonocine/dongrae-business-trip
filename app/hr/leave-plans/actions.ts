@@ -14,6 +14,11 @@ import { supabaseAdmin } from "@/lib/supabaseAdmin";
 import { requireSalaryAccess } from "@/lib/salaryAccess";
 import { sendSlackDM, siteBaseUrl, slackLink } from "@/lib/slack";
 import { kstTodayYmd } from "@/lib/trainings";
+import { downloadHrImage } from "@/lib/recruitmentApplicantDocData";
+import {
+  buildLeavePlanPdf,
+  buildLeavePlanBundlePdf,
+} from "@/lib/leavePlanPdf";
 import {
   normalizeLeavePlan,
   roundHalf,
@@ -476,6 +481,14 @@ export async function loadLeavePlansForExport(input: {
   employeeId?: string;
 }): Promise<LeavePlanRow[]> {
   await requireSalaryAccess();
+  return loadRowsForExport(input);
+}
+
+// 권한 검증 없는 내부 로더 — 위 액션과 아래 PDF 액션이 공유한다.
+async function loadRowsForExport(input: {
+  year: number;
+  employeeId?: string;
+}): Promise<LeavePlanRow[]> {
   const year = Math.round(Number(input.year));
   if (!Number.isFinite(year) || year <= 0) return [];
 
@@ -495,4 +508,154 @@ export async function loadLeavePlansForExport(input: {
       return row;
     })
     .sort((a, b) => a.name.localeCompare(b.name, "ko"));
+}
+
+// =====================================================================
+// LP-5. 날인 PDF — 제출자 도장(employee_profiles.stamp_path)을 서명란에 합성.
+//   미리보기·다운로드 모두 이 액션의 base64 를 쓴다(증명서 패턴).
+//   도장이 없으면 자리를 비운 채 발급한다(손도장 대응).
+// =====================================================================
+async function loadStamps(
+  driverIds: string[]
+): Promise<Map<string, Uint8Array | null>> {
+  const out = new Map<string, Uint8Array | null>();
+  const ids = [...new Set(driverIds.filter(Boolean))];
+  if (!ids.length) return out;
+  const { data } = await supabaseAdmin
+    .from(PROF)
+    .select("driver_id, stamp_path")
+    .in("driver_id", ids);
+  for (const r of data ?? []) {
+    const row = r as { driver_id: string; stamp_path: string | null };
+    out.set(
+      String(row.driver_id),
+      await downloadHrImage(row.stamp_path ?? null)
+    );
+  }
+  return out;
+}
+
+function pdfDataOf(r: LeavePlanRow, stamp: Uint8Array | null) {
+  return {
+    name: r.name,
+    department: r.department,
+    year: r.year,
+    unused_days: r.unused_days,
+    period_start: r.period_start,
+    period_end: r.period_end,
+    plan: r.plan,
+    total_days: r.total_days,
+    submitted_at: r.submitted_at,
+    stampBytes: stamp,
+  };
+}
+
+function safeName(s: string): string {
+  return s.replace(/[\\/:*?"<>|]/g, "_");
+}
+
+export type LeavePlanPdfResult =
+  | { ok: true; filename: string; pdfBase64: string; hasStamp: boolean }
+  | { ok: false; message: string };
+
+export async function buildLeavePlanPdfFor(input: {
+  year: number;
+  employeeId: string;
+}): Promise<LeavePlanPdfResult> {
+  try {
+    await requireSalaryAccess();
+    if (!input.employeeId) return { ok: false, message: "대상이 없습니다." };
+    const rows = await loadRowsForExport({
+      year: input.year,
+      employeeId: input.employeeId,
+    });
+    if (rows.length === 0)
+      return { ok: false, message: "발부된 계획서를 찾을 수 없습니다." };
+
+    const row = rows[0];
+    const stamps = await loadStamps([row.employee_id]);
+    const stamp = stamps.get(row.employee_id) ?? null;
+    const pdf = await buildLeavePlanPdf(pdfDataOf(row, stamp));
+
+    return {
+      ok: true,
+      filename: `연차사용계획서_${row.year}_${safeName(row.name)}.pdf`,
+      pdfBase64: Buffer.from(pdf).toString("base64"),
+      hasStamp: !!stamp,
+    };
+  } catch (e) {
+    return {
+      ok: false,
+      message: e instanceof Error ? e.message : "PDF 생성 중 오류가 발생했습니다.",
+    };
+  }
+}
+
+// =====================================================================
+// LP-6. 전체 날인본 합본 — 표지 + 제출 완료자 1인 1면.
+// =====================================================================
+export type LeavePlanBundleResult =
+  | {
+      ok: true;
+      filename: string;
+      pdfBase64: string;
+      pages: number; // 표지 포함
+      included: number; // 수록 계획서 수
+      withoutStamp: string[]; // 도장 미등록으로 서명란이 빈 직원
+    }
+  | { ok: false; message: string };
+
+export async function buildLeavePlanBundle(
+  year: number
+): Promise<LeavePlanBundleResult> {
+  try {
+    await requireSalaryAccess();
+    const y = Math.round(Number(year));
+    if (!Number.isFinite(y) || y <= 0)
+      return { ok: false, message: "연도를 확인하세요." };
+
+    const rows = await loadRowsForExport({ year: y });
+    if (rows.length === 0)
+      return { ok: false, message: `${y}년에 발부된 계획서가 없습니다.` };
+    const submitted = rows.filter((r) => r.submitted_at != null);
+    if (submitted.length === 0)
+      return {
+        ok: false,
+        message: "제출 완료된 계획서가 없습니다. (제출 후 다시 시도하세요)",
+      };
+
+    const stamps = await loadStamps(submitted.map((r) => r.employee_id));
+    const withoutStamp: string[] = [];
+    const items = submitted.map((r) => {
+      const stamp = stamps.get(r.employee_id) ?? null;
+      if (!stamp) withoutStamp.push(r.name);
+      return pdfDataOf(r, stamp);
+    });
+
+    const pdf = await buildLeavePlanBundlePdf({
+      year: y,
+      orgName: "동래구청소년센터",
+      issuedCount: rows.length,
+      submittedCount: submitted.length,
+      pendingNames: rows
+        .filter((r) => r.submitted_at == null)
+        .map((r) => r.name),
+      generatedAt: new Date().toISOString(),
+      items,
+    });
+
+    return {
+      ok: true,
+      filename: `연차사용계획서_날인본_${y}_전체.pdf`,
+      pdfBase64: Buffer.from(pdf).toString("base64"),
+      pages: items.length + 1,
+      included: items.length,
+      withoutStamp,
+    };
+  } catch (e) {
+    return {
+      ok: false,
+      message: e instanceof Error ? e.message : "합본 생성 중 오류가 발생했습니다.",
+    };
+  }
 }
