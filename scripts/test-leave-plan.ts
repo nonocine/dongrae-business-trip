@@ -17,6 +17,17 @@ import {
   LEAVE_PLAN_MAX_ROWS,
 } from "../lib/leavePlan";
 import { buildLeavePlanWorkbook } from "../lib/leavePlanExport";
+import {
+  HOLIDAYS,
+  HOLIDAY_YEARS,
+  getHolidayName,
+  hasHolidayData,
+  isHoliday,
+  isRestDay,
+  monthCells,
+  monthsInRange,
+  restDayReason,
+} from "../lib/koreanHolidays";
 
 let failures = 0;
 function expectEq(label: string, actual: unknown, expected: unknown) {
@@ -277,6 +288,114 @@ async function main() {
     "오전 제출도 KST 날짜(8월 3일)",
     String(kstWs["A24"]?.v ?? ""),
     "    2026년        8월        3일"
+  );
+
+  console.log("\n--- LP-4 공휴일 달력 ---");
+  // 표에 넣은 날짜의 요일이 실제와 맞는지(음력·대체공휴일 오기 방지).
+  const W = ["일", "월", "화", "수", "목", "금", "토"];
+  const wd = (d: string) =>
+    W[new Date(Date.parse(`${d}T00:00:00Z`)).getUTCDay()];
+  expectEq("2026 설날 2/17 화요일", [getHolidayName("2026-02-17"), wd("2026-02-17")], ["설날", "화"]);
+  expectEq("2026 추석 9/25 금요일", [getHolidayName("2026-09-25"), wd("2026-09-25")], ["추석", "금"]);
+  expectEq("2027 설날 2/6 토요일", [getHolidayName("2027-02-06"), wd("2027-02-06")], ["설날", "토"]);
+  expectEq("2027 추석 9/15 수요일", [getHolidayName("2027-09-15"), wd("2027-09-15")], ["추석", "수"]);
+  expectEq(
+    "2026 부처님오신날 5/24",
+    getHolidayName("2026-05-24"),
+    "부처님오신날"
+  );
+  expectEq("2027 부처님오신날 5/13", getHolidayName("2027-05-13"), "부처님오신날");
+
+  // 대체공휴일 — 본 공휴일이 주말이면 다음 평일에 붙는다.
+  expectEq("3·1절(일) → 3/2 대체", getHolidayName("2026-03-02"), "삼일절 대체공휴일");
+  expectEq("광복절(토) → 8/17 대체", getHolidayName("2026-08-17"), "광복절 대체공휴일");
+  expectEq("개천절(토) → 10/5 대체", getHolidayName("2026-10-05"), "개천절 대체공휴일");
+  expectEq("설 연휴 일요일 → 2/8 대체(2027)", getHolidayName("2027-02-08"), "설날 대체공휴일");
+  expectEq("한글날(토) → 10/11 대체(2027)", getHolidayName("2027-10-11"), "한글날 대체공휴일");
+  expectEq("성탄절(토) → 12/27 대체(2027)", getHolidayName("2027-12-27"), "성탄절 대체공휴일");
+  // 신정·현충일은 대체공휴일 대상이 아니다.
+  expectEq("현충일(토, 2026) 대체 없음", getHolidayName("2026-06-08"), null);
+  expectEq("현충일(일, 2027) 대체 없음", getHolidayName("2027-06-07"), null);
+  expectEq("신정 대체 없음", getHolidayName("2027-01-04"), null);
+  // 모든 대체공휴일은 평일이어야 한다.
+  const substitutes = Object.entries(HOLIDAYS).filter(([, n]) =>
+    n.includes("대체")
+  );
+  expectEq(
+    "대체공휴일은 모두 평일",
+    substitutes.filter(([d]) => ["일", "토"].includes(wd(d))).map(([d]) => d),
+    []
+  );
+  // 2026: 삼일절·부처님오신날·광복절·개천절 4건 / 2027: 설날·광복절·개천절·한글날·성탄절 5건
+  expectEq("대체공휴일 건수", substitutes.length, 9);
+  expectEq(
+    "연도별 대체공휴일",
+    [2026, 2027].map(
+      (y) => substitutes.filter(([d]) => d.startsWith(String(y))).length
+    ),
+    [4, 5]
+  );
+
+  expectEq("평일은 공휴일 아님", isHoliday("2026-07-15"), false);
+  expectEq("표에 없는 연도는 공휴일 없음", isHoliday("2030-01-01"), false);
+  expectEq("2026·2027만 등록", [...HOLIDAY_YEARS], [2026, 2027]);
+  expectEq("hasHolidayData(2026)", hasHolidayData(2026), true);
+  expectEq("hasHolidayData(2030)", hasHolidayData(2030), false);
+
+  console.log("\n--- 쉬는 날 판정(붉게 + 확인 경고 대상) ---");
+  expectEq("일요일", isRestDay("2026-07-12"), true); // 일
+  expectEq("토요일은 아님", isRestDay("2026-07-11"), false); // 토
+  expectEq("공휴일(평일)", isRestDay("2026-10-09"), true); // 한글날 금
+  expectEq("평일", isRestDay("2026-07-15"), false);
+  expectEq("사유: 공휴일", restDayReason("2026-10-09"), "한글날");
+  expectEq("사유: 일요일", restDayReason("2026-07-12"), "일요일");
+  // 공휴일이면서 일요일이면 둘 다 알려 준다.
+  expectEq("사유: 공휴일+일요일", restDayReason("2026-03-01"), "삼일절(일요일)");
+  expectEq("사유 없음", restDayReason("2026-07-15"), null);
+
+  console.log("\n--- 달력 셀 ---");
+  const feb = monthCells(2026, 2);
+  expectEq("2026-02 은 4주 + 앞 빈칸", feb.length % 7, 0);
+  expectEq("2월 1일은 일요일이라 앞 빈칸 0", feb[0]?.date, "2026-02-01");
+  expectEq("28일까지", feb.filter(Boolean).length, 28);
+  const setStrs = feb.filter(Boolean).filter((c) => c!.rest).map((c) => c!.date);
+  expectEq(
+    "2026-02 쉬는 날 = 일요일 4일 + 설 연휴 3일",
+    setStrs,
+    [
+      "2026-02-01",
+      "2026-02-08",
+      "2026-02-15",
+      "2026-02-16",
+      "2026-02-17",
+      "2026-02-18",
+      "2026-02-22",
+    ]
+  );
+  const oct = monthCells(2026, 10);
+  expectEq("10월 1일은 목요일 → 앞 빈칸 4", oct.slice(0, 4).every((c) => c === null), true);
+  expectEq("10/9 한글날 표시", oct.find((c) => c?.date === "2026-10-09")?.holiday, "한글날");
+
+  console.log("\n--- 달력 이동 범위 ---");
+  expectEq(
+    "기간 안의 달만",
+    monthsInRange("2026-03-10", "2026-06-05", 2026).map((m) => m.month),
+    [3, 4, 5, 6]
+  );
+  expectEq(
+    "연 넘김",
+    monthsInRange("2026-11-01", "2027-02-28", 2026).map((m) => `${m.year}-${m.month}`),
+    ["2026-11", "2026-12", "2027-1", "2027-2"]
+  );
+  expectEq(
+    "기간 없으면 그 해 12달",
+    monthsInRange(null, null, 2026).length,
+    12
+  );
+  expectEq(
+    "기간이 뒤집혀도 한 달은 준다",
+    monthsInRange("2026-06-01", "2026-01-01", 2026).length,
+    1
   );
 
   console.log("\n--- 동명이인 시트명 ---");

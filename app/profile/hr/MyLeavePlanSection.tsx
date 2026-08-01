@@ -23,6 +23,8 @@ import {
   sumLeavePlan,
   type LeavePlanEntry,
 } from "@/lib/leavePlan";
+import { restDayReason } from "@/lib/koreanHolidays";
+import LeaveCalendar from "@/app/profile/hr/LeaveCalendar";
 import { fmtKstDateTime } from "@/lib/datetime";
 import {
   btnPrimary,
@@ -96,9 +98,6 @@ export default function MyLeavePlanSection({
   function setRow(key: string, p: Partial<Row>) {
     setRows((prev) => prev.map((r) => (r.key === key ? { ...r, ...p } : r)));
   }
-  function addRow() {
-    setRows((prev) => [...prev, { key: newKey(), date: "", days: 1 }]);
-  }
   function removeRow(key: string) {
     setRows((prev) => {
       const next = prev.filter((r) => r.key !== key);
@@ -151,6 +150,36 @@ export default function MyLeavePlanSection({
     persist(true);
   }
 
+  // LP-4. 달력에서 날짜 추가·해제. 이미 있으면 제거, 없으면 1일로 추가.
+  function toggleDate(date: string, already: boolean) {
+    setMsg(null);
+    if (already) {
+      setRows((prev) => {
+        const next = prev.filter((r) => r.date !== date);
+        return next.length ? next : [{ key: newKey(), date: "", days: 1 }];
+      });
+      return;
+    }
+    if (filled.length >= initial.maxRows) {
+      setMsg({
+        ok: false,
+        text: `계획은 최대 ${initial.maxRows}행까지 입력할 수 있습니다.`,
+      });
+      return;
+    }
+    setRows((prev) => {
+      // 비어 있는 첫 행이 있으면 그 자리에 채우고, 없으면 뒤에 붙인다.
+      const blank = prev.findIndex((r) => !r.date.trim());
+      const next = [...prev];
+      if (blank >= 0) next[blank] = { ...next[blank], date };
+      else next.push({ key: newKey(), date, days: 1 });
+      // 날짜순으로 보여 준다(빈 행은 뒤로).
+      return next.sort((a, b) =>
+        a.date && b.date ? a.date.localeCompare(b.date) : a.date ? -1 : 1
+      );
+    });
+  }
+
   return (
     <section className="space-y-4">
       <div>
@@ -192,6 +221,18 @@ export default function MyLeavePlanSection({
 
       {msg && <p className={msg.ok ? noticeSuccess : noticeError}>{msg.text}</p>}
 
+      {/* LP-4. 달력 — 제출 후에는 읽기 전용이라 감춘다. */}
+      {!submitted && (
+        <LeaveCalendar
+          periodStart={initial.period_start}
+          periodEnd={initial.period_end}
+          fallbackYear={initial.year}
+          selected={filled.map((r) => ({ date: r.date, days: r.days }))}
+          disabled={pending}
+          onToggle={toggleDate}
+        />
+      )}
+
       {/* 계획 표 */}
       <div className="overflow-hidden rounded-lg border border-line">
         <table className="w-full border-collapse">
@@ -214,25 +255,21 @@ export default function MyLeavePlanSection({
                   <td className={`${tdCls} text-right text-xs text-ink-hint`}>
                     {i + 1}
                   </td>
+                  {/* LP-4. 날짜는 위 달력에서 고른다 — 여기서는 확인·해제만. */}
                   <td className={tdCls}>
-                    {submitted ? (
-                      <span className="font-mono">{r.date || "-"}</span>
-                    ) : (
-                      <>
-                        <input
-                          type="date"
-                          value={r.date}
-                          min={initial.period_start ?? undefined}
-                          max={initial.period_end ?? undefined}
-                          onChange={(e) => setRow(r.key, { date: e.target.value })}
-                          className={inCls}
-                        />
-                        {err && (
-                          <span className="mt-0.5 block text-[11px] text-stamp">
-                            {err}
-                          </span>
-                        )}
-                      </>
+                    <span className="font-mono">{r.date || "-"}</span>
+                    {(() => {
+                      const reason = r.date ? restDayReason(r.date) : null;
+                      return reason ? (
+                        <span className="ml-1.5 text-[11px] font-semibold text-stamp">
+                          {reason}
+                        </span>
+                      ) : null;
+                    })()}
+                    {!submitted && err && (
+                      <span className="mt-0.5 block text-[11px] text-stamp">
+                        {err}
+                      </span>
                     )}
                   </td>
                   <td className={tdCls}>
@@ -288,25 +325,13 @@ export default function MyLeavePlanSection({
 
       {!submitted && (
         <>
-          <div className="flex flex-wrap items-center gap-2">
-            <button
-              type="button"
-              onClick={addRow}
-              disabled={pending || filled.length >= initial.maxRows}
-              className={btnSecondary}
-              title={
-                filled.length >= initial.maxRows
-                  ? `서식 칸수 상한(${initial.maxRows}행)에 도달했습니다.`
-                  : ""
-              }
-            >
-              + 행 추가
-            </button>
-            <p className="text-xs text-ink-hint">
-              {filled.length}/{initial.maxRows}행 · 0.5일(반차) 단위로 입력할 수
-              있습니다.
-            </p>
-          </div>
+          {/* LP-4. 날짜 추가는 달력에서 — 행 추가 버튼은 더 두지 않는다. */}
+          <p className="text-xs text-ink-hint">
+            {filled.length}/{initial.maxRows}행 · 위 달력에서 날짜를 고르고,
+            반차는 목록에서 0.5일로 바꾸세요.
+            {filled.length >= initial.maxRows &&
+              ` (서식 칸수 상한 ${initial.maxRows}행에 도달했습니다)`}
+          </p>
 
           {mismatch && filled.length > 0 && (
             <p className={noticeWarning}>
