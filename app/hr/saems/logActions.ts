@@ -10,6 +10,8 @@ const PROG = "saem_programs";
 const SESS = "saem_sessions";
 const PROJ = "saem_projects";
 const INSTR = "saem_instructors";
+const ENROLL = "saem_enrollments";
+const ATTEND = "saem_attendance";
 
 export type TermOption = {
   id: string;
@@ -45,6 +47,14 @@ export async function getTermOptions(): Promise<TermOption[]> {
     });
 }
 
+// SA-18. 회차별 출석 집계 — 강사가 동래샘들에서 체크한 결과(있을 때만).
+export type AttendanceSummary = {
+  present: number;
+  late: number;
+  absent: number;
+  checked: number; // 체크된 학생 수(present+late+absent)
+};
+
 export type LogRow = {
   id: string;
   session_date: string | null;
@@ -56,6 +66,7 @@ export type LogRow = {
   periodNo: number | null;
   timeStart: string | null;
   timeEnd: string | null;
+  capacity: number | null;
   sortOrder: number;
   submitted: boolean;
   confirmed: boolean;
@@ -64,6 +75,8 @@ export type LogRow = {
   log_content: string | null;
   plan_content: string | null;
   note: string | null;
+  enrolledCount: number; // 프로그램 명단(활성) 인원 — 0 이면 명단 없음
+  attendance: AttendanceSummary | null; // null = 아직 출석 체크 없음
 };
 
 export type LogResult = {
@@ -98,7 +111,9 @@ export async function getLogs(input: {
   // 프로그램 + 강사명.
   const { data: progs } = await supabaseAdmin
     .from(PROG)
-    .select("id, name, instructor_id, period_no, time_start, time_end, sort_order")
+    .select(
+      "id, name, instructor_id, period_no, time_start, time_end, capacity, sort_order"
+    )
     .in("term_id", termIds);
   const programs = (progs ?? []) as {
     id: string;
@@ -107,6 +122,7 @@ export async function getLogs(input: {
     period_no: number | null;
     time_start: string | null;
     time_end: string | null;
+    capacity: number | null;
     sort_order: number | null;
   }[];
   if (programs.length === 0) {
@@ -132,6 +148,44 @@ export async function getLogs(input: {
     .order("session_no", { ascending: true });
   if (input.date) sq = sq.eq("session_date", input.date);
   const { data: sess } = await sq;
+  const sessionIds = (sess ?? []).map((s) => String((s as { id: string }).id));
+
+  // SA-18. 명단(활성) 인원 + 회차별 출석 집계.
+  //   명단/출석 테이블이 아직 비어 있어도 근무일지 화면은 그대로 동작해야 하므로
+  //   실패는 삼키고(집계 없음) 나머지를 그린다.
+  const enrolledByProgram = new Map<string, number>();
+  const attendanceBySession = new Map<string, AttendanceSummary>();
+  const { data: enrolls } = await supabaseAdmin
+    .from(ENROLL)
+    .select("program_id, status")
+    .in(
+      "program_id",
+      programs.map((p) => p.id)
+    )
+    .eq("status", "active");
+  for (const e of enrolls ?? []) {
+    const pid = String((e as { program_id: string }).program_id);
+    enrolledByProgram.set(pid, (enrolledByProgram.get(pid) ?? 0) + 1);
+  }
+  if (sessionIds.length) {
+    const { data: atts } = await supabaseAdmin
+      .from(ATTEND)
+      .select("session_id, status")
+      .in("session_id", sessionIds);
+    for (const a of atts ?? []) {
+      const row = a as { session_id: string; status: string };
+      const sid = String(row.session_id);
+      const cur =
+        attendanceBySession.get(sid) ??
+        { present: 0, late: 0, absent: 0, checked: 0 };
+      if (row.status === "present") cur.present += 1;
+      else if (row.status === "late") cur.late += 1;
+      else if (row.status === "absent") cur.absent += 1;
+      else continue; // 알 수 없는 상태는 집계에서 제외
+      cur.checked += 1;
+      attendanceBySession.set(sid, cur);
+    }
+  }
 
   const rows: LogRow[] = (sess ?? []).map((s) => {
     const r = s as Record<string, unknown>;
@@ -147,6 +201,7 @@ export async function getLogs(input: {
       periodNo: prog?.period_no ?? null,
       timeStart: prog?.time_start ?? null,
       timeEnd: prog?.time_end ?? null,
+      capacity: prog?.capacity ?? null,
       sortOrder: prog?.sort_order ?? 0,
       submitted: !!r.instructor_submitted_at,
       confirmed: !!r.staff_confirmed_at,
@@ -155,6 +210,8 @@ export async function getLogs(input: {
       log_content: (r.log_content as string | null) ?? null,
       plan_content: (r.plan_content as string | null) ?? null,
       note: (r.note as string | null) ?? null,
+      enrolledCount: enrolledByProgram.get(String(r.program_id)) ?? 0,
+      attendance: attendanceBySession.get(String(r.id)) ?? null,
     };
   });
 

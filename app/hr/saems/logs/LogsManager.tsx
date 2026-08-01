@@ -287,6 +287,7 @@ export default function LogsManager({
                   <th className={thCls}>강사</th>
                   <th className={thCls}>상태</th>
                   <th className={`${thCls} text-right`}>인원</th>
+                  <th className={thCls}>출석</th>
                   <th className={`${thCls} text-right`}>시간</th>
                   <th className={thCls}>수업내용</th>
                 </tr>
@@ -298,7 +299,7 @@ export default function LogsManager({
                     <FragmentRow key={r.id}>
                       {showDivider && (
                         <tr className="bg-surface/70">
-                          <td colSpan={7} className="px-2 py-1 text-xs font-bold text-navy">
+                          <td colSpan={8} className="px-2 py-1 text-xs font-bold text-navy">
                             {r.periodNo != null ? `${r.periodNo}교시` : "교시 미지정"}
                             {r.timeStart
                               ? ` ${hhmm(r.timeStart)}~${hhmm(r.timeEnd)}`
@@ -335,6 +336,9 @@ export default function LogsManager({
                         <td className={`${tdCls} text-right`}>
                           {r.student_count ?? "-"}
                         </td>
+                        <td className={tdCls}>
+                          <AttendanceCell row={r} />
+                        </td>
                         <td className={`${tdCls} text-right`}>
                           {r.work_hours ?? "-"}
                         </td>
@@ -370,6 +374,35 @@ export default function LogsManager({
 // tbody 직계 자식만 허용되므로 divider+row 를 함께 반환.
 function FragmentRow({ children }: { children: React.ReactNode }) {
   return <>{children}</>;
+}
+
+// SA-18. 출석 요약 — 강사가 동래샘들에서 체크한 결과가 있을 때만 표시한다.
+//   "출석 n/정원" (지각은 출석에 포함, 상세는 title 로).
+function AttendanceCell({ row }: { row: LogRow }) {
+  const a = row.attendance;
+  if (!a) {
+    // 명단이 있는데 아직 체크가 없으면 그 사실을 알린다(명단조차 없으면 조용히).
+    if (row.enrolledCount === 0)
+      return <span className="text-xs text-ink-hint">-</span>;
+    return (
+      <span className={badgeNeutral} title={`명단 ${row.enrolledCount}명 · 출석 미체크`}>
+        미체크
+      </span>
+    );
+  }
+  const attended = a.present + a.late;
+  const denom = row.capacity ?? row.enrolledCount ?? 0;
+  return (
+    <span
+      className={a.absent > 0 ? badgeWarning : badgeSuccess}
+      title={`출석 ${a.present} · 지각 ${a.late} · 결석 ${a.absent} / 체크 ${a.checked}명 · 명단 ${row.enrolledCount}명${
+        row.capacity != null ? ` · 정원 ${row.capacity}명` : ""
+      }`}
+    >
+      출석 {attended}/{denom || a.checked}
+      {a.late > 0 && ` (지각 ${a.late})`}
+    </span>
+  );
 }
 
 function Stat({ label, value }: { label: string; value: string }) {
@@ -417,6 +450,13 @@ function DetailModal({
           {row.work_hours ?? "-"}h ·{" "}
           {row.confirmed ? "확정됨" : row.submitted ? "제출됨(미확정)" : "미제출"}
         </p>
+        {row.attendance && (
+          <p className="mb-3 text-xs text-ink-body">
+            출석 체크 — 출석 {row.attendance.present} · 지각 {row.attendance.late} ·
+            결석 {row.attendance.absent} (명단 {row.enrolledCount}명
+            {row.capacity != null && ` · 정원 ${row.capacity}명`})
+          </p>
+        )}
 
         <div className="space-y-3">
           <Block title="계획(plan)" text={row.plan_content} />

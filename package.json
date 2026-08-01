@@ -13,6 +13,7 @@
     "test:salary": "tsx scripts/test-salary-calc.ts",
     "test:edi": "tsx scripts/test-salary-edi.ts",
     "test:payslip": "tsx scripts/test-salary-payslip.ts",
+    "test:enroll": "tsx scripts/test-saem-enrollment.ts",
     "gen:icons": "node scripts/gen-icons.mjs"
   },
   "dependencies": {
