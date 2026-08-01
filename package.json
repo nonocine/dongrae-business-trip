@@ -16,7 +16,8 @@
     "test:enroll": "tsx scripts/test-saem-enrollment.ts",
     "test:settle": "tsx scripts/test-settlement.ts",
     "gen:icons": "node scripts/gen-icons.mjs",
-    "test:leave": "tsx scripts/test-leave-plan.ts"
+    "test:leave": "tsx scripts/test-leave-plan.ts",
+    "test:mutual": "tsx scripts/test-mutual.ts"
   },
   "dependencies": {
     "@pdf-lib/fontkit": "^1.1.1",

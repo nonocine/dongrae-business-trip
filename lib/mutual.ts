@@ -108,6 +108,9 @@ export function retirementTier(key: string): RetirementTier | null {
   return RETIREMENT_TIERS.find((t) => t.key === key) ?? null;
 }
 
+// 향후 며칠 내 생일을 배너·Cron 알림에 띄우는지(MU-3).
+export const BIRTHDAY_AHEAD_DAYS = 7;
+
 // 연말상여 — 1인당.
 export const YEAR_END_BONUS_UNIT = 50_000;
 // 연말상여 제안 조건 — 12월 1일 기준 잔액이 이 금액 이상일 때.
@@ -347,8 +350,12 @@ export type BirthdaySoon = {
   dday: number; // 0 = 오늘
 };
 
-// today·birthDate 모두 YYYY-MM-DD. 윤년 2/29 는 평년에 3/1 로 보지 않고 건너뛴다
-// (축하금은 하루 차이로 놓쳐도 담당이 장부에서 직접 처리할 수 있다).
+// today·birthDate 모두 YYYY-MM-DD. 윤년 2/29 생일은 평년에 3/1 로 옮기지 않고
+// 다음 윤년까지 기다린다(임의로 날짜를 바꿔 축하금을 잘못 잡지 않기 위해).
+//   → 그래서 올해·내년만 보면 2/29 가 null 이 된다. 다음 윤년이 잡히도록
+//     8년까지 훑는다(7일 배너에서는 어차피 범위 밖으로 걸러진다).
+const BIRTHDAY_SCAN_YEARS = 8;
+
 export function daysUntilBirthday(
   birthDate: string,
   today: string
@@ -359,10 +366,11 @@ export function daysUntilBirthday(
   const ty = Number(today.slice(0, 4));
   const t = Date.UTC(ty, Number(today.slice(5, 7)) - 1, Number(today.slice(8, 10)));
 
-  // 올해 생일과 내년 생일 중 오늘 이후로 가장 가까운 것.
-  for (const y of [ty, ty + 1]) {
+  // 오늘 이후로 가장 가까운 생일.
+  for (let i = 0; i <= BIRTHDAY_SCAN_YEARS; i++) {
+    const y = ty + i;
     const d = new Date(Date.UTC(y, bm - 1, bd));
-    // 존재하지 않는 날짜(2/29 평년)는 Date 가 다음 달로 넘긴다 → 건너뛴다.
+    // 존재하지 않는 날짜(2/29 평년)는 Date 가 3/1 로 넘긴다 → 그 해는 건너뛴다.
     if (d.getUTCMonth() !== bm - 1) continue;
     const diff = Math.round((d.getTime() - t) / 86_400_000);
     if (diff >= 0) return diff;
