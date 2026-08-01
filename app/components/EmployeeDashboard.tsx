@@ -536,6 +536,12 @@ export default async function EmployeeDashboard({
                     title="급여 기준 관리"
                     desc="호봉표·기준값·직원별 급여 설정"
                   />
+                  <MenuCard
+                    href="/hr/leave-plans"
+                    icon="🌴"
+                    title="연차 사용촉진"
+                    desc="미사용 연차 사용계획서 발부·수합·서식 출력"
+                  />
                   <PendingCard icon="📊" title="예산" desc="예산 관리" />
                 </div>
               </div>
