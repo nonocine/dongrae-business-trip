@@ -6,6 +6,7 @@ import {
   getMyEmployeeRoles,
 } from "@/app/profile/hr/actions";
 import { getMyTrainingSummary } from "@/app/profile/hr/trainingActions";
+import { getMyLeavePlanNotice } from "@/app/profile/hr/leavePlanActions";
 import { getTrainingsAdminSummary } from "@/app/hr/trainings/actions";
 import { getPendingCertRequestCount } from "@/app/hr/certificates/actions";
 import { getGoogleSession } from "@/app/actions";
@@ -76,6 +77,60 @@ function MenuCard({
       </span>
       <span className="min-w-0">
         <span className="block text-sm font-semibold text-ink">{title}</span>
+        <span className="mt-0.5 block text-xs text-ink-muted">{desc}</span>
+      </span>
+      <span
+        aria-hidden
+        className="ml-auto shrink-0 self-center text-ink-hint transition group-hover:translate-x-0.5 group-hover:text-navy"
+      >
+        →
+      </span>
+    </Link>
+  );
+}
+
+// 일수 표기(0.5 단위) — lib/leavePlan 의 formatDays 와 같은 규칙.
+function formatLeaveDays(v: number): string {
+  return Number.isInteger(v) ? String(v) : v.toFixed(1);
+}
+
+// 조치가 필요한 카드 — 미제출 연차 계획서처럼 "해야 할 일"을 눈에 띄게.
+//   urgent(마감 임박)면 붉게, 아니면 주의색.
+function AlertCard({
+  href,
+  icon,
+  title,
+  desc,
+  urgent,
+}: {
+  href: string;
+  icon: string;
+  title: string;
+  desc: string;
+  urgent?: boolean;
+}) {
+  const tone = urgent
+    ? "border-stamp/50 bg-stamp-soft/50 hover:border-stamp"
+    : "border-warning/50 bg-warning-soft/60 hover:border-warning";
+  return (
+    <Link
+      href={href}
+      className={`group flex items-start gap-3 rounded-xl border p-4 text-left shadow-sm transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-navy focus-visible:ring-offset-2 ${tone}`}
+    >
+      <span aria-hidden className="text-2xl">
+        {icon}
+      </span>
+      <span className="min-w-0">
+        <span className="flex flex-wrap items-center gap-1.5">
+          <span className="text-sm font-semibold text-ink">{title}</span>
+          <span
+            className={`rounded-full px-1.5 py-0.5 text-[10px] font-bold ${
+              urgent ? "bg-stamp text-white" : "bg-warning text-white"
+            }`}
+          >
+            {urgent ? "기한 임박" : "미제출"}
+          </span>
+        </span>
         <span className="mt-0.5 block text-xs text-ink-muted">{desc}</span>
       </span>
       <span
@@ -230,6 +285,7 @@ export default async function EmployeeDashboard({
     judgeAssignments,
     trainingSummary,
     trainingAdminSummary,
+    leavePlanNotice,
   ] = await Promise.all([
     getMyProfile(),
     getMyPhotoUrl(),
@@ -239,6 +295,7 @@ export default async function EmployeeDashboard({
     getMyJudgeAssignments(),
     getMyTrainingSummary(),
     getTrainingsAdminSummary(),
+    getMyLeavePlanNotice(),
   ]);
 
   const driver = my?.driver ?? null;
@@ -489,6 +546,20 @@ export default async function EmployeeDashboard({
             title="증명서 발급"
             desc="재직증명서 즉시 발급 · 발급 이력"
           />
+          {/* LP-2. 연차 사용계획서 — 발부됐고 아직 제출 안 한 건이 있을 때만 노출. */}
+          {leavePlanNotice && (
+            <AlertCard
+              href="/profile/hr#leave-plan"
+              icon="🌴"
+              title={`${leavePlanNotice.year}년 연차 사용계획서 작성`}
+              desc={`미사용 연차 ${formatLeaveDays(leavePlanNotice.unusedDays)}일${
+                leavePlanNotice.periodEnd
+                  ? ` · 잔여기간 ${leavePlanNotice.periodEnd}까지`
+                  : ""
+              } — 아직 제출하지 않았습니다`}
+              urgent={leavePlanNotice.dueSoon}
+            />
+          )}
         </div>
       </section>
 

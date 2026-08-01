@@ -5,8 +5,10 @@ import MyEmployeeProfileForm from "@/app/profile/hr/MyEmployeeProfileForm";
 import MyTrainingsSection from "@/app/profile/hr/MyTrainingsSection";
 import MyCertificatesSection from "@/app/profile/hr/MyCertificatesSection";
 import MyHrTabs from "@/app/profile/hr/MyHrTabs";
+import MyLeavePlanSection from "@/app/profile/hr/MyLeavePlanSection";
 import { getMyProfile } from "@/app/profile/hr/actions";
 import { getMyTrainings } from "@/app/profile/hr/trainingActions";
+import { getMyLeavePlan } from "@/app/profile/hr/leavePlanActions";
 import {
   listMyCertificates,
   listMyRequests,
@@ -25,13 +27,14 @@ export default async function MyHrPage() {
   // 관리자는 본인 인사기록카드 개념이 없음
   if (session.kind === "admin") redirect("/admin");
 
-  const [my, myTrainings, myCerts, myCertRequests, certPrefill] =
+  const [my, myTrainings, myCerts, myCertRequests, certPrefill, myLeavePlan] =
     await Promise.all([
       getMyProfile(),
       getMyTrainings(),
       listMyCertificates(),
       listMyRequests(),
       getMyCertificatePrefill(),
+      getMyLeavePlan(),
     ]);
   if (!my) redirect("/");
 
@@ -75,6 +78,16 @@ export default async function MyHrPage() {
             ) : (
               <p className="py-6 text-center text-sm text-ink-hint">
                 올해 등록된 의무교육이 없습니다.
+              </p>
+            )
+          }
+          leave={
+            myLeavePlan ? (
+              <MyLeavePlanSection initial={myLeavePlan} />
+            ) : (
+              <p className="py-6 text-center text-sm text-ink-hint">
+                발부된 연차 사용계획서가 없습니다. (담당자가 발부하면 여기에
+                표시됩니다)
               </p>
             )
           }
