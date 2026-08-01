@@ -158,7 +158,7 @@ export default function MembersManager({
       {msg && <p className={msg.ok ? noticeSuccess : noticeError}>{msg.text}</p>}
 
       {/* 일괄 가입 */}
-      {candidates.length > 0 && (
+      {data.canManage && candidates.length > 0 && (
         <section className={cardCls}>
           <h3 className="mb-2 text-sm font-bold text-ink">
             미가입 재직자 {candidates.length}명
@@ -237,7 +237,7 @@ export default function MembersManager({
                     }`}
                   >
                     <td className={tdCls}>
-                      {isCandidate && (
+                      {isCandidate && data.canManage && (
                         <input
                           type="checkbox"
                           checked={picked.has(r.employee_id)}
@@ -263,6 +263,10 @@ export default function MembersManager({
                     <td className={tdCls}>
                       {r.status == null ? (
                         <span className={badgeDanger}>미가입</span>
+                      ) : !data.canManage ? (
+                        <span className={badgeNeutral}>
+                          {MUTUAL_MEMBER_STATUS_LABEL[r.status]}
+                        </span>
                       ) : (
                         <select
                           value={r.status}
@@ -301,7 +305,7 @@ export default function MembersManager({
                       {r.memo ?? "-"}
                     </td>
                     <td className={`${tdCls} text-right`}>
-                      {r.id && (
+                      {r.id && data.canManage && (
                         <div className="flex justify-end gap-1">
                           <button
                             type="button"

@@ -2,7 +2,8 @@
 
 // =====================================================================
 // 상조회 회원 관리 — MU-1
-//   * 접근: M0 또는 mutual 직무. 모든 액션이 진입 시 재검증(RLS 정책 0개).
+//   * 접근 2층(MU-5): 조회는 로그인 직원 전원(requireMutualView), 변경은 mutual
+//     직무·M0(requireMutualManage). 모든 액션이 진입 시 재검증(RLS 정책 0개).
 //   * 생일·입사일은 mutual_members 에 중복 저장하지 않는다 — 인사기록
 //     (employee_profiles)을 조회해 합쳐서 보여준다(단일 진실).
 //   * employee_id = drivers.id (급여·연차 모듈과 같은 직원 식별자).
@@ -10,7 +11,7 @@
 
 import { revalidatePath } from "next/cache";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
-import { requireMutualAccess } from "@/lib/mutualAccess";
+import { requireMutualView, requireMutualManage } from "@/lib/mutualAccess";
 import {
   normalizeMemberStatus,
   type MutualMemberStatus,
@@ -101,10 +102,11 @@ export type MutualMemberOverview = {
   notJoinedCount: number;
   today: string;
   isM0: boolean;
+  canManage: boolean; // 가입·상태변경·메모·삭제 버튼 노출 여부
 };
 
 export async function getMemberOverview(): Promise<MutualMemberOverview> {
-  const ctx = await requireMutualAccess();
+  const ctx = await requireMutualView();
   const [roster, { data: mems, error }] = await Promise.all([
     loadRoster(),
     supabaseAdmin.from(MEM).select("*"),
@@ -174,12 +176,13 @@ export async function getMemberOverview(): Promise<MutualMemberOverview> {
     notJoinedCount: rows.filter((r) => r.status == null && !r.resigned).length,
     today: kstTodayYmd(),
     isM0: ctx.isM0,
+    canManage: ctx.canManage,
   };
 }
 
 // 그 달에 회비를 낼 active 회원 수 — 장부의 [월 회비 기입]이 쓴다.
 export async function countActiveMembers(): Promise<number> {
-  await requireMutualAccess();
+  await requireMutualView();
   const { count, error } = await supabaseAdmin
     .from(MEM)
     .select("id", { count: "exact", head: true })
@@ -199,7 +202,7 @@ export async function joinMembers(input: {
   | { ok: false; message: string }
 > {
   try {
-    await requireMutualAccess();
+    await requireMutualManage();
     const ids = [...new Set((input.employeeIds ?? []).filter(Boolean))];
     if (!ids.length) return { ok: false, message: "가입할 직원을 선택하세요." };
 
@@ -270,7 +273,7 @@ export async function setMemberStatus(input: {
   leftOn?: string | null;
 }): Promise<{ ok: true } | { ok: false; message: string }> {
   try {
-    await requireMutualAccess();
+    await requireMutualManage();
     const status = normalizeMemberStatus(input.status);
     if (!input.memberId) return { ok: false, message: "대상이 없습니다." };
 
@@ -304,7 +307,7 @@ export async function setMemberMemo(input: {
   memo: string | null;
 }): Promise<{ ok: true } | { ok: false; message: string }> {
   try {
-    await requireMutualAccess();
+    await requireMutualManage();
     if (!input.memberId) return { ok: false, message: "대상이 없습니다." };
     const { error } = await supabaseAdmin
       .from(MEM)
@@ -326,7 +329,7 @@ export async function deleteMember(
   memberId: string
 ): Promise<{ ok: true } | { ok: false; message: string }> {
   try {
-    await requireMutualAccess();
+    await requireMutualManage();
     if (!memberId) return { ok: false, message: "대상이 없습니다." };
     const { data: row } = await supabaseAdmin
       .from(MEM)

@@ -552,6 +552,13 @@ export default async function EmployeeDashboard({
             title="증명서 발급"
             desc="재직증명서 즉시 발급 · 발급 이력"
           />
+          {/* MU-5. 상조회는 직원 자치 조직 — 장부·회원·규정은 전 직원 열람. */}
+          <MenuCard
+            href="/hr/mutual/ledger"
+            icon="🤲"
+            title="상조회 현황"
+            desc="회비 장부·회원 명단·규정 열람 (기입은 담당자)"
+          />
           {/* LP-2. 연차 사용계획서 — 발부됐고 아직 제출 안 한 건이 있을 때만 노출. */}
           {leavePlanNotice && (
             <AlertCard

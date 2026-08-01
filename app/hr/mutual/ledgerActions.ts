@@ -2,7 +2,8 @@
 
 // =====================================================================
 // 상조회 장부 — MU-2 (연도 조회 / 월 회비 기입 / 세입·세출 추가 / 수정·삭제)
-//   * 접근: M0 또는 mutual 직무. 모든 액션이 진입 시 재검증(RLS 정책 0개).
+//   * 접근 2층(MU-5): 조회는 로그인 직원 전원(requireMutualView), 기입·수정·삭제는
+//     mutual 직무·M0(requireMutualManage). 진입 시마다 재검증(RLS 정책 0개).
 //   * 이월(carryOver)은 별도 컬럼을 두지 않고 "그 연도 1월 1일 이전 전체 순액"으로
 //     계산한다 → 과거 장부를 이관하면 이월이 자동으로 맞는다(단일 진실).
 //   * 금액은 프리셋으로 자동 계산하되 항상 담당이 수정할 수 있다(미납·실비 정산).
@@ -11,7 +12,7 @@
 
 import { revalidatePath } from "next/cache";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
-import { requireMutualAccess } from "@/lib/mutualAccess";
+import { requireMutualView, requireMutualManage } from "@/lib/mutualAccess";
 import { kstTodayYmd } from "@/lib/trainings";
 import {
   BIRTHDAY_AHEAD_DAYS,
@@ -86,6 +87,7 @@ export type LedgerView = {
   birthdaysSoon: BirthdaySoon[];
   yearEndBonus: { eligible: boolean; members: number; total: number } | null;
   isM0: boolean;
+  canManage: boolean; // 기입·수정·삭제 버튼 노출 여부
 };
 
 async function loadMemberOptions(): Promise<MemberOption[]> {
@@ -121,7 +123,7 @@ async function loadMemberOptions(): Promise<MemberOption[]> {
 }
 
 export async function getLedger(yearInput?: number): Promise<LedgerView> {
-  const ctx = await requireMutualAccess();
+  const ctx = await requireMutualView();
   const today = kstTodayYmd();
   const thisYear = Number(today.slice(0, 4));
 
@@ -250,6 +252,7 @@ export async function getLedger(yearInput?: number): Promise<LedgerView> {
     birthdaysSoon,
     yearEndBonus,
     isM0: ctx.isM0,
+    canManage: ctx.canManage,
   };
 }
 
@@ -264,7 +267,7 @@ export async function previewMonthlyFee(input: {
   | { ok: false; message: string }
 > {
   try {
-    await requireMutualAccess();
+    await requireMutualManage();
     const year = Math.round(Number(input.year));
     const month = Math.round(Number(input.month));
     if (!Number.isFinite(year) || month < 1 || month > 12)
@@ -300,7 +303,7 @@ export async function addMonthlyFee(input: {
   entryDate?: string;
 }): Promise<{ ok: true; amount: number } | { ok: false; message: string }> {
   try {
-    const ctx = await requireMutualAccess();
+    const ctx = await requireMutualManage();
     const year = Math.round(Number(input.year));
     const month = Math.round(Number(input.month));
     if (!Number.isFinite(year) || month < 1 || month > 12)
@@ -386,7 +389,7 @@ export async function addLedgerEntry(
   input: LedgerInput
 ): Promise<{ ok: true; id: string } | { ok: false; message: string }> {
   try {
-    const ctx = await requireMutualAccess();
+    const ctx = await requireMutualManage();
     const err = validate(input);
     if (err) return { ok: false, message: err };
 
@@ -420,7 +423,7 @@ export async function updateLedgerEntry(
   input: LedgerInput
 ): Promise<{ ok: true } | { ok: false; message: string }> {
   try {
-    const ctx = await requireMutualAccess();
+    const ctx = await requireMutualManage();
     if (!id) return { ok: false, message: "대상이 없습니다." };
     const err = validate(input);
     if (err) return { ok: false, message: err };
@@ -457,7 +460,7 @@ export async function deleteLedgerEntry(
   id: string
 ): Promise<{ ok: true } | { ok: false; message: string }> {
   try {
-    await requireMutualAccess();
+    await requireMutualManage();
     if (!id) return { ok: false, message: "대상이 없습니다." };
     const { data, error } = await supabaseAdmin
       .from(LEDGER)

@@ -146,6 +146,7 @@ export default function LedgerManager({ initial }: { initial: LedgerView }) {
               </option>
             ))}
           </select>
+          {data.canManage && (
           <div className="ml-auto flex flex-wrap gap-2">
             <button
               type="button"
@@ -186,6 +187,7 @@ export default function LedgerManager({ initial }: { initial: LedgerView }) {
               세입 추가
             </button>
           </div>
+          )}
         </div>
 
         <div className="mt-3 grid grid-cols-2 gap-3 sm:grid-cols-4">
@@ -257,6 +259,7 @@ export default function LedgerManager({ initial }: { initial: LedgerView }) {
                 {pairs.map((p, i) => (
                   <tr key={i} className="border-b border-line/60">
                     <Side
+                      canManage={data.canManage}
                       row={p.income}
                       onEdit={(row) =>
                         setModal({ kind: "entry", entryKind: "income", row })
@@ -271,6 +274,7 @@ export default function LedgerManager({ initial }: { initial: LedgerView }) {
                       pending={pending}
                     />
                     <Side
+                      canManage={data.canManage}
                       row={p.expense}
                       onEdit={(row) =>
                         setModal({ kind: "entry", entryKind: "expense", row })
@@ -389,11 +393,13 @@ function Side({
   onEdit,
   onDelete,
   pending,
+  canManage,
 }: {
   row: LedgerRow | null;
   onEdit: (row: LedgerRow) => void;
   onDelete: (row: LedgerRow) => void;
   pending: boolean;
+  canManage: boolean;
 }) {
   if (!row)
     return (
@@ -424,6 +430,8 @@ function Side({
         {formatKRW(row.amount)}
       </td>
       <td className={`${tdCls} whitespace-nowrap text-right`}>
+        {!canManage ? null : (
+        <>
         <button
           type="button"
           onClick={() => onEdit(row)}
@@ -439,6 +447,8 @@ function Side({
         >
           삭제
         </button>
+        </>
+        )}
       </td>
     </>
   );

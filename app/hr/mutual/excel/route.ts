@@ -1,4 +1,4 @@
-import { requireMutualAccess } from "@/lib/mutualAccess";
+import { requireMutualManage } from "@/lib/mutualAccess";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
 import { buildMutualYearWorkbook } from "@/lib/mutualExport";
 import { normalizeKind, sumEntries, normalizeMemberStatus } from "@/lib/mutual";
@@ -10,7 +10,7 @@ export const dynamic = "force-dynamic";
 // GET /hr/mutual/excel?year=2025
 export async function GET(req: Request) {
   try {
-    await requireMutualAccess();
+    await requireMutualManage();
   } catch {
     return new Response("권한이 없습니다.", { status: 403 });
   }

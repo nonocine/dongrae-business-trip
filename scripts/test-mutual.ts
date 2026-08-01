@@ -1,4 +1,4 @@
-// 상조회 규정 금액·장부 집계 검증 (MU-1~MU-2)
+// 상조회 규정 금액·장부 집계 검증 + 권한 게이트 정적 검증 (MU-1~MU-2, MU-5)
 //   실행: npx tsx scripts/test-mutual.ts  (package.json: npm run test:mutual)
 //
 //   지시문 검증 항목:
@@ -28,6 +28,7 @@ import {
   sumEntries,
   type LedgerEntryLike,
 } from "../lib/mutual";
+import { readFileSync } from "node:fs";
 
 let failures = 0;
 function expectEq(label: string, actual: unknown, expected: unknown) {
@@ -206,6 +207,63 @@ expectEq(
   ]
 );
 expectEq("범위 0일이면 오늘만", birthdaysWithin(members, "2026-02-24", 0).length, 1);
+
+// =====================================================================
+// MU-5. 권한 2층 정적 검증 — 변경 액션이 실수로 조회 게이트를 쓰지 않는지.
+//   화면에서 버튼을 숨기는 것은 방어가 아니므로, 서버 액션마다 올바른 게이트가
+//   붙어 있는지 소스에서 직접 확인한다(리팩터링 회귀 방지).
+// =====================================================================
+console.log("\n--- 서버 액션 권한 게이트 ---");
+
+// 조회 전용으로 열어 둔 액션(그 외 export 는 모두 manage 여야 한다).
+const VIEW_ONLY: Record<string, string[]> = {
+  "app/hr/mutual/memberActions.ts": ["getMemberOverview", "countActiveMembers"],
+  "app/hr/mutual/ledgerActions.ts": ["getLedger"],
+  "app/hr/mutual/importActions.ts": [],
+  "app/hr/mutual/policyActions.ts": ["getMutualPolicy"],
+};
+
+for (const [file, viewOnly] of Object.entries(VIEW_ONLY)) {
+  const src = readFileSync(file, "utf8");
+  // export 된 async 함수 본문을 다음 export 직전까지 잘라 게이트를 확인한다.
+  const names = [...src.matchAll(/export async function (\w+)/g)].map((m) => m[1]);
+  for (const name of names) {
+    const start = src.indexOf(`export async function ${name}`);
+    const nextIdx = names
+      .map((n) => src.indexOf(`export async function ${n}`))
+      .filter((i) => i > start)
+      .sort((a, b) => a - b)[0];
+    const body = src.slice(start, nextIdx === undefined ? src.length : nextIdx);
+    const hasView = body.includes("requireMutualView(");
+    const hasManage = body.includes("requireMutualManage(");
+    const shouldBeView = viewOnly.includes(name);
+    expectEq(
+      `${file.split("/").pop()} ${name} → ${shouldBeView ? "view" : "manage"}`,
+      shouldBeView ? hasView && !hasManage : hasManage,
+      true
+    );
+  }
+}
+
+// 라우트 핸들러는 레이아웃 가드 밖 → 자체 manage 검증이 있어야 한다.
+for (const route of [
+  "app/hr/mutual/excel/route.ts",
+]) {
+  expectEq(
+    `${route} 자체 권한 재검증`,
+    readFileSync(route, "utf8").includes("requireMutualManage("),
+    true
+  );
+}
+
+// 관리 전용 페이지는 canManage 를 확인해 되돌려보내야 한다.
+expectEq(
+  "연마감 페이지 canManage 가드",
+  readFileSync("app/hr/mutual/closing/page.tsx", "utf8").includes(
+    "!access.canManage"
+  ),
+  true
+);
 
 console.log(`\n${failures === 0 ? "✅ 전부 통과" : `❌ 실패 ${failures}건`}`);
 process.exit(failures === 0 ? 0 : 1);

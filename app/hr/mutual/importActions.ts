@@ -13,7 +13,7 @@
 
 import { revalidatePath } from "next/cache";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
-import { requireMutualAccess } from "@/lib/mutualAccess";
+import { requireMutualManage } from "@/lib/mutualAccess";
 import {
   carryOverEntries,
   checkImportRange,
@@ -65,7 +65,7 @@ export async function previewMutualImport(input: {
   base64: string;
 }): Promise<ImportPreviewResult> {
   try {
-    await requireMutualAccess();
+    await requireMutualManage();
     if (!input.base64) return { ok: false, message: "엑셀 파일을 선택하세요." };
 
     const parsed = parseMutualWorkbook(Buffer.from(input.base64, "base64"));
@@ -162,7 +162,7 @@ export async function applyMutualImport(input: {
   years: number[]; // 이관할 연도(체크박스 선택)
 }): Promise<ImportApplyResult> {
   try {
-    const ctx = await requireMutualAccess();
+    const ctx = await requireMutualManage();
     const years = [...new Set((input.years ?? []).map((y) => Math.round(Number(y))))]
       .filter((y) => Number.isFinite(y) && y > 1900)
       .sort((a, b) => a - b);
@@ -257,7 +257,7 @@ export async function getClosingSummary(): Promise<{
   years: ClosingYear[];
   isM0: boolean;
 }> {
-  const ctx = await requireMutualAccess();
+  const ctx = await requireMutualManage();
   const { data, error } = await supabaseAdmin
     .from(LEDGER)
     .select("entry_date, kind, amount")
@@ -300,7 +300,7 @@ export async function clearMutualYear(
   year: number
 ): Promise<{ ok: true; deleted: number } | { ok: false; message: string }> {
   try {
-    await requireMutualAccess({ onlyM0: true });
+    await requireMutualManage({ onlyM0: true });
     const y = Math.round(Number(year));
     if (!Number.isFinite(y) || y <= 1900)
       return { ok: false, message: "연도를 확인하세요." };

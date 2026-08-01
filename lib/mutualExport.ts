@@ -4,7 +4,7 @@
 //       2행 제목 / 3행 근무자 메모 / 5행 "세 입"·"세 출"·"잔액" / 6행 머리글
 //       7행부터 세입(A 적요·B 금액) | 세출(C 날짜·D 적요·E 금액)
 //       마지막 "합 계" 행, 우측 G~L 회원명단 + 퇴사자
-//   * 가드 없음(라우트가 requireMutualAccess 후 호출) — settlementExport 와 동일.
+//   * 가드 없음(라우트가 requireMutualManage 후 호출) — settlementExport 와 동일.
 // =====================================================================
 
 import ExcelJS from "exceljs";
