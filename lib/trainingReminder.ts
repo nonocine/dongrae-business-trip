@@ -4,6 +4,9 @@
 //   * 개인: 이메일로 슬랙 DM. 관리자: SLACK_WEBHOOK_ADMIN 요약 1건.
 //   * SA-14: 같은 Cron 에 성범죄경력조회 만료 스캔을 얹어 관리자 요약에 덧붙인다
 //     (별도 Cron 만들지 않음). 강사는 슬랙 미가입 → 개인 DM 없음.
+//   * MU-3: 같은 Cron 에 상조회 블록(생일 축하금 대상·연말상여 제안)을 더 얹는다.
+//     상조회 담당을 코드로 식별하려면 employee_roles 를 뒤져야 하고 담당이 자주
+//     바뀌므로, 개인 DM 대신 관리자 요약에 포함한다(지시문 지시).
 //   * 슬랙 발송은 부가기능 — 전부 실패해도 throw 하지 않음. DB 조회 실패만 throw.
 //   * "use server" 아님 — 라우트/액션이 각자 인증 후 호출.
 // =====================================================================
@@ -21,6 +24,16 @@ import {
   crimeCheckState,
   needsCrimeCheckAction,
 } from "@/lib/saemDocExpiry";
+import {
+  BIRTHDAY_AHEAD_DAYS,
+  YEAR_END_BONUS_MIN_BALANCE,
+  YEAR_END_BONUS_UNIT,
+  birthdaysWithin,
+  formatKRW,
+  mutualCategory,
+  normalizeKind,
+  sumEntries,
+} from "@/lib/mutual";
 
 const DUE_WITHIN_DAYS = 7; // D-7 이내(초과 포함)
 
@@ -32,6 +45,8 @@ export type TrainingReminderSummary = {
   dmFailed: number; // DM 미연결/실패
   unreachable: string[]; // DM 실패 직원 이름
   crimeCheckTargets: number; // 성범죄경력조회 만료·임박·미제출 강사 수
+  mutualBirthdays: number; // MU-3: 7일 내 생일 회원 수
+  mutualBonusProposed: boolean; // MU-3: 연말상여 제안 발송 여부(12/1 하루만)
 };
 
 // =====================================================================
@@ -130,20 +145,124 @@ function crimeBlock(lines: string[]): string[] {
   return lines.length ? ["", "⚠️ 성범죄경력조회", ...lines] : [];
 }
 
+// =====================================================================
+// MU-3. 상조회 스캔 — 관리자 요약용 라인 + 요약 카운트.
+//   ① 향후 7일 내 활동 회원 생일 → 축하금 지급 대상
+//   ② 12월 1일 하루만: 잔액 ≥ 200만이면 연말 상여 제안
+//   조회 실패는 부가기능이므로 빈 결과로 넘긴다(의무교육 독촉을 막지 않음).
+// =====================================================================
+type MutualScan = { lines: string[]; birthdays: number; bonusProposed: boolean };
+
+async function scanMutual(today: string): Promise<MutualScan> {
+  const empty: MutualScan = { lines: [], birthdays: 0, bonusProposed: false };
+  try {
+    const { data: mems } = await supabaseAdmin
+      .from("mutual_members")
+      .select("employee_id, status")
+      .eq("status", "active");
+    const activeIds = (mems ?? []).map((m) =>
+      String((m as { employee_id: string }).employee_id)
+    );
+    if (activeIds.length === 0) return empty;
+
+    const [{ data: drivers }, { data: profs }] = await Promise.all([
+      supabaseAdmin.from("drivers").select("id, name").in("id", activeIds),
+      supabaseAdmin
+        .from("employee_profiles")
+        .select("driver_id, birth_date")
+        .in("driver_id", activeIds),
+    ]);
+    const nameById = new Map(
+      (drivers ?? []).map((d) => [
+        String((d as { id: string }).id),
+        String((d as { name: string }).name ?? ""),
+      ])
+    );
+    const birthById = new Map(
+      (profs ?? []).map((p) => [
+        String((p as { driver_id: string }).driver_id),
+        ((p as { birth_date: string | null }).birth_date ?? null) as string | null,
+      ])
+    );
+
+    const lines: string[] = [];
+
+    // ① 생일 — 축하금 지급 대상.
+    const cash = mutualCategory("birthday_cash");
+    const cashAmount =
+      cash && cash.rule.type === "fixed" ? cash.rule.amount : 0;
+    const soon = birthdaysWithin(
+      activeIds.map((id) => ({
+        name: nameById.get(id) ?? "(이름 없음)",
+        birthDate: birthById.get(id) ?? null,
+      })),
+      today,
+      BIRTHDAY_AHEAD_DAYS
+    );
+    for (const b of soon) {
+      const when = b.dday === 0 ? "오늘" : `${b.dday}일 뒤`;
+      lines.push(
+        `• 🎂 ${b.name}(${b.monthDay}) ${when} — 축하금 ${formatKRW(cashAmount)} 지급 대상`
+      );
+    }
+
+    // ② 연말 상여 제안 — 12월 1일 하루만.
+    let bonusProposed = false;
+    if (today.slice(5) === "12-01") {
+      const { data: all } = await supabaseAdmin
+        .from("mutual_ledger")
+        .select("kind, amount, entry_date");
+      const balance = sumEntries(
+        ((all ?? []) as Record<string, unknown>[]).map((r) => ({
+          entry_date: String(r.entry_date ?? ""),
+          kind: normalizeKind(r.kind),
+          amount: Math.round(Number(r.amount) || 0),
+        }))
+      ).net;
+      if (balance >= YEAR_END_BONUS_MIN_BALANCE) {
+        const total = activeIds.length * YEAR_END_BONUS_UNIT;
+        lines.push(
+          `• 🎁 연말 상여 조건 충족(잔액 ${formatKRW(balance)}원, 회원 ${
+            activeIds.length
+          }명 × ${formatKRW(YEAR_END_BONUS_UNIT)} = ${formatKRW(total)}원)`
+        );
+        bonusProposed = true;
+      }
+    }
+
+    return { lines, birthdays: soon.length, bonusProposed };
+  } catch {
+    return empty;
+  }
+}
+
+function mutualBlock(lines: string[]): string[] {
+  return lines.length ? ["", "🤲 상조회", ...lines] : [];
+}
+
 export async function runTrainingReminder(): Promise<TrainingReminderSummary> {
   const today = kstTodayYmd();
   const year = Number(today.slice(0, 4));
 
-  // SA-14 — 의무교육 대상 유무와 무관하게 항상 스캔한다(같은 Cron 재사용).
-  const crimeLines = await scanCrimeCheckLines(today);
+  // SA-14 / MU-3 — 의무교육 대상 유무와 무관하게 항상 스캔한다(같은 Cron 재사용).
+  const [crimeLines, mutual] = await Promise.all([
+    scanCrimeCheckLines(today),
+    scanMutual(today),
+  ]);
 
-  // 의무교육 독촉 대상이 없을 때: 성범죄경력조회 블록만 보내고 끝낸다.
-  const crimeOnly = async (): Promise<TrainingReminderSummary> => {
-    if (crimeLines.length > 0) {
-      await sendSlack(
-        "SLACK_WEBHOOK_ADMIN",
-        [`⚠️ 성범죄경력조회 갱신 필요 (${today})`, ...crimeLines].join("\n")
-      );
+  // 의무교육 독촉 대상이 없을 때: 부가 블록(성범죄경력조회·상조회)만 보내고 끝낸다.
+  const noTrainingTargets = async (): Promise<TrainingReminderSummary> => {
+    if (crimeLines.length > 0 || mutual.lines.length > 0) {
+      // 어느 블록이 있는지에 따라 제목을 맞춘다(빈 제목 알림을 보내지 않음).
+      const head =
+        crimeLines.length > 0
+          ? `⚠️ 성범죄경력조회 갱신 필요 (${today})`
+          : `🤲 상조회 알림 (${today})`;
+      const body =
+        crimeLines.length > 0
+          ? [head, ...crimeLines, ...mutualBlock(mutual.lines)]
+          : [head, ...mutual.lines];
+      await sendSlack("SLACK_WEBHOOK_ADMIN", body.join("\n"));
     }
     return {
       today,
@@ -153,8 +272,12 @@ export async function runTrainingReminder(): Promise<TrainingReminderSummary> {
       dmFailed: 0,
       unreachable: [],
       crimeCheckTargets: crimeLines.length,
+      mutualBirthdays: mutual.birthdays,
+      mutualBonusProposed: mutual.bonusProposed,
     };
   };
+  // 기존 호출부 이름 유지(아래 early return 들이 쓴다).
+  const crimeOnly = noTrainingTargets;
 
   // 1) 올해 활성 교육 중 마감 D-7 이내(초과 포함).
   const { data: trsRaw, error: tErr } = await supabaseAdmin
@@ -238,6 +361,7 @@ export async function runTrainingReminder(): Promise<TrainingReminderSummary> {
     summaryLines.push(`⚠️ 슬랙 미연결(DM 실패): ${unreachable.join(", ")}`);
   }
   summaryLines.push(...crimeBlock(crimeLines));
+  summaryLines.push(...mutualBlock(mutual.lines));
   await sendSlack("SLACK_WEBHOOK_ADMIN", summaryLines.join("\n"));
 
   return {
@@ -248,5 +372,7 @@ export async function runTrainingReminder(): Promise<TrainingReminderSummary> {
     dmFailed,
     unreachable,
     crimeCheckTargets: crimeLines.length,
+    mutualBirthdays: mutual.birthdays,
+    mutualBonusProposed: mutual.bonusProposed,
   };
 }

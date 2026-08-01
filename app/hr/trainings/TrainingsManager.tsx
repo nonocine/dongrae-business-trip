@@ -107,15 +107,20 @@ export default function TrainingsManager({
         return;
       }
       const s = res.summary;
-      // 성범죄경력조회 만료 알림은 의무교육 대상이 없어도 별도로 발송된다(SA-14).
+      // 성범죄경력조회 만료(SA-14)·상조회(MU-3) 알림은 의무교육 대상이 없어도
+      // 같은 Cron 에 얹혀 별도로 발송된다.
       const crimeTail =
         s.crimeCheckTargets > 0
           ? ` · 성범죄경력조회 갱신 필요 ${s.crimeCheckTargets}명 알림`
           : "";
+      const mutualTail =
+        (s.mutualBirthdays > 0
+          ? ` · 상조회 생일 ${s.mutualBirthdays}명 알림`
+          : "") + (s.mutualBonusProposed ? " · 연말상여 제안" : "");
       if (s.targetEmployees === 0) {
         setMsg({
           kind: "ok",
-          text: `독촉 대상이 없습니다. (D-7 이내 미이수 없음)${crimeTail}`,
+          text: `독촉 대상이 없습니다. (D-7 이내 미이수 없음)${crimeTail}${mutualTail}`,
         });
         return;
       }
@@ -125,7 +130,7 @@ export default function TrainingsManager({
           : "";
       setMsg({
         kind: "ok",
-        text: `DM ${s.dmSent}건 발송 / 미연결 ${s.dmFailed}명${tail} · 관리자 요약 발송${crimeTail}`,
+        text: `DM ${s.dmSent}건 발송 / 미연결 ${s.dmFailed}명${tail} · 관리자 요약 발송${crimeTail}${mutualTail}`,
       });
     });
   }
