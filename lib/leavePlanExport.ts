@@ -7,7 +7,7 @@
 //   * 가드 없음(라우트가 requireSalaryAccess 후 호출) — settlementExport 와 동일.
 //
 //   원본 행 구성(1-indexed):
-//     1  [붙임서식 1]
+//     1  [서식 1]
 //     2  미사용 연차유급휴가 사용계획서            (A2:G2)
 //     3  [ 관련 : 근로기준법 제61조의 2항 ]        (A3:G3)
 //     5  성 명 | (B5:C5) | 부 서 | (F5:G5)
@@ -131,7 +131,7 @@ function addSheet(wb: ExcelJS.Workbook, d: LeavePlanSheetData, sheetName: string
   };
 
   // --- 1~3행 머리 ---
-  const tag = set(1, 1, "[붙임서식 1]");
+  const tag = set(1, 1, "[서식 1]");
   tag.font = { size: 9, color: { argb: "FF6B7280" } };
 
   const title = merged(2, 1, 2, 7, "미사용 연차유급휴가 사용계획서");

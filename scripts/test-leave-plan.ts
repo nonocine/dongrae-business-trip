@@ -288,7 +288,7 @@ async function main() {
   };
 
   // 원본과 같은 셀 주소·문구.
-  expectEq("A1 붙임서식", at("A1"), "[붙임서식 1]");
+  expectEq("A1 서식 표기", at("A1"), "[서식 1]");
   expectEq("A2 제목", at("A2"), "미사용 연차유급휴가 사용계획서");
   expectEq("A3 관련법", at("A3"), "[ 관련 : 근로기준법 제61조의 2항 ]");
   expectEq("A5 성명 라벨", at("A5"), "성  명");

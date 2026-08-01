@@ -3,7 +3,7 @@
 //   * 증명서(certificatePdf) 파이프라인 재사용: pdf-lib + fontkit +
 //     나눔고딕 통임베드(subset:false — Vercel 글리프 누락 대응).
 //   * 원본 법정 서식(lib/leavePlanExport 의 xlsx 와 같은 레이아웃)을 재현한다:
-//       [붙임서식 1] / 제목 / 관련법 / 성명·부서 / 미사용일수·잔여기간 /
+//       [서식 1] / 제목 / 관련법 / 성명·부서 / 미사용일수·잔여기간 /
 //       계획 2단 × 8행 / 합계 / 사용촉진 확인 문구 / 년 월 일 /
 //       제출자 + (서명 또는 인) / 동래구청소년센터장귀중
 //   * 제출자의 도장 이미지(employee_profiles.stamp_path)가 있으면 서명란에
@@ -196,8 +196,8 @@ async function drawPlanPage(
 
   let y = 42;
 
-  // ---- [붙임서식 1] ----
-  p.text(M, y, "[붙임서식 1]", { size: 8.5, color: MUTED });
+  // ---- [서식 1] ----
+  p.text(M, y, "[서식 1]", { size: 8.5, color: MUTED });
   y += 26;
 
   // ---- 제목 ----
