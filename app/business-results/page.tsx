@@ -10,7 +10,7 @@ export const dynamic = "force-dynamic";
 export default async function BusinessResultsPage({
   searchParams,
 }: {
-  searchParams: Promise<{ year?: string; month?: string }>;
+  searchParams: Promise<{ year?: string; month?: string; period?: string }>;
 }) {
   await enforcePasswordChange();
   const session = await getSession();
@@ -18,8 +18,25 @@ export default async function BusinessResultsPage({
   const query = await searchParams;
   const now = new Date();
   const year = Number(query.year) || now.getFullYear();
-  const month = Math.min(12, Math.max(1, Number(query.month) || now.getMonth() + 1));
-  const data = await getBusinessResultsData(year, month);
+  const month = Math.min(
+    12,
+    Math.max(1, Number(query.month) || now.getMonth() + 1),
+  );
+  const period = /^(month|q1|q2|q3|q4|h1|h2|year)$/.test(query.period ?? "")
+    ? query.period!
+    : "month";
+  const ranges: Record<string, [number, number]> = {
+    month: [month, month],
+    q1: [1, 3],
+    q2: [4, 6],
+    q3: [7, 9],
+    q4: [10, 12],
+    h1: [1, 6],
+    h2: [7, 12],
+    year: [1, 12],
+  };
+  const [startMonth, endMonth] = ranges[period];
+  const data = await getBusinessResultsData(year, startMonth, endMonth);
 
   return (
     <>
@@ -37,11 +54,21 @@ export default async function BusinessResultsPage({
               월별 사업실적과 홍보내용을 함께 취합합니다.
             </p>
           </div>
-          <Link href="/" className="shrink-0 text-sm text-ink-muted hover:underline">
+          <Link
+            href="/"
+            className="shrink-0 text-sm text-ink-muted hover:underline"
+          >
             ← 홈
           </Link>
         </div>
-        <BusinessResultsDashboard year={year} month={month} data={data} />
+        <BusinessResultsDashboard
+          year={year}
+          month={month}
+          period={period}
+          startMonth={startMonth}
+          endMonth={endMonth}
+          data={data}
+        />
       </main>
     </>
   );
