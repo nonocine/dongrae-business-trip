@@ -252,6 +252,12 @@ function AdminArea({
           title="강사·프로그램 관리"
           desc="외부 강사 등록·초대, 프로그램·근무일지(동래샘들)"
         />
+        <MenuCard
+          href="/business-results"
+          icon="📊"
+          title="사업실적"
+          desc="월별 실적 취합·검토·결과보고서"
+        />
       </div>
     </section>
   );
@@ -521,6 +527,12 @@ export default async function EmployeeDashboard({
       <section className={cardCls}>
         <SectionHeading>공통</SectionHeading>
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+          <MenuCard
+            href="/business-results"
+            icon="📊"
+            title="사업실적"
+            desc="담당 사업의 월별 실적·홍보내용 입력"
+          />
           <MenuCard
             href="/profile/hr"
             icon="🗂"
