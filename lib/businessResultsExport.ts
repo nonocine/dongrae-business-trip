@@ -3,7 +3,10 @@ import {
   AlignmentType,
   BorderStyle,
   Document,
+  Footer,
+  Header,
   HeadingLevel,
+  PageNumber,
   Packer,
   PageOrientation,
   Paragraph,
@@ -70,9 +73,11 @@ export function calculateBusinessReportTotals(input: BusinessReportInput) {
 const navy = "17365D";
 const paleBlue = "D9EAF7";
 const paleGray = "F2F2F2";
+const documentFont = "NanumGothic";
+const documentFontAttributes = { ascii: documentFont, hAnsi: documentFont, eastAsia: documentFont, cs: documentFont };
 const border = { style: BorderStyle.SINGLE, size: 4, color: "A6A6A6" };
 
-function docCell(text: string, options?: { header?: boolean; width?: number; align?: (typeof AlignmentType)[keyof typeof AlignmentType] }) {
+function docCell(text: string, options?: { header?: boolean; width?: number; align?: (typeof AlignmentType)[keyof typeof AlignmentType]; small?: boolean }) {
   return new TableCell({
     width: options?.width ? { size: options.width, type: WidthType.DXA } : undefined,
     shading: options?.header ? { fill: paleBlue, type: ShadingType.CLEAR } : undefined,
@@ -82,72 +87,86 @@ function docCell(text: string, options?: { header?: boolean; width?: number; ali
       new Paragraph({
         alignment: options?.align ?? AlignmentType.CENTER,
         spacing: { before: 0, after: 0, line: 260 },
-        children: [new TextRun({ text: text || "-", bold: options?.header, size: 18, font: "Malgun Gothic" })],
+        children: [new TextRun({ text: text || "-", bold: options?.header, size: options?.small ? 15 : 18, font: documentFontAttributes })],
       }),
     ],
   });
 }
 
-function docTable(headers: string[], widths: number[], rows: string[][]) {
+function docTable(headers: string[], widths: number[], rows: string[][], small = false) {
   return new Table({
     width: { size: widths.reduce((a, b) => a + b, 0), type: WidthType.DXA },
     layout: "fixed",
+    columnWidths: widths,
     rows: [
-      new TableRow({ tableHeader: true, children: headers.map((h, i) => docCell(h, { header: true, width: widths[i] })) }),
-      ...rows.map((row) => new TableRow({ children: row.map((v, i) => docCell(v, { width: widths[i], align: i < 2 ? AlignmentType.LEFT : AlignmentType.CENTER })) })),
+      new TableRow({ tableHeader: true, cantSplit: true, children: headers.map((h, i) => docCell(h, { header: true, width: widths[i], small })) }),
+      ...rows.map((row) => new TableRow({ cantSplit: true, children: row.map((v, i) => docCell(v, { width: widths[i], small, align: i < 3 ? AlignmentType.LEFT : AlignmentType.CENTER })) })),
     ],
   });
 }
 
 export async function buildBusinessReportDocx(input: BusinessReportInput): Promise<Uint8Array> {
   const totals = calculateBusinessReportTotals(input);
-  const title = `${input.year}년 ${input.month}월 사업 운영 결과보고`;
+  const title = `${input.year}년 동래구청소년센터 ${input.month}월 청소년 사업 운영 결과보고서`;
+  const periodEnd = new Date(input.year, input.month, 0).getDate();
+  const detailRows = input.results.filter((row) =>
+    (row.summary || row.evaluation) && !/^\d+월 최종 결과보고서 \d+번 사업 실적$/.test(row.summary)
+  );
+  const detailSection = detailRows.length
+    ? [docTable(
+        ["번호", "사업명", "주요 운영내용", "평가·향후 계획"],
+        [700, 2600, 4880, 4880],
+        detailRows.map((r) => [String(input.results.indexOf(r) + 1), r.program_name, r.summary, r.evaluation || "확인 필요"])
+      )]
+    : [new Paragraph({
+        spacing: { before: 40, after: 120 },
+        children: [new TextRun({ text: "※ 프로그램 목록과 수치는 반영되었으며, 사업별 주요 내용·평가는 원자료 추가 입력 후 이 위치에 자동 출력됩니다.", size: 18, color: "666666", font: documentFontAttributes })],
+      })];
   const children = [
     new Paragraph({
       alignment: AlignmentType.CENTER,
       spacing: { before: 0, after: 120 },
-      children: [new TextRun({ text: title, bold: true, size: 34, color: navy, font: "Malgun Gothic" })],
+      children: [new TextRun({ text: title, bold: true, size: 32, color: "000000", font: documentFontAttributes })],
     }),
     new Paragraph({
       alignment: AlignmentType.RIGHT,
       spacing: { after: 240 },
-      children: [new TextRun({ text: input.orgName, size: 20, font: "Malgun Gothic" })],
+      children: [new TextRun({ text: input.orgName, size: 20, font: documentFontAttributes })],
     }),
-    new Paragraph({ text: "1. 월간 종합현황", heading: HeadingLevel.HEADING_1 }),
+    new Paragraph({ text: "Ⅰ. 사업개요", heading: HeadingLevel.HEADING_1 }),
+    new Paragraph({ children: [new TextRun({ text: `1. 사업기간 : ${input.year}. ${String(input.month).padStart(2, "0")}. 01. ~ ${String(periodEnd).padStart(2, "0")}.`, font: documentFontAttributes })] }),
+    new Paragraph({ children: [new TextRun({ text: `2. 총 이용인원 : ${totals.totalUses.toLocaleString("ko-KR")}명 (청소년 : ${totals.youthUses.toLocaleString("ko-KR")}명, 기타 : ${totals.otherUses.toLocaleString("ko-KR")}명)`, font: documentFontAttributes })] }),
+    new Paragraph({ children: [new TextRun({ text: `3. 청소년 이용률 : ${(totals.youthRate * 100).toFixed(2)}%`, font: documentFontAttributes })] }),
+    new Paragraph({ text: "4. 사업별 종합실적", heading: HeadingLevel.HEADING_2 }),
     docTable(
-      ["등록 사업", "운영", "참가인원", "연인원", "실별 이용", "청소년 이용률", "홍보·협력"],
-      [1100, 900, 1100, 1100, 1200, 1300, 1200],
-      [[`${input.results.length}개`, `${totals.sessions}회`, `${totals.participants}명`, `${totals.attendance}명`, `${totals.totalUses}명`, `${(totals.youthRate * 100).toFixed(1)}%`, `${totals.promotionCount}회`]]
+      ["번호", "분야", "사업명", "횟수", "참가인원", "연인원", "청소년", "기타", "실별 계"],
+      [600, 1700, 3600, 850, 1100, 1100, 1050, 900, 1100],
+      input.results.map((r, index) => [String(index + 1), r.category, r.program_name, r.sessions ? String(r.sessions) : "수시", String(r.participants), String(r.attendance), String(r.youth_uses), String(r.other_uses), String(r.youth_uses + r.other_uses)]),
+      true
     ),
-    new Paragraph({ text: "2. 분야별 사업실적", heading: HeadingLevel.HEADING_1 }),
-    docTable(
-      ["분야", "사업명", "횟수", "참가", "연인원", "청소년", "기타", "상태"],
-      [1150, 2450, 700, 700, 800, 800, 700, 900],
-      input.results.map((r) => [r.category, r.program_name, String(r.sessions), String(r.participants), String(r.attendance), String(r.youth_uses), String(r.other_uses), r.status === "submitted" ? "제출" : "작성 중"])
-    ),
-    new Paragraph({ text: "3. 주요 내용 및 평가", heading: HeadingLevel.HEADING_1 }),
-    docTable(
-      ["사업명", "주요 내용", "평가·향후 계획"],
-      [2200, 3580, 3580],
-      input.results.map((r) => [r.program_name, r.summary, r.evaluation])
-    ),
-    new Paragraph({ text: "4. 홍보·대외협력", heading: HeadingLevel.HEADING_1 }),
+    new Paragraph({ text: "Ⅱ. 사업별 실적보고", heading: HeadingLevel.HEADING_1 }),
+    ...detailSection,
+    new Paragraph({ text: "Ⅲ. 홍보·대외협력 실적", heading: HeadingLevel.HEADING_1 }),
     docTable(
       ["날짜", "구분", "제목", "횟수", "설명"],
-      [1200, 1300, 2500, 700, 3660],
+      [1400, 1500, 3000, 900, 5680],
       input.promotions.map((r) => [r.activity_date, r.category, r.title, String(r.count), r.description])
     ),
+    new Paragraph({ alignment: AlignmentType.RIGHT, spacing: { before: 100 }, children: [new TextRun({ text: `홍보·대외협력 합계 ${totals.promotionCount.toLocaleString("ko-KR")}회`, bold: true, size: 18, font: documentFontAttributes })] }),
   ];
 
   const doc = new Document({
     styles: {
-      default: { document: { run: { font: "Malgun Gothic", size: 20 }, paragraph: { spacing: { after: 100, line: 280 } } } },
+      default: { document: { run: { font: documentFontAttributes, size: 19 }, paragraph: { spacing: { after: 90, line: 260 } } } },
       paragraphStyles: [
-        { id: "Heading1", name: "Heading 1", basedOn: "Normal", next: "Normal", quickFormat: true, run: { bold: true, size: 25, color: navy, font: "Malgun Gothic" }, paragraph: { spacing: { before: 260, after: 100 }, keepNext: true } },
+        { id: "Heading1", name: "Heading 1", basedOn: "Normal", next: "Normal", quickFormat: true, run: { bold: true, size: 25, color: "000000", font: documentFontAttributes }, paragraph: { spacing: { before: 260, after: 100 }, keepNext: true } },
+        { id: "Heading2", name: "Heading 2", basedOn: "Normal", next: "Normal", quickFormat: true, run: { bold: true, size: 21, color: "000000", font: documentFontAttributes }, paragraph: { spacing: { before: 180, after: 80 }, keepNext: true } },
       ],
     },
     sections: [{
-      properties: { page: { size: { width: 12240, height: 15840, orientation: PageOrientation.PORTRAIT }, margin: { top: 900, right: 900, bottom: 900, left: 900, header: 500, footer: 500 } } },
+      properties: { page: { size: { width: 11900, height: 16840, orientation: PageOrientation.LANDSCAPE }, margin: { top: 720, right: 720, bottom: 720, left: 720, header: 360, footer: 360 } } },
+      headers: { default: new Header({ children: [new Paragraph({ alignment: AlignmentType.RIGHT, children: [new TextRun({ text: `${input.orgName} | ${input.year}년 ${input.month}월`, size: 16, color: "666666", font: documentFontAttributes })] })] }) },
+      footers: { default: new Footer({ children: [new Paragraph({ alignment: AlignmentType.CENTER, children: [new TextRun({ children: [PageNumber.CURRENT], size: 16, color: "777777", font: documentFontAttributes })] })] }) },
       children,
     }],
   });
