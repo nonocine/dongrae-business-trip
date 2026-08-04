@@ -18,7 +18,8 @@
     "gen:icons": "node scripts/gen-icons.mjs",
     "test:leave": "tsx scripts/test-leave-plan.ts",
     "test:mutual": "tsx scripts/test-mutual.ts",
-    "test:mutual-import": "tsx scripts/test-mutual-import.ts"
+    "test:mutual-import": "tsx scripts/test-mutual-import.ts",
+    "test:business-results": "node --import tsx scripts/test-business-results-export.ts"
   },
   "dependencies": {
     "@pdf-lib/fontkit": "^1.1.1",
