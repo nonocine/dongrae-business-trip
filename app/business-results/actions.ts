@@ -61,7 +61,8 @@ async function requireUser() {
 
 export async function getBusinessResultsData(
   year: number,
-  month: number
+  startMonth: number,
+  endMonth = startMonth,
 ): Promise<BusinessResultsData> {
   const session = await getSession();
   if (!session) return { configured: false, results: [], promotions: [] };
@@ -71,14 +72,18 @@ export async function getBusinessResultsData(
       .from("business_results")
       .select("*")
       .eq("report_year", year)
-      .eq("report_month", month)
+      .gte("report_month", startMonth)
+      .lte("report_month", endMonth)
+      .order("report_month")
       .order("category")
       .order("program_name"),
     supabaseAdmin
       .from("business_promotions")
       .select("*")
       .eq("report_year", year)
-      .eq("report_month", month)
+      .gte("report_month", startMonth)
+      .lte("report_month", endMonth)
+      .order("report_month", { ascending: false })
       .order("activity_date", { ascending: false }),
   ]);
 
@@ -142,7 +147,9 @@ export async function savePromotion(formData: FormData) {
   if (!payload.activity_date || !payload.title) {
     throw new Error("날짜와 제목을 입력해주세요.");
   }
-  const { error } = await supabaseAdmin.from("business_promotions").insert(payload);
+  const { error } = await supabaseAdmin
+    .from("business_promotions")
+    .insert(payload);
   if (error) throw new Error(error.message);
   revalidatePath("/business-results");
   return { ok: true };
