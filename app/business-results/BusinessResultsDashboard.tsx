@@ -43,7 +43,7 @@ export default function BusinessResultsDashboard({ year, month, data }: { year: 
   return <div className="space-y-4">
     <section className={cardCls}><div className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between"><div className="flex gap-2">
       <label className={labelCls}>연도<select className={`${inputCls} min-w-28`} value={year} onChange={e => changeMonth(Number(e.target.value), month)}>{[2025, 2026, 2027].map(v => <option key={v}>{v}</option>)}</select></label>
-      <label className={labelCls}>월<select className={`${inputCls} min-w-24`} value={month} onChange={e => changeMonth(year, Number(e.target.value))}>{Array.from({length:12},(_,i)=>i+1).map(v=><option key={v}>{v}월</option>)}</select></label>
+      <label className={labelCls}>월<select className={`${inputCls} min-w-24`} value={month} onChange={e => changeMonth(year, Number(e.target.value))}>{Array.from({length:12},(_,i)=>i+1).map(v=><option key={v} value={v}>{v}월</option>)}</select></label>
     </div><span className={badgeNeutral}>공동 저장</span></div></section>
     <nav className="overflow-x-auto rounded-xl border border-line bg-card p-1 shadow-sm" aria-label="사업실적 메뉴"><div className="flex min-w-max gap-1">{tabs.map(item=><button key={item.key} onClick={()=>setTab(item.key)} className={`rounded-lg px-4 py-2.5 text-sm font-semibold ${tab===item.key?"bg-navy text-white":"text-ink-muted hover:bg-surface"}`}>{item.label}</button>)}</div></nav>
     {message && <p className="rounded-lg bg-surface px-4 py-3 text-sm text-ink">{message}</p>}
