@@ -1,7 +1,8 @@
 // =====================================================================
 // 의무교육 D-7 독촉 로직 — Cron / 수동버튼 공용 코어(권한 게이트 없음).
 //   * 재직자의 미이수 의무교육 중 마감 D-7 이내(초과 포함) 건을 스캔.
-//   * 개인: 이메일로 슬랙 DM. 관리자: SLACK_WEBHOOK_ADMIN 요약 1건.
+//   * 개인: 이메일로 슬랙 DM. 관리자: SLACK_WEBHOOK_TRAINING 요약 1건
+//     (미설정이면 SLACK_WEBHOOK_ADMIN 으로 폴백 — 다른 알림은 ADMIN 그대로).
 //   * SA-14: 같은 Cron 에 성범죄경력조회 만료 스캔을 얹어 관리자 요약에 덧붙인다
 //     (별도 Cron 만들지 않음). 강사는 슬랙 미가입 → 개인 DM 없음.
 //   * MU-3: 같은 Cron 에 상조회 블록(생일 축하금 대상·연말상여 제안)을 더 얹는다.
@@ -36,6 +37,13 @@ import {
 } from "@/lib/mutual";
 
 const DUE_WITHIN_DAYS = 7; // D-7 이내(초과 포함)
+
+// 이 Cron 의 관리자 요약 전용 채널. 환경변수 미설정 시 기존 관리자 채널로 폴백.
+function summaryWebhookKey(): string {
+  return process.env.SLACK_WEBHOOK_TRAINING
+    ? "SLACK_WEBHOOK_TRAINING"
+    : "SLACK_WEBHOOK_ADMIN";
+}
 
 export type TrainingReminderSummary = {
   today: string;
@@ -262,7 +270,7 @@ export async function runTrainingReminder(): Promise<TrainingReminderSummary> {
         crimeLines.length > 0
           ? [head, ...crimeLines, ...mutualBlock(mutual.lines)]
           : [head, ...mutual.lines];
-      await sendSlack("SLACK_WEBHOOK_ADMIN", body.join("\n"));
+      await sendSlack(summaryWebhookKey(), body.join("\n"));
     }
     return {
       today,
@@ -362,7 +370,7 @@ export async function runTrainingReminder(): Promise<TrainingReminderSummary> {
   }
   summaryLines.push(...crimeBlock(crimeLines));
   summaryLines.push(...mutualBlock(mutual.lines));
-  await sendSlack("SLACK_WEBHOOK_ADMIN", summaryLines.join("\n"));
+  await sendSlack(summaryWebhookKey(), summaryLines.join("\n"));
 
   return {
     today,
