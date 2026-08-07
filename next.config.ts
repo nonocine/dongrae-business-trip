@@ -9,6 +9,9 @@ const nextConfig: NextConfig = {
       bodySizeLimit: "20mb",
     },
   },
+  // 공용 메일함 수집기 — POP3(net/tls 소켓)·MIME 파서는 번들링하지 않고
+  // 서버 런타임에서 그대로 require 하게 둡니다(동적 의존성이 많아 번들 시 깨짐).
+  serverExternalPackages: ["node-pop3", "mailparser"],
   // 급여명세서 PDF(급여 3차)는 서버에서 나눔고딕 TTF 를 fs 로 읽습니다.
   // Vercel 서버리스 번들에 폰트가 포함되도록 급여 라우트에 강제 트레이싱합니다.
   outputFileTracingIncludes: {
