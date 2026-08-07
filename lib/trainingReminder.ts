@@ -3,8 +3,9 @@
 //   * 재직자의 미이수 의무교육 중 마감 D-7 이내(초과 포함) 건을 스캔.
 //   * 개인: 이메일로 슬랙 DM. 관리자: SLACK_WEBHOOK_TRAINING 요약 1건
 //     (미설정이면 SLACK_WEBHOOK_ADMIN 으로 폴백 — 다른 알림은 ADMIN 그대로).
-//   * SA-14: 같은 Cron 에 성범죄경력조회 만료 스캔을 얹어 관리자 요약에 덧붙인다
-//     (별도 Cron 만들지 않음). 강사는 슬랙 미가입 → 개인 DM 없음.
+//   * SA-14: 같은 Cron 에 성범죄경력조회 만료 스캔을 얹는다(별도 Cron 만들지 않음).
+//     단 발송 채널은 분리 — 교육 요약과 한 메시지로 묶지 않고 SLACK_WEBHOOK_ADMIN
+//     으로 별도 1건. 강사는 슬랙 미가입 → 개인 DM 없음.
 //   * MU-3: 같은 Cron 에 상조회 블록(생일 축하금 대상·연말상여 제안)을 더 얹는다.
 //     상조회 담당을 코드로 식별하려면 employee_roles 를 뒤져야 하고 담당이 자주
 //     바뀌므로, 개인 DM 대신 관리자 요약에 포함한다(지시문 지시).
@@ -38,12 +39,15 @@ import {
 
 const DUE_WITHIN_DAYS = 7; // D-7 이내(초과 포함)
 
-// 이 Cron 의 관리자 요약 전용 채널. 환경변수 미설정 시 기존 관리자 채널로 폴백.
+// 의무교육 요약(+상조회) 채널. 환경변수 미설정 시 기존 관리자 채널로 폴백.
 function summaryWebhookKey(): string {
   return process.env.SLACK_WEBHOOK_TRAINING
     ? "SLACK_WEBHOOK_TRAINING"
     : "SLACK_WEBHOOK_ADMIN";
 }
+
+// 성범죄경력조회 경고 채널 — 교육 요약과 분리해 항상 관리자 채널로 보낸다.
+const CRIME_CHECK_WEBHOOK = "SLACK_WEBHOOK_ADMIN";
 
 export type TrainingReminderSummary = {
   today: string;
@@ -148,9 +152,17 @@ function ddayPhrase(dday: number): string {
   return `${-dday}일 초과`;
 }
 
-// 관리자 요약에 덧붙일 성범죄경력조회 블록(대상 0명이면 빈 배열 → 블록 생략).
-function crimeBlock(lines: string[]): string[] {
-  return lines.length ? ["", "⚠️ 성범죄경력조회", ...lines] : [];
+// 성범죄경력조회 경고 — 교육 요약과 별개 메시지로 관리자 채널에 1건.
+//   대상 0명이면 아무것도 보내지 않는다(빈 알림 금지).
+async function sendCrimeCheckAlert(
+  today: string,
+  lines: string[]
+): Promise<void> {
+  if (lines.length === 0) return;
+  await sendSlack(
+    CRIME_CHECK_WEBHOOK,
+    [`⚠️ 성범죄경력조회 갱신 필요 (${today})`, ...lines].join("\n")
+  );
 }
 
 // =====================================================================
@@ -259,18 +271,14 @@ export async function runTrainingReminder(): Promise<TrainingReminderSummary> {
   ]);
 
   // 의무교육 독촉 대상이 없을 때: 부가 블록(성범죄경력조회·상조회)만 보내고 끝낸다.
+  //   성범죄경력조회는 관리자 채널, 상조회는 교육 요약과 같은 채널로 각각 발송.
   const noTrainingTargets = async (): Promise<TrainingReminderSummary> => {
-    if (crimeLines.length > 0 || mutual.lines.length > 0) {
-      // 어느 블록이 있는지에 따라 제목을 맞춘다(빈 제목 알림을 보내지 않음).
-      const head =
-        crimeLines.length > 0
-          ? `⚠️ 성범죄경력조회 갱신 필요 (${today})`
-          : `🤲 상조회 알림 (${today})`;
-      const body =
-        crimeLines.length > 0
-          ? [head, ...crimeLines, ...mutualBlock(mutual.lines)]
-          : [head, ...mutual.lines];
-      await sendSlack(summaryWebhookKey(), body.join("\n"));
+    await sendCrimeCheckAlert(today, crimeLines);
+    if (mutual.lines.length > 0) {
+      await sendSlack(
+        summaryWebhookKey(),
+        [`🤲 상조회 알림 (${today})`, ...mutual.lines].join("\n")
+      );
     }
     return {
       today,
@@ -368,9 +376,11 @@ export async function runTrainingReminder(): Promise<TrainingReminderSummary> {
   if (unreachable.length > 0) {
     summaryLines.push(`⚠️ 슬랙 미연결(DM 실패): ${unreachable.join(", ")}`);
   }
-  summaryLines.push(...crimeBlock(crimeLines));
   summaryLines.push(...mutualBlock(mutual.lines));
   await sendSlack(summaryWebhookKey(), summaryLines.join("\n"));
+
+  // 성범죄경력조회는 교육 요약과 분리 — 관리자 채널로 별도 1건.
+  await sendCrimeCheckAlert(today, crimeLines);
 
   return {
     today,
