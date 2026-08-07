@@ -14,16 +14,26 @@ import {
   type BusinessResult,
   type BusinessResultsData,
 } from "./actions";
+import CoinPayTab from "./CoinPayTab";
 import DetailRowsEditor from "./DetailRowsEditor";
 import ProgramRegistryManager from "./ProgramRegistryManager";
+import StaffTrainingTab from "./StaffTrainingTab";
 import ProgramResultForm from "./ProgramResultForm";
 import type { RoomCounts } from "./RoomUsageSection";
 
-type Tab = "overview" | "programs" | "promotions" | "report";
+type Tab =
+  | "overview"
+  | "programs"
+  | "promotions"
+  | "coinpay"
+  | "trainings"
+  | "report";
 const tabs: { key: Tab; label: string }[] = [
   { key: "overview", label: "실적 현황" },
   { key: "programs", label: "사업실적 입력" },
   { key: "promotions", label: "홍보·대외협력" },
+  { key: "coinpay", label: "동전PAY" },
+  { key: "trainings", label: "종사자 교육" },
   { key: "report", label: "종합보고서" },
 ];
 const promotionCategories = [
@@ -806,6 +816,25 @@ export default function BusinessResultsDashboard({
             ))}
           </div>
         </section>
+      )}
+      {tab === "coinpay" && (
+        <CoinPayTab
+          year={year}
+          month={month}
+          periodLabel={periodNames[period]}
+          configured={data.coinPayConfigured}
+          rows={data.coinPay}
+          cumulative={data.coinPayCumulative}
+        />
+      )}
+      {tab === "trainings" && (
+        <StaffTrainingTab
+          year={year}
+          month={month}
+          periodLabel={periodLabel}
+          configured={data.staffTrainingConfigured}
+          rows={data.staffTrainings}
+        />
       )}
       {tab === "report" && (
         <section className={cardCls}>

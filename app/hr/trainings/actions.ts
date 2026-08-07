@@ -82,6 +82,10 @@ export type TrainingInput = {
   note: string | null;
   display_order: number | null;
   is_active: boolean;
+  // 종사자 교육 실적(사업실적 모듈) 반입에 쓰이는 교육 단위 속성 — 선택 입력.
+  location?: string | null;
+  organizer?: string | null;
+  hours?: string | null;
 };
 
 function cleanStr(v: string | null | undefined): string | null {
@@ -135,6 +139,9 @@ export async function saveTraining(
       note: cleanStr(input.note),
       display_order: order,
       is_active: input.is_active !== false,
+      location: cleanStr(input.location),
+      organizer: cleanStr(input.organizer),
+      hours: cleanStr(input.hours),
     };
 
     if (input.id) {
@@ -237,6 +244,10 @@ export async function copyTrainingsFromYear(
         note: t.note,
         display_order: t.display_order,
         is_active: t.is_active,
+        // 장소·주최·수료시간은 해가 바뀌어도 대개 같으므로 함께 복사합니다.
+        location: t.location,
+        organizer: t.organizer,
+        hours: t.hours,
       }));
     if (rows.length === 0) {
       return { ok: false, message: "복사할 새 교육이 없습니다(이미 모두 존재)." };

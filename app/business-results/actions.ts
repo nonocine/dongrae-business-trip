@@ -96,6 +96,34 @@ export type ResultDetail = {
   sort_order: number;
 };
 
+// 동전PAY — 건별이 아닌 월 합계 1행(월 × 구분 × 사용처).
+export type CoinPayResult = {
+  id: string;
+  report_year: number;
+  report_month: number;
+  entry_type: "적립" | "차감";
+  place: string;
+  headcount: number;
+  amount: number;
+  note: string;
+  author_name: string;
+};
+
+// 종사자 교육 — 의무교육 반입(mandatory) + 외부 연수·기타(manual).
+export type StaffTrainingResult = {
+  id: string;
+  report_year: number;
+  report_month: number;
+  training_date: string;
+  staff_name: string;
+  training_name: string;
+  location: string;
+  organizer: string;
+  hours: string;
+  source: "mandatory" | "manual";
+  author_name: string;
+};
+
 export type BusinessResultsData = {
   configured: boolean;
   isAdmin: boolean;
@@ -107,6 +135,11 @@ export type BusinessResultsData = {
   roomUsage: ResultRoomUsage[];
   detailsConfigured: boolean;
   details: ResultDetail[];
+  coinPayConfigured: boolean;
+  coinPay: CoinPayResult[];
+  coinPayCumulative: number; // 센터 전체 누적(조회 기간과 무관)
+  staffTrainingConfigured: boolean;
+  staffTrainings: StaffTrainingResult[];
 };
 
 const EMPTY_REGISTRY: ProgramRegistry = {
@@ -239,6 +272,63 @@ async function loadDetails(resultIds: string[]): Promise<{
   return { configured: true, details: (data ?? []) as ResultDetail[] };
 }
 
+// 동전PAY — 기간 행 + "최종 금액(센터 전체 누적)".
+//   누적은 조회 기간과 무관하게 테이블 전체에서 적립 − 차감 으로 산출합니다.
+async function loadCoinPay(
+  year: number,
+  startMonth: number,
+  endMonth: number,
+): Promise<{
+  configured: boolean;
+  rows: CoinPayResult[];
+  cumulative: number;
+}> {
+  const [periodQuery, allQuery] = await Promise.all([
+    supabaseAdmin
+      .from("coin_pay_results")
+      .select("*")
+      .eq("report_year", year)
+      .gte("report_month", startMonth)
+      .lte("report_month", endMonth)
+      .order("report_month")
+      .order("entry_type")
+      .order("place"),
+    supabaseAdmin.from("coin_pay_results").select("entry_type,amount"),
+  ]);
+  if (tableMissing(periodQuery.error) || tableMissing(allQuery.error))
+    return { configured: false, rows: [], cumulative: 0 };
+  if (periodQuery.error) throw new Error(periodQuery.error.message);
+  if (allQuery.error) throw new Error(allQuery.error.message);
+  const cumulative = (
+    (allQuery.data ?? []) as { entry_type: string; amount: number }[]
+  ).reduce(
+    (sum, r) => sum + (r.entry_type === "차감" ? -1 : 1) * Number(r.amount ?? 0),
+    0,
+  );
+  return {
+    configured: true,
+    rows: (periodQuery.data ?? []) as CoinPayResult[],
+    cumulative,
+  };
+}
+
+async function loadStaffTrainings(
+  year: number,
+  startMonth: number,
+  endMonth: number,
+): Promise<{ configured: boolean; rows: StaffTrainingResult[] }> {
+  const { data, error } = await supabaseAdmin
+    .from("staff_training_results")
+    .select("*")
+    .eq("report_year", year)
+    .gte("report_month", startMonth)
+    .lte("report_month", endMonth)
+    .order("training_date");
+  if (tableMissing(error)) return { configured: false, rows: [] };
+  if (error) throw new Error(error.message);
+  return { configured: true, rows: (data ?? []) as StaffTrainingResult[] };
+}
+
 export async function getBusinessResultsData(
   year: number,
   startMonth: number,
@@ -257,10 +347,16 @@ export async function getBusinessResultsData(
       roomUsage: [],
       detailsConfigured: false,
       details: [],
+      coinPayConfigured: false,
+      coinPay: [],
+      coinPayCumulative: 0,
+      staffTrainingConfigured: false,
+      staffTrainings: [],
     };
   const isAdmin = session.kind === "admin";
 
-  const [resultQuery, promotionQuery, registry, roomMaster] = await Promise.all([
+  const [resultQuery, promotionQuery, registry, roomMaster, coinPay, staff] =
+    await Promise.all([
     supabaseAdmin
       .from("business_results")
       .select("*")
@@ -278,9 +374,11 @@ export async function getBusinessResultsData(
       .lte("report_month", endMonth)
       .order("report_month", { ascending: false })
       .order("activity_date", { ascending: false }),
-    loadRegistry(),
-    loadRooms(),
-  ]);
+      loadRegistry(),
+      loadRooms(),
+      loadCoinPay(year, startMonth, endMonth),
+      loadStaffTrainings(year, startMonth, endMonth),
+    ]);
 
   if (tableMissing(resultQuery.error) || tableMissing(promotionQuery.error)) {
     return {
@@ -294,6 +392,11 @@ export async function getBusinessResultsData(
       roomUsage: [],
       detailsConfigured: false,
       details: [],
+      coinPayConfigured: coinPay.configured,
+      coinPay: coinPay.rows,
+      coinPayCumulative: coinPay.cumulative,
+      staffTrainingConfigured: staff.configured,
+      staffTrainings: staff.rows,
     };
   }
   if (resultQuery.error) throw new Error(resultQuery.error.message);
@@ -319,6 +422,11 @@ export async function getBusinessResultsData(
     roomUsage,
     detailsConfigured: detailData.configured,
     details: detailData.details,
+    coinPayConfigured: coinPay.configured,
+    coinPay: coinPay.rows,
+    coinPayCumulative: coinPay.cumulative,
+    staffTrainingConfigured: staff.configured,
+    staffTrainings: staff.rows,
   };
 }
 
@@ -544,6 +652,219 @@ export async function savePromotion(formData: FormData) {
   if (error) throw new Error(error.message);
   revalidatePath("/business-results");
   return { ok: true };
+}
+
+// =====================================================================
+// 작업 6. 동전PAY — 월 합계 행 저장/삭제.
+// =====================================================================
+export async function saveCoinPay(formData: FormData) {
+  const user = await requireUser();
+  const id = String(formData.get("id") ?? "").trim();
+  const entryType = String(formData.get("entry_type") ?? "적립").trim();
+  const payload = {
+    report_year: asInt(formData.get("year"), 2020),
+    report_month: Math.min(12, asInt(formData.get("month"), 1)),
+    entry_type: entryType === "차감" ? "차감" : "적립",
+    place: String(formData.get("place") ?? "").trim(),
+    headcount: asInt(formData.get("headcount")),
+    amount: asInt(formData.get("amount")),
+    note: String(formData.get("note") ?? "").trim(),
+    author_name: user.name,
+    updated_at: new Date().toISOString(),
+  };
+  if (!payload.place) throw new Error("사용처를 입력해주세요.");
+
+  let query = id
+    ? supabaseAdmin.from("coin_pay_results").update(payload).eq("id", id)
+    : supabaseAdmin.from("coin_pay_results").insert(payload);
+  if (id && !user.isAdmin) query = query.eq("author_name", user.name);
+  const { error } = await query;
+  if (error) throw new Error(error.message);
+  revalidatePath("/business-results");
+  return { ok: true };
+}
+
+export async function deleteCoinPay(id: string): Promise<ActionResult> {
+  try {
+    const user = await requireUser();
+    if (!id) return { ok: false, message: "대상이 없습니다." };
+    let query = supabaseAdmin.from("coin_pay_results").delete().eq("id", id);
+    if (!user.isAdmin) query = query.eq("author_name", user.name);
+    const { error } = await query;
+    if (error) throw new Error(error.message);
+    revalidatePath("/business-results");
+    return { ok: true };
+  } catch (e) {
+    return actionError(e, "동전PAY 기록을 삭제하지 못했습니다.");
+  }
+}
+
+// =====================================================================
+// 작업 7. 종사자 교육 — 수동 행 저장/삭제 + 의무교육 반입.
+// =====================================================================
+export async function saveStaffTraining(formData: FormData) {
+  const user = await requireUser();
+  const id = String(formData.get("id") ?? "").trim();
+  const payload = {
+    report_year: asInt(formData.get("year"), 2020),
+    report_month: Math.min(12, asInt(formData.get("month"), 1)),
+    training_date: String(formData.get("training_date") ?? "").trim(),
+    staff_name: String(formData.get("staff_name") ?? "").trim(),
+    training_name: String(formData.get("training_name") ?? "").trim(),
+    location: String(formData.get("location") ?? "").trim(),
+    organizer: String(formData.get("organizer") ?? "").trim(),
+    hours: String(formData.get("hours") ?? "").trim(),
+    author_name: user.name,
+    updated_at: new Date().toISOString(),
+  };
+  if (!payload.training_date || !payload.staff_name || !payload.training_name) {
+    throw new Error("일자·성명·교육명을 입력해주세요.");
+  }
+  const { error } = id
+    ? // 반입 행(source='mandatory')도 장소·주최·수료시간을 고쳐 쓸 수 있게 둡니다.
+      await supabaseAdmin
+        .from("staff_training_results")
+        .update(payload)
+        .eq("id", id)
+    : await supabaseAdmin
+        .from("staff_training_results")
+        .insert({ ...payload, source: "manual" });
+  if (error) throw new Error(error.message);
+  revalidatePath("/business-results");
+  return { ok: true };
+}
+
+export async function deleteStaffTraining(id: string): Promise<ActionResult> {
+  try {
+    await requireUser();
+    if (!id) return { ok: false, message: "대상이 없습니다." };
+    const { error } = await supabaseAdmin
+      .from("staff_training_results")
+      .delete()
+      .eq("id", id);
+    if (error) throw new Error(error.message);
+    revalidatePath("/business-results");
+    return { ok: true };
+  } catch (e) {
+    return actionError(e, "교육 기록을 삭제하지 못했습니다.");
+  }
+}
+
+// KST(UTC+9) 기준 해당 연·월의 [시작, 끝) 을 UTC ISO 로 계산합니다.
+function kstMonthRangeUtc(year: number, month: number) {
+  const offset = 9 * 60 * 60 * 1000;
+  return {
+    start: new Date(Date.UTC(year, month - 1, 1) - offset).toISOString(),
+    end: new Date(Date.UTC(year, month, 1) - offset).toISOString(),
+  };
+}
+
+// completed_at(timestamptz) → KST 기준 "YYYY-MM-DD".
+function kstDateOf(iso: string): string {
+  const kst = new Date(Date.parse(iso) + 9 * 60 * 60 * 1000);
+  const p2 = (n: number) => String(n).padStart(2, "0");
+  return `${kst.getUTCFullYear()}-${p2(kst.getUTCMonth() + 1)}-${p2(kst.getUTCDate())}`;
+}
+
+// 의무교육 수료기록을 종사자 교육 실적으로 반입합니다.
+//   source_completion_id unique + ignoreDuplicates 로 재클릭 시 중복이 생기지 않습니다.
+export async function importMandatoryTrainings(
+  year: number,
+  month: number,
+): Promise<
+  { ok: true; inserted: number; skipped: number } | { ok: false; message: string }
+> {
+  try {
+    const user = await requireUser();
+    const range = kstMonthRangeUtc(year, month);
+    const { data: comps, error: compError } = await supabaseAdmin
+      .from("training_completions")
+      .select("id, training_id, driver_id, completed_at")
+      .gte("completed_at", range.start)
+      .lt("completed_at", range.end);
+    if (compError) {
+      if (tableMissing(compError))
+        return { ok: false, message: "의무교육 테이블을 찾을 수 없습니다." };
+      throw new Error(compError.message);
+    }
+    const rows = (comps ?? []) as {
+      id: string;
+      training_id: string;
+      driver_id: string;
+      completed_at: string | null;
+    }[];
+    const usable = rows.filter((r) => r.completed_at);
+    if (usable.length === 0) return { ok: true, inserted: 0, skipped: 0 };
+
+    const [{ data: trainings }, { data: drivers }] = await Promise.all([
+      supabaseAdmin
+        .from("mandatory_trainings")
+        .select("id, name, location, organizer, hours")
+        .in("id", [...new Set(usable.map((r) => r.training_id))]),
+      supabaseAdmin
+        .from("drivers")
+        .select("id, name")
+        .in("id", [...new Set(usable.map((r) => r.driver_id))]),
+    ]);
+    const trainingById = new Map(
+      (trainings ?? []).map((t) => {
+        const r = t as Record<string, unknown>;
+        return [
+          String(r.id),
+          {
+            name: String(r.name ?? ""),
+            location: String(r.location ?? ""),
+            organizer: String(r.organizer ?? ""),
+            hours: String(r.hours ?? ""),
+          },
+        ];
+      }),
+    );
+    const nameById = new Map(
+      (drivers ?? []).map((d) => {
+        const r = d as Record<string, unknown>;
+        return [String(r.id), String(r.name ?? "")];
+      }),
+    );
+
+    const payload = usable.map((r) => {
+      const t = trainingById.get(r.training_id);
+      return {
+        report_year: year,
+        report_month: month,
+        training_date: kstDateOf(r.completed_at as string),
+        staff_name: nameById.get(r.driver_id) ?? "(이름 없음)",
+        training_name: t?.name ?? "(교육명 없음)",
+        location: t?.location ?? "",
+        organizer: t?.organizer ?? "",
+        hours: t?.hours ?? "",
+        source: "mandatory",
+        source_completion_id: r.id,
+        author_name: user.name,
+      };
+    });
+
+    const { data: inserted, error } = await supabaseAdmin
+      .from("staff_training_results")
+      .upsert(payload, {
+        onConflict: "source_completion_id",
+        ignoreDuplicates: true,
+      })
+      .select("id");
+    if (error) {
+      if (tableMissing(error))
+        return { ok: false, message: "종사자 교육 테이블이 아직 적용되지 않았습니다." };
+      throw new Error(error.message);
+    }
+    const count = (inserted ?? []).length;
+    revalidatePath("/business-results");
+    return { ok: true, inserted: count, skipped: payload.length - count };
+  } catch (e) {
+    return {
+      ok: false,
+      message: e instanceof Error ? e.message : "반입하지 못했습니다.",
+    };
+  }
 }
 
 // =====================================================================

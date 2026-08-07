@@ -17,6 +17,11 @@ export type MandatoryTraining = {
   note: string | null;
   is_active: boolean;
   display_order: number;
+  // 종사자 교육 실적 반입용 — 교육(과정) 단위 속성. 마스터에 1회 입력하면
+  // 모든 수료자 반입 행에 자동 적용됩니다(비어 있어도 무방).
+  location: string | null;
+  organizer: string | null;
+  hours: string | null;
 };
 
 // training_completions 한 행.
@@ -94,6 +99,9 @@ export function toTraining(raw: Record<string, unknown>): MandatoryTraining {
     note: (raw.note as string | null) ?? null,
     is_active: raw.is_active !== false,
     display_order: Number(raw.display_order ?? 0),
+    location: (raw.location as string | null) ?? null,
+    organizer: (raw.organizer as string | null) ?? null,
+    hours: (raw.hours as string | null) ?? null,
   };
 }
 

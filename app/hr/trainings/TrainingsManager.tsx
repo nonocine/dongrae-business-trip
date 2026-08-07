@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useRef, useState, useTransition } from "react";
+import { Fragment, useMemo, useRef, useState, useTransition } from "react";
 import {
   listTrainings,
   getTrainingMatrix,
@@ -45,6 +45,9 @@ type EditFields = {
   note: string;
   display_order: string;
   is_active: boolean;
+  location: string;
+  organizer: string;
+  hours: string;
 };
 
 export default function TrainingsManager({
@@ -78,6 +81,10 @@ export default function TrainingsManager({
   const [addDue, setAddDue] = useState("");
   const [addUrl, setAddUrl] = useState("");
   const [addNote, setAddNote] = useState("");
+  // 종사자 교육 실적 반입용 — 선택 입력.
+  const [addLocation, setAddLocation] = useState("");
+  const [addOrganizer, setAddOrganizer] = useState("");
+  const [addHours, setAddHours] = useState("");
 
   // 수정 중인 교육.
   const [editId, setEditId] = useState<string | null>(null);
@@ -198,6 +205,9 @@ export default function TrainingsManager({
         note: addNote || null,
         display_order: null,
         is_active: true,
+        location: addLocation || null,
+        organizer: addOrganizer || null,
+        hours: addHours || null,
       });
       if (!res.ok) {
         setMsg({ kind: "err", text: res.message });
@@ -207,6 +217,9 @@ export default function TrainingsManager({
       setAddDue("");
       setAddUrl("");
       setAddNote("");
+      setAddLocation("");
+      setAddOrganizer("");
+      setAddHours("");
       setMsg({ kind: "ok", text: "교육을 등록했습니다." });
       reload(year);
     });
@@ -221,6 +234,9 @@ export default function TrainingsManager({
       note: t.note ?? "",
       display_order: String(t.display_order),
       is_active: t.is_active,
+      location: t.location ?? "",
+      organizer: t.organizer ?? "",
+      hours: t.hours ?? "",
     });
   }
 
@@ -240,6 +256,9 @@ export default function TrainingsManager({
         note: edit.note || null,
         display_order: edit.display_order ? Number(edit.display_order) : null,
         is_active: edit.is_active,
+        location: edit.location || null,
+        organizer: edit.organizer || null,
+        hours: edit.hours || null,
       });
       if (!res.ok) {
         setMsg({ kind: "err", text: res.message });
@@ -453,6 +472,34 @@ export default function TrainingsManager({
               추가
             </button>
           </div>
+          {/* 종사자 교육 실적 반입용 — 채워두면 반입 행에 자동으로 들어갑니다. */}
+          <div className="sm:col-span-4">
+            <label className={lblCls}>장소</label>
+            <input
+              className={`${inCls} mt-1`}
+              value={addLocation}
+              onChange={(e) => setAddLocation(e.target.value)}
+              placeholder="예) 온라인"
+            />
+          </div>
+          <div className="sm:col-span-4">
+            <label className={lblCls}>주최</label>
+            <input
+              className={`${inCls} mt-1`}
+              value={addOrganizer}
+              onChange={(e) => setAddOrganizer(e.target.value)}
+              placeholder="예) 여성가족부"
+            />
+          </div>
+          <div className="sm:col-span-4">
+            <label className={lblCls}>수료시간</label>
+            <input
+              className={`${inCls} mt-1`}
+              value={addHours}
+              onChange={(e) => setAddHours(e.target.value)}
+              placeholder="예) 1시간"
+            />
+          </div>
         </form>
 
         {/* 교육 목록 */}
@@ -482,7 +529,8 @@ export default function TrainingsManager({
               )}
               {trainings.map((t) =>
                 editId === t.id && edit ? (
-                  <tr key={t.id} className="border-b border-line bg-navy-soft/30">
+                  <Fragment key={t.id}>
+                  <tr className="border-b border-line bg-navy-soft/30">
                     <td className="px-2 py-2 align-top">
                       <input
                         className={`${inCls} w-14`}
@@ -565,6 +613,34 @@ export default function TrainingsManager({
                       </div>
                     </td>
                   </tr>
+                  {/* 종사자 교육 반입용 3필드 — 열이 많아 별도 행으로 둡니다. */}
+                  <tr className="border-b border-line bg-navy-soft/30">
+                    <td />
+                    <td colSpan={6} className="px-2 pb-2">
+                      <div className="grid gap-2 sm:grid-cols-3">
+                        {(
+                          [
+                            ["location", "장소", "예) 온라인"],
+                            ["organizer", "주최", "예) 여성가족부"],
+                            ["hours", "수료시간", "예) 1시간"],
+                          ] as const
+                        ).map(([field, label, ph]) => (
+                          <div key={field}>
+                            <label className={lblCls}>{label}</label>
+                            <input
+                              className={`${inCls} mt-1`}
+                              value={edit[field]}
+                              placeholder={ph}
+                              onChange={(e) =>
+                                setEdit({ ...edit, [field]: e.target.value })
+                              }
+                            />
+                          </div>
+                        ))}
+                      </div>
+                    </td>
+                  </tr>
+                  </Fragment>
                 ) : (
                   <tr
                     key={t.id}
@@ -597,6 +673,13 @@ export default function TrainingsManager({
                     </td>
                     <td className="px-2 py-2 text-ink-muted">
                       {t.note || <span className="text-ink-hint">-</span>}
+                      {(t.location || t.organizer || t.hours) && (
+                        <span className="mt-0.5 block text-[11px] text-ink-hint">
+                          {[t.location, t.organizer, t.hours]
+                            .filter(Boolean)
+                            .join(" · ")}
+                        </span>
+                      )}
                     </td>
                     <td className="px-2 py-2">
                       <span className={t.is_active ? badgeSuccess : badgeNeutral}>
