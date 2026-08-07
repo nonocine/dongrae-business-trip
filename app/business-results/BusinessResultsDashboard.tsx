@@ -10,11 +10,12 @@ import {
   labelCls,
 } from "@/lib/ui";
 import {
-  saveBusinessResult,
   savePromotion,
   type BusinessResult,
   type BusinessResultsData,
 } from "./actions";
+import ProgramRegistryManager from "./ProgramRegistryManager";
+import ProgramResultForm from "./ProgramResultForm";
 
 type Tab = "overview" | "programs" | "promotions" | "report";
 const tabs: { key: Tab; label: string }[] = [
@@ -22,15 +23,6 @@ const tabs: { key: Tab; label: string }[] = [
   { key: "programs", label: "사업실적 입력" },
   { key: "promotions", label: "홍보·대외협력" },
   { key: "report", label: "종합보고서" },
-];
-const categories = [
-  "청소년활동",
-  "청소년참여",
-  "청소년보호",
-  "청소년복지",
-  "지역연계",
-  "시설이용",
-  "기타",
 ];
 const promotionCategories = [
   "홈페이지",
@@ -43,6 +35,17 @@ const promotionCategories = [
   "기타",
 ];
 const number = new Intl.NumberFormat("ko-KR");
+
+// 청/기 구분이 없는 과거 행(청·기 0 인데 계 > 0)은 청·기 를 "-" 로, 계만 표기합니다.
+function trio(youth: number, other: number, total: number): string[] {
+  if (youth + other === 0 && total > 0)
+    return ["-", "-", number.format(total)];
+  return [
+    number.format(youth),
+    number.format(other),
+    number.format(youth + other),
+  ];
+}
 
 const metricCards = [
   {
@@ -115,8 +118,13 @@ export default function BusinessResultsDashboard({
           if (!current) acc[key] = { ...row };
           else {
             current.sessions += row.sessions;
+            current.operating_days += row.operating_days;
             current.participants += row.participants;
+            current.participants_youth += row.participants_youth;
+            current.participants_other += row.participants_other;
             current.attendance += row.attendance;
+            current.attendance_youth += row.attendance_youth;
+            current.attendance_other += row.attendance_other;
             current.youth_uses += row.youth_uses;
             current.other_uses += row.other_uses;
             if (row.status === "draft") current.status = "draft";
@@ -132,11 +140,25 @@ export default function BusinessResultsDashboard({
         (a, r) => ({
           sessions: a.sessions + r.sessions,
           participants: a.participants + r.participants,
+          participantsYouth: a.participantsYouth + r.participants_youth,
+          participantsOther: a.participantsOther + r.participants_other,
           attendance: a.attendance + r.attendance,
+          attendanceYouth: a.attendanceYouth + r.attendance_youth,
+          attendanceOther: a.attendanceOther + r.attendance_other,
           uses: a.uses + r.youth_uses + r.other_uses,
           youth: a.youth + r.youth_uses,
         }),
-        { sessions: 0, participants: 0, attendance: 0, uses: 0, youth: 0 },
+        {
+          sessions: 0,
+          participants: 0,
+          participantsYouth: 0,
+          participantsOther: 0,
+          attendance: 0,
+          attendanceYouth: 0,
+          attendanceOther: 0,
+          uses: 0,
+          youth: 0,
+        },
       ),
     [aggregatedResults],
   );
@@ -436,17 +458,22 @@ export default function BusinessResultsDashboard({
             )}
             {aggregatedResults.length ? (
               <div className="mt-4 overflow-x-auto rounded-xl border border-line">
-                <table className="w-full min-w-[780px] border-collapse text-sm">
+                <table className="w-full min-w-[1180px] border-collapse text-sm">
                   <thead className="bg-navy text-white">
                     <tr>
                       {[
                         "분야",
                         "프로그램명",
                         "횟수",
-                        "참가인원",
-                        "연인원",
-                        "청소년",
-                        "기타",
+                        "참가 청",
+                        "참가 기",
+                        "참가 계",
+                        "연인원 청",
+                        "연인원 기",
+                        "연인원 계",
+                        "실인원 청",
+                        "실인원 기",
+                        "실인원 계",
                         "상태",
                       ].map((label) => (
                         <th
@@ -471,17 +498,26 @@ export default function BusinessResultsDashboard({
                           {row.program_name}
                         </td>
                         {[
-                          row.sessions,
-                          row.participants,
-                          row.attendance,
-                          row.youth_uses,
-                          row.other_uses,
+                          number.format(row.sessions),
+                          ...trio(
+                            row.participants_youth,
+                            row.participants_other,
+                            row.participants,
+                          ),
+                          ...trio(
+                            row.attendance_youth,
+                            row.attendance_other,
+                            row.attendance,
+                          ),
+                          number.format(row.youth_uses),
+                          number.format(row.other_uses),
+                          number.format(row.youth_uses + row.other_uses),
                         ].map((value, i) => (
                           <td
                             key={i}
                             className="border-r border-t border-line px-3 py-3 text-right tabular-nums text-ink-body"
                           >
-                            {number.format(value)}
+                            {value}
                           </td>
                         ))}
                         <td className="border-t border-line px-3 py-3 text-center">
@@ -503,17 +539,26 @@ export default function BusinessResultsDashboard({
                         기간 합계
                       </td>
                       {[
-                        totals.sessions,
-                        totals.participants,
-                        totals.attendance,
-                        totals.youth,
-                        Math.max(0, totals.uses - totals.youth),
+                        number.format(totals.sessions),
+                        ...trio(
+                          totals.participantsYouth,
+                          totals.participantsOther,
+                          totals.participants,
+                        ),
+                        ...trio(
+                          totals.attendanceYouth,
+                          totals.attendanceOther,
+                          totals.attendance,
+                        ),
+                        number.format(totals.youth),
+                        number.format(Math.max(0, totals.uses - totals.youth)),
+                        number.format(totals.uses),
                       ].map((value, i) => (
                         <td
                           key={i}
                           className="border-r border-t border-line px-3 py-3 text-right tabular-nums"
                         >
-                          {number.format(value)}
+                          {value}
                         </td>
                       ))}
                       <td className="border-t border-line" />
@@ -599,157 +644,62 @@ export default function BusinessResultsDashboard({
         </div>
       )}
       {tab === "programs" && (
-        <section className={cardCls}>
-          <div className="flex items-center justify-between gap-3">
+        <div className="space-y-4">
+          <section className={cardCls}>
             <h2 className="font-bold text-ink">
               {editing ? "프로그램 실적 수정" : "프로그램 실적 입력"}
             </h2>
-            {editing && (
-              <button
-                type="button"
-                className="text-sm font-semibold text-ink-muted hover:underline"
-                onClick={() => setEditing(null)}
-              >
-                수정 취소
-              </button>
-            )}
-          </div>
-          <p className="mt-1 text-xs text-ink-muted">
-            제출된 자료도 수정 버튼으로 다시 열어 고칠 수 있습니다.
-          </p>
-          <form
-            key={editing?.id ?? "new"}
-            className="mt-4 grid gap-3 md:grid-cols-3"
-            onSubmit={(e) => {
-              e.preventDefault();
-              submit(saveBusinessResult, e.currentTarget);
-            }}
-          >
-            <input type="hidden" name="id" value={editing?.id ?? ""} />
-            <input type="hidden" name="year" value={year} />
-            <label className={labelCls}>
-              실적 월
-              <select
-                name="month"
-                className={inputCls}
-                defaultValue={editing?.report_month ?? month}
-              >
-                {Array.from({ length: 12 }, (_, i) => i + 1).map((v) => (
-                  <option key={v} value={v}>
-                    {v}월
-                  </option>
-                ))}
-              </select>
-            </label>
-            <label className={labelCls}>
-              분야
-              <select
-                name="category"
-                className={inputCls}
-                defaultValue={editing?.category ?? categories[0]}
-              >
-                {editing && !categories.includes(editing.category) && (
-                  <option>{editing.category}</option>
-                )}
-                {categories.map((v) => (
-                  <option key={v}>{v}</option>
-                ))}
-              </select>
-            </label>
-            <label className={labelCls}>
-              사업명
-              <input
-                name="program_name"
-                required
-                className={inputCls}
-                defaultValue={editing?.program_name ?? ""}
-              />
-            </label>
-            {(
-              [
-                ["sessions", "운영 횟수"],
-                ["participants", "참가인원"],
-                ["attendance", "연인원"],
-                ["youth_uses", "청소년 이용"],
-                ["other_uses", "기타 이용"],
-              ] as const
-            ).map(([n, l]) => (
-              <label key={n} className={labelCls}>
-                {l}
-                <input
-                  name={n}
-                  type="number"
-                  min="0"
-                  defaultValue={editing?.[n] ?? 0}
-                  className={inputCls}
-                />
-              </label>
-            ))}
-            <label className={`${labelCls} md:col-span-3`}>
-              주요 내용
-              <textarea
-                name="summary"
-                rows={3}
-                className={inputCls}
-                defaultValue={editing?.summary ?? ""}
-              />
-            </label>
-            <label className={`${labelCls} md:col-span-3`}>
-              평가·향후 계획
-              <textarea
-                name="evaluation"
-                rows={3}
-                className={inputCls}
-                defaultValue={editing?.evaluation ?? ""}
-              />
-            </label>
-            <div className="flex gap-2 md:col-span-3">
-              <button disabled={pending} className={btnPrimary}>
-                {editing ? "수정 후 임시저장" : "임시저장"}
-              </button>
-              <button
-                disabled={pending}
-                name="submit"
-                value="true"
-                className={btnPrimary}
-              >
-                {editing ? "수정 후 제출" : "제출"}
-              </button>
-            </div>
-          </form>
-          <div className="mt-6 space-y-2">
-            {data.results.map((r) => (
-              <div
-                key={r.id}
-                className="rounded-lg border border-line p-3 text-sm"
-              >
-                <div className="flex items-start justify-between gap-3">
-                  <div>
-                    <strong>{r.program_name}</strong>
-                    <span className="ml-2 text-xs text-ink-muted">
-                      {r.report_month}월 ·{" "}
-                      {r.status === "submitted" ? "제출" : "작성 중"}
-                    </span>
+            <p className="mt-1 text-xs text-ink-muted">
+              제출된 자료도 수정 버튼으로 다시 열어 고칠 수 있습니다.
+            </p>
+            <ProgramResultForm
+              key={editing?.id ?? "new"}
+              year={year}
+              month={month}
+              editing={editing}
+              registry={data.registry}
+              onCancel={() => setEditing(null)}
+              onSaved={(text) => {
+                setEditing(null);
+                setMessage(text);
+              }}
+            />
+            <div className="mt-6 space-y-2">
+              {data.results.map((r) => (
+                <div
+                  key={r.id}
+                  className="rounded-lg border border-line p-3 text-sm"
+                >
+                  <div className="flex items-start justify-between gap-3">
+                    <div>
+                      <strong>{r.program_name}</strong>
+                      <span className="ml-2 text-xs text-ink-muted">
+                        {r.report_month}월 ·{" "}
+                        {r.status === "submitted" ? "제출" : "작성 중"}
+                      </span>
+                    </div>
+                    <button
+                      type="button"
+                      className="shrink-0 rounded-lg border border-line px-3 py-1.5 text-xs font-bold text-navy hover:bg-navy-soft"
+                      onClick={() => {
+                        setEditing(r);
+                        window.scrollTo({ top: 0, behavior: "smooth" });
+                      }}
+                    >
+                      수정
+                    </button>
                   </div>
-                  <button
-                    type="button"
-                    className="shrink-0 rounded-lg border border-line px-3 py-1.5 text-xs font-bold text-navy hover:bg-navy-soft"
-                    onClick={() => {
-                      setEditing(r);
-                      window.scrollTo({ top: 0, behavior: "smooth" });
-                    }}
-                  >
-                    수정
-                  </button>
+                  <p className="mt-1 text-ink-muted">
+                    {r.category} · {r.sessions}회 · 참가 {r.participants}명 ·
+                    연인원 {r.attendance}명 · 작성 {r.author_name}
+                    {r.manager_name ? ` · 담당 ${r.manager_name}` : ""}
+                  </p>
                 </div>
-                <p className="mt-1 text-ink-muted">
-                  {r.category} · {r.sessions}회 · 참가 {r.participants}명 ·
-                  연인원 {r.attendance}명 · 작성 {r.author_name}
-                </p>
-              </div>
-            ))}
-          </div>
-        </section>
+              ))}
+            </div>
+          </section>
+          {data.isAdmin && <ProgramRegistryManager registry={data.registry} />}
+        </div>
       )}
       {tab === "promotions" && (
         <section className={cardCls}>
