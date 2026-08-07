@@ -7,7 +7,9 @@ import {
   saveBusinessResult,
   type BusinessResult,
   type ProgramRegistry,
+  type ReportRoom,
 } from "./actions";
+import RoomUsageSection, { type RoomCounts } from "./RoomUsageSection";
 
 // 사업명 드롭다운에서 "직접 입력"을 고르면 등록 목록에 없는 임시 사업을 쓸 수 있습니다.
 const CUSTOM = "__custom__";
@@ -60,6 +62,9 @@ export default function ProgramResultForm({
   month,
   editing,
   registry,
+  rooms,
+  roomsConfigured,
+  initialRoomCounts,
   onCancel,
   onSaved,
 }: {
@@ -67,6 +72,9 @@ export default function ProgramResultForm({
   month: number;
   editing: BusinessResult | null;
   registry: ProgramRegistry;
+  rooms: ReportRoom[];
+  roomsConfigured: boolean;
+  initialRoomCounts: RoomCounts;
   onCancel: () => void;
   onSaved: (message: string) => void;
 }) {
@@ -130,6 +138,18 @@ export default function ProgramResultForm({
   );
   const [youthUses, setYouthUses] = useState(editing?.youth_uses ?? 0);
   const [otherUses, setOtherUses] = useState(editing?.other_uses ?? 0);
+
+  // 실별 사용인원 — report_rooms 적용 시 실인원은 이 합계에서 파생합니다.
+  const [roomCounts, setRoomCounts] = useState<RoomCounts>(initialRoomCounts);
+  const useRooms = roomsConfigured && rooms.length > 0;
+  const roomTotals = useMemo(
+    () =>
+      Object.values(roomCounts).reduce(
+        (a, v) => ({ youth: a.youth + v.youth, other: a.other + v.other }),
+        { youth: 0, other: 0 },
+      ),
+    [roomCounts],
+  );
 
   // 참가인원·운영일수 변경 시 연인원 자동 채움(청/기 각각 × 운영일수).
   function autofillAttendance(py: number, po: number, days: number) {
@@ -322,23 +342,50 @@ export default function ProgramResultForm({
       />
       <TotalField label="연인원 (계)" value={attendanceYouth + attendanceOther} />
 
-      <NumberField
-        label="실인원 (청소년)"
-        name="youth_uses"
-        value={youthUses}
-        onChange={setYouthUses}
-      />
-      <NumberField
-        label="실인원 (기타)"
-        name="other_uses"
-        value={otherUses}
-        onChange={setOtherUses}
-      />
-      <TotalField label="실인원 (계)" value={youthUses + otherUses} />
+      {useRooms ? (
+        <>
+          <TotalField label="실인원 (청소년)" value={roomTotals.youth} />
+          <TotalField label="실인원 (기타)" value={roomTotals.other} />
+          <TotalField
+            label="실인원 (계)"
+            value={roomTotals.youth + roomTotals.other}
+          />
+        </>
+      ) : (
+        <>
+          <NumberField
+            label="실인원 (청소년)"
+            name="youth_uses"
+            value={youthUses}
+            onChange={setYouthUses}
+          />
+          <NumberField
+            label="실인원 (기타)"
+            name="other_uses"
+            value={otherUses}
+            onChange={setOtherUses}
+          />
+          <TotalField label="실인원 (계)" value={youthUses + otherUses} />
+        </>
+      )}
 
       <p className="rounded-lg bg-surface px-3 py-2 text-xs leading-5 text-ink-muted md:col-span-3">
         {HEADCOUNT_HELP}
       </p>
+
+      {useRooms && (
+        <RoomUsageSection
+          rooms={rooms}
+          values={roomCounts}
+          onChange={setRoomCounts}
+        />
+      )}
+
+      {!editing && (
+        <p className="rounded-lg bg-surface px-3 py-2 text-xs leading-5 text-ink-muted md:col-span-3">
+          세부 실적(일자/회차별)은 저장 후 수정 화면에서 입력합니다.
+        </p>
+      )}
 
       <label className={`${labelCls} md:col-span-3`}>
         주요 내용

@@ -64,12 +64,49 @@ export type ProgramRegistry = {
   programs: BusinessProgram[];
 };
 
+// 보고용 실(26개) — 비품관리 facility_locations 와는 별개의 마스터입니다.
+export type ReportRoom = {
+  id: string;
+  floor: string;
+  name: string;
+  sort_order: number;
+  is_active: boolean;
+};
+
+export type ResultRoomUsage = {
+  result_id: string;
+  room_id: string;
+  youth_count: number;
+  other_count: number;
+};
+
+// 사업별 세부입력 — 일자형(date) / 회차형(session).
+export type ResultDetail = {
+  id: string;
+  result_id: string;
+  entry_type: "date" | "session";
+  entry_date: string | null;
+  session_no: number | null;
+  session_days: number | null;
+  content: string;
+  participants_youth: number;
+  participants_other: number;
+  room_youth: number;
+  room_other: number;
+  sort_order: number;
+};
+
 export type BusinessResultsData = {
   configured: boolean;
   isAdmin: boolean;
   results: BusinessResult[];
   promotions: PromotionResult[];
   registry: ProgramRegistry;
+  roomsConfigured: boolean;
+  rooms: ReportRoom[];
+  roomUsage: ResultRoomUsage[];
+  detailsConfigured: boolean;
+  details: ResultDetail[];
 };
 
 const EMPTY_REGISTRY: ProgramRegistry = {
@@ -161,6 +198,47 @@ async function loadRegistry(): Promise<ProgramRegistry> {
   };
 }
 
+// 보고용 실 목록 — 미적용(42P01)이면 빈 목록으로 폴백(입력 섹션 숨김).
+async function loadRooms(): Promise<{
+  configured: boolean;
+  rooms: ReportRoom[];
+}> {
+  const { data, error } = await supabaseAdmin
+    .from("report_rooms")
+    .select("id,floor,name,sort_order,is_active")
+    .order("sort_order");
+  if (tableMissing(error)) return { configured: false, rooms: [] };
+  if (error) throw new Error(error.message);
+  return { configured: true, rooms: (data ?? []) as ReportRoom[] };
+}
+
+// 조회 기간 결과행들의 실별 인원 — 결과 id 목록으로 in 쿼리 1회.
+async function loadRoomUsage(resultIds: string[]): Promise<ResultRoomUsage[]> {
+  if (resultIds.length === 0) return [];
+  const { data, error } = await supabaseAdmin
+    .from("business_result_rooms")
+    .select("result_id,room_id,youth_count,other_count")
+    .in("result_id", resultIds);
+  if (tableMissing(error)) return [];
+  if (error) throw new Error(error.message);
+  return (data ?? []) as ResultRoomUsage[];
+}
+
+async function loadDetails(resultIds: string[]): Promise<{
+  configured: boolean;
+  details: ResultDetail[];
+}> {
+  if (resultIds.length === 0) return { configured: true, details: [] };
+  const { data, error } = await supabaseAdmin
+    .from("business_result_details")
+    .select("*")
+    .in("result_id", resultIds)
+    .order("sort_order");
+  if (tableMissing(error)) return { configured: false, details: [] };
+  if (error) throw new Error(error.message);
+  return { configured: true, details: (data ?? []) as ResultDetail[] };
+}
+
 export async function getBusinessResultsData(
   year: number,
   startMonth: number,
@@ -174,10 +252,15 @@ export async function getBusinessResultsData(
       results: [],
       promotions: [],
       registry: EMPTY_REGISTRY,
+      roomsConfigured: false,
+      rooms: [],
+      roomUsage: [],
+      detailsConfigured: false,
+      details: [],
     };
   const isAdmin = session.kind === "admin";
 
-  const [resultQuery, promotionQuery, registry] = await Promise.all([
+  const [resultQuery, promotionQuery, registry, roomMaster] = await Promise.all([
     supabaseAdmin
       .from("business_results")
       .select("*")
@@ -196,6 +279,7 @@ export async function getBusinessResultsData(
       .order("report_month", { ascending: false })
       .order("activity_date", { ascending: false }),
     loadRegistry(),
+    loadRooms(),
   ]);
 
   if (tableMissing(resultQuery.error) || tableMissing(promotionQuery.error)) {
@@ -205,19 +289,36 @@ export async function getBusinessResultsData(
       results: [],
       promotions: [],
       registry,
+      roomsConfigured: roomMaster.configured,
+      rooms: roomMaster.rooms,
+      roomUsage: [],
+      detailsConfigured: false,
+      details: [],
     };
   }
   if (resultQuery.error) throw new Error(resultQuery.error.message);
   if (promotionQuery.error) throw new Error(promotionQuery.error.message);
 
+  const results = ((resultQuery.data ?? []) as Record<string, unknown>[]).map(
+    toResult,
+  );
+  const resultIds = results.map((r) => r.id);
+  const [roomUsage, detailData] = await Promise.all([
+    loadRoomUsage(resultIds),
+    loadDetails(resultIds),
+  ]);
+
   return {
     configured: true,
     isAdmin,
-    results: ((resultQuery.data ?? []) as Record<string, unknown>[]).map(
-      toResult,
-    ),
+    results,
     promotions: (promotionQuery.data ?? []) as PromotionResult[],
     registry,
+    roomsConfigured: roomMaster.configured,
+    rooms: roomMaster.rooms,
+    roomUsage,
+    detailsConfigured: detailData.configured,
+    details: detailData.details,
   };
 }
 
@@ -243,6 +344,26 @@ export async function saveBusinessResult(formData: FormData) {
   const attendanceYouth = asInt(formData.get("attendance_youth"));
   const attendanceOther = asInt(formData.get("attendance_other"));
 
+  // 실별 사용인원 — 폼의 room_{roomId}_youth / _other 를 수집합니다.
+  //   섹션이 노출된 경우(= report_rooms 적용)에만 필드가 오고, 이때 실인원은
+  //   실별 합계에서 파생합니다. 미적용이면 기존 직접 입력값을 그대로 씁니다.
+  const roomCounts = new Map<string, { youth: number; other: number }>();
+  for (const [key, value] of formData.entries()) {
+    const match = /^room_(.+)_(youth|other)$/.exec(key);
+    if (!match) continue;
+    const [, roomId, kind] = match;
+    const entry = roomCounts.get(roomId) ?? { youth: 0, other: 0 };
+    const n = Math.max(0, Number.parseInt(String(value ?? "0"), 10) || 0);
+    if (kind === "youth") entry.youth = n;
+    else entry.other = n;
+    roomCounts.set(roomId, entry);
+  }
+  const roomsSubmitted = roomCounts.size > 0;
+  const roomTotals = [...roomCounts.values()].reduce(
+    (a, r) => ({ youth: a.youth + r.youth, other: a.other + r.other }),
+    { youth: 0, other: 0 },
+  );
+
   const payload = {
     report_year: asInt(formData.get("year"), 2020),
     report_month: Math.min(12, asInt(formData.get("month"), 1)),
@@ -259,8 +380,12 @@ export async function saveBusinessResult(formData: FormData) {
     attendance_youth: attendanceYouth,
     attendance_other: attendanceOther,
     attendance: attendanceYouth + attendanceOther,
-    youth_uses: asInt(formData.get("youth_uses")),
-    other_uses: asInt(formData.get("other_uses")),
+    youth_uses: roomsSubmitted
+      ? roomTotals.youth
+      : asInt(formData.get("youth_uses")),
+    other_uses: roomsSubmitted
+      ? roomTotals.other
+      : asInt(formData.get("other_uses")),
     summary: String(formData.get("summary") ?? "").trim(),
     evaluation: String(formData.get("evaluation") ?? "").trim(),
     status: formData.get("submit") === "true" ? "submitted" : "draft",
@@ -268,14 +393,133 @@ export async function saveBusinessResult(formData: FormData) {
     updated_by: user.name,
   };
 
-  let query = id
-    ? supabaseAdmin.from("business_results").update(payload).eq("id", id)
-    : supabaseAdmin.from("business_results").insert(payload);
-  if (id && !user.isAdmin) query = query.eq("author_name", user.name);
-  const { error } = await query;
-  if (error) throw new Error(error.message);
+  // upsert 후 자식 테이블(실별 인원)을 교체하는 2단계 저장. 실패 시 그대로 throw.
+  let resultId = id;
+  if (id) {
+    let query = supabaseAdmin
+      .from("business_results")
+      .update(payload)
+      .eq("id", id);
+    if (!user.isAdmin) query = query.eq("author_name", user.name);
+    const { data, error } = await query.select("id").maybeSingle();
+    if (error) throw new Error(error.message);
+    if (!data) throw new Error("본인이 작성한 실적만 수정할 수 있습니다.");
+  } else {
+    const { data, error } = await supabaseAdmin
+      .from("business_results")
+      .insert(payload)
+      .select("id")
+      .single();
+    if (error) throw new Error(error.message);
+    resultId = String((data as { id: string }).id);
+  }
+
+  if (roomsSubmitted && resultId) {
+    await replaceResultRooms(resultId, roomCounts);
+  }
   revalidatePath("/business-results");
   return { ok: true };
+}
+
+// 실별 인원 delete-then-insert 교체. 0/0 인 실은 행을 만들지 않습니다.
+async function replaceResultRooms(
+  resultId: string,
+  roomCounts: Map<string, { youth: number; other: number }>,
+) {
+  const del = await supabaseAdmin
+    .from("business_result_rooms")
+    .delete()
+    .eq("result_id", resultId);
+  if (del.error) {
+    if (tableMissing(del.error)) return; // 테이블 미적용 — 실별 저장은 건너뜁니다.
+    throw new Error(del.error.message);
+  }
+  const rows = [...roomCounts.entries()]
+    .filter(([, v]) => v.youth > 0 || v.other > 0)
+    .map(([roomId, v]) => ({
+      result_id: resultId,
+      room_id: roomId,
+      youth_count: v.youth,
+      other_count: v.other,
+    }));
+  if (rows.length === 0) return;
+  const { error } = await supabaseAdmin
+    .from("business_result_rooms")
+    .insert(rows);
+  if (error) throw new Error(error.message);
+}
+
+// =====================================================================
+// 작업 5. 사업별 세부입력 — delete-then-insert 교체(실별 인원과 동일 패턴).
+//   권한 규칙은 saveBusinessResult 와 동일: 비관리자는 본인 작성 행만.
+// =====================================================================
+export type ResultDetailInput = {
+  entry_type: "date" | "session";
+  entry_date: string | null;
+  session_no: number | null;
+  session_days: number | null;
+  content: string;
+  participants_youth: number;
+  participants_other: number;
+  room_youth: number;
+  room_other: number;
+};
+
+export async function saveResultDetails(
+  resultId: string,
+  rows: ResultDetailInput[],
+): Promise<ActionResult> {
+  try {
+    const user = await requireUser();
+    if (!resultId) return { ok: false, message: "대상 실적이 없습니다." };
+
+    const { data: owner, error: ownerError } = await supabaseAdmin
+      .from("business_results")
+      .select("author_name")
+      .eq("id", resultId)
+      .maybeSingle();
+    if (ownerError) throw new Error(ownerError.message);
+    if (!owner) return { ok: false, message: "실적을 찾을 수 없습니다." };
+    if (
+      !user.isAdmin &&
+      String((owner as { author_name: string }).author_name) !== user.name
+    )
+      return { ok: false, message: "본인이 작성한 실적만 수정할 수 있습니다." };
+
+    const del = await supabaseAdmin
+      .from("business_result_details")
+      .delete()
+      .eq("result_id", resultId);
+    if (del.error) {
+      if (tableMissing(del.error))
+        return { ok: false, message: "세부입력 테이블이 아직 적용되지 않았습니다." };
+      throw new Error(del.error.message);
+    }
+
+    const payload = rows.map((r, index) => ({
+      result_id: resultId,
+      entry_type: r.entry_type === "session" ? "session" : "date",
+      entry_date: r.entry_type === "date" ? r.entry_date || null : null,
+      session_no: r.entry_type === "session" ? r.session_no : null,
+      session_days: r.entry_type === "session" ? r.session_days : null,
+      content: r.content.trim(),
+      participants_youth: Math.max(0, r.participants_youth),
+      participants_other: Math.max(0, r.participants_other),
+      room_youth: Math.max(0, r.room_youth),
+      room_other: Math.max(0, r.room_other),
+      sort_order: index + 1,
+    }));
+    if (payload.length > 0) {
+      const { error } = await supabaseAdmin
+        .from("business_result_details")
+        .insert(payload);
+      if (error) throw new Error(error.message);
+    }
+    revalidatePath("/business-results");
+    return { ok: true };
+  } catch (e) {
+    return actionError(e, "세부 실적을 저장하지 못했습니다.");
+  }
 }
 
 export async function savePromotion(formData: FormData) {

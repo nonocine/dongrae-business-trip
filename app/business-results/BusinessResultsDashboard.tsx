@@ -14,8 +14,10 @@ import {
   type BusinessResult,
   type BusinessResultsData,
 } from "./actions";
+import DetailRowsEditor from "./DetailRowsEditor";
 import ProgramRegistryManager from "./ProgramRegistryManager";
 import ProgramResultForm from "./ProgramResultForm";
+import type { RoomCounts } from "./RoomUsageSection";
 
 type Tab = "overview" | "programs" | "promotions" | "report";
 const tabs: { key: Tab; label: string }[] = [
@@ -161,6 +163,24 @@ export default function BusinessResultsDashboard({
         },
       ),
     [aggregatedResults],
+  );
+  // 수정 중인 실적의 실별 인원·세부 행 프리필.
+  const editingRoomCounts = useMemo<RoomCounts>(() => {
+    if (!editing) return {};
+    const out: RoomCounts = {};
+    for (const usage of data.roomUsage) {
+      if (usage.result_id !== editing.id) continue;
+      out[usage.room_id] = {
+        youth: usage.youth_count,
+        other: usage.other_count,
+      };
+    }
+    return out;
+  }, [editing, data.roomUsage]);
+  const editingDetails = useMemo(
+    () =>
+      editing ? data.details.filter((d) => d.result_id === editing.id) : [],
+    [editing, data.details],
   );
   const promoTotal = data.promotions.reduce((sum, row) => sum + row.count, 0);
   const youthRate = totals.uses
@@ -658,12 +678,24 @@ export default function BusinessResultsDashboard({
               month={month}
               editing={editing}
               registry={data.registry}
+              rooms={data.rooms}
+              roomsConfigured={data.roomsConfigured}
+              initialRoomCounts={editingRoomCounts}
               onCancel={() => setEditing(null)}
               onSaved={(text) => {
                 setEditing(null);
                 setMessage(text);
               }}
             />
+            {editing && data.detailsConfigured && (
+              <div className="mt-4">
+                <DetailRowsEditor
+                  key={editing.id}
+                  resultId={editing.id}
+                  details={editingDetails}
+                />
+              </div>
+            )}
             <div className="mt-6 space-y-2">
               {data.results.map((r) => (
                 <div
