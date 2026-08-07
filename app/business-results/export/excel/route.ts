@@ -32,7 +32,12 @@ export async function GET(req: Request) {
       endMonth,
       periodLabel,
     );
-    if (!input.results.length && !input.promotions.length)
+    if (
+      !input.results.length &&
+      !input.promotions.length &&
+      !input.coinPay?.length &&
+      !input.staffTrainings?.length
+    )
       return new Response("출력할 사업실적이 없습니다.", { status: 404 });
     const buffer = await buildBusinessReportWorkbook(input);
     const filename = `사업운영결과보고_${year}년_${periodLabel}.xlsx`;
