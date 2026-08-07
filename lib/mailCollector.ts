@@ -15,6 +15,7 @@ import Pop3Command from "node-pop3";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
 import { parseRawMail, selectNewUids } from "@/lib/mailParse";
 import { MAIL_BUCKET, type MailAttachmentMeta } from "@/lib/mail";
+import { sendSlack, siteBaseUrl, slackLink } from "@/lib/slack";
 
 const POP_HOST = "pop.naver.com";
 const POP_PORT = 995;
@@ -87,7 +88,34 @@ async function ensureBucket(): Promise<void> {
   }
 }
 
-export async function runMailFetch(): Promise<MailFetchSummary> {
+// ML-3. 새 메일 도착 알림 — 관리자 채널에 1건 요약. 0건이면 보내지 않습니다.
+//   슬랙은 부가기능이라 sendSlack 이 내부에서 실패를 삼킵니다(수집 결과 영향 없음).
+const NOTIFY_LIST_MAX = 5;
+
+async function notifyNewMail(summary: MailFetchSummary): Promise<void> {
+  if (summary.saved <= 0) return;
+  const base = siteBaseUrl();
+  const link = base ? slackLink(`${base}/mail`, "공용 메일함 열기") : "/mail";
+  const shown = summary.newMails.slice(0, NOTIFY_LIST_MAX);
+  const rest = summary.newMails.length - shown.length;
+
+  const lines = [
+    `📬 공용 메일 ${summary.saved}건 도착`,
+    ...shown.map((m) => `• ${m.from} — ${m.subject}`),
+  ];
+  if (rest > 0) lines.push(`외 ${rest}건`);
+  if (summary.remaining > 0)
+    lines.push(`(백로그 ${summary.remaining}건은 다음 수집에 이어서)`);
+  lines.push(link);
+
+  await sendSlack("SLACK_WEBHOOK_ADMIN", lines.join("\n"));
+}
+
+// notify: 새 메일 슬랙 알림 발송 여부. Cron 은 true, 화면의 [지금 가져오기] 는
+//   실행한 사람이 결과를 바로 보고 있으므로 false 로 호출합니다(중복 알림 방지).
+export async function runMailFetch(options?: {
+  notify?: boolean;
+}): Promise<MailFetchSummary> {
   const user = process.env.NAVER_POP_USER;
   const password = process.env.NAVER_POP_PASSWORD;
   if (!user || !password) {
@@ -213,6 +241,7 @@ export async function runMailFetch(): Promise<MailFetchSummary> {
         );
       }
     }
+    if (options?.notify !== false) await notifyNewMail(summary);
     return summary;
   } finally {
     // DELE 없이 종료 — 원본은 네이버에 그대로 남습니다.

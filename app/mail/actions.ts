@@ -334,7 +334,8 @@ export async function fetchMailNow(): Promise<
 > {
   try {
     await requireMailAccess();
-    const summary = await runMailFetch();
+    // 실행한 사람이 화면에서 결과를 바로 보므로 슬랙 알림은 보내지 않습니다.
+    const summary = await runMailFetch({ notify: false });
     if (!summary.ok)
       return { ok: false, message: summary.message ?? "수집하지 못했습니다." };
     revalidatePath("/mail");
