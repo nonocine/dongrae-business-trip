@@ -14,18 +14,12 @@
 import Pop3Command from "node-pop3";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
 import { parseRawMail, selectNewUids } from "@/lib/mailParse";
+import { MAIL_BUCKET, type MailAttachmentMeta } from "@/lib/mail";
 
 const POP_HOST = "pop.naver.com";
 const POP_PORT = 995;
 const FETCH_LIMIT = 30; // 1회 수집 상한
 const ATTACHMENT_MAX_BYTES = 10 * 1024 * 1024; // 10MB 초과는 메타데이터만
-export const MAIL_BUCKET = "shared-mail";
-
-export type MailAttachmentMeta = {
-  name: string;
-  size: number;
-  storage_path: string | null; // null = 용량 초과·업로드 실패 → 네이버에서 확인
-};
 
 export type MailFetchSummary = {
   ok: boolean;

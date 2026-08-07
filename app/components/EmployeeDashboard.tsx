@@ -12,6 +12,7 @@ import { getPendingCertRequestCount } from "@/app/hr/certificates/actions";
 import { getGoogleSession } from "@/app/actions";
 import { listAnnouncements } from "@/app/announcements/actions";
 import { getMyJudgeAssignments } from "@/app/hr/recruitment/[slug]/actions";
+import { getUnreadMailCount } from "@/app/mail/actions";
 import { isM0Grant } from "@/lib/authLevels";
 import { ddayLabel } from "@/lib/trainings";
 import { roleLabel } from "@/lib/employeeRoles";
@@ -186,14 +187,26 @@ function SectionHeading({ children }: { children: ReactNode }) {
 function AdminArea({
   trainingNotMet,
   pendingCertCount = 0,
+  unreadMailCount = 0,
 }: {
   trainingNotMet: number | null;
   pendingCertCount?: number;
+  unreadMailCount?: number;
 }) {
   return (
     <section className={cardCls}>
       <SectionHeading>관리자 영역</SectionHeading>
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+        <MenuCard
+          href="/mail"
+          icon="📬"
+          title="공용 메일함"
+          desc={
+            unreadMailCount > 0
+              ? `미처리 ${unreadMailCount}건 — 센터 대표 메일 확인·담당 지정`
+              : "센터 대표 메일 확인·담당 지정 (미처리 없음)"
+          }
+        />
         <MenuCard
           href="/hr?tab=recruitment"
           icon="📢"
@@ -282,7 +295,10 @@ export default async function EmployeeDashboard({
             아래에서 업무를 시작하세요.
           </p>
         </section>
-        <AdminArea trainingNotMet={null} />
+        <AdminArea
+          trainingNotMet={null}
+          unreadMailCount={await getUnreadMailCount()}
+        />
       </div>
     );
   }
@@ -309,6 +325,9 @@ export default async function EmployeeDashboard({
     getTrainingsAdminSummary(),
     getMyLeavePlanNotice(),
   ]);
+
+  // 공용 메일함 미처리 건수 — 테이블 미적용이면 0 으로 폴백합니다.
+  const unreadMailCount = await getUnreadMailCount();
 
   const driver = my?.driver ?? null;
   const profile = my?.profile ?? null;
@@ -528,6 +547,16 @@ export default async function EmployeeDashboard({
         <SectionHeading>공통</SectionHeading>
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
           <MenuCard
+            href="/mail"
+            icon="📬"
+            title="공용 메일함"
+            desc={
+              unreadMailCount > 0
+                ? `미처리 ${unreadMailCount}건 — 센터 대표 메일 확인·담당 지정`
+                : "센터 대표 메일 확인·담당 지정 (미처리 없음)"
+            }
+          />
+          <MenuCard
             href="/business-results"
             icon="📊"
             title="사업실적"
@@ -731,6 +760,7 @@ export default async function EmployeeDashboard({
         <AdminArea
           trainingNotMet={trainingAdminSummary?.totalNotMet ?? null}
           pendingCertCount={pendingCertCount}
+          unreadMailCount={unreadMailCount}
         />
       )}
     </div>
