@@ -28,12 +28,20 @@ export const MAIL_STATUS_BADGE: Record<MailStatus, string> = {
   done: "bg-surface text-ink-muted",
 };
 
-// attachments jsonb 한 항목. storage_path 가 null 이면 10MB 초과·업로드 실패로
-// 사본을 두지 않은 경우 — 화면에서 "원본은 네이버 확인" 으로 안내합니다.
+// attachments jsonb 한 항목.
+//   storage_path 가 null 이면 사본을 두지 못한 경우인데, 이유가 두 가지입니다.
+//   skip_reason 으로 구분합니다 — 예전에는 화면이 둘 다 "용량 초과" 로
+//   안내해서 508KB PDF 가 "용량이 커서" 로 잘못 표시됐습니다.
+//     - "too_large": 10MB 초과라 의도적으로 건너뜀
+//     - "failed"   : 업로드 실패(권한·키 제한 등)
+//     - null       : 2단계 이전에 저장된 기존 행(이유 미상)
+export type AttachmentSkipReason = "too_large" | "failed";
+
 export type MailAttachmentMeta = {
   name: string;
   size: number;
   storage_path: string | null;
+  skip_reason?: AttachmentSkipReason | null;
 };
 
 export type MailListItem = {
@@ -45,6 +53,10 @@ export type MailListItem = {
   has_attachments: boolean;
   assignee_name: string;
   status: MailStatus;
+  ai_summary: string;
+  ai_category: string;
+  ai_suggested_assignee: string;
+  deleted_at: string | null;
 };
 
 export type MailDetail = MailListItem & {
@@ -53,6 +65,18 @@ export type MailDetail = MailListItem & {
   memo: string;
   attachments: MailAttachmentMeta[];
   fetched_at: string | null;
+};
+
+// 답장 이력 한 건 — 누가·언제·무엇을 보냈는지 공유가 목적입니다.
+export type MailReply = {
+  id: string;
+  to_email: string;
+  subject: string;
+  body: string;
+  sent_by: string;
+  sent_at: string;
+  status: "sent" | "failed";
+  error_message: string | null;
 };
 
 export type MailListView = {
@@ -65,6 +89,51 @@ export type MailListView = {
 
 export function isMailStatus(v: unknown): v is MailStatus {
   return (MAIL_STATUSES as readonly unknown[]).includes(v);
+}
+
+// 목록 필터의 특수값 — 상태가 아니라 "삭제된 메일만" 을 뜻합니다.
+export const MAIL_TRASH_FILTER = "trash";
+
+// --- AI 분류(ML-5) 공용 상수 ---
+//   분류 로직은 lib/mailClassifier.ts(서버 전용, supabaseAdmin·SDK 사용)에
+//   있지만, 목록 뱃지는 클라이언트 컴포넌트가 그려야 하므로 상수만 여기에
+//   둡니다. (클라이언트가 mailClassifier 를 import 하면 service_role 클라이언트가
+//   브라우저 번들에 끌려 들어갑니다.)
+export const MAIL_CATEGORIES = [
+  "공문",
+  "회계",
+  "방과후",
+  "청소년활동",
+  "시설",
+  "홍보",
+  "기타",
+] as const;
+export type MailCategory = (typeof MAIL_CATEGORIES)[number];
+
+export function isMailCategory(v: unknown): v is MailCategory {
+  return (MAIL_CATEGORIES as readonly unknown[]).includes(v);
+}
+
+export const MAIL_CATEGORY_BADGE: Record<string, string> = {
+  공문: "bg-navy-soft text-navy",
+  회계: "bg-brand-green/15 text-brand-green",
+  방과후: "bg-brand-blue-soft text-brand-blue",
+  청소년활동: "bg-brand-yellow/25 text-amber-800",
+  시설: "bg-warning-soft text-warning",
+  홍보: "bg-stamp-soft text-stamp",
+  기타: "bg-surface text-ink-muted",
+};
+
+// 첨부 사본이 없는 이유 안내 문구. 이유를 모르면 원인을 단정하지 않습니다.
+export function attachmentSkipNotice(
+  name: string,
+  reason: AttachmentSkipReason | null | undefined,
+): string {
+  if (reason === "too_large")
+    return `${name} 은(는) 10MB를 넘어 사본을 저장하지 않았습니다. 네이버 메일에서 확인하세요.`;
+  if (reason === "failed")
+    return `${name} 사본 저장에 실패했습니다. 네이버 메일에서 확인하세요.`;
+  return `${name} 은(는) 사본이 없습니다. 네이버 메일에서 확인하세요.`;
 }
 
 // 바이트 → 사람이 읽는 크기.
