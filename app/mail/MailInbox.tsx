@@ -19,13 +19,17 @@ import {
   MAIL_STATUS_LABEL,
   MAIL_CATEGORY_BADGE,
   MAIL_TRASH_FILTER,
+  assigneeLabel,
   attachmentSkipNotice,
   formatBytes,
+  hasPendingSuggestion,
   type MailDetail,
   type MailListView,
   type MailReply,
 } from "@/lib/mail";
 import {
+  analyzeMailNow,
+  applySuggestedAssignee,
   assignMail,
   fetchMailNow,
   getMailDetail,
@@ -155,6 +159,51 @@ export default function MailInbox({
       setActiveIndex(index);
       setMemo(found.memo);
       setReplies(replyList);
+    });
+  }
+
+  // [추천 적용] — 저장된 AI 추천을 담당자로 확정합니다(슬랙 DM 포함).
+  //   목록·상세 양쪽에서 쓰므로 열려 있는 상세도 함께 갱신합니다.
+  function applySuggestion(id: string) {
+    setMsg(null);
+    start(async () => {
+      const res = await applySuggestedAssignee(id);
+      if (!res.ok) {
+        setMsg({ ok: false, text: res.message });
+        return;
+      }
+      setMsg({
+        ok: true,
+        text: `${res.assignee} 담당으로 지정했습니다. (슬랙 DM 발송)`,
+      });
+      if (detail && detail.id === id) {
+        const refreshed = await getMailDetail(id);
+        if (refreshed) setDetail(refreshed);
+      }
+      router.refresh();
+    });
+  }
+
+  // [AI 분석] — 수집 당시 분석되지 않은 메일을 사람이 직접 요청합니다.
+  function analyzeNow(id: string) {
+    setMsg(null);
+    start(async () => {
+      const res = await analyzeMailNow(id);
+      if (!res.ok) {
+        setMsg({ ok: false, text: res.message });
+        return;
+      }
+      setMsg({
+        ok: true,
+        text: res.assigned
+          ? `AI 분석 완료 — ${res.assigned} 담당으로 지정했습니다.`
+          : "AI 분석을 완료했습니다.",
+      });
+      if (detail && detail.id === id) {
+        const refreshed = await getMailDetail(id);
+        if (refreshed) setDetail(refreshed);
+      }
+      router.refresh();
     });
   }
 
@@ -380,67 +429,89 @@ export default function MailInbox({
         <div className="mt-3 divide-y divide-line overflow-hidden rounded-xl border border-line">
           {view.items.map((item, index) => {
             const unread = item.status === "unread";
+            const suggestion = hasPendingSuggestion(item);
             return (
-              <button
+              // 행 전체가 버튼이면 안쪽에 [적용] 버튼을 넣을 수 없어(중첩 불가)
+              // 여는 영역만 버튼으로 두고 담당자 칸을 형제로 뺐습니다.
+              <div
                 key={item.id}
-                type="button"
-                onClick={() => openIndex(index)}
-                aria-haspopup="dialog"
-                className="flex w-full cursor-pointer items-start gap-3 px-3 py-3 text-left transition-colors hover:bg-navy-soft/40 focus-visible:bg-navy-soft/40 focus-visible:outline-none"
+                className="flex w-full items-start gap-3 px-3 py-3 transition-colors hover:bg-navy-soft/40"
               >
-                <span
-                  aria-hidden
-                  className={`mt-1.5 h-2.5 w-2.5 shrink-0 rounded-full ${MAIL_STATUS_DOT[item.status]}`}
-                />
-                <span
-                  className={`mt-0.5 w-28 shrink-0 truncate text-sm ${
-                    unread ? "font-bold text-ink" : "font-medium text-ink-body"
-                  }`}
+                <button
+                  type="button"
+                  onClick={() => openIndex(index)}
+                  aria-haspopup="dialog"
+                  className="flex min-w-0 flex-1 cursor-pointer items-start gap-3 text-left focus-visible:outline-none"
                 >
-                  {item.from_name || item.from_email || "(보낸사람 없음)"}
-                </span>
-                <span className="min-w-0 flex-1">
                   <span
-                    className={`flex items-center gap-1.5 truncate text-sm ${
-                      unread ? "font-bold text-ink" : "text-ink-body"
+                    aria-hidden
+                    className={`mt-1.5 h-2.5 w-2.5 shrink-0 rounded-full ${MAIL_STATUS_DOT[item.status]}`}
+                  />
+                  <span
+                    className={`mt-0.5 w-28 shrink-0 truncate text-sm ${
+                      unread ? "font-bold text-ink" : "font-medium text-ink-body"
                     }`}
                   >
-                    {item.ai_category && (
-                      <span
-                        className={`shrink-0 rounded-full px-1.5 py-0.5 text-[10px] font-semibold ${
-                          MAIL_CATEGORY_BADGE[item.ai_category] ??
-                          MAIL_CATEGORY_BADGE["기타"]
-                        }`}
-                      >
-                        {item.ai_category}
+                    {item.from_name || item.from_email || "(보낸사람 없음)"}
+                  </span>
+                  <span className="min-w-0 flex-1">
+                    <span
+                      className={`flex items-center gap-1.5 truncate text-sm ${
+                        unread ? "font-bold text-ink" : "text-ink-body"
+                      }`}
+                    >
+                      {item.ai_category && (
+                        <span
+                          className={`shrink-0 rounded-full px-1.5 py-0.5 text-[10px] font-semibold ${
+                            MAIL_CATEGORY_BADGE[item.ai_category] ??
+                            MAIL_CATEGORY_BADGE["기타"]
+                          }`}
+                        >
+                          {item.ai_category}
+                        </span>
+                      )}
+                      <span className="truncate">
+                        {item.subject || "(제목 없음)"}
+                      </span>
+                      {item.has_attachments && (
+                        <span className="shrink-0 text-ink-hint">📎</span>
+                      )}
+                    </span>
+                    {/* AI 한 줄 요약 — 분석을 마친 메일만. 분석 전에는 비워 둡니다. */}
+                    {item.ai_processed && item.ai_summary && (
+                      <span className="mt-0.5 block truncate text-xs font-normal text-ink-muted">
+                        {item.ai_summary}
                       </span>
                     )}
-                    <span className="truncate">
-                      {item.subject || "(제목 없음)"}
-                    </span>
-                    {item.has_attachments && (
-                      <span className="shrink-0 text-ink-hint">📎</span>
-                    )}
                   </span>
-                  {/* AI 한 줄 요약 — 제목 아래 회색 한 줄 */}
-                  {item.ai_summary && (
-                    <span className="mt-0.5 block truncate text-xs font-normal text-ink-muted">
-                      {item.ai_summary}
-                    </span>
+                  <span className="mt-0.5 hidden w-32 shrink-0 text-right text-xs text-ink-muted sm:block">
+                    {formatReceived(item.received_at)}
+                  </span>
+                </button>
+
+                {/* 담당자 — 미지정이고 추천이 있으면 추천과 [적용] 을 함께 */}
+                <span className="mt-0.5 flex w-28 shrink-0 flex-col items-end gap-1 sm:w-36">
+                  <span className="w-full truncate text-right text-xs text-ink-muted">
+                    {assigneeLabel(item)}
+                  </span>
+                  {suggestion && (
+                    <button
+                      type="button"
+                      disabled={pending}
+                      onClick={() => applySuggestion(item.id)}
+                      className="rounded-md border border-navy px-2 py-0.5 text-[11px] font-semibold text-navy hover:bg-navy-soft disabled:opacity-50"
+                    >
+                      추천 적용
+                    </button>
                   )}
                 </span>
-                <span className="mt-0.5 hidden w-32 shrink-0 text-right text-xs text-ink-muted sm:block">
-                  {formatReceived(item.received_at)}
-                </span>
-                <span className="mt-0.5 w-16 shrink-0 truncate text-right text-xs text-ink-muted">
-                  {item.assignee_name || "미지정"}
-                </span>
+
                 {loadingId === item.id && (
                   <span className="mt-0.5 shrink-0 text-xs text-ink-hint">
                     여는 중…
                   </span>
                 )}
-              </button>
+              </div>
             );
           })}
           {view.items.length === 0 && (
@@ -542,7 +613,13 @@ export default function MailInbox({
                       )
                     }
                   >
-                    <option value="">미지정</option>
+                    {/* '미지정' 항목에만 추천을 덧붙입니다(담당자가 이미
+                        있으면 이 항목은 '해제' 를 뜻하므로 그대로 둡니다). */}
+                    <option value="">
+                      {hasPendingSuggestion(detail)
+                        ? `미지정 (추천: ${detail.ai_suggested_assignee})`
+                        : "미지정"}
+                    </option>
                     {detail.assignee_name &&
                       !view.assignees.includes(detail.assignee_name) && (
                         <option value={detail.assignee_name}>
@@ -578,8 +655,8 @@ export default function MailInbox({
                 </label>
               </div>
 
-              {/* AI 요약 — 담당자가 본문을 열기 전에 성격을 파악하도록 */}
-              {detail.ai_summary && (
+              {/* AI 요약 — 분석을 마친 메일만. 분석 전에는 자리를 비웁니다. */}
+              {detail.ai_processed && detail.ai_summary && (
                 <p className="mt-2 flex items-start gap-1.5 text-xs text-ink-muted">
                   {detail.ai_category && (
                     <span
@@ -594,12 +671,40 @@ export default function MailInbox({
                   <span>{detail.ai_summary}</span>
                 </p>
               )}
-              {/* 자동 지정되지 않은 추천은 참고용으로만 보여줍니다. */}
-              {!detail.assignee_name && detail.ai_suggested_assignee && (
-                <p className="mt-1 text-xs text-ink-hint">
-                  AI 추천 담당자: {detail.ai_suggested_assignee} (확신도가 낮아
-                  자동 지정하지 않았습니다)
-                </p>
+
+              {/* 추천 담당자 — 확신도가 낮아 자동 지정되지 않은 건을 한 번에 적용 */}
+              {hasPendingSuggestion(detail) && (
+                <div className="mt-2 flex flex-wrap items-center gap-2">
+                  <span className="text-xs text-ink-hint">
+                    AI 추천 담당자: {detail.ai_suggested_assignee} (확신도가 낮아
+                    자동 지정하지 않았습니다)
+                  </span>
+                  <button
+                    type="button"
+                    disabled={pending}
+                    onClick={() => applySuggestion(detail.id)}
+                    className="rounded-md border border-navy px-2 py-0.5 text-[11px] font-semibold text-navy hover:bg-navy-soft disabled:opacity-50"
+                  >
+                    추천 적용
+                  </button>
+                </div>
+              )}
+
+              {/* AI 분석 전 — 사람이 직접 요청할 수 있게 */}
+              {!detail.ai_processed && (
+                <div className="mt-2 flex flex-wrap items-center gap-2">
+                  <span className="text-xs text-ink-hint">
+                    아직 AI 분석을 하지 않은 메일입니다.
+                  </span>
+                  <button
+                    type="button"
+                    disabled={pending}
+                    onClick={() => analyzeNow(detail.id)}
+                    className="rounded-md border border-navy px-2 py-0.5 text-[11px] font-semibold text-navy hover:bg-navy-soft disabled:opacity-50"
+                  >
+                    ✨ AI 분석
+                  </button>
+                </div>
               )}
 
               {detail.attachments.length > 0 && (

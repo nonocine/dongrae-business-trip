@@ -14,6 +14,10 @@ import { requireMailAccess } from "@/lib/mailAccess";
 import { sendSlackDM, siteBaseUrl, slackLink } from "@/lib/slack";
 import { runMailFetch } from "@/lib/mailCollector";
 import {
+  isClassifierConfigured,
+  runMailClassification,
+} from "@/lib/mailClassifier";
+import {
   MAIL_BUCKET,
   MAIL_TRASH_FILTER,
   isMailStatus,
@@ -61,7 +65,7 @@ function toAttachments(raw: unknown): MailAttachmentMeta[] {
 
 // 목록 조회 컬럼 — 상세는 select("*") 라 따로 두지 않습니다.
 const LIST_COLUMNS =
-  "id,from_name,from_email,subject,received_at,has_attachments,assignee_name,status,ai_summary,ai_category,ai_suggested_assignee,deleted_at";
+  "id,from_name,from_email,subject,received_at,has_attachments,assignee_name,status,ai_summary,ai_category,ai_suggested_assignee,ai_processed_at,deleted_at";
 
 function toListItem(raw: Record<string, unknown>): MailListItem {
   return {
@@ -76,6 +80,7 @@ function toListItem(raw: Record<string, unknown>): MailListItem {
     ai_summary: String(raw.ai_summary ?? ""),
     ai_category: String(raw.ai_category ?? ""),
     ai_suggested_assignee: String(raw.ai_suggested_assignee ?? ""),
+    ai_processed: !!raw.ai_processed_at,
     deleted_at: (raw.deleted_at as string | null) ?? null,
   };
 }
@@ -316,6 +321,76 @@ async function notifyAssignee(name: string, subject: string): Promise<void> {
       "[mail] 담당 지정 알림 실패:",
       e instanceof Error ? e.message : e,
     );
+  }
+}
+
+// [AI 분석] — 수집 당시 분석에 실패했거나 키가 없던 메일을 사람이 다시 요청.
+//   * 분류기가 모든 실패를 내부에서 삼키므로, 결과가 비면 "분석하지 못함" 으로
+//     안내만 하고 메일 자체에는 영향이 없습니다.
+//   * force: 이미 분석된 메일도 다시 분석합니다(사람이 명시적으로 누른 경우).
+export async function analyzeMailNow(
+  id: string,
+): Promise<
+  { ok: true; assigned: string } | { ok: false; message: string }
+> {
+  try {
+    await requireMailAccess();
+    if (!id) return { ok: false, message: "대상 메일이 없습니다." };
+    if (!isClassifierConfigured()) {
+      return {
+        ok: false,
+        message: "AI 분석 설정이 없습니다. (ANTHROPIC_API_KEY 환경변수)",
+      };
+    }
+
+    const result = await runMailClassification({ ids: [id], force: true });
+    revalidatePath("/mail");
+    if (result.processed === 0) {
+      return {
+        ok: false,
+        message: "AI가 이 메일을 분석하지 못했습니다. 잠시 후 다시 시도해주세요.",
+      };
+    }
+    // 자동 지정까지 됐으면 담당자 이름을 돌려줘 화면에서 안내합니다.
+    return { ok: true, assigned: result.autoAssigned[0]?.assignee ?? "" };
+  } catch (e) {
+    return {
+      ok: false,
+      message: e instanceof Error ? e.message : "AI 분석에 실패했습니다.",
+    };
+  }
+}
+
+// 추천 담당자 적용 — 저장된 ai_suggested_assignee 를 그대로 담당자로 지정합니다.
+//   실제 지정·슬랙 DM 은 assignMail 과 같은 경로를 씁니다(동작 일관성).
+export async function applySuggestedAssignee(
+  id: string,
+): Promise<{ ok: true; assignee: string } | { ok: false; message: string }> {
+  try {
+    await requireMailAccess();
+    if (!id) return { ok: false, message: "대상 메일이 없습니다." };
+
+    const { data, error } = await supabaseAdmin
+      .from("mail_messages")
+      .select("ai_suggested_assignee")
+      .eq("id", id)
+      .maybeSingle();
+    if (error) throw new Error(error.message);
+    const suggested = String(
+      (data as { ai_suggested_assignee?: unknown } | null)
+        ?.ai_suggested_assignee ?? "",
+    ).trim();
+    if (!suggested)
+      return { ok: false, message: "적용할 추천 담당자가 없습니다." };
+
+    const res = await assignMail(id, suggested);
+    if (!res.ok) return res;
+    return { ok: true, assignee: suggested };
+  } catch (e) {
+    return {
+      ok: false,
+      message: e instanceof Error ? e.message : "추천을 적용하지 못했습니다.",
+    };
   }
 }
 

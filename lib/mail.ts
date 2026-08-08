@@ -56,8 +56,30 @@ export type MailListItem = {
   ai_summary: string;
   ai_category: string;
   ai_suggested_assignee: string;
+  // AI 분석을 이미 거쳤는지(ai_processed_at 유무). 분석 전 메일은 요약 자리를
+  // 비워 두고 상세에서 [AI 분석] 버튼을 띄우는 데 씁니다.
+  ai_processed: boolean;
   deleted_at: string | null;
 };
+
+// 담당자 표시 문구 — 미지정이고 AI 추천이 있으면 "미지정 (추천: 김혜지)".
+export function assigneeLabel(item: {
+  assignee_name: string;
+  ai_suggested_assignee: string;
+}): string {
+  if (item.assignee_name) return item.assignee_name;
+  return item.ai_suggested_assignee
+    ? `미지정 (추천: ${item.ai_suggested_assignee})`
+    : "미지정";
+}
+
+// 추천 적용 버튼을 띄울지 — 담당자가 비어 있고 추천이 있을 때만.
+export function hasPendingSuggestion(item: {
+  assignee_name: string;
+  ai_suggested_assignee: string;
+}): boolean {
+  return !item.assignee_name && !!item.ai_suggested_assignee;
+}
 
 export type MailDetail = MailListItem & {
   body_text: string;

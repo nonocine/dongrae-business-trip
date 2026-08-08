@@ -159,10 +159,14 @@ export type ClassifyRunSummary = {
 // 미분류 메일 일괄 분류.
 //   * 대상: ai_processed_at IS NULL AND deleted_at IS NULL, 최신순 최대 30건.
 //   * ids 를 주면 그 메일들만(수집 직후 신규분) 대상으로 좁힙니다.
+//   * force 면 ai_processed_at 조건을 빼고 재분석합니다 — 화면의 [AI 분석]
+//     버튼처럼 사람이 명시적으로 요청한 경우에만 씁니다(자동 경로는 항상
+//     미분류만 처리해 중복 과금을 막습니다).
 //   * 어떤 실패도 밖으로 던지지 않습니다.
 export async function runMailClassification(options?: {
   ids?: string[];
   limit?: number;
+  force?: boolean;
 }): Promise<ClassifyRunSummary> {
   const summary: ClassifyRunSummary = {
     processed: 0,
@@ -176,10 +180,10 @@ export async function runMailClassification(options?: {
     let query = supabaseAdmin
       .from("mail_messages")
       .select("id, from_name, from_email, subject, body_text, assignee_name")
-      .is("ai_processed_at", null)
       .is("deleted_at", null)
       .order("received_at", { ascending: false, nullsFirst: false })
       .limit(limit);
+    if (!options?.force) query = query.is("ai_processed_at", null);
     if (options?.ids && options.ids.length > 0) {
       query = query.in("id", options.ids);
     }
