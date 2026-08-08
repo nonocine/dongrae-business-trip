@@ -28,6 +28,7 @@
     "bcryptjs": "^3.0.3",
     "docx": "^9.7.1",
     "exceljs": "^4.4.0",
+    "google-auth-library": "^11.0.0",
     "html2canvas": "^1.4.1",
     "jspdf": "^4.2.1",
     "jszip": "^3.10.1",
