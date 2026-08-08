@@ -320,11 +320,19 @@ export default function MailInbox({
         res.classified > 0
           ? ` · AI 분류 ${res.classified}건(자동배정 ${res.autoAssigned}건)`
           : "";
+      const dm = res.dmSent > 0 ? ` · 담당자 DM ${res.dmSent}건` : "";
+      // DM 실패는 사유까지 그대로 보여줍니다(원인을 화면에서 바로 알 수 있게).
+      const dmFail =
+        res.dmFailures.length > 0
+          ? `\n⚠️ 슬랙 DM 실패 — ${res.dmFailures
+              .map((f) => `${f.name}: ${f.reason}`)
+              .join(" / ")}`
+          : "";
       setMsg({
-        ok: true,
+        ok: res.dmFailures.length === 0,
         text:
           res.saved > 0
-            ? `새 메일 ${res.saved}통을 가져왔습니다.${tail}${failed}${ai}`
+            ? `새 메일 ${res.saved}통을 가져왔습니다.${tail}${failed}${ai}${dm}${dmFail}`
             : `새 메일이 없습니다.${failed}`,
       });
       router.refresh();
@@ -408,7 +416,12 @@ export default function MailInbox({
 
       {/* 모달이 열려 있을 때는 모달 안에서 같은 메시지를 보여줍니다(중복 방지). */}
       {msg && !open && (
-        <p className={msg.ok ? noticeSuccess : noticeError}>{msg.text}</p>
+        // DM 실패 사유는 줄바꿈으로 붙으므로 pre-line 으로 보존합니다.
+        <p
+          className={`whitespace-pre-line ${msg.ok ? noticeSuccess : noticeError}`}
+        >
+          {msg.text}
+        </p>
       )}
 
       <section className={cardCls}>
@@ -739,7 +752,9 @@ export default function MailInbox({
               )}
 
               {msg && (
-                <p className={`mt-2 ${msg.ok ? noticeSuccess : noticeError}`}>
+                <p
+                  className={`mt-2 whitespace-pre-line ${msg.ok ? noticeSuccess : noticeError}`}
+                >
                   {msg.text}
                 </p>
               )}

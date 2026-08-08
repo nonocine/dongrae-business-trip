@@ -619,13 +619,17 @@ export async function fetchMailNow(): Promise<
       failed: number;
       classified: number;
       autoAssigned: number;
+      dmSent: number;
+      // 담당자 DM 이 실패했으면 사유를 화면에 그대로 보여줍니다.
+      dmFailures: { name: string; reason: string }[];
     }
   | { ok: false; message: string }
 > {
   try {
     await requireMailAccess();
-    // 실행한 사람이 화면에서 결과를 바로 보므로 슬랙 DM 은 보내지 않습니다.
-    const summary = await runMailFetch({ notify: false });
+    // ML-9: 담당자 DM 은 트리거와 무관하게 항상 보냅니다.
+    //   (버튼을 누른 사람과 DM 을 받아야 할 담당자는 서로 다른 사람입니다)
+    const summary = await runMailFetch();
     if (!summary.ok)
       return { ok: false, message: summary.message ?? "수집하지 못했습니다." };
     revalidatePath("/mail");
@@ -636,6 +640,8 @@ export async function fetchMailNow(): Promise<
       failed: summary.failed,
       classified: summary.classified,
       autoAssigned: summary.autoAssigned,
+      dmSent: summary.dmSent,
+      dmFailures: summary.dmFailures,
     };
   } catch (e) {
     return {

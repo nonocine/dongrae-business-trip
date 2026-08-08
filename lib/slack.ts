@@ -71,23 +71,81 @@ export async function sendSlackDM(
   email: string | null | undefined,
   text: string
 ): Promise<boolean> {
+  const { ok } = await sendSlackDMDetailed(email, text);
+  return ok;
+}
+
+// 상세 결과판 — 실패 사유(reason)를 함께 돌려줍니다.
+//   호출부가 화면·다이제스트에 "왜 안 갔는지" 를 표시할 수 있도록 하기 위함.
+//   sendSlackDM 과 마찬가지로 절대 throw 하지 않습니다.
+export async function sendSlackDMDetailed(
+  email: string | null | undefined,
+  text: string
+): Promise<{ ok: boolean; reason: string | null }> {
   const token = process.env.SLACK_BOT_TOKEN;
   const addr = (email ?? "").trim();
-  if (!addr) return false;
+  if (!addr) {
+    const reason = "직원 이메일이 등록되어 있지 않습니다(인사기록카드 email)";
+    console.warn(`[slack] DM 불가 — ${reason}`);
+    return { ok: false, reason };
+  }
   if (!token) {
-    console.warn("[slack] SLACK_BOT_TOKEN 미설정 — DM skip");
-    return false;
+    const reason = "SLACK_BOT_TOKEN 미설정";
+    console.warn(`[slack] DM 불가 — ${reason} (대상 ${addr})`);
+    return { ok: false, reason };
   }
   try {
-    const userId = await lookupUserIdByEmail(token, addr);
+    const { id: userId, reason: lookupReason } = await lookupUserIdByEmail(
+      token,
+      addr
+    );
     if (!userId) {
-      console.warn(`[slack] 사용자 매칭 실패(미연결): ${addr}`);
-      return false;
+      const reason = lookupReason ?? "사용자 매칭 실패";
+      console.warn(`[slack] 사용자 매칭 실패 (${addr}) — ${reason}`);
+      return { ok: false, reason };
     }
-    return await postMessage(token, userId, text);
+    const { ok, reason: postReason } = await postMessage(token, userId, text);
+    if (!ok) {
+      const reason = postReason ?? "발송 실패";
+      console.warn(`[slack] DM 발송 실패 (${addr}) — ${reason}`);
+      return { ok: false, reason };
+    }
+    return { ok: true, reason: null };
   } catch (e) {
-    console.warn("[slack] DM 실패:", e instanceof Error ? e.message : e);
-    return false;
+    const reason = e instanceof Error ? e.message : "알 수 없는 오류";
+    console.warn(`[slack] DM 실패 (${addr}) — ${reason}`);
+    return { ok: false, reason };
+  }
+}
+
+// 슬랙 API 오류코드 → 사람이 읽을 수 있는 원인.
+//   ★ 원인을 로그·화면에 남기기 위해 추가했습니다. 예전에는 실패를 boolean
+//     으로만 돌려줘서 "왜" 안 갔는지 알 수 없었습니다(스코프 부족인지,
+//     계정 매칭 실패인지, 토큰 자체가 없는지 구분 불가).
+export function describeSlackError(
+  error: string,
+  data?: Record<string, unknown>
+): string {
+  switch (error) {
+    case "missing_scope": {
+      const needed = String(data?.needed ?? "");
+      const provided = String(data?.provided ?? "");
+      return `봇 토큰 스코프 부족 — 필요: ${needed || "(미상)"} / 현재: ${provided || "(미상)"}`;
+    }
+    case "users_not_found":
+      return "해당 이메일의 슬랙 사용자를 찾을 수 없습니다(슬랙 계정 이메일 불일치 또는 미가입)";
+    case "invalid_auth":
+    case "token_revoked":
+    case "account_inactive":
+      return `봇 토큰이 유효하지 않습니다(${error})`;
+    case "not_allowed_token_type":
+      return "토큰 종류가 맞지 않습니다(봇 토큰 xoxb- 필요)";
+    case "channel_not_found":
+      return "DM 대화를 열 수 없습니다(im:write 스코프 확인 필요)";
+    case "ratelimited":
+      return "슬랙 API 호출 한도 초과";
+    default:
+      return `슬랙 오류(${error})`;
   }
 }
 
@@ -118,31 +176,44 @@ async function slackApi(
   }
 }
 
+// 실패 시 원인 문자열을 함께 돌려줍니다(로그·화면 안내용).
 async function lookupUserIdByEmail(
   token: string,
   email: string
-): Promise<string | null> {
+): Promise<{ id: string | null; reason: string | null }> {
   const { ok, data } = await slackApi(
     token,
     "users.lookupByEmail",
     new URLSearchParams({ email }),
     true
   );
-  if (!ok) return null;
+  if (!ok) {
+    return {
+      id: null,
+      reason: describeSlackError(String(data?.error ?? "unknown"), data),
+    };
+  }
   const user = data.user as { id?: string } | undefined;
-  return user?.id ?? null;
+  return user?.id
+    ? { id: user.id, reason: null }
+    : { id: null, reason: "슬랙 응답에 사용자 ID가 없습니다" };
 }
 
 async function postMessage(
   token: string,
   channel: string,
   text: string
-): Promise<boolean> {
-  const { ok } = await slackApi(
+): Promise<{ ok: boolean; reason: string | null }> {
+  const { ok, data } = await slackApi(
     token,
     "chat.postMessage",
     { channel, text },
     false
   );
-  return ok;
+  return ok
+    ? { ok: true, reason: null }
+    : {
+        ok: false,
+        reason: describeSlackError(String(data?.error ?? "unknown"), data),
+      };
 }

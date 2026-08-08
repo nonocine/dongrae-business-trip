@@ -23,6 +23,17 @@ export async function GET(request: Request) {
 
   try {
     const summary = await runMailFetch();
+    // 한 줄 요약을 남깁니다 — DM 이 안 갔을 때 Cron 실행 자체는 됐는지,
+    // 분류·자동배정까지 갔는지를 로그만 보고 구분할 수 있도록.
+    console.log(
+      `[mail-fetch] 저장 ${summary.saved} · 분류 ${summary.classified} · ` +
+        `자동배정 ${summary.autoAssigned} · DM ${summary.dmSent}` +
+        (summary.dmFailures.length > 0
+          ? ` · DM실패 ${summary.dmFailures
+              .map((f) => `${f.name}(${f.reason})`)
+              .join(",")}`
+          : ""),
+    );
     return Response.json(summary);
   } catch (e) {
     return new Response(

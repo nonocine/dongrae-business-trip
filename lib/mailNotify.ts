@@ -1,5 +1,5 @@
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
-import { sendSlackDM, siteBaseUrl, slackLink } from "@/lib/slack";
+import { sendSlackDMDetailed, siteBaseUrl, slackLink } from "@/lib/slack";
 import type { AutoAssigned } from "@/lib/mailClassifier";
 
 // =====================================================================
@@ -16,6 +16,8 @@ export type DmResult = {
   sent: number;
   // DM 이 닿지 않은 직원 이름(중복 제거). 다이제스트에서 안내합니다.
   unreachable: string[];
+  // 직원별 실패 사유 — 화면·로그에 "왜 안 갔는지" 를 남기기 위함.
+  failures: { name: string; reason: string }[];
 };
 
 // 직원 이름 → employee_profiles.email. 없으면 null.
@@ -49,7 +51,7 @@ async function emailOf(name: string): Promise<string | null> {
 export async function notifyAutoAssigned(
   items: AutoAssigned[],
 ): Promise<DmResult> {
-  const result: DmResult = { sent: 0, unreachable: [] };
+  const result: DmResult = { sent: 0, unreachable: [], failures: [] };
   if (items.length === 0) return result;
 
   const base = siteBaseUrl();
@@ -57,7 +59,8 @@ export async function notifyAutoAssigned(
 
   // 같은 직원의 이메일을 반복 조회하지 않도록 캐시합니다.
   const emailCache = new Map<string, string | null>();
-  const failed = new Set<string>();
+  // 같은 직원이 여러 통 받으면 사유가 중복되므로 이름당 1건만 남깁니다.
+  const failedReason = new Map<string, string>();
 
   for (const item of items) {
     try {
@@ -74,19 +77,36 @@ export async function notifyAutoAssigned(
         link,
       ].join("\n");
 
-      // 이메일이 없으면 DM 자체가 불가능 — 미연결로 처리합니다.
-      const ok = email ? await sendSlackDM(email, text) : false;
-      if (ok) result.sent++;
-      else failed.add(item.assignee);
+      const { ok, reason } = await sendSlackDMDetailed(email, text);
+      if (ok) {
+        result.sent++;
+      } else {
+        const why = reason ?? "알 수 없는 사유";
+        console.warn(`[mail] 담당자 DM 실패 (${item.assignee}) — ${why}`);
+        if (!failedReason.has(item.assignee))
+          failedReason.set(item.assignee, why);
+      }
     } catch (e) {
-      console.warn(
-        `[mail] 담당자 DM 실패(${item.assignee}):`,
-        e instanceof Error ? e.message : e,
-      );
-      failed.add(item.assignee);
+      const why = e instanceof Error ? e.message : "알 수 없는 오류";
+      console.warn(`[mail] 담당자 DM 실패 (${item.assignee}) — ${why}`);
+      if (!failedReason.has(item.assignee))
+        failedReason.set(item.assignee, why);
     }
   }
 
-  result.unreachable = [...failed].sort((a, b) => a.localeCompare(b, "ko"));
+  result.unreachable = [...failedReason.keys()].sort((a, b) =>
+    a.localeCompare(b, "ko"),
+  );
+  result.failures = result.unreachable.map((name) => ({
+    name,
+    reason: failedReason.get(name) ?? "알 수 없는 사유",
+  }));
+  if (result.failures.length > 0) {
+    console.warn(
+      `[mail] DM 실패 요약: ${result.failures
+        .map((f) => `${f.name}(${f.reason})`)
+        .join(" / ")}`,
+    );
+  }
   return result;
 }

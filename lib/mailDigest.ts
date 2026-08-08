@@ -105,7 +105,8 @@ async function purgeTrash(): Promise<{ purged: number; failed: number }> {
 // 매일 아침 9시(KST) 1회. 어제 도착분을 담당별로 집계해 관리자 채널에 보냅니다.
 //   unreachable: 슬랙 DM 이 닿지 않은 담당자(수집 시점에 모아둔 값이 있으면 전달).
 export async function runMailDigest(options?: {
-  unreachable?: string[];
+  // 이름만 주면 "슬랙 미연결" 로, 사유까지 주면 사유를 함께 표시합니다.
+  unreachable?: { name: string; reason?: string }[] | string[];
 }): Promise<MailDigestSummary> {
   const summary: MailDigestSummary = {
     arrived: 0,
@@ -163,8 +164,14 @@ export async function runMailDigest(options?: {
       .join("·");
 
     const lines = [`📬 어제 도착 ${summary.arrived}건 (담당별: ${breakdown})`];
-    for (const name of options?.unreachable ?? []) {
-      lines.push(`⚠️ ${name} 슬랙 미연결 — 화면에서 확인 필요`);
+    for (const entry of options?.unreachable ?? []) {
+      const name = typeof entry === "string" ? entry : entry.name;
+      const reason = typeof entry === "string" ? "" : (entry.reason ?? "");
+      lines.push(
+        reason
+          ? `⚠️ ${name} 슬랙 DM 실패(${reason}) — 화면에서 확인 필요`
+          : `⚠️ ${name} 슬랙 미연결 — 화면에서 확인 필요`,
+      );
     }
     if (summary.purged > 0) {
       lines.push(`🗑 휴지통 ${summary.purged}건 영구 삭제(30일 경과)`);

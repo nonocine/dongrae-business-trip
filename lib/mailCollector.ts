@@ -38,6 +38,7 @@ export type MailFetchSummary = {
   autoAssigned: number; // confidence 임계값을 넘어 담당자까지 자동 지정된 건수
   dmSent: number; // 담당자 슬랙 DM 성공 건수
   slackUnreachable: string[]; // DM 이 닿지 않은 담당자(다이제스트에서 안내)
+  dmFailures: { name: string; reason: string }[]; // 담당자별 실패 사유
   message?: string;
 };
 
@@ -56,6 +57,7 @@ function emptySummary(message: string): MailFetchSummary {
     autoAssigned: 0,
     dmSent: 0,
     slackUnreachable: [],
+    dmFailures: [],
     message,
   };
 }
@@ -101,13 +103,18 @@ async function ensureBucket(): Promise<void> {
 // ML-6. 관리자 채널 알림은 "수집할 때마다 건별" → "하루 1회 다이제스트" 로
 //   옮겼습니다(10분 주기라 알림이 너무 잦았음). lib/mailDigest.ts 참고.
 //   대신 수집 직후에는 AI 분류 → 담당자 본인에게만 DM 을 보냅니다.
-
-// notify: 담당자 슬랙 DM 발송 여부. Cron 은 true, 화면의 [지금 가져오기] 는
-//   실행한 사람이 결과를 바로 보고 있으므로 false 로 호출합니다(중복 알림 방지).
+//
+// ★ ML-9 수정: 담당자 DM 은 트리거(Cron / 화면의 [지금 가져오기])와 무관하게
+//   항상 보냅니다.
+//   ML-6 에서 [지금 가져오기] 에 notify:false 를 넘겨 DM 을 막았는데, 이는
+//   ML-3 의 "관리자 채널 요약" 억제 규칙을 그대로 가져온 실수였습니다.
+//   관리자 채널 요약은 버튼을 누른 사람이 화면에서 결과를 바로 보므로 중복이
+//   맞지만, 담당자 DM 은 받는 사람이 다릅니다 — 버튼을 누른 사람이 화면을
+//   보고 있다는 사실은 김혜지가 알림을 받았는지와 아무 상관이 없습니다.
+//   그래서 수동 수집으로 들어온 메일은 담당자가 영영 알림을 못 받았습니다.
 //   ★ AI·슬랙은 전부 부가기능 — 여기서 실패해도 수집·저장 결과는 유지됩니다.
-export async function runMailFetch(options?: {
-  notify?: boolean;
-}): Promise<MailFetchSummary> {
+//   notify 옵션은 제거했습니다 — 다시 생기면 같은 버그가 재발합니다.
+export async function runMailFetch(): Promise<MailFetchSummary> {
   const user = process.env.NAVER_POP_USER;
   const password = process.env.NAVER_POP_PASSWORD;
   if (!user || !password) {
@@ -143,6 +150,7 @@ export async function runMailFetch(options?: {
     autoAssigned: 0,
     dmSent: 0,
     slackUnreachable: [],
+    dmFailures: [],
   };
 
   // 이번 수집으로 새로 저장한 메일 id — AI 분류 대상을 이 건들로 좁힙니다.
@@ -267,10 +275,12 @@ export async function runMailFetch(options?: {
       summary.classified = ai.processed;
       summary.autoAssigned = ai.autoAssigned.length;
 
-      if (options?.notify !== false && ai.autoAssigned.length > 0) {
+      // 트리거와 무관하게 항상 발송합니다(위 ML-9 주석 참고).
+      if (ai.autoAssigned.length > 0) {
         const dm = await notifyAutoAssigned(ai.autoAssigned);
         summary.dmSent = dm.sent;
         summary.slackUnreachable = dm.unreachable;
+        summary.dmFailures = dm.failures;
       }
     }
     return summary;
