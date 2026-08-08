@@ -162,7 +162,32 @@ function DashboardTab({ stats }: { stats: ActivityAdminStats }) {
         <ByTravelerCard stats={stats} />
       </div>
       <RecentActivitiesCard stats={stats} />
+      <BackupCard />
     </div>
+  );
+}
+
+// 데이터 백업 바로가기 — 실제 실행·이력은 /hr/backup(M0 전용)에서.
+function BackupCard() {
+  return (
+    <Link
+      href="/hr/backup"
+      className={`${cardCls} flex items-center justify-between gap-3 transition hover:-translate-y-0.5 hover:border-navy hover:shadow-md`}
+    >
+      <div>
+        <h3 className="flex items-center gap-1.5 text-sm font-semibold text-ink">
+          <span aria-hidden>💾</span>
+          데이터 백업
+        </h3>
+        <p className="mt-1 text-xs text-ink-muted">
+          센터 데이터를 ZIP 으로 묶어 구글 드라이브에 보관합니다. 매월 2일 새벽
+          자동 실행 · 즉시 실행과 이력 확인.
+        </p>
+      </div>
+      <span aria-hidden className="shrink-0 text-lg text-ink-hint">
+        →
+      </span>
+    </Link>
   );
 }
 
