@@ -1,6 +1,7 @@
 "use server";
 
 import { randomUUID } from "node:crypto";
+import { hashPassword } from "@/lib/password";
 import { revalidatePath } from "next/cache";
 import { cookies } from "next/headers";
 import {
@@ -537,12 +538,15 @@ export async function convertApplicantToEmployee(
     }
 
     // 3) drivers 새 계정 — 기본 직급 '팀원', 구글 로그인 전용, 재직.
-    //    drivers.password 는 NOT NULL 평문 컬럼이라 값이 필요하지만, 이 계정은
-    //    비밀번호 로그인을 쓰지 않는다. loginEmployee 는 입력값을 trim 한 뒤 평문
-    //    동치 비교하므로, (1) 추측 불가한 난수에 (2) 앞뒤 공백을 둘러 trim 된
-    //    입력과는 절대 일치할 수 없는 placeholder 를 넣어 비밀번호 로그인을
-    //    원천 차단한다(구글 로그인만 가능). 일반 직원 생성/로그인 로직과는 무관.
-    const placeholderPassword = ` google-only-${randomUUID()}${randomUUID()} `;
+    //    drivers.password 는 NOT NULL 이라 값이 필요하지만 이 계정은 비밀번호
+    //    로그인을 쓰지 않는다. SEC-1 이후에는 아무도 원문을 모르는 난수를
+    //    "해시로" 넣는다 — 원문이 어디에도 남지 않으므로 bcrypt.compare 가
+    //    성공할 수 없고, 비밀번호 로그인이 원천 차단된다(구글 로그인만 가능).
+    //    (이전에는 평문 동치 비교를 전제로 앞뒤 공백 트릭을 썼는데, 검증이
+    //     해시 기반으로 바뀌었으므로 그 전제에 기대지 않는 방식으로 바꾼다.)
+    const placeholderPassword = await hashPassword(
+      `google-only-${randomUUID()}${randomUUID()}`,
+    );
     const { data: drv, error: drvErr } = await supabaseAdmin
       .from("drivers")
       .insert({

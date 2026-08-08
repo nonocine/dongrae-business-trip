@@ -148,7 +148,7 @@ export async function listDriversForHrProfile(): Promise<Driver[]> {
     name: String((row as { name: unknown }).name ?? ""),
     rank: ((row as { rank: unknown }).rank as EmployeeRank | null) ?? null,
     // 비밀번호는 인사 UI에 불필요 — 클라이언트로 내려보내지 않습니다.
-    password: null,
+    has_password: false,
     is_active: (row as { is_active: unknown }).is_active !== false,
     created_at: String((row as { created_at: unknown }).created_at ?? ""),
   }));

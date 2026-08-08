@@ -745,8 +745,9 @@ function EmployeeRow({ employee }: { employee: Employee }) {
         )}
       </td>
       <td className="px-3 py-2 text-ink-body">{employee.rank ?? "-"}</td>
-      <td className="px-3 py-2 font-mono text-ink-muted">
-        {employee.password ? "****" : "—"}
+      {/* SEC-1: 비밀번호 값은 서버 밖으로 나오지 않습니다. 설정 여부만 표시. */}
+      <td className="px-3 py-2 text-ink-muted">
+        {employee.has_password ? "설정됨" : "미설정"}
       </td>
       <td className="whitespace-nowrap px-3 py-2">
         <span className={inactive ? badgeNeutral : badgeSuccess}>

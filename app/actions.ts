@@ -1,6 +1,7 @@
 "use server";
 
 import { cookies } from "next/headers";
+import { hashPassword, verifyPassword } from "@/lib/password";
 import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
 import {
@@ -158,8 +159,26 @@ export async function loginEmployee(formData: FormData) {
       message: "비밀번호가 등록되지 않은 직원입니다. 관리자에게 문의해주세요.",
     };
   }
-  if (data.password !== password) {
+  // SEC-1: 해시 검증. 기존 평문 저장값은 폴백 비교 후 그 자리에서 해시로 올립니다.
+  const verified = await verifyPassword(password, data.password as string);
+  if (!verified.ok) {
     return { ok: false as const, message: "비밀번호가 올바르지 않습니다." };
+  }
+  if (verified.needsUpgrade) {
+    // 무통증 마이그레이션 — 실패해도 로그인은 진행합니다(다음 로그인 때 재시도).
+    try {
+      const upgraded = await hashPassword(password);
+      const { error: upErr } = await supabase
+        .from("drivers")
+        .update({ password: upgraded })
+        .eq("id", data.id as string);
+      if (upErr) console.warn("[auth] 비밀번호 해시 전환 실패:", upErr.message);
+    } catch (e) {
+      console.warn(
+        "[auth] 비밀번호 해시 전환 실패:",
+        e instanceof Error ? e.message : e,
+      );
+    }
   }
   const store = await cookies();
   store.delete(ADMIN_COOKIE);
@@ -480,6 +499,10 @@ export async function getAdminStats(): Promise<AdminStats> {
 // =====================================================================
 // Drivers (직원 목록 — 차량 어플과 공유)
 // =====================================================================
+// SEC-1: password 는 조회하되 값 자체는 밖으로 내보내지 않고 has_password
+//   (설정 여부)로만 환원합니다. 예전에는 Driver.password 에 실제 값이 담겨
+//   관리자 화면(클라이언트 컴포넌트)까지 전달됐습니다 — 화면에는 "****" 로
+//   가려져 있었지만 값은 페이지 페이로드에 그대로 실려 나갔습니다.
 const DRIVER_COLUMNS = "id,name,rank,password,is_active,created_at";
 
 export async function listDrivers(opts?: {
@@ -498,8 +521,8 @@ export async function listDrivers(opts?: {
     id: String((row as { id: unknown }).id ?? ""),
     name: String((row as { name: unknown }).name ?? ""),
     rank: ((row as { rank: unknown }).rank as EmployeeRank | null) ?? null,
-    password:
-      ((row as { password: unknown }).password as string | null) ?? null,
+    has_password:
+      String((row as { password: unknown }).password ?? "").length > 0,
     is_active: (row as { is_active: unknown }).is_active !== false,
     created_at: String((row as { created_at: unknown }).created_at ?? ""),
   }));
@@ -546,6 +569,9 @@ export async function addDriver(formData: FormData) {
     throw new Error("4자리 숫자 비밀번호를 입력해주세요.");
   }
 
+  // SEC-1: 평문이 아닌 bcrypt 해시로 저장합니다.
+  const passwordHash = await hashPassword(password);
+
   // 동일 이름의 비활성 직원이 있다면 복귀 처리
   const { data: existing } = await supabase
     .from("drivers")
@@ -555,7 +581,7 @@ export async function addDriver(formData: FormData) {
   if (existing && existing.is_active === false) {
     const { error: upErr } = await supabase
       .from("drivers")
-      .update({ rank, password, is_active: true })
+      .update({ rank, password: passwordHash, is_active: true })
       .eq("id", existing.id);
     if (upErr) throw new Error(upErr.message);
     revalidatePath("/admin");
@@ -566,7 +592,7 @@ export async function addDriver(formData: FormData) {
 
   const { error } = await supabase
     .from("drivers")
-    .insert({ name, rank, password, is_active: true });
+    .insert({ name, rank, password: passwordHash, is_active: true });
   if (error) {
     if (error.code === "23505") {
       throw new Error("이미 같은 이름의 직원이 있습니다.");
@@ -598,7 +624,8 @@ export async function updateDriver(formData: FormData) {
     if (!/^\d{4}$/.test(password)) {
       throw new Error("비밀번호는 4자리 숫자여야 합니다.");
     }
-    update.password = password;
+    // SEC-1: 해시로 저장.
+    update.password = await hashPassword(password);
   }
 
   const { error } = await supabase.from("drivers").update(update).eq("id", id);
@@ -702,7 +729,13 @@ export async function changePassword(formData: FormData) {
   if (error) throw new Error(error.message);
   if (!data) throw new Error("직원 정보를 찾을 수 없습니다.");
 
-  if ((data as { password?: unknown }).password !== currentPassword) {
+  // SEC-1: 현재 비번도 해시 검증(레거시 평문은 폴백). 어차피 아래에서 새
+  // 비번을 해시로 덮어쓰므로 여기서는 별도 업그레이드를 하지 않습니다.
+  const current = await verifyPassword(
+    currentPassword,
+    (data as { password?: unknown }).password as string,
+  );
+  if (!current.ok) {
     throw new Error("현재 비밀번호가 올바르지 않습니다.");
   }
 
@@ -717,11 +750,12 @@ export async function changePassword(formData: FormData) {
   }
 
   const id = (data as { id: unknown }).id;
+  const newHash = await hashPassword(newPassword); // SEC-1
   // 새 컬럼이 있으면 함께 갱신, 없으면(에러) password 만 갱신.
   const { error: upErr } = await supabase
     .from("drivers")
     .update({
-      password: newPassword,
+      password: newHash,
       password_changed_at: new Date().toISOString(),
       must_change_password: false,
     })
@@ -729,7 +763,7 @@ export async function changePassword(formData: FormData) {
   if (upErr) {
     const { error: fbErr } = await supabase
       .from("drivers")
-      .update({ password: newPassword })
+      .update({ password: newHash })
       .eq("id", id);
     if (fbErr) throw new Error(fbErr.message);
   }
@@ -758,13 +792,16 @@ export async function resetEmployeePassword(
     if (fetchErr) return { ok: false, message: fetchErr.message };
     if (!row) return { ok: false, message: "직원을 찾을 수 없습니다." };
 
+    // 원문은 관리자에게 1회 전달하기 위해서만 메모리에 두고, DB 에는 해시만
+    // 저장합니다(SEC-1). 이 값은 로그로 남기지 않습니다.
     const tempPassword = generateTempPassword();
+    const tempHash = await hashPassword(tempPassword);
 
     // 새 컬럼이 있으면 함께 갱신, 없으면(에러) password 만 갱신.
     const { error: upErr } = await supabase
       .from("drivers")
       .update({
-        password: tempPassword,
+        password: tempHash,
         must_change_password: true,
         password_changed_at: null,
       })
@@ -772,7 +809,7 @@ export async function resetEmployeePassword(
     if (upErr) {
       const { error: fbErr } = await supabase
         .from("drivers")
-        .update({ password: tempPassword })
+        .update({ password: tempHash })
         .eq("id", id);
       if (fbErr) return { ok: false, message: fbErr.message };
     }

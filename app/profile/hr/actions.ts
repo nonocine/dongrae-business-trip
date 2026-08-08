@@ -49,7 +49,7 @@ async function getMyDriver(): Promise<Driver | null> {
     name: String((data as { name: unknown }).name ?? ""),
     rank: ((data as { rank: unknown }).rank as EmployeeRank | null) ?? null,
     // 비밀번호는 클라이언트로 내려보내지 않습니다.
-    password: null,
+    has_password: false,
     is_active: (data as { is_active: unknown }).is_active !== false,
     created_at: String((data as { created_at: unknown }).created_at ?? ""),
   };

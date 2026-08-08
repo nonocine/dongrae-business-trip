@@ -328,7 +328,9 @@ export type Driver = {
   id: string;
   name: string;
   rank: EmployeeRank | null;
-  password: string | null;
+  // SEC-1: 비밀번호 값은 절대 이 타입에 담지 않습니다(브라우저까지 전달됨).
+  //   설정 여부만 필요하므로 boolean 으로 환원합니다.
+  has_password: boolean;
   is_active: boolean;
   created_at: string;
   // 아래 두 컬럼은 DB에 아직 없을 수 있어 옵셔널입니다.
