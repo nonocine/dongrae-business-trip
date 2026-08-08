@@ -16,6 +16,7 @@ import {
   MAIL_STATUSES,
   MAIL_STATUS_BADGE,
   MAIL_STATUS_DOT,
+  MAIL_STATUS_DOT_HINT,
   MAIL_STATUS_LABEL,
   MAIL_CATEGORY_BADGE,
   MAIL_TRASH_FILTER,
@@ -31,10 +32,16 @@ import {
   analyzeMailNow,
   applySuggestedAssignee,
   assignMail,
+  bulkAssignMail,
+  bulkPurgeMail,
+  bulkRestoreMail,
+  bulkSetMailStatus,
+  bulkTrashMail,
   fetchMailNow,
   getMailDetail,
   getReplyDraft,
   listMailReplies,
+  markMailOpened,
   restoreMail,
   saveMailMemo,
   sendMailReply,
@@ -42,6 +49,7 @@ import {
   signMailAttachment,
   trashMail,
 } from "./actions";
+import Button from "@/app/components/Button";
 
 // 수신일 표기 — "2026-08-07 14:03". 값이 없으면 "-".
 function formatReceived(iso: string | null): string {
@@ -58,12 +66,23 @@ function formatReceived(iso: string | null): string {
 const navBtn =
   "rounded-lg border border-line px-2.5 py-1.5 text-xs font-semibold text-ink-body hover:bg-surface disabled:opacity-40";
 
+// 일괄 액션 바 버튼
+const bulkBtn =
+  "rounded-md border border-line bg-card px-2.5 py-1 text-xs font-semibold text-ink-body hover:bg-surface disabled:opacity-50";
+const bulkBtnDanger =
+  "rounded-md border border-stamp bg-card px-2.5 py-1 text-xs font-semibold text-stamp hover:bg-stamp-soft disabled:opacity-50";
+
 export default function MailInbox({
   view,
   filters,
 }: {
   view: MailListView;
-  filters: { status: string; assignee: string; q: string };
+  filters: {
+    status: string;
+    assignee: string;
+    q: string;
+    unreadOnly: boolean;
+  };
 }) {
   const router = useRouter();
   const [pending, start] = useTransition();
@@ -82,9 +101,65 @@ export default function MailInbox({
   const [replyMarkDone, setReplyMarkDone] = useState(true); // 기본 켬
   const [replyConfigured, setReplyConfigured] = useState(true);
   const [replies, setReplies] = useState<MailReply[]>([]);
+  // 원문 인용은 본문과 분리해 보관하고, 보낼 때만 이어 붙입니다.
+  const [replyQuote, setReplyQuote] = useState("");
+  const [quoteOpen, setQuoteOpen] = useState(false);
+
+  // --- 일괄 선택(ML-10) ---
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [confirmBulk, setConfirmBulk] = useState<
+    null | "trash" | "purge"
+  >(null);
 
   const open = detail !== null;
   const trashView = filters.status === MAIL_TRASH_FILTER;
+
+  // ★ 선택 목록은 "현재 화면에 보이는 것" 과 교집합으로 렌더 중에 계산합니다.
+  //   필터가 바뀌어 사라진 메일의 id 가 state 에 남아 있어도 일괄 처리 대상이
+  //   되지 않습니다 — 보이지 않는 메일이 삭제되는 사고를 막는 핵심 장치입니다.
+  //   (effect 로 state 를 동기화하면 렌더가 연쇄로 돌고, 동기화 직전 클릭에
+  //    안 보이는 id 가 섞일 수 있어 파생값으로 둡니다.)
+  const selectedIds = view.items
+    .filter((i) => selected.has(i.id))
+    .map((i) => i.id);
+  const allVisibleSelected =
+    view.items.length > 0 && view.items.every((i) => selected.has(i.id));
+
+  function toggleOne(id: string) {
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }
+
+  function toggleAll() {
+    setSelected((prev) =>
+      view.items.length > 0 && view.items.every((i) => prev.has(i.id))
+        ? new Set()
+        : new Set(view.items.map((i) => i.id)),
+    );
+  }
+
+  // 일괄 액션 공통 — 성공하면 선택을 비우고 목록을 새로고침합니다.
+  function runBulk(
+    task: () => Promise<{ ok: boolean; count?: number; message?: string }>,
+    okText: (n: number) => string,
+  ) {
+    setMsg(null);
+    start(async () => {
+      const res = await task();
+      if (!res.ok) {
+        setMsg({ ok: false, text: res.message ?? "처리하지 못했습니다." });
+        return;
+      }
+      setMsg({ ok: true, text: okText(res.count ?? 0) });
+      setSelected(new Set());
+      setConfirmBulk(null);
+      router.refresh();
+    });
+  }
 
   // 모달이 열려 있는 동안 배경(목록) 스크롤을 잠그고, 닫을 때 원래 위치로 되돌립니다.
   //   body 를 position:fixed 로 고정하는 방식이라 iOS 사파리에서도 위치가 튀지 않습니다.
@@ -135,6 +210,7 @@ export default function MailInbox({
     if (merged.status) params.set("status", merged.status);
     if (merged.assignee) params.set("assignee", merged.assignee);
     if (merged.q) params.set("q", merged.q);
+    if (merged.unreadOnly) params.set("unread", "1");
     const qs = params.toString();
     router.push(qs ? `/mail?${qs}` : "/mail");
   }
@@ -146,9 +222,11 @@ export default function MailInbox({
     setLoadingId(item.id);
     setReplyOpen(false);
     start(async () => {
+      // 상세를 여는 순간 열람으로 기록합니다(최초 1회만 저장됨).
       const [found, replyList] = await Promise.all([
         getMailDetail(item.id),
         listMailReplies(item.id),
+        markMailOpened(item.id),
       ]);
       setLoadingId(null);
       if (!found) {
@@ -159,6 +237,8 @@ export default function MailInbox({
       setActiveIndex(index);
       setMemo(found.memo);
       setReplies(replyList);
+      // 목록의 '안읽음' 표시를 즉시 반영합니다.
+      if (!item.opened) router.refresh();
     });
   }
 
@@ -219,8 +299,10 @@ export default function MailInbox({
       setReplyConfigured(draft.configured);
       setReplyTo(draft.to);
       setReplySubjectText(draft.subject);
-      // 커서가 맨 위에서 시작하도록 인용문 앞에 빈 줄을 둡니다.
-      setReplyBody(`\n${draft.quoted}`);
+      // 본문은 빈 칸에서 시작하고, 원문 인용은 접어 둡니다(보낼 때 이어 붙임).
+      setReplyBody("");
+      setReplyQuote(draft.quoted);
+      setQuoteOpen(false);
       setReplyMarkDone(true);
       setReplyOpen(true);
     });
@@ -234,7 +316,8 @@ export default function MailInbox({
         id: detail.id,
         to: replyTo,
         subject: replySubjectText,
-        body: replyBody,
+        // 접어 둔 원문 인용은 발송 시점에 본문 뒤로 붙입니다.
+        body: `${replyBody.trim()}\n${replyQuote}`,
         markDone: replyMarkDone,
       });
       if (!res.ok) {
@@ -412,6 +495,30 @@ export default function MailInbox({
             </button>
           </div>
         </div>
+
+        {/* 안읽음만 토글 + 점 색 범례 (색 의미를 화면에 명시) */}
+        <div className="mt-3 flex flex-wrap items-center justify-between gap-3 border-t border-line pt-3">
+          <label className="flex cursor-pointer items-center gap-2 text-sm text-ink-body">
+            <input
+              type="checkbox"
+              checked={filters.unreadOnly}
+              onChange={(e) => pushFilters({ unreadOnly: e.target.checked })}
+            />
+            안읽음만 보기
+          </label>
+          <div className="flex flex-wrap items-center gap-3 text-[11px] text-ink-muted">
+            {MAIL_STATUSES.map((s) => (
+              <span key={s} className="flex items-center gap-1">
+                <span
+                  aria-hidden
+                  className={`h-2 w-2 rounded-full ${MAIL_STATUS_DOT[s]}`}
+                />
+                {MAIL_STATUS_DOT_HINT[s]}
+              </span>
+            ))}
+            <span className="text-ink-hint">· 굵은 글씨 = 안읽음</span>
+          </div>
+        </div>
       </section>
 
       {/* 모달이 열려 있을 때는 모달 안에서 같은 메시지를 보여줍니다(중복 방지). */}
@@ -439,17 +546,139 @@ export default function MailInbox({
             그대로 남아 있습니다.
           </p>
         )}
-        <div className="mt-3 divide-y divide-line overflow-hidden rounded-xl border border-line">
+
+        {/* 일괄 액션 바 — 1건 이상 선택했을 때만 */}
+        {selectedIds.length > 0 && (
+          <div className="mt-3 flex flex-wrap items-center gap-2 rounded-xl border border-navy bg-navy-soft/50 px-3 py-2">
+            <span className="text-sm font-bold text-navy">
+              선택 {selectedIds.length}건
+            </span>
+            <span aria-hidden className="text-ink-hint">
+              ·
+            </span>
+            {trashView ? (
+              <>
+                <button
+                  type="button"
+                  className={bulkBtn}
+                  disabled={pending}
+                  onClick={() =>
+                    runBulk(
+                      () => bulkRestoreMail(selectedIds),
+                      (n) => `${n}건을 복구했습니다.`,
+                    )
+                  }
+                >
+                  복구
+                </button>
+                <button
+                  type="button"
+                  className={bulkBtnDanger}
+                  disabled={pending}
+                  onClick={() => setConfirmBulk("purge")}
+                >
+                  영구삭제
+                </button>
+              </>
+            ) : (
+              <>
+                <button
+                  type="button"
+                  className={bulkBtnDanger}
+                  disabled={pending}
+                  onClick={() => setConfirmBulk("trash")}
+                >
+                  삭제
+                </button>
+                <button
+                  type="button"
+                  className={bulkBtn}
+                  disabled={pending}
+                  onClick={() =>
+                    runBulk(
+                      () => bulkSetMailStatus(selectedIds, "done"),
+                      (n) => `${n}건을 완료 처리했습니다.`,
+                    )
+                  }
+                >
+                  완료 처리
+                </button>
+                <select
+                  className="h-[30px] rounded-md border border-line bg-card px-2 text-xs text-ink-body"
+                  disabled={pending}
+                  value=""
+                  onChange={(e) => {
+                    const name = e.target.value;
+                    if (!name) return;
+                    e.target.value = "";
+                    runBulk(
+                      () => bulkAssignMail(selectedIds, name),
+                      (n) => `${n}건을 ${name} 담당으로 지정했습니다.`,
+                    );
+                  }}
+                >
+                  <option value="">담당자 지정…</option>
+                  {view.assignees.map((n) => (
+                    <option key={n} value={n}>
+                      {n}
+                    </option>
+                  ))}
+                </select>
+              </>
+            )}
+            <button
+              type="button"
+              className="ml-auto text-xs text-ink-muted underline-offset-2 hover:underline"
+              onClick={() => setSelected(new Set())}
+            >
+              선택 해제
+            </button>
+          </div>
+        )}
+
+        {/* 헤더 — 전체선택 */}
+        <div className="mt-3 flex items-center gap-3 rounded-t-xl border border-b-0 border-line bg-surface px-3 py-2">
+          <input
+            type="checkbox"
+            aria-label="전체 선택"
+            checked={allVisibleSelected}
+            onChange={toggleAll}
+            disabled={view.items.length === 0}
+          />
+          <span className="text-xs text-ink-muted">
+            {allVisibleSelected && view.items.length > 0
+              ? "전체 선택됨"
+              : "전체 선택"}
+          </span>
+        </div>
+
+        <div className="divide-y divide-line overflow-hidden rounded-b-xl border border-line">
           {view.items.map((item, index) => {
-            const unread = item.status === "unread";
+            // ★ 굵기·배경은 '읽음 여부'(opened), 왼쪽 점 색은 '처리 상태'(status).
+            //   서로 다른 축이라 절대 섞지 않습니다.
+            const unopened = !item.opened;
             const suggestion = hasPendingSuggestion(item);
+            const checked = selected.has(item.id);
             return (
-              // 행 전체가 버튼이면 안쪽에 [적용] 버튼을 넣을 수 없어(중첩 불가)
-              // 여는 영역만 버튼으로 두고 담당자 칸을 형제로 뺐습니다.
+              // 행 전체가 버튼이면 안쪽에 체크박스·[적용] 버튼을 넣을 수 없어
+              // (중첩 불가) 여는 영역만 버튼으로 두고 나머지는 형제로 뺐습니다.
               <div
                 key={item.id}
-                className="flex w-full items-start gap-3 px-3 py-3 transition-colors hover:bg-navy-soft/40"
+                className={`flex w-full items-start gap-3 px-3 py-3 transition-colors hover:bg-navy-soft/40 ${
+                  checked
+                    ? "bg-navy-soft/30"
+                    : unopened
+                      ? "bg-surface/60"
+                      : ""
+                }`}
               >
+                <input
+                  type="checkbox"
+                  className="mt-1.5 shrink-0"
+                  aria-label={`${item.subject || "(제목 없음)"} 선택`}
+                  checked={checked}
+                  onChange={() => toggleOne(item.id)}
+                />
                 <button
                   type="button"
                   onClick={() => openIndex(index)}
@@ -458,11 +687,14 @@ export default function MailInbox({
                 >
                   <span
                     aria-hidden
+                    title={MAIL_STATUS_DOT_HINT[item.status]}
                     className={`mt-1.5 h-2.5 w-2.5 shrink-0 rounded-full ${MAIL_STATUS_DOT[item.status]}`}
                   />
                   <span
                     className={`mt-0.5 w-28 shrink-0 truncate text-sm ${
-                      unread ? "font-bold text-ink" : "font-medium text-ink-body"
+                      unopened
+                        ? "font-bold text-ink"
+                        : "font-medium text-ink-body"
                     }`}
                   >
                     {item.from_name || item.from_email || "(보낸사람 없음)"}
@@ -470,7 +702,7 @@ export default function MailInbox({
                   <span className="min-w-0 flex-1">
                     <span
                       className={`flex items-center gap-1.5 truncate text-sm ${
-                        unread ? "font-bold text-ink" : "text-ink-body"
+                        unopened ? "font-bold text-ink" : "text-ink-body"
                       }`}
                     >
                       {item.ai_category && (
@@ -536,6 +768,70 @@ export default function MailInbox({
           )}
         </div>
       </section>
+
+      {/* 일괄 삭제/영구삭제 확인 — 되돌리기 어려운 동작이라 1회 확인 */}
+      {confirmBulk && (
+        <div
+          className="fixed inset-0 z-[60] flex items-center justify-center bg-black/45 p-4"
+          role="dialog"
+          aria-modal="true"
+          aria-label="일괄 처리 확인"
+          onClick={() => setConfirmBulk(null)}
+        >
+          <div
+            className="w-full max-w-sm rounded-2xl bg-card p-5 shadow-2xl"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <h3 className="text-base font-bold text-ink">
+              {confirmBulk === "purge"
+                ? `${selectedIds.length}건을 영구 삭제할까요?`
+                : `${selectedIds.length}건을 삭제할까요?`}
+            </h3>
+            <p className="mt-2 text-sm leading-6 text-ink-muted">
+              {confirmBulk === "purge" ? (
+                <>
+                  첨부 사본과 답장 이력까지 <b>완전히</b> 지워집니다. 되돌릴 수
+                  없습니다.
+                  <br />
+                  네이버 메일의 원본은 그대로 남아 있습니다.
+                </>
+              ) : (
+                <>
+                  휴지통으로 옮깁니다. 30일 안에는 휴지통에서 복구할 수 있고,
+                  네이버 메일의 원본은 그대로 남아 있습니다.
+                </>
+              )}
+            </p>
+            <div className="mt-4 flex justify-end gap-2">
+              <button
+                type="button"
+                className={btnSecondary}
+                disabled={pending}
+                onClick={() => setConfirmBulk(null)}
+              >
+                취소
+              </button>
+              <Button
+                variant="danger"
+                loading={pending}
+                onClick={() =>
+                  confirmBulk === "purge"
+                    ? runBulk(
+                        () => bulkPurgeMail(selectedIds),
+                        (n) => `${n}건을 영구 삭제했습니다.`,
+                      )
+                    : runBulk(
+                        () => bulkTrashMail(selectedIds),
+                        (n) => `${n}건을 휴지통으로 옮겼습니다.`,
+                      )
+                }
+              >
+                {confirmBulk === "purge" ? "영구 삭제" : "삭제"}
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* 상세 — 데스크톱은 중앙 큰 모달, 모바일은 전체화면 시트. */}
       {detail && (
@@ -821,68 +1117,104 @@ export default function MailInbox({
               </div>
             )}
 
-            {/* 답장 작성 폼 */}
+            {/* 답장 작성 — 본문과 확실히 구분되도록 카드로 펼칩니다.
+                연한 배경 + 테두리 + 왼쪽 세로 강조선. */}
             {replyOpen && (
-              <div className="max-h-[55%] shrink-0 overflow-auto border-t border-line px-4 py-3 sm:px-5">
-                {!replyConfigured && (
-                  <p className={`mb-2 ${noticeError}`}>
-                    발신 설정이 없어 보낼 수 없습니다. (NAVER_POP_USER /
-                    NAVER_POP_PASSWORD 환경변수)
-                  </p>
-                )}
-                <div className="grid gap-2 sm:grid-cols-2">
-                  <label className={labelCls}>
-                    받는사람
-                    <input
-                      className={inputCls}
-                      value={replyTo}
-                      onChange={(e) => setReplyTo(e.target.value)}
+              <div className="max-h-[60%] shrink-0 overflow-auto border-t border-line px-4 py-3 sm:px-5">
+                <div className="rounded-xl border border-navy/30 border-l-4 border-l-navy bg-navy-soft/25 p-4">
+                  <div className="flex flex-wrap items-baseline justify-between gap-2">
+                    <h3 className="text-sm font-bold text-navy">답장 작성</h3>
+                    <span className="text-xs text-ink-muted">
+                      받는사람: {replyTo || "(주소 없음)"}
+                    </span>
+                  </div>
+
+                  {!replyConfigured && (
+                    <p className={`mt-2 ${noticeError}`}>
+                      발신 설정이 없어 보낼 수 없습니다. (NAVER_POP_USER /
+                      NAVER_POP_PASSWORD 환경변수)
+                    </p>
+                  )}
+
+                  <div className="mt-3 grid gap-2 sm:grid-cols-2">
+                    <label className={labelCls}>
+                      받는사람
+                      <input
+                        className={inputCls}
+                        value={replyTo}
+                        onChange={(e) => setReplyTo(e.target.value)}
+                      />
+                    </label>
+                    <label className={labelCls}>
+                      제목
+                      <input
+                        className={inputCls}
+                        value={replySubjectText}
+                        onChange={(e) => setReplySubjectText(e.target.value)}
+                      />
+                    </label>
+                  </div>
+
+                  <label className={`${labelCls} mt-3 block`}>
+                    본문
+                    <textarea
+                      rows={8}
+                      autoFocus
+                      placeholder="내용을 입력하세요"
+                      className="mt-1 block min-h-[11rem] w-full rounded-lg border border-line bg-card px-3 py-2 text-sm leading-6 text-ink-body shadow-sm placeholder:text-ink-hint focus:border-navy focus:outline-none focus:ring-2 focus:ring-navy/40"
+                      value={replyBody}
+                      onChange={(e) => setReplyBody(e.target.value)}
                     />
                   </label>
-                  <label className={labelCls}>
-                    제목
-                    <input
-                      className={inputCls}
-                      value={replySubjectText}
-                      onChange={(e) => setReplySubjectText(e.target.value)}
-                    />
-                  </label>
-                </div>
-                <label className={`${labelCls} mt-2 block`}>
-                  본문
-                  <textarea
-                    rows={10}
-                    className={`${inputCls} font-mono text-xs`}
-                    value={replyBody}
-                    onChange={(e) => setReplyBody(e.target.value)}
-                  />
-                </label>
-                <div className="mt-2 flex flex-wrap items-center justify-between gap-2">
-                  <label className="flex items-center gap-2 text-xs text-ink-body">
-                    <input
-                      type="checkbox"
-                      checked={replyMarkDone}
-                      onChange={(e) => setReplyMarkDone(e.target.checked)}
-                    />
-                    보낸 뒤 이 메일을 완료 처리
-                  </label>
-                  <div className="flex items-center gap-2">
-                    <button
-                      type="button"
-                      className={btnSecondary}
-                      disabled={pending}
-                      onClick={() => setReplyOpen(false)}
-                    >
-                      취소
-                    </button>
-                    <button
-                      type="button"
-                      className={btnPrimary}
-                      disabled={pending || !replyConfigured}
-                      onClick={submitReply}
-                    >
-                      보내기
-                    </button>
+
+                  {/* 원문 인용 — 기본은 접힘. 보낼 때 본문 뒤에 자동으로 붙습니다. */}
+                  {replyQuote && (
+                    <div className="mt-3">
+                      <button
+                        type="button"
+                        onClick={() => setQuoteOpen((v) => !v)}
+                        className="text-xs font-semibold text-navy underline-offset-2 hover:underline"
+                      >
+                        {quoteOpen ? "▾ 원문 숨기기" : "▸ 원문 보기"}
+                      </button>
+                      <p className="mt-1 text-[11px] text-ink-hint">
+                        원문 인용은 보낼 때 본문 아래에 자동으로 붙습니다.
+                      </p>
+                      {quoteOpen && (
+                        <pre className="mt-2 max-h-48 overflow-auto whitespace-pre-wrap rounded-lg border border-line bg-card p-3 text-[11px] leading-5 text-ink-muted">
+                          {replyQuote}
+                        </pre>
+                      )}
+                    </div>
+                  )}
+
+                  <div className="mt-4 flex flex-wrap items-center justify-between gap-3 border-t border-navy/20 pt-3">
+                    <label className="flex items-center gap-2 text-xs text-ink-body">
+                      <input
+                        type="checkbox"
+                        checked={replyMarkDone}
+                        onChange={(e) => setReplyMarkDone(e.target.checked)}
+                      />
+                      보낸 뒤 이 메일을 완료 처리
+                    </label>
+                    <div className="flex items-center gap-2">
+                      <button
+                        type="button"
+                        className={btnSecondary}
+                        disabled={pending}
+                        onClick={() => setReplyOpen(false)}
+                      >
+                        취소
+                      </button>
+                      <Button
+                        loading={pending}
+                        disabled={!replyConfigured}
+                        onClick={submitReply}
+                        className="px-6 font-bold"
+                      >
+                        {pending ? "보내는 중…" : "보내기"}
+                      </Button>
+                    </div>
                   </div>
                 </div>
               </div>

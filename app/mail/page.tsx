@@ -10,16 +10,23 @@ export const dynamic = "force-dynamic";
 export default async function MailPage({
   searchParams,
 }: {
-  searchParams: Promise<{ status?: string; assignee?: string; q?: string }>;
+  searchParams: Promise<{
+    status?: string;
+    assignee?: string;
+    q?: string;
+    unread?: string;
+  }>;
 }) {
   await enforcePasswordChange();
   const session = await getSession();
   if (!session) redirect("/");
   const query = await searchParams;
+  const unreadOnly = query.unread === "1";
   const view = await getMailList({
     status: query.status,
     assignee: query.assignee,
     q: query.q,
+    unreadOnly,
   });
 
   return (
@@ -52,6 +59,7 @@ export default async function MailPage({
             status: query.status ?? "",
             assignee: query.assignee ?? "",
             q: query.q ?? "",
+            unreadOnly,
           }}
         />
       </main>

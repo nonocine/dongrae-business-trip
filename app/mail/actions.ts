@@ -65,7 +65,10 @@ function toAttachments(raw: unknown): MailAttachmentMeta[] {
 
 // 목록 조회 컬럼 — 상세는 select("*") 라 따로 두지 않습니다.
 const LIST_COLUMNS =
-  "id,from_name,from_email,subject,received_at,has_attachments,assignee_name,status,ai_summary,ai_category,ai_suggested_assignee,ai_processed_at,deleted_at";
+  "id,from_name,from_email,subject,received_at,has_attachments,assignee_name,status,ai_summary,ai_category,ai_suggested_assignee,ai_processed_at,opened_at,deleted_at";
+
+// 일괄 처리 상한 — 실수로 전체를 날리는 사고를 막는 안전장치.
+const BULK_LIMIT = 300;
 
 function toListItem(raw: Record<string, unknown>): MailListItem {
   return {
@@ -81,6 +84,7 @@ function toListItem(raw: Record<string, unknown>): MailListItem {
     ai_category: String(raw.ai_category ?? ""),
     ai_suggested_assignee: String(raw.ai_suggested_assignee ?? ""),
     ai_processed: !!raw.ai_processed_at,
+    opened: !!raw.opened_at,
     deleted_at: (raw.deleted_at as string | null) ?? null,
   };
 }
@@ -116,6 +120,7 @@ export async function getMailList(filters?: {
   status?: string;
   assignee?: string;
   q?: string;
+  unreadOnly?: boolean;
 }): Promise<MailListView> {
   await requireMailAccess();
 
@@ -133,6 +138,8 @@ export async function getMailList(filters?: {
     ? query.not("deleted_at", "is", null)
     : query.is("deleted_at", null);
   if (isMailStatus(status)) query = query.eq("status", status);
+  // "안읽음만" — 상세를 아직 아무도 열지 않은 메일(opened_at IS NULL).
+  if (filters?.unreadOnly) query = query.is("opened_at", null);
   const assignee = (filters?.assignee ?? "").trim();
   if (assignee === "__none__") query = query.eq("assignee_name", "");
   else if (assignee) query = query.eq("assignee_name", assignee);
@@ -321,6 +328,187 @@ async function notifyAssignee(name: string, subject: string): Promise<void> {
       "[mail] 담당 지정 알림 실패:",
       e instanceof Error ? e.message : e,
     );
+  }
+}
+
+// 상세를 열었을 때 1회 기록 — 이미 열린 적이 있으면 덮어쓰지 않습니다
+// (최초 열람 시각을 보존). 실패해도 열람 자체를 막지 않으므로 조용히 넘어갑니다.
+export async function markMailOpened(id: string): Promise<void> {
+  try {
+    await requireMailAccess();
+    if (!id) return;
+    const { error } = await supabaseAdmin
+      .from("mail_messages")
+      .update({ opened_at: new Date().toISOString() })
+      .eq("id", id)
+      .is("opened_at", null);
+    if (error) console.warn("[mail] 열람 기록 실패:", error.message);
+  } catch (e) {
+    console.warn(
+      "[mail] 열람 기록 실패:",
+      e instanceof Error ? e.message : e,
+    );
+  }
+}
+
+// =====================================================================
+// 일괄 처리 (ML-10)
+//   * 전부 요청한 id 목록에 한정합니다. "조건에 맞는 전체" 를 서버가 다시
+//     계산하지 않으므로, 화면에서 본 것과 다른 대상이 처리될 일이 없습니다.
+//   * 상한(BULK_LIMIT)을 둬 사고 범위를 제한합니다.
+// =====================================================================
+
+type BulkResult = { ok: true; count: number } | { ok: false; message: string };
+
+function checkIds(ids: string[]): string[] | null {
+  const clean = [...new Set(ids.filter((i) => typeof i === "string" && i))];
+  if (clean.length === 0 || clean.length > BULK_LIMIT) return null;
+  return clean;
+}
+
+export async function bulkTrashMail(ids: string[]): Promise<BulkResult> {
+  try {
+    await requireMailAccess();
+    const clean = checkIds(ids);
+    if (!clean)
+      return { ok: false, message: `1~${BULK_LIMIT}건까지 선택해주세요.` };
+    const { error } = await supabaseAdmin
+      .from("mail_messages")
+      .update({ deleted_at: new Date().toISOString() })
+      .in("id", clean);
+    if (error) throw new Error(error.message);
+    revalidatePath("/mail");
+    return { ok: true, count: clean.length };
+  } catch (e) {
+    return actionError(e, "삭제하지 못했습니다.") as BulkResult;
+  }
+}
+
+export async function bulkRestoreMail(ids: string[]): Promise<BulkResult> {
+  try {
+    await requireMailAccess();
+    const clean = checkIds(ids);
+    if (!clean)
+      return { ok: false, message: `1~${BULK_LIMIT}건까지 선택해주세요.` };
+    const { error } = await supabaseAdmin
+      .from("mail_messages")
+      .update({ deleted_at: null })
+      .in("id", clean);
+    if (error) throw new Error(error.message);
+    revalidatePath("/mail");
+    return { ok: true, count: clean.length };
+  } catch (e) {
+    return actionError(e, "복구하지 못했습니다.") as BulkResult;
+  }
+}
+
+export async function bulkSetMailStatus(
+  ids: string[],
+  status: string,
+): Promise<BulkResult> {
+  try {
+    await requireMailAccess();
+    if (!isMailStatus(status))
+      return { ok: false, message: "알 수 없는 상태입니다." };
+    const clean = checkIds(ids);
+    if (!clean)
+      return { ok: false, message: `1~${BULK_LIMIT}건까지 선택해주세요.` };
+    const { error } = await supabaseAdmin
+      .from("mail_messages")
+      .update({ status })
+      .in("id", clean);
+    if (error) throw new Error(error.message);
+    revalidatePath("/mail");
+    return { ok: true, count: clean.length };
+  } catch (e) {
+    return actionError(e, "상태를 변경하지 못했습니다.") as BulkResult;
+  }
+}
+
+// 일괄 담당 지정 — 슬랙 DM 은 담당자당 1건으로 묶어 보냅니다.
+//   (10통을 한 번에 배정했다고 DM 을 10개 보내면 알림 폭탄이 됩니다)
+export async function bulkAssignMail(
+  ids: string[],
+  assignee: string,
+): Promise<BulkResult> {
+  try {
+    await requireMailAccess();
+    const clean = checkIds(ids);
+    if (!clean)
+      return { ok: false, message: `1~${BULK_LIMIT}건까지 선택해주세요.` };
+    const name = assignee.trim();
+
+    const { error } = await supabaseAdmin
+      .from("mail_messages")
+      .update({ assignee_name: name })
+      .in("id", clean);
+    if (error) throw new Error(error.message);
+
+    if (name) {
+      await notifyAssignee(
+        name,
+        clean.length === 1
+          ? "메일 1건"
+          : `메일 ${clean.length}건이 한 번에 배정되었습니다`,
+      );
+    }
+    revalidatePath("/mail");
+    return { ok: true, count: clean.length };
+  } catch (e) {
+    return actionError(e, "담당자를 지정하지 못했습니다.") as BulkResult;
+  }
+}
+
+// 휴지통 영구 삭제 — 첨부 Storage 파일·답장 이력까지 정리합니다.
+//   ★ 이미 휴지통에 있는(deleted_at NOT NULL) 메일만 지웁니다. 목록에서
+//     실수로 호출돼도 살아 있는 메일은 절대 지워지지 않습니다.
+//   ★ 네이버 원본은 건드리지 않습니다.
+export async function bulkPurgeMail(ids: string[]): Promise<BulkResult> {
+  try {
+    await requireMailAccess();
+    const clean = checkIds(ids);
+    if (!clean)
+      return { ok: false, message: `1~${BULK_LIMIT}건까지 선택해주세요.` };
+
+    // 휴지통에 있는 것만 대상으로 좁힙니다(서버측 이중 방어).
+    const { data, error } = await supabaseAdmin
+      .from("mail_messages")
+      .select("id, attachments")
+      .in("id", clean)
+      .not("deleted_at", "is", null);
+    if (error) throw new Error(error.message);
+
+    const targets = (data ?? []) as Record<string, unknown>[];
+    if (targets.length === 0)
+      return { ok: false, message: "휴지통에 있는 메일만 영구 삭제할 수 있습니다." };
+
+    const targetIds = targets.map((r) => String(r.id));
+    const paths = targets
+      .flatMap((r) => (Array.isArray(r.attachments) ? r.attachments : []))
+      .map((a) => {
+        const o = (a ?? {}) as Record<string, unknown>;
+        return typeof o.storage_path === "string" ? o.storage_path : null;
+      })
+      .filter((p): p is string => !!p);
+
+    if (paths.length > 0) {
+      const { error: removeError } = await supabaseAdmin.storage
+        .from(MAIL_BUCKET)
+        .remove(paths);
+      if (removeError)
+        console.warn("[mail] 첨부 삭제 실패:", removeError.message);
+    }
+    await supabaseAdmin.from("mail_replies").delete().in("mail_id", targetIds);
+    const { error: deleteError } = await supabaseAdmin
+      .from("mail_messages")
+      .delete()
+      .in("id", targetIds);
+    if (deleteError) throw new Error(deleteError.message);
+
+    revalidatePath("/mail");
+    return { ok: true, count: targetIds.length };
+  } catch (e) {
+    return actionError(e, "영구 삭제하지 못했습니다.") as BulkResult;
   }
 }
 

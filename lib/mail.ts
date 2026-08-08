@@ -22,6 +22,14 @@ export const MAIL_STATUS_DOT: Record<MailStatus, string> = {
   done: "bg-ink-hint",
 };
 
+// 점 색의 의미 — 툴팁·범례에 그대로 씁니다.
+//   ★ 이 점은 '처리 상태' 이지 '읽음 여부' 가 아닙니다(읽음은 opened_at).
+export const MAIL_STATUS_DOT_HINT: Record<MailStatus, string> = {
+  unread: "빨강 = 미처리",
+  processing: "주황 = 처리중",
+  done: "회색 = 완료",
+};
+
 export const MAIL_STATUS_BADGE: Record<MailStatus, string> = {
   unread: "bg-stamp-soft text-stamp",
   processing: "bg-warning-soft text-warning",
@@ -59,6 +67,8 @@ export type MailListItem = {
   // AI 분석을 이미 거쳤는지(ai_processed_at 유무). 분석 전 메일은 요약 자리를
   // 비워 두고 상세에서 [AI 분석] 버튼을 띄우는 데 씁니다.
   ai_processed: boolean;
+  // 상세를 한 번이라도 열었는지(opened_at 유무). status(처리 상태)와 별개 축.
+  opened: boolean;
   deleted_at: string | null;
 };
 
