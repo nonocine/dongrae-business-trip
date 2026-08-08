@@ -63,6 +63,27 @@ export function safeFileName(
   return cleaned.length > 0 ? cleaned.slice(0, 180) : fallback;
 }
 
+// Storage 오브젝트 키용 이름 — ASCII 안전 문자로만 만듭니다.
+//   ★ 이 함수가 있는 이유(2단계 버그 수정):
+//     Supabase Storage 는 오브젝트 키에 한글 등 비ASCII 문자를 허용하지 않아
+//     "(공문)2026년 ….pdf" 같은 첨부의 업로드가 조용히 실패했습니다.
+//     (508KB PDF 가 화면에 "용량이 커서" 로 잘못 안내된 진짜 원인)
+//     표시용 원본 파일명은 attachments.name 에 그대로 보존하고, 키만 안전한
+//     이름으로 바꿉니다. 확장자는 열람 시 뷰어 판별에 쓰이므로 살립니다.
+export function storageSafeName(name: string, index: number): string {
+  const dot = name.lastIndexOf(".");
+  const rawBase = dot > 0 ? name.slice(0, dot) : name;
+  const rawExt = dot > 0 ? name.slice(dot + 1) : "";
+
+  const asciiOnly = (s: string) => s.replace(/[^A-Za-z0-9._-]+/g, "");
+  const base = asciiOnly(rawBase).replace(/^[._-]+/, "").slice(0, 60);
+  const ext = asciiOnly(rawExt).toLowerCase().slice(0, 12);
+
+  // 한글만으로 된 파일명은 base 가 비므로 순번으로 대체합니다.
+  const stem = base.length > 0 ? `${index + 1}-${base}` : `attachment-${index + 1}`;
+  return ext ? `${stem}.${ext}` : stem;
+}
+
 // raw MIME 바이트 → 정규화된 메일 한 통.
 export async function parseRawMail(raw: Buffer): Promise<ParsedMail> {
   const parsed = await simpleParser(unstuffDots(raw));

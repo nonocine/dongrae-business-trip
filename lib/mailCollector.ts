@@ -13,9 +13,10 @@
 
 import Pop3Command from "node-pop3";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
-import { parseRawMail, selectNewUids } from "@/lib/mailParse";
+import { parseRawMail, selectNewUids, storageSafeName } from "@/lib/mailParse";
 import { MAIL_BUCKET, type MailAttachmentMeta } from "@/lib/mail";
-import { sendSlack, siteBaseUrl, slackLink } from "@/lib/slack";
+import { runMailClassification } from "@/lib/mailClassifier";
+import { notifyAutoAssigned } from "@/lib/mailNotify";
 
 const POP_HOST = "pop.naver.com";
 const POP_PORT = 995;
@@ -31,7 +32,12 @@ export type MailFetchSummary = {
   remaining: number; // 이번에 못 가져온 백로그
   attachmentsSaved: number;
   attachmentsSkipped: number;
-  newMails: { from: string; subject: string }[]; // 슬랙 알림용(ML-3)
+  newMails: { from: string; subject: string }[];
+  // --- 2단계(ML-5/ML-6) ---
+  classified: number; // AI 요약·분류에 성공한 건수
+  autoAssigned: number; // confidence 임계값을 넘어 담당자까지 자동 지정된 건수
+  dmSent: number; // 담당자 슬랙 DM 성공 건수
+  slackUnreachable: string[]; // DM 이 닿지 않은 담당자(다이제스트에서 안내)
   message?: string;
 };
 
@@ -46,6 +52,10 @@ function emptySummary(message: string): MailFetchSummary {
     attachmentsSaved: 0,
     attachmentsSkipped: 0,
     newMails: [],
+    classified: 0,
+    autoAssigned: 0,
+    dmSent: 0,
+    slackUnreachable: [],
     message,
   };
 }
@@ -88,31 +98,13 @@ async function ensureBucket(): Promise<void> {
   }
 }
 
-// ML-3. 새 메일 도착 알림 — 관리자 채널에 1건 요약. 0건이면 보내지 않습니다.
-//   슬랙은 부가기능이라 sendSlack 이 내부에서 실패를 삼킵니다(수집 결과 영향 없음).
-const NOTIFY_LIST_MAX = 5;
+// ML-6. 관리자 채널 알림은 "수집할 때마다 건별" → "하루 1회 다이제스트" 로
+//   옮겼습니다(10분 주기라 알림이 너무 잦았음). lib/mailDigest.ts 참고.
+//   대신 수집 직후에는 AI 분류 → 담당자 본인에게만 DM 을 보냅니다.
 
-async function notifyNewMail(summary: MailFetchSummary): Promise<void> {
-  if (summary.saved <= 0) return;
-  const base = siteBaseUrl();
-  const link = base ? slackLink(`${base}/mail`, "공용 메일함 열기") : "/mail";
-  const shown = summary.newMails.slice(0, NOTIFY_LIST_MAX);
-  const rest = summary.newMails.length - shown.length;
-
-  const lines = [
-    `📬 공용 메일 ${summary.saved}건 도착`,
-    ...shown.map((m) => `• ${m.from} — ${m.subject}`),
-  ];
-  if (rest > 0) lines.push(`외 ${rest}건`);
-  if (summary.remaining > 0)
-    lines.push(`(백로그 ${summary.remaining}건은 다음 수집에 이어서)`);
-  lines.push(link);
-
-  await sendSlack("SLACK_WEBHOOK_ADMIN", lines.join("\n"));
-}
-
-// notify: 새 메일 슬랙 알림 발송 여부. Cron 은 true, 화면의 [지금 가져오기] 는
+// notify: 담당자 슬랙 DM 발송 여부. Cron 은 true, 화면의 [지금 가져오기] 는
 //   실행한 사람이 결과를 바로 보고 있으므로 false 로 호출합니다(중복 알림 방지).
+//   ★ AI·슬랙은 전부 부가기능 — 여기서 실패해도 수집·저장 결과는 유지됩니다.
 export async function runMailFetch(options?: {
   notify?: boolean;
 }): Promise<MailFetchSummary> {
@@ -147,7 +139,14 @@ export async function runMailFetch(options?: {
     attachmentsSaved: 0,
     attachmentsSkipped: 0,
     newMails: [],
+    classified: 0,
+    autoAssigned: 0,
+    dmSent: 0,
+    slackUnreachable: [],
   };
+
+  // 이번 수집으로 새로 저장한 메일 id — AI 분류 대상을 이 건들로 좁힙니다.
+  const savedIds: string[] = [];
 
   try {
     const uidlRaw = await pop.UIDL();
@@ -197,14 +196,22 @@ export async function runMailFetch(options?: {
         const id = String((inserted as { id: string }).id);
 
         // 2) 첨부 업로드 — 10MB 이하만. 실패해도 메일 자체는 남깁니다.
+        //    키는 ASCII 안전 이름(storageSafeName)으로 만듭니다. 한글 파일명을
+        //    그대로 키에 쓰면 Supabase Storage 가 거부해 업로드가 실패합니다.
+        //    표시용 원본 이름은 meta.name 에 그대로 남습니다.
         const metas: MailAttachmentMeta[] = [];
-        for (const att of mail.attachments) {
+        for (const [attIndex, att] of mail.attachments.entries()) {
           if (att.size > ATTACHMENT_MAX_BYTES) {
-            metas.push({ name: att.filename, size: att.size, storage_path: null });
+            metas.push({
+              name: att.filename,
+              size: att.size,
+              storage_path: null,
+              skip_reason: "too_large",
+            });
             summary.attachmentsSkipped++;
             continue;
           }
-          const path = `mail/${id}/${att.filename}`;
+          const path = `mail/${id}/${storageSafeName(att.filename, attIndex)}`;
           const { error: uploadError } = await supabaseAdmin.storage
             .from(MAIL_BUCKET)
             .upload(path, att.content, {
@@ -213,11 +220,21 @@ export async function runMailFetch(options?: {
             });
           if (uploadError) {
             console.warn(`[mail] 첨부 업로드 실패(${att.filename}):`, uploadError.message);
-            metas.push({ name: att.filename, size: att.size, storage_path: null });
+            metas.push({
+              name: att.filename,
+              size: att.size,
+              storage_path: null,
+              skip_reason: "failed",
+            });
             summary.attachmentsSkipped++;
             continue;
           }
-          metas.push({ name: att.filename, size: att.size, storage_path: path });
+          metas.push({
+            name: att.filename,
+            size: att.size,
+            storage_path: path,
+            skip_reason: null,
+          });
           summary.attachmentsSaved++;
         }
         if (metas.length > 0) {
@@ -228,6 +245,7 @@ export async function runMailFetch(options?: {
         }
 
         summary.saved++;
+        savedIds.push(id);
         summary.newMails.push({
           from: mail.from_name || mail.from_email || "(보낸사람 없음)",
           subject: mail.subject || "(제목 없음)",
@@ -241,7 +259,20 @@ export async function runMailFetch(options?: {
         );
       }
     }
-    if (options?.notify !== false) await notifyNewMail(summary);
+    // --- ML-5/ML-6: AI 분류 → 담당자 DM ---
+    //   runMailClassification 과 notifyAutoAssigned 는 내부에서 모든 예외를
+    //   삼키므로 여기서 try/catch 를 더 두지 않아도 수집 결과가 보호됩니다.
+    if (savedIds.length > 0) {
+      const ai = await runMailClassification({ ids: savedIds });
+      summary.classified = ai.processed;
+      summary.autoAssigned = ai.autoAssigned.length;
+
+      if (options?.notify !== false && ai.autoAssigned.length > 0) {
+        const dm = await notifyAutoAssigned(ai.autoAssigned);
+        summary.dmSent = dm.sent;
+        summary.slackUnreachable = dm.unreachable;
+      }
+    }
     return summary;
   } finally {
     // DELE 없이 종료 — 원본은 네이버에 그대로 남습니다.
