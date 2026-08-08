@@ -36,6 +36,7 @@ import {
 } from "@/lib/recruitmentDocs";
 import { isEmployeeDocKey } from "@/lib/employeeDocs";
 import { AUTH_LEVELS, isM0Grant } from "@/lib/authLevels";
+import { hashPassword, isHashed } from "@/lib/password";
 import { isEmployeeRoleKey } from "@/lib/employeeRoles";
 import { listRolesForDriver } from "@/lib/employeeRolesServer";
 
@@ -1036,6 +1037,89 @@ export async function unarchiveRecruitmentPosting(
       ok: false,
       message:
         e instanceof Error ? e.message : "종결 취소 중 오류가 발생했습니다.",
+    };
+  }
+}
+
+// =====================================================================
+// SEC-1b: 평문 비밀번호 일괄 해시 전환 (M0 전용)
+//   * SEC-1 의 자동 마이그레이션은 "비번 로그인 성공 시" 발동합니다. 직원
+//     대부분이 구글 로그인만 쓰면 평문이 계속 남아 있게 되므로, 관리자가
+//     한 번에 전환할 수 있는 경로를 둡니다.
+//   * ★ 비밀번호 "값" 은 바꾸지 않습니다. 저장 형태만 평문 → bcrypt 해시로
+//     바꾸므로, 직원이 나중에 비번 로그인을 쓰면 쓰던 비번이 그대로 통합니다.
+//   * ★ 값은 메모리에서만 다루고 로그·반환값·화면 어디에도 내보내지 않습니다.
+//     (반환하는 것은 건수뿐)
+//   * service_role 경유 — 이 작업은 anon 권한에 의존하지 않습니다.
+// =====================================================================
+export type PasswordHashMigrationResult =
+  | {
+      ok: true;
+      converted: number; // 평문 → 해시로 전환한 건수
+      alreadyHashed: number; // 이미 해시라 건너뛴 건수
+      empty: number; // 비번 미설정(빈 값)이라 대상 아님
+      failed: number; // 전환 실패(개별 격리)
+    }
+  | { ok: false; message: string };
+
+export async function migratePlaintextPasswords(): Promise<PasswordHashMigrationResult> {
+  try {
+    // 관장·부장·master 만 통과(그 외는 requireHrAdmin 이 redirect).
+    const me = await requireHrAdmin();
+    if (!isM0Grant({ rank: me.rank })) {
+      return { ok: false, message: "이 작업은 관장·부장만 할 수 있습니다." };
+    }
+
+    const { data, error } = await supabaseAdmin
+      .from("drivers")
+      .select("id, password");
+    if (error) return { ok: false, message: error.message };
+
+    let converted = 0;
+    let alreadyHashed = 0;
+    let empty = 0;
+    let failed = 0;
+
+    for (const row of (data ?? []) as Record<string, unknown>[]) {
+      const id = String(row.id ?? "");
+      const stored = row.password;
+      if (!id) continue;
+      if (typeof stored !== "string" || stored.length === 0) {
+        empty++;
+        continue;
+      }
+      if (isHashed(stored)) {
+        alreadyHashed++;
+        continue;
+      }
+      try {
+        // 기존 값을 그대로 해시 — 비번 자체는 유지됩니다.
+        const hashed = await hashPassword(stored);
+        const { error: upErr } = await supabaseAdmin
+          .from("drivers")
+          .update({ password: hashed })
+          .eq("id", id);
+        if (upErr) throw new Error(upErr.message);
+        converted++;
+      } catch (e) {
+        // 개별 실패는 격리 — 나머지는 계속 전환합니다.
+        //   ★ 로그에 비번 값이 섞이지 않도록 id 와 사유만 남깁니다.
+        failed++;
+        console.warn(
+          `[sec] 비밀번호 해시 전환 실패 (driver id=${id}):`,
+          e instanceof Error ? e.message : e,
+        );
+      }
+    }
+
+    revalidatePath("/hr");
+    revalidatePath("/admin");
+    return { ok: true, converted, alreadyHashed, empty, failed };
+  } catch (e) {
+    return {
+      ok: false,
+      message:
+        e instanceof Error ? e.message : "일괄 전환 중 오류가 발생했습니다.",
     };
   }
 }

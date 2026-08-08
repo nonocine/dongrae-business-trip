@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useMemo, useState } from "react";
 import EmployeeProfileForm from "@/app/hr/EmployeeProfileForm";
 import RecruitmentPostingsTab from "@/app/hr/RecruitmentPostingsTab";
+import PasswordMigrationCard from "@/app/hr/PasswordMigrationCard";
 import RowChevron from "@/app/components/RowChevron";
 import type { Driver, EmployeeProfile } from "@/lib/supabase";
 import type { RecruitmentPostingAdmin } from "@/app/hr/actions";
@@ -55,6 +56,9 @@ export default function HrDashboard({
       {tab === "recruitment" && (
         <RecruitmentPostingsTab postings={recruitmentPostings} />
       )}
+
+      {/* SEC-1b: 보안 관리 — M0(관장·부장)에게만 노출. 탭과 무관하게 하단 고정. */}
+      {canManageAuth && <PasswordMigrationCard />}
     </div>
   );
 }
