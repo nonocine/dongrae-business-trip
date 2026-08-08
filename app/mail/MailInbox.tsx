@@ -17,17 +17,26 @@ import {
   MAIL_STATUS_BADGE,
   MAIL_STATUS_DOT,
   MAIL_STATUS_LABEL,
+  MAIL_CATEGORY_BADGE,
+  MAIL_TRASH_FILTER,
+  attachmentSkipNotice,
   formatBytes,
   type MailDetail,
   type MailListView,
+  type MailReply,
 } from "@/lib/mail";
 import {
   assignMail,
   fetchMailNow,
   getMailDetail,
+  getReplyDraft,
+  listMailReplies,
+  restoreMail,
   saveMailMemo,
+  sendMailReply,
   setMailStatus,
   signMailAttachment,
+  trashMail,
 } from "./actions";
 
 // 수신일 표기 — "2026-08-07 14:03". 값이 없으면 "-".
@@ -61,7 +70,17 @@ export default function MailInbox({
   const [memo, setMemo] = useState("");
   const [search, setSearch] = useState(filters.q);
 
+  // --- 답장(ML-7) ---
+  const [replyOpen, setReplyOpen] = useState(false);
+  const [replyTo, setReplyTo] = useState("");
+  const [replySubjectText, setReplySubjectText] = useState("");
+  const [replyBody, setReplyBody] = useState("");
+  const [replyMarkDone, setReplyMarkDone] = useState(true); // 기본 켬
+  const [replyConfigured, setReplyConfigured] = useState(true);
+  const [replies, setReplies] = useState<MailReply[]>([]);
+
   const open = detail !== null;
+  const trashView = filters.status === MAIL_TRASH_FILTER;
 
   // 모달이 열려 있는 동안 배경(목록) 스크롤을 잠그고, 닫을 때 원래 위치로 되돌립니다.
   //   body 를 position:fixed 로 고정하는 방식이라 iOS 사파리에서도 위치가 튀지 않습니다.
@@ -92,6 +111,8 @@ export default function MailInbox({
   const closeDetail = useCallback(() => {
     setDetail(null);
     setActiveIndex(null);
+    setReplyOpen(false);
+    setReplies([]);
   }, []);
 
   // ESC 로 닫기.
@@ -119,8 +140,12 @@ export default function MailInbox({
     if (!item) return;
     setMsg(null);
     setLoadingId(item.id);
+    setReplyOpen(false);
     start(async () => {
-      const found = await getMailDetail(item.id);
+      const [found, replyList] = await Promise.all([
+        getMailDetail(item.id),
+        listMailReplies(item.id),
+      ]);
       setLoadingId(null);
       if (!found) {
         setMsg({ ok: false, text: "메일을 불러오지 못했습니다." });
@@ -129,6 +154,55 @@ export default function MailInbox({
       setDetail(found);
       setActiveIndex(index);
       setMemo(found.memo);
+      setReplies(replyList);
+    });
+  }
+
+  // [답장] — 받는사람/제목/원문 인용을 서버에서 받아 폼을 채웁니다.
+  function openReply(id: string) {
+    setMsg(null);
+    start(async () => {
+      const draft = await getReplyDraft(id);
+      if (!draft) {
+        setMsg({ ok: false, text: "답장 정보를 불러오지 못했습니다." });
+        return;
+      }
+      setReplyConfigured(draft.configured);
+      setReplyTo(draft.to);
+      setReplySubjectText(draft.subject);
+      // 커서가 맨 위에서 시작하도록 인용문 앞에 빈 줄을 둡니다.
+      setReplyBody(`\n${draft.quoted}`);
+      setReplyMarkDone(true);
+      setReplyOpen(true);
+    });
+  }
+
+  function submitReply() {
+    if (!detail) return;
+    setMsg(null);
+    start(async () => {
+      const res = await sendMailReply({
+        id: detail.id,
+        to: replyTo,
+        subject: replySubjectText,
+        body: replyBody,
+        markDone: replyMarkDone,
+      });
+      if (!res.ok) {
+        setMsg({ ok: false, text: res.message });
+        // 실패 이력도 남으므로 목록을 새로고침합니다.
+        setReplies(await listMailReplies(detail.id));
+        return;
+      }
+      setMsg({ ok: true, text: "답장을 보냈습니다." });
+      setReplyOpen(false);
+      const [refreshed, replyList] = await Promise.all([
+        getMailDetail(detail.id),
+        listMailReplies(detail.id),
+      ]);
+      if (refreshed) setDetail(refreshed);
+      setReplies(replyList);
+      router.refresh();
     });
   }
 
@@ -160,12 +234,14 @@ export default function MailInbox({
     });
   }
 
-  function openAttachment(path: string | null, name: string) {
+  function openAttachment(
+    path: string | null,
+    name: string,
+    reason: "too_large" | "failed" | null | undefined,
+  ) {
     if (!path) {
-      setMsg({
-        ok: false,
-        text: `${name} 은(는) 용량이 커서 사본을 저장하지 않았습니다. 네이버 메일에서 확인하세요.`,
-      });
+      // 사본이 없는 이유를 구분해 안내합니다(예전에는 전부 "용량 초과" 였음).
+      setMsg({ ok: false, text: attachmentSkipNotice(name, reason) });
       return;
     }
     setMsg(null);
@@ -190,11 +266,16 @@ export default function MailInbox({
       const tail =
         res.remaining > 0 ? ` (남은 ${res.remaining}통은 다음 주기에)` : "";
       const failed = res.failed > 0 ? ` · 실패 ${res.failed}건` : "";
+      // AI 분류는 부가기능이라 0건이어도 수집 자체는 성공입니다.
+      const ai =
+        res.classified > 0
+          ? ` · AI 분류 ${res.classified}건(자동배정 ${res.autoAssigned}건)`
+          : "";
       setMsg({
         ok: true,
         text:
           res.saved > 0
-            ? `새 메일 ${res.saved}통을 가져왔습니다.${tail}${failed}`
+            ? `새 메일 ${res.saved}통을 가져왔습니다.${tail}${failed}${ai}`
             : `새 메일이 없습니다.${failed}`,
       });
       router.refresh();
@@ -230,6 +311,7 @@ export default function MailInbox({
                     {MAIL_STATUS_LABEL[s]}
                   </option>
                 ))}
+                <option value={MAIL_TRASH_FILTER}>🗑 휴지통</option>
               </select>
             </label>
             <label className={labelCls}>
@@ -282,11 +364,19 @@ export default function MailInbox({
 
       <section className={cardCls}>
         <div className="flex items-center justify-between gap-3">
-          <h2 className="font-bold text-ink">받은 메일</h2>
+          <h2 className="font-bold text-ink">
+            {trashView ? "휴지통" : "받은 메일"}
+          </h2>
           <span className="text-xs text-ink-muted">
             최근 {view.items.length}건
           </span>
         </div>
+        {trashView && (
+          <p className="mt-2 text-xs text-ink-muted">
+            삭제한 메일은 30일 뒤 자동으로 완전히 지워집니다. 네이버 메일의 원본은
+            그대로 남아 있습니다.
+          </p>
+        )}
         <div className="mt-3 divide-y divide-line overflow-hidden rounded-xl border border-line">
           {view.items.map((item, index) => {
             const unread = item.status === "unread";
@@ -296,37 +386,57 @@ export default function MailInbox({
                 type="button"
                 onClick={() => openIndex(index)}
                 aria-haspopup="dialog"
-                className="flex w-full cursor-pointer items-center gap-3 px-3 py-3 text-left transition-colors hover:bg-navy-soft/40 focus-visible:bg-navy-soft/40 focus-visible:outline-none"
+                className="flex w-full cursor-pointer items-start gap-3 px-3 py-3 text-left transition-colors hover:bg-navy-soft/40 focus-visible:bg-navy-soft/40 focus-visible:outline-none"
               >
                 <span
                   aria-hidden
-                  className={`h-2.5 w-2.5 shrink-0 rounded-full ${MAIL_STATUS_DOT[item.status]}`}
+                  className={`mt-1.5 h-2.5 w-2.5 shrink-0 rounded-full ${MAIL_STATUS_DOT[item.status]}`}
                 />
                 <span
-                  className={`w-28 shrink-0 truncate text-sm ${
+                  className={`mt-0.5 w-28 shrink-0 truncate text-sm ${
                     unread ? "font-bold text-ink" : "font-medium text-ink-body"
                   }`}
                 >
                   {item.from_name || item.from_email || "(보낸사람 없음)"}
                 </span>
-                <span
-                  className={`min-w-0 flex-1 truncate text-sm ${
-                    unread ? "font-bold text-ink" : "text-ink-body"
-                  }`}
-                >
-                  {item.subject || "(제목 없음)"}
-                  {item.has_attachments && (
-                    <span className="ml-1.5 text-ink-hint">📎</span>
+                <span className="min-w-0 flex-1">
+                  <span
+                    className={`flex items-center gap-1.5 truncate text-sm ${
+                      unread ? "font-bold text-ink" : "text-ink-body"
+                    }`}
+                  >
+                    {item.ai_category && (
+                      <span
+                        className={`shrink-0 rounded-full px-1.5 py-0.5 text-[10px] font-semibold ${
+                          MAIL_CATEGORY_BADGE[item.ai_category] ??
+                          MAIL_CATEGORY_BADGE["기타"]
+                        }`}
+                      >
+                        {item.ai_category}
+                      </span>
+                    )}
+                    <span className="truncate">
+                      {item.subject || "(제목 없음)"}
+                    </span>
+                    {item.has_attachments && (
+                      <span className="shrink-0 text-ink-hint">📎</span>
+                    )}
+                  </span>
+                  {/* AI 한 줄 요약 — 제목 아래 회색 한 줄 */}
+                  {item.ai_summary && (
+                    <span className="mt-0.5 block truncate text-xs font-normal text-ink-muted">
+                      {item.ai_summary}
+                    </span>
                   )}
                 </span>
-                <span className="hidden w-32 shrink-0 text-right text-xs text-ink-muted sm:block">
+                <span className="mt-0.5 hidden w-32 shrink-0 text-right text-xs text-ink-muted sm:block">
                   {formatReceived(item.received_at)}
                 </span>
-                <span className="w-16 shrink-0 truncate text-right text-xs text-ink-muted">
+                <span className="mt-0.5 w-16 shrink-0 truncate text-right text-xs text-ink-muted">
                   {item.assignee_name || "미지정"}
                 </span>
                 {loadingId === item.id && (
-                  <span className="shrink-0 text-xs text-ink-hint">
+                  <span className="mt-0.5 shrink-0 text-xs text-ink-hint">
                     여는 중…
                   </span>
                 )}
@@ -335,7 +445,9 @@ export default function MailInbox({
           })}
           {view.items.length === 0 && (
             <p className="px-4 py-12 text-center text-sm text-ink-muted">
-              조건에 맞는 메일이 없습니다.
+              {trashView
+                ? "휴지통이 비어 있습니다."
+                : "조건에 맞는 메일이 없습니다."}
             </p>
           )}
         </div>
@@ -466,6 +578,30 @@ export default function MailInbox({
                 </label>
               </div>
 
+              {/* AI 요약 — 담당자가 본문을 열기 전에 성격을 파악하도록 */}
+              {detail.ai_summary && (
+                <p className="mt-2 flex items-start gap-1.5 text-xs text-ink-muted">
+                  {detail.ai_category && (
+                    <span
+                      className={`shrink-0 rounded-full px-1.5 py-0.5 text-[10px] font-semibold ${
+                        MAIL_CATEGORY_BADGE[detail.ai_category] ??
+                        MAIL_CATEGORY_BADGE["기타"]
+                      }`}
+                    >
+                      {detail.ai_category}
+                    </span>
+                  )}
+                  <span>{detail.ai_summary}</span>
+                </p>
+              )}
+              {/* 자동 지정되지 않은 추천은 참고용으로만 보여줍니다. */}
+              {!detail.assignee_name && detail.ai_suggested_assignee && (
+                <p className="mt-1 text-xs text-ink-hint">
+                  AI 추천 담당자: {detail.ai_suggested_assignee} (확신도가 낮아
+                  자동 지정하지 않았습니다)
+                </p>
+              )}
+
               {detail.attachments.length > 0 && (
                 <ul className="mt-2 flex flex-wrap gap-2">
                   {detail.attachments.map((att, i) => (
@@ -474,7 +610,11 @@ export default function MailInbox({
                         type="button"
                         disabled={pending}
                         onClick={() =>
-                          openAttachment(att.storage_path, att.name)
+                          openAttachment(
+                            att.storage_path,
+                            att.name,
+                            att.skip_reason,
+                          )
                         }
                         className="rounded-lg border border-line px-3 py-1.5 text-xs text-ink-body hover:bg-surface disabled:opacity-50"
                       >
@@ -517,7 +657,118 @@ export default function MailInbox({
               )}
             </div>
 
-            {/* 메모 */}
+            {/* 답장 이력 — 누가·언제 보냈는지 공유가 목적입니다. */}
+            {replies.length > 0 && (
+              <div className="max-h-40 shrink-0 overflow-auto border-t border-line px-4 py-3 sm:px-5">
+                <h3 className="text-xs font-semibold text-ink">
+                  답장 이력 {replies.length}건
+                </h3>
+                <ul className="mt-2 space-y-2">
+                  {replies.map((r) => (
+                    <li
+                      key={r.id}
+                      className="rounded-lg border border-line bg-surface px-3 py-2"
+                    >
+                      <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs">
+                        <span className="font-semibold text-ink">
+                          {r.sent_by}
+                        </span>
+                        <span className="text-ink-muted">
+                          {formatReceived(r.sent_at)}
+                        </span>
+                        <span className="text-ink-muted">→ {r.to_email}</span>
+                        {r.status === "failed" ? (
+                          <span className="rounded-full bg-stamp-soft px-1.5 py-0.5 text-[10px] font-semibold text-stamp">
+                            실패
+                          </span>
+                        ) : (
+                          <span className="rounded-full bg-success-soft px-1.5 py-0.5 text-[10px] font-semibold text-success">
+                            발송
+                          </span>
+                        )}
+                      </div>
+                      {r.error_message && (
+                        <p className="mt-1 text-[11px] text-stamp">
+                          {r.error_message}
+                        </p>
+                      )}
+                      <pre className="mt-1 max-h-24 overflow-auto whitespace-pre-wrap text-[11px] leading-5 text-ink-body">
+                        {r.body}
+                      </pre>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
+
+            {/* 답장 작성 폼 */}
+            {replyOpen && (
+              <div className="max-h-[55%] shrink-0 overflow-auto border-t border-line px-4 py-3 sm:px-5">
+                {!replyConfigured && (
+                  <p className={`mb-2 ${noticeError}`}>
+                    발신 설정이 없어 보낼 수 없습니다. (NAVER_POP_USER /
+                    NAVER_POP_PASSWORD 환경변수)
+                  </p>
+                )}
+                <div className="grid gap-2 sm:grid-cols-2">
+                  <label className={labelCls}>
+                    받는사람
+                    <input
+                      className={inputCls}
+                      value={replyTo}
+                      onChange={(e) => setReplyTo(e.target.value)}
+                    />
+                  </label>
+                  <label className={labelCls}>
+                    제목
+                    <input
+                      className={inputCls}
+                      value={replySubjectText}
+                      onChange={(e) => setReplySubjectText(e.target.value)}
+                    />
+                  </label>
+                </div>
+                <label className={`${labelCls} mt-2 block`}>
+                  본문
+                  <textarea
+                    rows={10}
+                    className={`${inputCls} font-mono text-xs`}
+                    value={replyBody}
+                    onChange={(e) => setReplyBody(e.target.value)}
+                  />
+                </label>
+                <div className="mt-2 flex flex-wrap items-center justify-between gap-2">
+                  <label className="flex items-center gap-2 text-xs text-ink-body">
+                    <input
+                      type="checkbox"
+                      checked={replyMarkDone}
+                      onChange={(e) => setReplyMarkDone(e.target.checked)}
+                    />
+                    보낸 뒤 이 메일을 완료 처리
+                  </label>
+                  <div className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      className={btnSecondary}
+                      disabled={pending}
+                      onClick={() => setReplyOpen(false)}
+                    >
+                      취소
+                    </button>
+                    <button
+                      type="button"
+                      className={btnPrimary}
+                      disabled={pending || !replyConfigured}
+                      onClick={submitReply}
+                    >
+                      보내기
+                    </button>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* 메모 + 답장/삭제 */}
             <div className="shrink-0 border-t border-line px-4 py-3 sm:px-5">
               <div className="flex items-end gap-2">
                 <label className={`${labelCls} flex-1`}>
@@ -542,6 +793,47 @@ export default function MailInbox({
                 >
                   저장
                 </button>
+              </div>
+              <div className="mt-2 flex flex-wrap items-center gap-2">
+                {!replyOpen && !detail.deleted_at && (
+                  <button
+                    type="button"
+                    className={btnSecondary}
+                    disabled={pending}
+                    onClick={() => openReply(detail.id)}
+                  >
+                    ↩ 답장
+                  </button>
+                )}
+                {detail.deleted_at ? (
+                  <button
+                    type="button"
+                    className={btnSecondary}
+                    disabled={pending}
+                    onClick={() =>
+                      runAction(
+                        () => restoreMail(detail.id),
+                        "휴지통에서 복구했습니다.",
+                      )
+                    }
+                  >
+                    복구
+                  </button>
+                ) : (
+                  <button
+                    type="button"
+                    className="inline-flex h-[38px] items-center justify-center rounded-lg border border-stamp bg-card px-4 text-sm font-semibold text-stamp shadow-sm transition hover:bg-stamp-soft disabled:opacity-60"
+                    disabled={pending}
+                    onClick={() =>
+                      runAction(
+                        () => trashMail(detail.id),
+                        "휴지통으로 옮겼습니다. (네이버 원본은 그대로)",
+                      )
+                    }
+                  >
+                    삭제
+                  </button>
+                )}
               </div>
             </div>
           </div>
