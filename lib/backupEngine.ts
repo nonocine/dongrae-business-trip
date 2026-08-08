@@ -172,19 +172,182 @@ async function fetchAll(table: string): Promise<Record<string, unknown>[]> {
   return out;
 }
 
-// --- Google Drive -----------------------------------------------------
-// 서비스 계정 private_key 는 환경변수에 한 줄로 들어가면서 개행이 "\n"
-// 문자열로 이스케이프됩니다. 실제 개행으로 되돌리지 않으면 서명이 실패합니다.
-// 값 전체가 따옴표로 감싸진 경우(일부 CLI)도 함께 벗겨냅니다.
-export function normalizePrivateKey(raw: string): string {
-  let k = raw.trim();
+// --- Google 서비스 계정 키 정규화 --------------------------------------
+// GDRIVE_SA_KEY 에 들어올 수 있는 형태가 여러 가지라 방어적으로 처리합니다.
+//   (a) 서비스 계정 JSON 전문(콘솔에서 받은 파일 내용 그대로)
+//   (b) private_key 값만 (PEM)
+// 어느 쪽이든 환경변수에 한 줄로 들어가면서 개행이 리터럴 "\n" 으로
+// 이스케이프되는 경우가 많고, 그대로 두면 PEM 파싱이
+// `error:1E08010C:DECODER routines::unsupported` 로 실패합니다.
+//
+// ⚠️ 이 모듈의 어떤 로그·반환값에도 키 내용 자체는 절대 담지 않습니다.
+//    (길이·마커 유무 같은 메타정보만 진단에 사용)
+
+const PEM_BEGIN = "-----BEGIN PRIVATE KEY-----";
+const PEM_END = "-----END PRIVATE KEY-----";
+
+export type KeyDiagnostics = {
+  // 환경변수 원본 길이(문자 수). 값 자체는 포함하지 않습니다.
+  rawLength: number;
+  // JSON 전문으로 파싱됐는지. false 면 PEM 단독으로 간주.
+  jsonParsed: boolean;
+  // 정규화 후 PEM 이 BEGIN 마커로 시작하는지.
+  hasBeginMarker: boolean;
+  // JSON 의 client_email 과 GDRIVE_SA_EMAIL 일치 여부. JSON 이 아니면 null.
+  clientEmailMatches: boolean | null;
+};
+
+// 앞뒤 따옴표 제거 — 일부 CLI/대시보드가 값을 통째로 감싸 저장합니다.
+function unquote(s: string): string {
+  const t = s.trim();
   if (
-    (k.startsWith('"') && k.endsWith('"')) ||
-    (k.startsWith("'") && k.endsWith("'"))
+    t.length >= 2 &&
+    ((t.startsWith('"') && t.endsWith('"')) ||
+      (t.startsWith("'") && t.endsWith("'")))
   ) {
-    k = k.slice(1, -1);
+    return t.slice(1, -1);
   }
-  return k.replace(/\\n/g, "\n");
+  return t;
+}
+
+// PEM 본문 정규화 — 리터럴 \n → 실제 개행, \r 제거, 앞뒤 공백 정리.
+//   * 이미 실제 개행인 키는 그대로 보존됩니다(치환 대상이 없으므로).
+function normalizePem(raw: string): string {
+  return unquote(raw)
+    .replace(/\\r\\n/g, "\n") // 리터럴 "\r\n"
+    .replace(/\\n/g, "\n") // 리터럴 "\n"
+    .replace(/\r/g, "") // 실제 CR(윈도우 줄바꿈 잔재)
+    .trim();
+}
+
+export type ResolvedServiceAccount = {
+  privateKey: string;
+  // JSON 전문에서 읽은 client_email. PEM 단독이면 null.
+  clientEmail: string | null;
+  diag: KeyDiagnostics;
+};
+
+// GDRIVE_SA_KEY → 사용 가능한 PEM. 형식이 어긋나면 명확한 메시지로 throw.
+export function resolveServiceAccountKey(
+  raw: string,
+  expectedEmail: string | null | undefined
+): ResolvedServiceAccount {
+  const rawLength = raw.length;
+  const unquoted = unquote(raw);
+
+  // (a) JSON 전문 시도 — 실패해도 throw 하지 않고 (b) 로 넘어갑니다.
+  let jsonParsed = false;
+  let pemSource = unquoted;
+  let clientEmail: string | null = null;
+  if (unquoted.startsWith("{")) {
+    try {
+      const o = JSON.parse(unquoted) as {
+        private_key?: unknown;
+        client_email?: unknown;
+      };
+      if (typeof o?.private_key === "string") {
+        jsonParsed = true;
+        pemSource = o.private_key;
+        clientEmail =
+          typeof o.client_email === "string" ? o.client_email : null;
+      }
+    } catch {
+      // JSON 처럼 보였지만 파싱 실패 — PEM 단독으로 계속 시도합니다.
+    }
+  }
+
+  const privateKey = normalizePem(pemSource);
+  const hasBeginMarker = privateKey.startsWith(PEM_BEGIN);
+  const clientEmailMatches = clientEmail
+    ? clientEmail.trim().toLowerCase() ===
+      (expectedEmail ?? "").trim().toLowerCase()
+    : null;
+
+  const diag: KeyDiagnostics = {
+    rawLength,
+    jsonParsed,
+    hasBeginMarker,
+    clientEmailMatches,
+  };
+
+  if (!hasBeginMarker || !privateKey.endsWith(PEM_END)) {
+    throw new Error(
+      `GDRIVE_SA_KEY 형식 오류 — private_key 가 "${PEM_BEGIN}" 로 시작하고 ` +
+        `"${PEM_END}" 로 끝나야 합니다. 서비스 계정 JSON 전문 또는 private_key ` +
+        `값을 그대로 붙여넣었는지 확인하세요.`
+    );
+  }
+
+  return { privateKey, clientEmail, diag };
+}
+
+// --- 진단 힌트 --------------------------------------------------------
+// 실패 원인을 화면·로그에서 좁힐 수 있도록 메타정보만 한 줄로 요약합니다.
+//   * 키 값·client_email 주소 등 실제 내용은 절대 포함하지 않습니다.
+//   * 어떤 상황에서도 throw 하지 않습니다(진단이 본 에러를 덮으면 안 됨).
+export function describeKeyDiagnostics(): string {
+  try {
+    const email = process.env.GDRIVE_SA_EMAIL ?? "";
+    const raw = process.env.GDRIVE_SA_KEY ?? "";
+    const folder = process.env.GDRIVE_BACKUP_FOLDER_ID ?? "";
+
+    const parts: string[] = [
+      `SA_EMAIL ${email ? "설정됨" : "미설정"}`,
+      `FOLDER_ID ${folder ? "설정됨" : "미설정"}`,
+      `SA_KEY 길이 ${raw.length}자`,
+    ];
+    if (!raw) {
+      return `진단: ${parts.join(" · ")}`;
+    }
+
+    let diag: KeyDiagnostics;
+    try {
+      diag = resolveServiceAccountKey(raw, email).diag;
+    } catch {
+      // 형식 오류로 throw 된 경우에도 메타정보는 다시 계산해 보여줍니다.
+      const unquoted = unquote(raw);
+      let jsonParsed = false;
+      let pemSource = unquoted;
+      let clientEmail: string | null = null;
+      try {
+        const o = JSON.parse(unquoted) as {
+          private_key?: unknown;
+          client_email?: unknown;
+        };
+        if (typeof o?.private_key === "string") {
+          jsonParsed = true;
+          pemSource = o.private_key;
+          clientEmail =
+            typeof o.client_email === "string" ? o.client_email : null;
+        }
+      } catch {
+        /* PEM 단독 */
+      }
+      diag = {
+        rawLength: raw.length,
+        jsonParsed,
+        hasBeginMarker: normalizePem(pemSource).startsWith(PEM_BEGIN),
+        clientEmailMatches: clientEmail
+          ? clientEmail.trim().toLowerCase() === email.trim().toLowerCase()
+          : null,
+      };
+    }
+
+    parts.push(`JSON 파싱 ${diag.jsonParsed ? "성공" : "아님(PEM 단독)"}`);
+    parts.push(`PEM BEGIN 마커 ${diag.hasBeginMarker ? "있음" : "없음"}`);
+    parts.push(
+      `client_email ${
+        diag.clientEmailMatches === null
+          ? "비교불가(JSON 아님)"
+          : diag.clientEmailMatches
+            ? "GDRIVE_SA_EMAIL 과 일치"
+            : "GDRIVE_SA_EMAIL 과 불일치"
+      }`
+    );
+    return `진단: ${parts.join(" · ")}`;
+  } catch {
+    return "진단: 수집 실패";
+  }
 }
 
 async function uploadToDrive(
@@ -200,9 +363,12 @@ async function uploadToDrive(
     );
   }
 
+  // JSON 전문/PEM 단독 모두 허용. 형식이 어긋나면 여기서 명확히 실패합니다.
+  const { privateKey } = resolveServiceAccountKey(rawKey, email);
+
   const jwt = new JWT({
     email,
-    key: normalizePrivateKey(rawKey),
+    key: privateKey,
     scopes: ["https://www.googleapis.com/auth/drive"],
   });
   const { token } = await jwt.getAccessToken();
@@ -377,11 +543,14 @@ export async function runBackup(triggeredBy: string): Promise<BackupSummary> {
       elapsedMs: Date.now() - startedAt,
     };
   } catch (e) {
-    const msg = e instanceof Error ? e.message : String(e);
+    const raw = e instanceof Error ? e.message : String(e);
+    // 구글 인증 실패는 원인이 대부분 키 형식이라 진단 힌트를 함께 남깁니다.
+    // (메타정보만 — 키 값은 포함되지 않습니다)
+    const msg = `${raw}\n${describeKeyDiagnostics()}`;
     await finish({ status: "failed", error_message: msg });
     await sendSlack(
       "SLACK_WEBHOOK_ADMIN",
-      `🚨 백업 실패 — ${msg}\n트리거: ${triggeredBy}`
+      `🚨 백업 실패 — ${raw}\n${describeKeyDiagnostics()}\n트리거: ${triggeredBy}`
     );
     return {
       ok: false,

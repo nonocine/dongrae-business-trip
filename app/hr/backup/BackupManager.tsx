@@ -92,7 +92,10 @@ export default function BackupManager({
             이미 진행 중인 백업이 있어 새로 시작할 수 없습니다.
           </p>
         )}
-        {error && <p className={`mt-3 ${noticeError}`}>{error}</p>}
+        {/* 실패 메시지에는 진단 힌트가 줄바꿈으로 붙습니다 — pre-line 으로 보존. */}
+        {error && (
+          <p className={`mt-3 whitespace-pre-line ${noticeError}`}>{error}</p>
+        )}
         {success && <p className={`mt-3 ${noticeSuccess}`}>{success}</p>}
       </section>
 
@@ -148,7 +151,10 @@ export default function BackupManager({
                 {logs
                   .filter((l) => l.error_message)
                   .map((l) => (
-                    <li key={l.id} className="text-xs text-stamp">
+                    <li
+                      key={l.id}
+                      className="whitespace-pre-line text-xs text-stamp"
+                    >
                       <span className="font-semibold">
                         {fmtKstDateTime(l.started_at)}
                       </span>{" "}
