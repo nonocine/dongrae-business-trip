@@ -6,6 +6,7 @@ import {
   enforcePasswordChange,
   getBusinessTrip,
   getSession,
+  isManagerAdmin,
 } from "@/app/actions";
 
 export const dynamic = "force-dynamic";
@@ -17,9 +18,10 @@ export default async function TripDetailPage({
 }) {
   const { id } = await params;
   await enforcePasswordChange();
-  const [trip, session] = await Promise.all([
+  const [trip, session, canManageAll] = await Promise.all([
     getBusinessTrip(id),
     getSession(),
+    isManagerAdmin(),
   ]);
   // 권한 없거나 미존재 → 메인으로 리다이렉트 (로그인 필요 시 로그인 화면)
   if (!trip || !session) redirect("/");
@@ -34,7 +36,7 @@ export default async function TripDetailPage({
             ← 목록
           </Link>
         </div>
-        <TripDetail trip={trip} isAdmin={session.kind === "admin"} />
+        <TripDetail trip={trip} isAdmin={canManageAll} />
       </main>
     </>
   );

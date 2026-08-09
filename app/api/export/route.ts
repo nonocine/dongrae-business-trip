@@ -1,5 +1,5 @@
 import * as XLSX from "xlsx";
-import { isAdmin, listActivities } from "@/app/actions";
+import { isManagerAdmin, listActivities } from "@/app/actions";
 import {
   ACTIVITY_KINDS,
   ACTIVITY_LABEL,
@@ -206,7 +206,8 @@ const HEADER_FILL: Record<ActivityKind, string> = {
 };
 
 export async function GET(request: Request) {
-  if (!(await isAdmin())) {
+  // SEC-3b: 공유비번 admin → 구글 관장·master 판정으로 이전.
+  if (!(await isManagerAdmin())) {
     return new Response("관리자 권한이 필요합니다.", { status: 403 });
   }
 

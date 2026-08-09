@@ -18,7 +18,8 @@ import {
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-const ADMIN_COOKIE = "dongrae_admin";
+// SEC-3b: 발급 경로가 제거된 구버전 쿠키 — 남아있는 값 정리용으로만 지웁니다.
+const LEGACY_ADMIN_COOKIE = "dongrae_admin";
 const EMPLOYEE_COOKIE = "dongrae_employee";
 
 function callbackUri(request: Request): string {
@@ -170,7 +171,7 @@ export async function GET(request: Request) {
 
   // 7) 쿠키 발급 — 다른 세션과의 우선순위 혼선을 막기 위해 기존 세션 정리.
   const store = await cookies();
-  store.delete(ADMIN_COOKIE);
+  store.delete(LEGACY_ADMIN_COOKIE);
   store.delete(EMPLOYEE_COOKIE);
   store.set(GOOGLE_SESSION_COOKIE, serializeGoogleSession(session), {
     httpOnly: true,

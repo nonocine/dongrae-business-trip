@@ -18,10 +18,27 @@ npm run test:e2e:ui               # UI 모드(디버깅)
 
 | 변수 | 용도 | 기본값 |
 |------|------|--------|
-| `E2E_HR_NAME` | 관장·부장 직원 이름. HR 세션 쿠키(`dongrae_employee`)를 위조해 인증이 필요한 페이지를 테스트. **미설정 시 HR 테스트는 자동 skip.** | (없음) |
+| `E2E_HR_NAME` | 관장·부장 직원 이름. HR 세션 쿠키(`dongrae_employee`)를 **서명해서** 심어 인증이 필요한 페이지를 테스트. **미설정 시 HR 테스트는 자동 skip.** | (없음) |
 | `E2E_SLUG` | 테스트 대상 채용공고 slug | `2026-1` |
+| `SESSION_SECRET` | 세션 쿠키 HMAC 서명 키(SEC-3a). **필수** — 없으면 테스트가 세션을 만들 수 없습니다. | (없음) |
 
 직원 실명을 저장소에 남기지 않기 위해 `.env.local`(gitignore 대상)에서만 읽습니다.
+
+## 세션 쿠키 (SEC-3a 이후)
+
+세션 쿠키는 HMAC 서명본만 유효합니다. 평문 JSON·이름 평문을 심는 예전 방식은
+서버가 거부하므로, 테스트는 `e2e/helpers.ts` 의 헬퍼로 실제 로그인과 동일하게
+서명된 쿠키를 심습니다.
+
+```ts
+import { setGoogleSession, setEmployeeSession } from "./helpers";
+
+await setGoogleSession(context, baseURL, { email: "x@onnainna.kr", rank: "관장" });
+await setEmployeeSession(context, baseURL, "홍길동");
+```
+
+두 헬퍼 모두 `lib/signedCookie.ts` 의 `signPayload` 를 그대로 사용하며, 서명 키는
+`playwright.config.ts` 가 `.env.local` 에서 읽어 `process.env` 로 주입합니다.
 
 ## 커버리지
 

@@ -1,6 +1,6 @@
 // 직원 로그인 — 구글 워크스페이스 단일.
-//   * 직원 비번 로그인(loginEmployee)·관리자 비번 로그인 진입점은 제거되었습니다.
-//     (loginEmployee 액션 자체는 app/actions.ts 에 보존 — 다음 단계에서 정리 예정)
+//   * SEC-3b: 직원 비번 로그인·공유비번 관리자 로그인은 화면과 서버액션 모두
+//     제거되었습니다. 로그인 경로는 구글 워크스페이스 하나뿐입니다.
 //   * onnainna.kr 계정만 통과(서버 콜백에서 도메인·등록 검증).
 //   * next 로 로그인 후 복귀 경로를 지정(기본: 직원 메인 "/").
 export default function LoginForm({ next = "/" }: { next?: string }) {

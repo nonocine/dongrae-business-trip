@@ -4,7 +4,7 @@ import Link from "next/link";
 import { useState } from "react";
 import { logoutCurrent } from "@/app/actions";
 
-type SessionKind = "admin" | "employee" | null;
+type SessionKind = "employee" | null;
 
 type NavChild = { href: string; label: string };
 type NavItem = { href: string; label: string; children?: NavChild[] };

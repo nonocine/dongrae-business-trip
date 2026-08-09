@@ -138,17 +138,8 @@ async function getAuthContext(): Promise<AuthContext | null> {
     return { rank, email: null, authLevel, driverId, name: s.name };
   }
 
-  if (s && s.kind === "admin") {
-    // 공유비번 admin = 최고관리자. M0 인정.
-    return {
-      rank: "관장",
-      email: null,
-      authLevel: "M0",
-      driverId: null,
-      name: "관리자",
-    };
-  }
-
+  // SEC-3b: 공유비번 admin 분기 제거. 구글 관장·master 는 위 구글 세션 경로에서
+  //   rank/authLevel 로 M0 판정되므로 별도 분기가 필요 없습니다.
   return null;
 }
 

@@ -277,32 +277,10 @@ function AdminArea({
 }
 
 export default async function EmployeeDashboard({
-  kind,
   name,
 }: {
-  kind: "admin" | "employee";
   name: string | null;
 }) {
-  // 관리자(공유비번 세션)는 인사기록카드 개념이 없음 — 인사말 + 관리자 영역만.
-  if (kind === "admin") {
-    return (
-      <div className="space-y-4">
-        <section className={cardCls}>
-          <h2 className="text-xl font-bold tracking-tight text-ink sm:text-2xl">
-            관리자 님, 안녕하세요 👋
-          </h2>
-          <p className="mt-1.5 text-sm text-ink-muted">
-            아래에서 업무를 시작하세요.
-          </p>
-        </section>
-        <AdminArea
-          trainingNotMet={null}
-          unreadMailCount={await getUnreadMailCount()}
-        />
-      </div>
-    );
-  }
-
   // 본인 인사정보·사진·직무·구글세션(M0 판정용)·최신 공지·심사 배정·의무교육 요약을 병렬 조회.
   const [
     my,

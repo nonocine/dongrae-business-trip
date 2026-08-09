@@ -27,9 +27,7 @@ export default async function ActivitiesPage() {
       <main className="mx-auto w-full max-w-3xl flex-1 space-y-4 px-4 py-5 sm:py-6">
         <section className={cardCls}>
           <h2 className="text-lg font-bold tracking-tight text-ink">
-            {session.kind === "admin"
-              ? "전체 활동 일지"
-              : `${session.name} 님의 활동 일지`}
+            {`${session.name} 님의 활동 일지`}
           </h2>
           <p className="mt-1 text-xs text-ink-muted">
             외근 · 출장 · 국내연수 · 해외연수 · 교육 모두 한곳에서 관리하세요.

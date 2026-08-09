@@ -1,24 +1,17 @@
 import { test, expect } from "@playwright/test";
-import { collectErrors } from "./helpers";
+import { collectErrors, setEmployeeSession } from "./helpers";
 
-// HR(관장·부장) 세션 쿠키는 직원 이름 평문이므로 위조 가능.
+// HR(관장·부장) 세션을 SEC-3a 서명 방식으로 심어 인증이 필요한 화면을 테스트합니다.
 //   E2E_HR_NAME 을 .env.local 에 두면(저장소 미커밋) 아래 테스트가 활성화됩니다.
+//   rank 검증은 서버가 실제 drivers 테이블에서 수행하므로 실명이 필요합니다.
 const HR_NAME = process.env.E2E_HR_NAME;
 const SLUG = process.env.E2E_SLUG ?? "2026-1";
 
 test.describe("HR 채용 문서 다운로드", () => {
-  test.skip(!HR_NAME, "E2E_HR_NAME 미설정 — HR 세션 위조 불가로 skip");
+  test.skip(!HR_NAME, "E2E_HR_NAME 미설정 — HR 세션 생성 불가로 skip");
 
   test.beforeEach(async ({ context, baseURL }) => {
-    // 한글 이름은 URL-인코딩해서 넣는다 — 서버 쿠키 파서가 decodeURIComponent 하므로
-    // raw 한글을 그대로 보내면 Cookie 헤더에서 모지바케가 된다.
-    await context.addCookies([
-      {
-        name: "dongrae_employee",
-        value: encodeURIComponent(HR_NAME as string),
-        url: baseURL as string,
-      },
-    ]);
+    await setEmployeeSession(context, baseURL as string, HR_NAME as string);
   });
 
   const docs = [

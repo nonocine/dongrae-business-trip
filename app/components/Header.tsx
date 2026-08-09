@@ -34,7 +34,7 @@ export default async function Header() {
   return (
     <HeaderClient
       kind={session?.kind ?? null}
-      name={session?.kind === "employee" ? session.name : null}
+      name={session?.name ?? null}
       canAccessHr={hrAccess}
       canAccessAdmin={canAccessAdmin}
     />

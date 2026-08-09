@@ -34,9 +34,11 @@ import {
   parseGoogleSession,
   type GoogleSession,
 } from "@/lib/googleAuth";
-import { signPayload, verifyPayload } from "@/lib/signedCookie";
+import { verifyPayload } from "@/lib/signedCookie";
 
-const ADMIN_COOKIE = "dongrae_admin";
+// SEC-3b: 발급 경로(adminLogin)가 제거되어 더 이상 인증에 쓰이지 않습니다.
+//   기존 사용자 브라우저에 남아있는 쿠키를 로그아웃 시 지우기 위해서만 유지합니다.
+const LEGACY_ADMIN_COOKIE = "dongrae_admin";
 const EMPLOYEE_COOKIE = "dongrae_employee";
 
 const STORAGE_BUCKET_PHOTOS = "trip-photos";
@@ -45,21 +47,13 @@ const STORAGE_BUCKET_RECEIPTS = "trip-receipts";
 const TRANSPORT_VALUES: TransportType[] = ["vehicle", "public", "walk"];
 
 // =====================================================================
-// Sessions (admin / employee)
+// Sessions (employee)
+//   * SEC-3b: 공유비번 관리자 세션(kind:"admin")은 제거되었습니다. 관리자 권한은
+//     구글 관장·master 판정(isManagerAdmin)으로 일원화합니다.
 // =====================================================================
-export type Session =
-  | { kind: "admin" }
-  | { kind: "employee"; name: string };
-
-export async function isAdmin(): Promise<boolean> {
-  const store = await cookies();
-  const expected = process.env.ADMIN_PASSWORD;
-  if (!expected) return false;
-  return store.get(ADMIN_COOKIE)?.value === expected;
-}
+export type Session = { kind: "employee"; name: string };
 
 export async function getSession(): Promise<Session | null> {
-  if (await isAdmin()) return { kind: "admin" };
   const store = await cookies();
   // SEC-3a: 직원 쿠키도 서명본만 신뢰. 서명이 없거나 어긋나면 이 경로는 건너뛰고
   //   아래 구글 세션 판정으로 넘어갑니다(= 미인증으로 취급).
@@ -81,14 +75,15 @@ export async function getGoogleSession(): Promise<GoogleSession | null> {
   return parseGoogleSession(store.get(GOOGLE_SESSION_COOKIE)?.value);
 }
 
-// Google Workspace 로그인 통과 여부 — HR 접근 게이트(isAdmin 과 병렬).
+// Google Workspace 로그인 통과 여부 — HR 접근 게이트.
 export async function isGoogleAuth(): Promise<boolean> {
   return (await getGoogleSession()) !== null;
 }
 
 // 관장(최고관리자) 권한 — 구글 세션이 마스터이거나 rank==='관장' 이면 true.
 //   * /admin 및 관리자 전용 기능의 단일 권한 기준.
-//   * 구버전 공유비번(ADMIN_PASSWORD)은 더 이상 이 판정에 사용하지 않습니다.
+//   * SEC-3b: 구버전 공유비번(ADMIN_PASSWORD) 경로는 완전히 제거되었습니다.
+//     관리자 판정이 필요한 곳은 전부 이 함수를 씁니다.
 export async function isManagerAdmin(): Promise<boolean> {
   const g = await getGoogleSession();
   return !!g && (g.isMaster || g.rank === "관장");
@@ -107,104 +102,9 @@ async function requireSession(): Promise<Session> {
   return session;
 }
 
-export async function adminLogin(formData: FormData) {
-  const password = String(formData.get("password") ?? "");
-  const expected = process.env.ADMIN_PASSWORD;
-  if (!expected) {
-    return {
-      ok: false,
-      message: "ADMIN_PASSWORD 환경변수가 설정되지 않았습니다.",
-    };
-  }
-  if (password !== expected) {
-    return { ok: false, message: "비밀번호가 올바르지 않습니다." };
-  }
-  const store = await cookies();
-  // 관리자 로그인 시 직원 세션은 정리
-  store.delete(EMPLOYEE_COOKIE);
-  store.set(ADMIN_COOKIE, password, {
-    httpOnly: true,
-    sameSite: "lax",
-    path: "/",
-    maxAge: 60 * 60 * 24 * 7,
-    secure: process.env.NODE_ENV === "production",
-  });
-  redirect("/admin");
-}
-
-export async function loginEmployee(formData: FormData) {
-  const name = String(formData.get("name") ?? "").trim();
-  const password = String(formData.get("password") ?? "").trim();
-  if (!name) {
-    return { ok: false as const, message: "직원을 선택해주세요." };
-  }
-  // 직급별 비번 정책이 달라(일반 4자리 / 관장·부장 강력) 길이만 확인.
-  // 실제 일치 여부는 아래 DB 조회에서 검증합니다.
-  if (!password) {
-    return { ok: false as const, message: "비밀번호를 입력해주세요." };
-  }
-  // select("*") — must_change_password 컬럼이 아직 없어도 안전합니다.
-  const { data, error } = await supabase
-    .from("drivers")
-    .select("*")
-    .eq("name", name)
-    .maybeSingle();
-  if (error) return { ok: false as const, message: error.message };
-  if (!data) {
-    return { ok: false as const, message: "등록되지 않은 직원입니다." };
-  }
-  if (data.is_active === false) {
-    return {
-      ok: false as const,
-      message: "퇴사 처리된 계정입니다. 관리자에게 문의해주세요.",
-    };
-  }
-  if (!data.password) {
-    return {
-      ok: false as const,
-      message: "비밀번호가 등록되지 않은 직원입니다. 관리자에게 문의해주세요.",
-    };
-  }
-  // SEC-1: 해시 검증. 기존 평문 저장값은 폴백 비교 후 그 자리에서 해시로 올립니다.
-  const verified = await verifyPassword(password, data.password as string);
-  if (!verified.ok) {
-    return { ok: false as const, message: "비밀번호가 올바르지 않습니다." };
-  }
-  if (verified.needsUpgrade) {
-    // 무통증 마이그레이션 — 실패해도 로그인은 진행합니다(다음 로그인 때 재시도).
-    try {
-      const upgraded = await hashPassword(password);
-      const { error: upErr } = await supabase
-        .from("drivers")
-        .update({ password: upgraded })
-        .eq("id", data.id as string);
-      if (upErr) console.warn("[auth] 비밀번호 해시 전환 실패:", upErr.message);
-    } catch (e) {
-      console.warn(
-        "[auth] 비밀번호 해시 전환 실패:",
-        e instanceof Error ? e.message : e,
-      );
-    }
-  }
-  const store = await cookies();
-  store.delete(ADMIN_COOKIE);
-  // SEC-3a: 이름 평문 대신 서명본을 저장 — 쿠키만으로는 위조할 수 없습니다.
-  store.set(EMPLOYEE_COOKIE, signPayload({ name: data.name as string }), {
-    httpOnly: true,
-    sameSite: "lax",
-    path: "/",
-    maxAge: 60 * 60 * 24 * 30,
-    secure: process.env.NODE_ENV === "production",
-  });
-  // 임시 비밀번호(must_change_password=true)면 비번 변경 페이지로 강제 이동.
-  const mustChange =
-    (data as { must_change_password?: unknown }).must_change_password === true;
-  redirect(mustChange ? "/profile/password" : "/");
-}
-
 export async function logoutCurrent() {
   const store = await cookies();
-  store.delete(ADMIN_COOKIE);
+  store.delete(LEGACY_ADMIN_COOKIE);
   store.delete(EMPLOYEE_COOKIE);
   store.delete(GOOGLE_SESSION_COOKIE);
   redirect("/");
@@ -711,11 +611,6 @@ export async function enforcePasswordChange(): Promise<void> {
 // 본인 비밀번호 변경 (직원 세션 전용).
 export async function changePassword(formData: FormData) {
   const session = await requireSession();
-  if (session.kind !== "employee") {
-    throw new Error(
-      "관리자 비밀번호는 환경변수(ADMIN_PASSWORD)로 관리됩니다."
-    );
-  }
 
   const currentPassword = String(formData.get("current_password") ?? "").trim();
   const newPassword = String(formData.get("new_password") ?? "").trim();
@@ -1200,8 +1095,9 @@ export async function deleteActivity(formData: FormData) {
   if (fetchErr) throw new Error(fetchErr.message);
   if (!row) throw new Error("삭제할 활동을 찾을 수 없습니다.");
 
-  // 권한: 관리자 또는 본인 활동
-  if (session.kind !== "admin" && (row as { author: string }).author !== session.name) {
+  // 권한: 관리자(구글 관장·master) 또는 본인 활동
+  const canManageAll = await isManagerAdmin();
+  if (!canManageAll && (row as { author: string }).author !== session.name) {
     throw new Error("본인 활동만 삭제할 수 있습니다.");
   }
 
@@ -1229,7 +1125,7 @@ export async function deleteActivity(formData: FormData) {
   const drivingLogId = (row as { driving_log_id: string | null })
     .driving_log_id;
   if (drivingLogId) {
-    if (session.kind === "admin") {
+    if (canManageAll) {
       await supabase.from("driving_logs").delete().eq("id", drivingLogId);
     } else {
       await supabase

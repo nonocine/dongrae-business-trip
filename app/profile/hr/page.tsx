@@ -24,8 +24,6 @@ export default async function MyHrPage() {
 
   const session = await getSession();
   if (!session) redirect("/");
-  // 관리자는 본인 인사기록카드 개념이 없음
-  if (session.kind === "admin") redirect("/admin");
 
   const [my, myTrainings, myCerts, myCertRequests, certPrefill, myLeavePlan] =
     await Promise.all([

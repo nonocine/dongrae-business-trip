@@ -235,10 +235,7 @@ export default async function Home({
         {recruitmentCount > 0 && (
           <RecruitmentBanner count={recruitmentCount} />
         )}
-        <EmployeeDashboard
-          kind={session.kind}
-          name={session.kind === "employee" ? session.name : null}
-        />
+        <EmployeeDashboard name={session.name} />
       </main>
     </>
   );

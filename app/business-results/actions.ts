@@ -1,7 +1,7 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import { getSession } from "@/app/actions";
+import { getSession, isManagerAdmin } from "@/app/actions";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
 
 export type BusinessResult = {
@@ -160,9 +160,10 @@ function tableMissing(error: { code?: string; message?: string } | null) {
 async function requireUser() {
   const session = await getSession();
   if (!session) throw new Error("로그인이 필요합니다.");
+  // SEC-3b: 관리자 판정은 구글 관장·master 기준(공유비번 세션 제거).
   return {
-    name: session.kind === "employee" ? session.name : "관리자",
-    isAdmin: session.kind === "admin",
+    name: session.name,
+    isAdmin: await isManagerAdmin(),
   };
 }
 
@@ -353,7 +354,7 @@ export async function getBusinessResultsData(
       staffTrainingConfigured: false,
       staffTrainings: [],
     };
-  const isAdmin = session.kind === "admin";
+  const isAdmin = await isManagerAdmin();
 
   const [resultQuery, promotionQuery, registry, roomMaster, coinPay, staff] =
     await Promise.all([
