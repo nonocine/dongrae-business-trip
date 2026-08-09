@@ -1,4 +1,6 @@
-import { MASTER_EMAIL } from "@/lib/googleAuth";
+// 클라이언트 컴포넌트도 이 모듈을 import 합니다 — 서버 전용 모듈(googleAuth →
+//   signedCookie → node:crypto)로 이어지지 않도록 순수 상수 모듈에서 가져옵니다.
+import { MASTER_EMAIL } from "@/lib/authConstants";
 
 // =====================================================================
 // 직원 권한등급(auth_level) — ERP 호환 시스템 권한 코드.

@@ -34,6 +34,7 @@ import {
   parseGoogleSession,
   type GoogleSession,
 } from "@/lib/googleAuth";
+import { signPayload, verifyPayload } from "@/lib/signedCookie";
 
 const ADMIN_COOKIE = "dongrae_admin";
 const EMPLOYEE_COOKIE = "dongrae_employee";
@@ -60,8 +61,13 @@ export async function isAdmin(): Promise<boolean> {
 export async function getSession(): Promise<Session | null> {
   if (await isAdmin()) return { kind: "admin" };
   const store = await cookies();
-  const name = store.get(EMPLOYEE_COOKIE)?.value;
-  if (name && name.length > 0) return { kind: "employee", name };
+  // SEC-3a: 직원 쿠키도 서명본만 신뢰. 서명이 없거나 어긋나면 이 경로는 건너뛰고
+  //   아래 구글 세션 판정으로 넘어갑니다(= 미인증으로 취급).
+  const emp = verifyPayload<{ name?: unknown }>(
+    store.get(EMPLOYEE_COOKIE)?.value
+  );
+  const name = typeof emp?.name === "string" ? emp.name : "";
+  if (name.length > 0) return { kind: "employee", name };
   // Google Workspace 세션 — 직원 비번 로그인과 동등하게 취급.
   //   이름은 매칭된 직원명 우선(없으면 구글 표시 이름).
   const g = parseGoogleSession(store.get(GOOGLE_SESSION_COOKIE)?.value);
@@ -182,7 +188,8 @@ export async function loginEmployee(formData: FormData) {
   }
   const store = await cookies();
   store.delete(ADMIN_COOKIE);
-  store.set(EMPLOYEE_COOKIE, data.name as string, {
+  // SEC-3a: 이름 평문 대신 서명본을 저장 — 쿠키만으로는 위조할 수 없습니다.
+  store.set(EMPLOYEE_COOKIE, signPayload({ name: data.name as string }), {
     httpOnly: true,
     sameSite: "lax",
     path: "/",

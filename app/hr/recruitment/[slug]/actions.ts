@@ -32,6 +32,7 @@ import { supabaseAdmin } from "@/lib/supabaseAdmin";
 import { requireHrAdmin } from "@/app/hr/actions";
 import { isEmployeeDocKey } from "@/lib/employeeDocs";
 import { isM0Grant } from "@/lib/authLevels";
+import { signPayload, verifyPayload } from "@/lib/signedCookie";
 import {
   SCREENING_ITEMS,
   SCREENING_MAX,
@@ -1688,7 +1689,7 @@ export async function authenticateExternalJudge(input: {
 // 외부위원 세션 (쿠키 'dongrae_external_judge')
 //   * 기존 직원/관리자 세션(Session in app/actions.ts)과 완전 분리.
 //     getSession() 은 외부위원을 인식하지 못함 — 의도된 격리.
-//   * 쿠키 값: ExternalJudgeSession 객체의 JSON 문자열.
+//   * 쿠키 값: ExternalJudgeSession 객체의 HMAC 서명본(SEC-3a, lib/signedCookie.ts).
 //   * 유효기간 8시간 — 면접 당일 단위로 만료.
 //   * 매 요청마다 requireExternalJudge() 가 DB 재검증을 수행하므로,
 //     쿠키 발급 후 관리자가 위원/공고를 비활성화해도 즉시 차단됨.
@@ -1731,7 +1732,8 @@ export async function loginExternalJudge(input: {
   };
 
   const store = await cookies();
-  store.set(EXTERNAL_JUDGE_COOKIE, JSON.stringify(session), {
+  // SEC-3a: 평문 JSON 대신 서명본 — 쿠키만으로는 위원 신분을 위조할 수 없습니다.
+  store.set(EXTERNAL_JUDGE_COOKIE, signPayload(session), {
     httpOnly: true,
     sameSite: "lax",
     path: "/",
@@ -1751,30 +1753,28 @@ export async function logoutExternalJudge(): Promise<void> {
 
 // ---------------------------------------------------------------------
 // getExternalJudgeSession — 쿠키만 신뢰. DB 조회 없음 (가벼움).
-//   파싱 실패·필수 필드 누락 시 null. 페이지가 단순 분기에 사용.
+//   서명 불일치·파싱 실패·필수 필드 누락 시 null. 페이지가 단순 분기에 사용.
+//   * SEC-3a: 서명 검증(위조 차단) 후 기존 필드 검증을 그대로 통과해야 합니다.
 // ---------------------------------------------------------------------
 export async function getExternalJudgeSession(): Promise<ExternalJudgeSession | null> {
   const store = await cookies();
-  const raw = store.get(EXTERNAL_JUDGE_COOKIE)?.value;
-  if (!raw) return null;
-  try {
-    const parsed = JSON.parse(raw) as Partial<ExternalJudgeSession>;
-    if (
-      typeof parsed?.judgeId === "string" &&
-      parsed.judgeId.length > 0 &&
-      typeof parsed?.externalPoolId === "string" &&
-      typeof parsed?.name === "string" &&
-      typeof parsed?.postingId === "string" &&
-      parsed.postingId.length > 0 &&
-      typeof parsed?.postingSlug === "string" &&
-      parsed.postingSlug.length > 0
-    ) {
-      return parsed as ExternalJudgeSession;
-    }
-    return null;
-  } catch {
-    return null;
+  const parsed = verifyPayload<Partial<ExternalJudgeSession>>(
+    store.get(EXTERNAL_JUDGE_COOKIE)?.value
+  );
+  if (!parsed) return null;
+  if (
+    typeof parsed?.judgeId === "string" &&
+    parsed.judgeId.length > 0 &&
+    typeof parsed?.externalPoolId === "string" &&
+    typeof parsed?.name === "string" &&
+    typeof parsed?.postingId === "string" &&
+    parsed.postingId.length > 0 &&
+    typeof parsed?.postingSlug === "string" &&
+    parsed.postingSlug.length > 0
+  ) {
+    return parsed as ExternalJudgeSession;
   }
+  return null;
 }
 
 // ---------------------------------------------------------------------
