@@ -60,7 +60,15 @@ export default async function RecruitmentApplyPage({
   // 접수 시작 전이면 본인 인증/지원서 조회 없이 안내만 노출.
   const session = upcoming ? null : await getKakaoSession();
   // 로그인 된 경우에만 기존 지원서를 미리 불러옵니다.
+  //   * getApplicationDraft 는 접수 기간 제한이 없으므로(조회 전용) 마감 후에도
+  //     본인 지원서를 그대로 읽어옵니다.
   const draft = session ? await getApplicationDraft(slug) : null;
+
+  // 제출 완료(= draft 아님) 여부. 마감 후 열람 허용 대상은 이 경우뿐입니다.
+  //   * 임시저장만 하고 제출하지 않은 건은 열람시키지 않습니다(접수 안 된 상태라
+  //     "접수됐다"는 오해를 줄 수 있음).
+  const submitted =
+    !!draft?.application && draft.application.status !== "draft";
 
   return (
     <main className="mx-auto w-full max-w-4xl flex-1 px-4 py-6 sm:px-6 sm:py-8 lg:px-8 lg:py-10">
@@ -90,6 +98,17 @@ export default async function RecruitmentApplyPage({
             후에 지원서를 작성할 수 있습니다.
           </p>
         </section>
+      ) : closed && submitted ? (
+        // 마감 후 본인 열람 — 제출 완료된 지원서를 읽기전용으로 보여줍니다.
+        //   * 공고가 종결(status ≠ published)되면 위 getApplyPosting 이 null 을
+        //     반환해 이미 notFound() 로 빠지므로, 여기까지 오지 않습니다.
+        <ApplyForm
+          posting={posting}
+          initialApplicant={draft?.applicant ?? null}
+          initialApplication={draft?.application ?? null}
+          kakaoNickname={session?.nickname ?? ""}
+          viewOnly
+        />
       ) : closed ? (
         <section className="rounded-xl border border-line border-l-4 border-l-stamp bg-card p-5 shadow-sm">
           <p className={noticeWarning}>접수가 마감되었습니다.</p>
@@ -97,6 +116,18 @@ export default async function RecruitmentApplyPage({
             마감 시각 이후에는 새 지원서를 접수할 수 없습니다. 이미 임시저장된
             지원서가 있더라도 제출은 불가합니다.
           </p>
+          {!session && (
+            <div className="mt-5 border-t border-line pt-5">
+              <p className="text-sm font-bold text-ink">
+                이미 지원하셨나요?
+              </p>
+              <p className="mt-1.5 text-xs text-ink-muted sm:text-sm">
+                지원 당시 사용한 카카오 계정으로 로그인하면 제출하신 지원서와
+                접수번호를 다시 확인할 수 있습니다.
+              </p>
+              <KakaoLoginButton slug={slug} className="mt-4" />
+            </div>
+          )}
         </section>
       ) : !session ? (
         <KakaoLoginGate slug={slug} />
@@ -116,7 +147,6 @@ export default async function RecruitmentApplyPage({
 // 카카오 로그인 게이트 — 비로그인 상태에서 노출되는 안내 + 시작 버튼
 // =====================================================================
 function KakaoLoginGate({ slug }: { slug: string }) {
-  const href = `/api/auth/kakao?slug=${encodeURIComponent(slug)}`;
   return (
     <section className="rounded-xl border border-line border-l-4 border-l-brand-blue bg-card p-5 shadow-sm sm:p-6">
       <h2 className="text-base font-bold text-ink sm:text-lg">
@@ -126,13 +156,27 @@ function KakaoLoginGate({ slug }: { slug: string }) {
         카카오 계정으로 본인을 인증하면 지원서 작성을 시작할 수 있습니다.
         작성하신 내용은 카카오 계정에 연결되어 임시저장 · 이어 작성이 가능합니다.
       </p>
-      <a
-        href={href}
-        className="mt-5 inline-flex h-[44px] items-center justify-center gap-2 rounded-lg bg-[#FEE500] px-5 text-sm font-semibold text-[#191919] shadow-sm transition hover:brightness-95"
-      >
-        <span aria-hidden="true" className="text-base">💬</span>
-        카카오로 시작하기
-      </a>
+      <KakaoLoginButton slug={slug} className="mt-5" />
     </section>
+  );
+}
+
+// 카카오 로그인 버튼 — 접수 중 게이트와 마감 후 열람 안내가 공유합니다.
+function KakaoLoginButton({
+  slug,
+  className = "",
+}: {
+  slug: string;
+  className?: string;
+}) {
+  const href = `/api/auth/kakao?slug=${encodeURIComponent(slug)}`;
+  return (
+    <a
+      href={href}
+      className={`inline-flex h-[44px] items-center justify-center gap-2 rounded-lg bg-[#FEE500] px-5 text-sm font-semibold text-[#191919] shadow-sm transition hover:brightness-95 ${className}`}
+    >
+      <span aria-hidden="true" className="text-base">💬</span>
+      카카오로 시작하기
+    </a>
   );
 }

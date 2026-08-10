@@ -20,6 +20,9 @@ import {
   type EmployeeTraining,
 } from "@/lib/supabase";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
+import { verifyPayload } from "@/lib/signedCookie";
+import { applicantNumberLast4 } from "@/lib/applicantNumber";
+import { sendPlainMail, isMailerConfigured } from "@/lib/mailer";
 
 // =====================================================================
 // 채용 지원 — 외부 지원자가 채용 공고에 직접 접수하는 흐름
@@ -38,9 +41,16 @@ export type KakaoSession = {
   nickname: string;
 };
 
+// 카카오 세션 — kakao_id 쿠키는 HMAC 서명본만 신뢰합니다(SEC-3a 패턴).
+//   * 서명이 없거나 어긋나면 미로그인으로 취급합니다. 무서명 폴백은 두지 않습니다
+//     — 폴백이 있으면 서명을 떼고 보내는 것만으로 우회되어 의미가 없습니다.
+//   * 배포 시점의 기존 카카오 로그인은 무효가 되어 재로그인이 필요합니다.
 export async function getKakaoSession(): Promise<KakaoSession | null> {
   const store = await cookies();
-  const id = store.get(KAKAO_ID_COOKIE)?.value;
+  const parsed = verifyPayload<{ kakaoId?: unknown }>(
+    store.get(KAKAO_ID_COOKIE)?.value
+  );
+  const id = typeof parsed?.kakaoId === "string" ? parsed.kakaoId : "";
   if (!id) return null;
   return {
     kakaoId: id,
@@ -435,6 +445,59 @@ async function findExistingApplication(
 }
 
 // =====================================================================
+// 접수완료 안내 메일 — 지원자 본인에게. 접수번호(특히 뒷 4자리)를 알려주는 것이
+//   주목적입니다. 대외 공고는 뒷 4자리로만 본인을 표기하기 때문입니다.
+//   * export 하지 않는 내부 헬퍼("use server" 파일은 async export 만 허용).
+//   * 호출처에서 try/catch 로 감싸 실패를 격리합니다.
+// =====================================================================
+async function sendApplicationReceiptMail(input: {
+  to: string | null;
+  applicantName: string;
+  applicantNumber: string;
+  postingTitle: string;
+  postingField: string;
+  slug: string;
+}): Promise<void> {
+  const to = (input.to ?? "").trim();
+  // 이메일이 없거나 발송 설정이 없으면 조용히 건너뜁니다(에러 아님).
+  if (!to || !isMailerConfigured()) return;
+
+  const last4 = applicantNumberLast4(input.applicantNumber);
+  const base = siteBaseUrl();
+  const applyUrl = base ? `${base}/recruitment/${input.slug}/apply` : "";
+
+  // null = 값이 없어 생략할 줄, "" = 의도한 빈 줄.
+  const lines: (string | null)[] = [
+    `${input.applicantName}님, 지원서 접수가 정상적으로 완료되었습니다.`,
+    "",
+    `[지원 공고] ${input.postingTitle}`,
+    input.postingField ? `[모집 분야] ${input.postingField}` : null,
+    "",
+    "────────────────────────",
+    `접수번호 뒷 4자리 :  ${last4}`,
+    "────────────────────────",
+    `전체 접수번호 : ${input.applicantNumber}`,
+    "",
+    "면접 대상자 공고와 최종 합격자 공고에는 응시자 보호를 위해 성명 일부와",
+    `접수번호를 비공개 처리합니다. 본인 여부는 위 접수번호 뒷 4자리(${last4})로`,
+    "확인해 주시기 바랍니다.",
+    "",
+    "접수가 마감된 뒤에도 채용 절차가 끝나기 전까지는, 지원 당시 사용하신",
+    "카카오 계정으로 로그인하시면 제출한 지원서를 다시 확인하실 수 있습니다.",
+    applyUrl || null,
+    "",
+    "본 메일은 발신 전용입니다.",
+    "동래구청소년센터",
+  ];
+
+  await sendPlainMail({
+    to,
+    subject: `[동래구청소년센터] 지원서 접수 완료 (접수번호 뒷 4자리 ${last4})`,
+    text: lines.filter((l): l is string => l !== null).join("\n"),
+  });
+}
+
+// =====================================================================
 // 임시저장 — 어느 탭에서든 호출 가능. 어떤 필드도 필수 아님.
 //   * 본인 확인은 카카오 세션으로만 강제(인증 게이트).
 //   * 입력값 검증은 submit 에서만. 여기서는 들어온 값 그대로 저장.
@@ -657,6 +720,26 @@ export async function submitApplication(
     const applicationId = String((appRow as { id: unknown }).id);
 
     revalidatePath(`/recruitment/${slug}/apply`);
+
+    // 지원자 접수완료 메일(부가기능) — 슬랙 알림과 같은 원칙으로 완전 격리합니다.
+    //   * 발송 실패·미설정은 로그만 남기고 제출은 성공 처리합니다.
+    //   * 이 지점은 draft → submitted 전이에서만 도달합니다(위에서 이미 제출된
+    //     건은 return 으로 차단) → 중복 발송이 발생하지 않습니다.
+    try {
+      await sendApplicationReceiptMail({
+        to: email,
+        applicantName: name,
+        applicantNumber: applicantNumber ?? "",
+        postingTitle: posting.title,
+        postingField: posting.field,
+        slug,
+      });
+    } catch (mailErr) {
+      console.warn(
+        "[mail] 접수완료 안내 발송 실패:",
+        mailErr instanceof Error ? mailErr.message : mailErr
+      );
+    }
 
     // 관리자 채널 알림(부가기능) — 실패해도 지원 제출에는 절대 영향 없게 완전 격리.
     //   (지원자 입장에서 제출이 막히면 안 됨이 최우선)

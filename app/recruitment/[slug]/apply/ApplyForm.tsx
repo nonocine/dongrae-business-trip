@@ -29,6 +29,8 @@ import {
   noticeWarning,
 } from "@/lib/ui";
 import SignaturePad from "@/app/components/SignaturePad";
+// 접수번호 뒷4자리 — 대외 공고 빌더와 동일한 로직을 공유합니다.
+import { applicantNumberLast4 } from "@/lib/applicantNumber";
 import {
   saveApplicationDraft,
   submitApplication,
@@ -154,11 +156,15 @@ export default function ApplyForm({
   initialApplicant,
   initialApplication,
   kakaoNickname,
+  viewOnly = false,
 }: {
   posting: ApplyPosting;
   initialApplicant: RecruitmentApplicant | null;
   initialApplication: RecruitmentApplication | null;
   kakaoNickname: string;
+  // 접수 마감 후 열람 모드 — 안내 문구만 달라집니다.
+  //   (수정 차단은 alreadySubmitted 로 이미 걸리고, 서버 액션도 마감이면 거부합니다)
+  viewOnly?: boolean;
 }) {
   // 이미 제출 완료된 지원서면 폼 자체를 비활성화하고 안내만 노출.
   const alreadySubmitted =
@@ -542,10 +548,38 @@ export default function ApplyForm({
   return (
     <div className="space-y-4">
       {alreadySubmitted && (
-        <div className={noticeSuccess}>
-          이미 접수 완료된 지원서입니다. 수정할 수 없습니다.
+        <div className="space-y-3">
+          <div className={noticeSuccess}>
+            {viewOnly
+              ? "접수가 마감되었습니다. 아래는 제출하신 지원서 사본이며 수정할 수 없습니다."
+              : "이미 접수 완료된 지원서입니다. 수정할 수 없습니다."}
+          </div>
+
+          {/* 접수번호 안내 — 공고에는 뒷 4자리만 공개되므로 그 부분을 크게 강조. */}
           {applicantNumber && (
-            <span className="ml-2 font-mono">({applicantNumber})</span>
+            <section className="rounded-xl border-2 border-brand-blue bg-card p-4 shadow-sm sm:p-5">
+              <p className="text-xs font-bold text-brand-blue sm:text-sm">
+                내 접수번호 뒷 4자리
+              </p>
+              <p className="mt-1 font-mono text-4xl font-black tracking-[0.2em] text-brand-blue sm:text-5xl">
+                {applicantNumberLast4(applicantNumber)}
+              </p>
+              <p className="mt-2 text-xs text-ink-body sm:text-sm">
+                면접 대상자·합격자 공고에서 접수번호 뒷 4자리{" "}
+                <span className="font-mono font-bold text-ink">
+                  {applicantNumberLast4(applicantNumber)}
+                </span>
+                로 본인을 확인하세요.
+              </p>
+              <p className="mt-1.5 text-xs text-ink-muted">
+                전체 접수번호{" "}
+                <span className="font-mono">{applicantNumber}</span>
+              </p>
+              <p className="mt-1.5 text-xs text-ink-muted">
+                접수 마감 후에도 채용 절차가 끝나기 전까지는 카카오 로그인으로 이
+                화면에서 지원서를 다시 확인할 수 있습니다.
+              </p>
+            </section>
           )}
         </div>
       )}

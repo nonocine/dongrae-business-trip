@@ -54,6 +54,8 @@ import {
   CELL_BORDERS,
 } from "./recruitmentDocx";
 import { fmtKstDate, fmtKstDateTime } from "./datetime";
+// 접수번호 뒷4자리 — 지원 화면(ApplyForm)과 반드시 같은 값이어야 합니다.
+import { applicantNumberLast4 } from "./applicantNumber";
 
 // 휴대전화 11자리면 010-1234-5678 형태로. 그 외는 원문.
 function fmtPhone(raw: string): string {
@@ -1007,7 +1009,7 @@ export async function buildInterviewNoticeDoc(
   });
 
   const bodyRows = targets.map((a, i) => {
-    const last4 = a.applicant_number.slice(-4);
+    const last4 = applicantNumberLast4(a.applicant_number);
     return new TableRow({
       children: [
         dataCell(String(i + 1)),
@@ -1105,7 +1107,7 @@ export async function buildFinalNoticeDoc(data: ReportData): Promise<Buffer> {
     ],
   });
   const bodyRows = finals.map((a, i) => {
-    const last4 = a.applicant_number.slice(-4);
+    const last4 = applicantNumberLast4(a.applicant_number);
     return new TableRow({
       children: [
         dataCell(String(i + 1)),

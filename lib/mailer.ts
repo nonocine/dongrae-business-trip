@@ -26,6 +26,25 @@ function transport() {
   });
 }
 
+// 첨부 없는 본문 메일 — 채용 접수완료 안내 등.
+//   * 실패 시 throw. 부가기능에서 쓸 때는 호출처에서 try/catch 로 격리하세요.
+export async function sendPlainMail(input: {
+  to: string;
+  subject: string;
+  text: string;
+}): Promise<void> {
+  if (!isMailerConfigured()) {
+    throw new Error("발송 설정이 필요합니다. (GMAIL_SENDER / GMAIL_APP_PASSWORD)");
+  }
+  const tp = transport();
+  await tp.sendMail({
+    from: `동래구청소년센터 <${SENDER()}>`,
+    to: input.to,
+    subject: input.subject,
+    text: input.text,
+  });
+}
+
 export type MailAttachment = {
   filename: string;
   content: Buffer;

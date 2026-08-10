@@ -1,5 +1,6 @@
 import { cookies } from "next/headers";
 import { NextResponse } from "next/server";
+import { signPayload } from "@/lib/signedCookie";
 
 // 카카오 콜백 — 인가 코드 수신 → 토큰 교환 → 사용자 조회 → 쿠키 세션 발급.
 // 끝에 /recruitment/{state}/apply 로 redirect.
@@ -117,8 +118,11 @@ export async function GET(request: Request) {
     "";
 
   // 3) 쿠키 세팅 — kakao_id / nickname
+  //    kakao_id 는 본인 판별 키이므로 HMAC 서명본으로 저장합니다(SEC-3a 패턴).
+  //    이 값을 임의로 바꿔 타인 지원서를 여는 것을 원천 차단합니다.
+  //    nickname 은 화면 표시용(httpOnly:false)이라 서명하지 않습니다.
   const store = await cookies();
-  store.set(KAKAO_ID_COOKIE, kakaoId, {
+  store.set(KAKAO_ID_COOKIE, signPayload({ kakaoId }), {
     httpOnly: true,
     sameSite: "lax",
     path: "/",
