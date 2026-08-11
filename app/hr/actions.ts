@@ -524,6 +524,13 @@ export async function saveEmployeeAuthLevel(
 //     'resigned'(퇴사) → resignation_date(YYYY-MM-DD) 필수.
 //   * 삭제 금지 원칙: 퇴사는 상태 전환만 하고 인사기록·계정은 보존합니다.
 //   * 본 폼(saveEmployeeProfile)과 독립 저장(별도 버튼) — auth_level 패턴 재사용.
+//   * 신원통합 2단계: employee_profiles 를 바꾼 뒤 drivers.is_active 도 함께
+//     맞춥니다(resigned→false / active→true). dongrae-car(차량앱)가 is_active 로
+//     로그인 가부를 판단하므로, 퇴사 토글 하나로 차량앱 로그인까지 차단됩니다.
+//     - employee_profiles 가 주(主): 급여·증명서의 단일 진실 기준.
+//     - drivers.is_active 는 종(從): 로그인 차단용 반영.
+//       종이 실패해도 주는 되돌리지 않고, 실패 사실을 호출부에 알립니다.
+//     - leave_date(레거시)는 건드리지 않습니다.
 // =====================================================================
 export async function saveEmploymentStatus(
   driverId: string,
@@ -562,7 +569,30 @@ export async function saveEmploymentStatus(
     );
     if (error) throw new Error(error.message);
 
+    // 종속 반영 — drivers.is_active. 위 단계가 성공한 뒤에만 시도합니다.
+    //   s 는 위에서 'active' | 'resigned' 로 이미 좁혀져 있으므로 이분 매핑이
+    //   안전합니다(다른 값은 :541 에서 거부됨).
+    const { error: drvErr } = await supabaseAdmin
+      .from("drivers")
+      .update({ is_active: s === "active" })
+      .eq("id", driverId);
+
     revalidatePath("/hr");
+
+    if (drvErr) {
+      // 퇴사 처리 자체는 성공했으므로 되돌리지 않습니다. 다만 차량앱 로그인
+      //   차단이 반영되지 않았으므로 조용히 넘기지 않고 명확히 알립니다.
+      console.warn(
+        "[신원통합] drivers.is_active 동기화 실패:",
+        drvErr.message
+      );
+      return {
+        ok: false,
+        message:
+          "재직 상태는 변경됐으나 차량앱 동기화에 실패했습니다. 다시 시도해주세요.",
+      };
+    }
+
     return { ok: true };
   } catch (e) {
     return {
