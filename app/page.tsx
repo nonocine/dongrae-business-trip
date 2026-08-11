@@ -2,6 +2,9 @@ import Link from "next/link";
 import Header from "@/app/components/Header";
 import GateIntro from "@/app/components/GateIntro";
 import EmployeeDashboard from "@/app/components/EmployeeDashboard";
+import PinEntry from "@/app/components/PinEntry";
+import PinSuggestBanner from "@/app/components/PinSuggestBanner";
+import { getTrustedDeviceHint, getPinStatus } from "@/app/auth/pinActions";
 import { enforcePasswordChange, getSession } from "@/app/actions";
 import { listPublishedRecruitmentSummaries } from "@/app/recruitment/[slug]/actions";
 
@@ -58,6 +61,8 @@ export default async function Home({
   //   ② 직원 업무 시스템: 구글 로그인 후 직원 메인(/)으로 복귀.
   if (!session) {
     const googleError = googleErrorMessage((await searchParams).google_error);
+    // 이 기기가 신뢰 등록돼 있으면 PIN 간편입력을 함께 노출합니다.
+    const trustedDevice = await getTrustedDeviceHint();
     return (
       <main
         className="relative flex min-h-[100dvh] flex-1 flex-col items-center justify-center overflow-hidden px-5 py-12"
@@ -162,6 +167,16 @@ export default async function Home({
               </Link>
             )}
 
+            {/* ①-b 신뢰 등록된 기기 — PIN 간편입력(SEC-3 2단계).
+                 · 신뢰 기기 쿠키가 유효할 때만 노출됩니다.
+                 · 이 입력만으로 로그인되는 것이 아니라, 서버가 신뢰 기기와
+                   PIN 을 모두 검증해야 세션이 발급됩니다. */}
+            {trustedDevice.trusted && (
+              <div className="mb-4">
+                <PinEntry name={trustedDevice.name} next="/" />
+              </div>
+            )}
+
             {/* ② 직원 업무 시스템 — 구글 로그인. 진한 네이비·블루 + 흰 글자 */}
             <a
               href="/api/auth/google/login?next=/"
@@ -226,6 +241,10 @@ export default async function Home({
     );
   }
 
+  // PIN 설정 제안 — 아직 설정하지 않은 직원에게만, 배너로만(강제 이동 없음).
+  const pinStatus = await getPinStatus();
+  const suggestPin = pinStatus.eligible && !pinStatus.isSet;
+
   // 직원 로그인 후 첫 화면 = 직원 대시보드(프로필 위젯).
   //   * 활동일지(ActivityList)는 여기서 빼고 /activities 로 분리 — 헤더 네비로 접근.
   return (
@@ -235,6 +254,7 @@ export default async function Home({
         {recruitmentCount > 0 && (
           <RecruitmentBanner count={recruitmentCount} />
         )}
+        {suggestPin && <PinSuggestBanner />}
         <EmployeeDashboard name={session.name} />
       </main>
     </>

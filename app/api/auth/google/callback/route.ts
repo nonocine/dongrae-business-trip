@@ -10,6 +10,8 @@ import {
   serializeGoogleSession,
   type GoogleSession,
 } from "@/lib/googleAuth";
+import { signPayload } from "@/lib/signedCookie";
+import { TRUSTED_DEVICE_COOKIE, TRUSTED_DEVICE_MAX_AGE } from "@/lib/pin";
 
 // Google 콜백 — 인가 코드 수신 → 토큰 교환 → 사용자 조회 →
 //   onnainna.kr 도메인 검증(이중 안전장치) → employee_profiles 매칭 →
@@ -180,6 +182,38 @@ export async function GET(request: Request) {
     maxAge: GOOGLE_SESSION_MAX_AGE,
     secure: process.env.NODE_ENV === "production",
   });
+
+  // 8) PIN 간편입력(SEC-3 2단계) — 직원 레코드가 있는 계정만 해당.
+  //    · 이 기기를 "신뢰 기기"로 등록합니다. 이 쿠키만으로는 로그인되지 않고,
+  //      PIN 검증을 통과해야만 세션이 발급됩니다(app/auth/pinActions.ts).
+  //    · 구글 로그인은 신원의 뿌리이므로, 여기서 PIN 잠금을 자동 해제합니다.
+  //      (pin_hash 는 건드리지 않아 기존 PIN 은 그대로 유지)
+  //    · PIN 미설정자를 설정 화면으로 강제 이동시키지 않습니다 — 선택 기능.
+  if (driverId) {
+    store.set(
+      TRUSTED_DEVICE_COOKIE,
+      signPayload({ driverId, driverName, email }),
+      {
+        httpOnly: true,
+        sameSite: "lax",
+        path: "/",
+        maxAge: TRUSTED_DEVICE_MAX_AGE,
+        secure: process.env.NODE_ENV === "production",
+      }
+    );
+    try {
+      await supabaseAdmin
+        .from("drivers")
+        .update({ pin_failed_count: 0, pin_locked_until: null })
+        .eq("id", driverId);
+    } catch (e) {
+      // 잠금 해제 실패는 로그인 자체를 막지 않습니다(부가 기능).
+      console.warn(
+        "[pin] 잠금 해제 실패:",
+        e instanceof Error ? e.message : e
+      );
+    }
+  }
 
   return NextResponse.redirect(new URL(next, origin).toString());
 }

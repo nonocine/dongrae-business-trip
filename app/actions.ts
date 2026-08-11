@@ -35,6 +35,7 @@ import {
   type GoogleSession,
 } from "@/lib/googleAuth";
 import { verifyPayload } from "@/lib/signedCookie";
+import { TRUSTED_DEVICE_COOKIE } from "@/lib/pin";
 
 // =====================================================================
 // SEC-2 (진행 중): dongrae-car 와 공유하는 3개 테이블(drivers·driving_logs·
@@ -117,6 +118,13 @@ export async function logoutCurrent() {
   store.delete(LEGACY_ADMIN_COOKIE);
   store.delete(EMPLOYEE_COOKIE);
   store.delete(GOOGLE_SESSION_COOKIE);
+  // 명시적 로그아웃은 이 기기의 신뢰 등록도 함께 해제합니다.
+  //   * 세션 만료(8시간)로 로그아웃된 경우에는 신뢰가 유지되어 PIN 재진입이
+  //     가능하지만, 사용자가 직접 로그아웃한 경우는 "이 기기에서 나가겠다"는
+  //     의사로 보고 공용 PC 등에서 PIN 만으로 재진입되는 상황을 막습니다.
+  //   * PIN 자체(drivers.pin_hash)는 지우지 않습니다 — 구글 재로그인하면
+  //     기기가 다시 신뢰 등록되고 기존 PIN 을 그대로 씁니다.
+  store.delete(TRUSTED_DEVICE_COOKIE);
   redirect("/");
 }
 
