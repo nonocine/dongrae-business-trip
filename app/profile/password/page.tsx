@@ -3,7 +3,8 @@ import { redirect } from "next/navigation";
 import Header from "@/app/components/Header";
 import ChangePasswordForm from "@/app/profile/password/ChangePasswordForm";
 import { getSession } from "@/app/actions";
-import { supabase, type EmployeeRank } from "@/lib/supabase";
+import { type EmployeeRank } from "@/lib/supabase";
+import { supabaseAdmin } from "@/lib/supabaseAdmin";
 
 export const dynamic = "force-dynamic";
 
@@ -16,7 +17,7 @@ export default async function ChangePasswordPage() {
   let rank: EmployeeRank | null = null;
   let mustChange = false;
   try {
-    const { data } = await supabase
+    const { data } = await supabaseAdmin
       .from("drivers")
       .select("*")
       .eq("name", session.name)

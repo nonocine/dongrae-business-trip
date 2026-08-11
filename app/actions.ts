@@ -36,6 +36,16 @@ import {
 } from "@/lib/googleAuth";
 import { verifyPayload } from "@/lib/signedCookie";
 
+// =====================================================================
+// SEC-2 (진행 중): dongrae-car 와 공유하는 3개 테이블(drivers·driving_logs·
+//   settings)은 anon 권한 회수 대상이므로 supabaseAdmin(service_role)으로
+//   접근합니다. 그 외 테이블(business_trips 등)과 Storage 는 아직 anon 을
+//   그대로 쓰며, SEC-2 후속에서 이전할 예정입니다.
+//   → 이 파일에 supabase 와 supabaseAdmin 이 공존하는 것은 의도된 중간 상태입니다.
+//   ⚠ supabaseAdmin 은 RLS 를 우회하므로, 새로 추가하는 호출은 반드시 호출부에
+//     권한 게이트(requireAdmin / requireSession 등)가 있는지 확인하세요.
+// =====================================================================
+
 // SEC-3b: 발급 경로(adminLogin)가 제거되어 더 이상 인증에 쓰이지 않습니다.
 //   기존 사용자 브라우저에 남아있는 쿠키를 로그아웃 시 지우기 위해서만 유지합니다.
 const LEGACY_ADMIN_COOKIE = "dongrae_admin";
@@ -412,10 +422,20 @@ export async function getAdminStats(): Promise<AdminStats> {
 //   가려져 있었지만 값은 페이지 페이로드에 그대로 실려 나갔습니다.
 const DRIVER_COLUMNS = "id,name,rank,password,is_active,created_at";
 
+// SEC-2: 로그인 필수. 전 직원 명단이므로 무인증 직접 호출을 막습니다.
+//   * 더 강한 게이트(관장 전용)를 걸지 않은 이유 — 호출처 두 곳의 권한 기준이
+//     서로 다릅니다. /admin 은 isManagerAdmin(관장·master), 채용 내부위원 배정
+//     (/hr/recruitment/[slug]/judges)은 requireHrAdmin(관장·부장)입니다.
+//     여기서 requireAdmin(관장·master)을 걸면 부장이 내부위원 배정 화면에서
+//     튕깁니다. requireHrAdmin 은 app/hr/actions.ts 가 이 파일을 import 하고
+//     있어(순환 참조) 가져올 수 없습니다.
+//     → 각 호출처가 자기 화면에 맞는 더 강한 게이트를 이미 걸고 있으므로,
+//       여기서는 "비로그인 차단"만 담당합니다.
 export async function listDrivers(opts?: {
   includeInactive?: boolean;
 }): Promise<Driver[]> {
-  let query = supabase
+  await requireSession();
+  let query = supabaseAdmin
     .from("drivers")
     .select(DRIVER_COLUMNS)
     .order("created_at", { ascending: true });
@@ -440,8 +460,10 @@ export async function listEmployees(): Promise<Employee[]> {
   return listDrivers({ includeInactive: true });
 }
 
+// SEC-2: 로그인 필수 — 활동/출장 작성 폼(일반 직원 사용)에서 호출됩니다.
 export async function listDriverNames(): Promise<string[]> {
-  const { data, error } = await supabase
+  await requireSession();
+  const { data, error } = await supabaseAdmin
     .from("drivers")
     .select("name")
     .eq("is_active", true)
@@ -480,13 +502,13 @@ export async function addDriver(formData: FormData) {
   const passwordHash = await hashPassword(password);
 
   // 동일 이름의 비활성 직원이 있다면 복귀 처리
-  const { data: existing } = await supabase
+  const { data: existing } = await supabaseAdmin
     .from("drivers")
     .select("id, is_active")
     .eq("name", name)
     .maybeSingle();
   if (existing && existing.is_active === false) {
-    const { error: upErr } = await supabase
+    const { error: upErr } = await supabaseAdmin
       .from("drivers")
       .update({ rank, password: passwordHash, is_active: true })
       .eq("id", existing.id);
@@ -497,7 +519,7 @@ export async function addDriver(formData: FormData) {
     return;
   }
 
-  const { error } = await supabase
+  const { error } = await supabaseAdmin
     .from("drivers")
     .insert({ name, rank, password: passwordHash, is_active: true });
   if (error) {
@@ -535,7 +557,7 @@ export async function updateDriver(formData: FormData) {
     update.password = await hashPassword(password);
   }
 
-  const { error } = await supabase.from("drivers").update(update).eq("id", id);
+  const { error } = await supabaseAdmin.from("drivers").update(update).eq("id", id);
   if (error) throw new Error(error.message);
   revalidatePath("/admin");
 }
@@ -549,7 +571,7 @@ export async function deleteDriver(formData: FormData) {
   await requireAdmin();
   const id = String(formData.get("id") ?? "");
   if (!id) throw new Error("직원 ID가 없습니다.");
-  const { error } = await supabase
+  const { error } = await supabaseAdmin
     .from("drivers")
     .update({ is_active: false })
     .eq("id", id);
@@ -568,7 +590,7 @@ export async function restoreDriver(formData: FormData) {
   await requireAdmin();
   const id = String(formData.get("id") ?? "");
   if (!id) throw new Error("직원 ID가 없습니다.");
-  const { error } = await supabase
+  const { error } = await supabaseAdmin
     .from("drivers")
     .update({ is_active: true })
     .eq("id", id);
@@ -590,7 +612,7 @@ export async function enforcePasswordChange(): Promise<void> {
   const session = await getSession();
   if (!session || session.kind !== "employee") return;
   try {
-    const { data, error } = await supabase
+    const { data, error } = await supabaseAdmin
       .from("drivers")
       .select("*")
       .eq("name", session.name)
@@ -623,7 +645,7 @@ export async function changePassword(formData: FormData) {
     throw new Error("새 비밀번호 확인이 일치하지 않습니다.");
   }
 
-  const { data, error } = await supabase
+  const { data, error } = await supabaseAdmin
     .from("drivers")
     .select("*")
     .eq("name", session.name)
@@ -654,7 +676,7 @@ export async function changePassword(formData: FormData) {
   const id = (data as { id: unknown }).id;
   const newHash = await hashPassword(newPassword); // SEC-1
   // 새 컬럼이 있으면 함께 갱신, 없으면(에러) password 만 갱신.
-  const { error: upErr } = await supabase
+  const { error: upErr } = await supabaseAdmin
     .from("drivers")
     .update({
       password: newHash,
@@ -663,7 +685,7 @@ export async function changePassword(formData: FormData) {
     })
     .eq("id", id);
   if (upErr) {
-    const { error: fbErr } = await supabase
+    const { error: fbErr } = await supabaseAdmin
       .from("drivers")
       .update({ password: newHash })
       .eq("id", id);
@@ -686,7 +708,7 @@ export async function resetEmployeePassword(
     const id = String(formData.get("id") ?? "");
     if (!id) return { ok: false, message: "직원 ID가 없습니다." };
 
-    const { data: row, error: fetchErr } = await supabase
+    const { data: row, error: fetchErr } = await supabaseAdmin
       .from("drivers")
       .select("name")
       .eq("id", id)
@@ -700,7 +722,7 @@ export async function resetEmployeePassword(
     const tempHash = await hashPassword(tempPassword);
 
     // 새 컬럼이 있으면 함께 갱신, 없으면(에러) password 만 갱신.
-    const { error: upErr } = await supabase
+    const { error: upErr } = await supabaseAdmin
       .from("drivers")
       .update({
         password: tempHash,
@@ -709,7 +731,7 @@ export async function resetEmployeePassword(
       })
       .eq("id", id);
     if (upErr) {
-      const { error: fbErr } = await supabase
+      const { error: fbErr } = await supabaseAdmin
         .from("drivers")
         .update({ password: tempHash })
         .eq("id", id);
@@ -738,8 +760,10 @@ export async function resetEmployeePassword(
 //   * settings 테이블은 (key, value) Key-Value 구조입니다.
 //   * value 는 항상 text. 숫자 키는 읽을 때 Number, 쓸 때 String 변환.
 // =====================================================================
+// SEC-2: 로그인 필수 — 차량 정보·누적거리는 로그인 직원만 조회합니다.
 export async function getSettings(): Promise<Settings | null> {
-  const { data, error } = await supabase
+  await requireSession();
+  const { data, error } = await supabaseAdmin
     .from("settings")
     .select("key, value");
   if (error) {
@@ -754,7 +778,7 @@ export async function getSettings(): Promise<Settings | null> {
 
 // 단일 키 조회 (raw text)
 async function getSettingValue(key: string): Promise<string | null> {
-  const { data, error } = await supabase
+  const { data, error } = await supabaseAdmin
     .from("settings")
     .select("value")
     .eq("key", key)
@@ -766,19 +790,19 @@ async function getSettingValue(key: string): Promise<string | null> {
 
 // 단일 키 저장 (없으면 insert, 있으면 update)
 async function setSettingValue(key: string, value: string): Promise<void> {
-  const { data: existing } = await supabase
+  const { data: existing } = await supabaseAdmin
     .from("settings")
     .select("id")
     .eq("key", key)
     .maybeSingle();
   if (existing) {
-    const { error } = await supabase
+    const { error } = await supabaseAdmin
       .from("settings")
       .update({ value })
       .eq("key", key);
     if (error) throw new Error(error.message);
   } else {
-    const { error } = await supabase
+    const { error } = await supabaseAdmin
       .from("settings")
       .insert({ key, value });
     if (error) throw new Error(error.message);
@@ -788,22 +812,12 @@ async function setSettingValue(key: string, value: string): Promise<void> {
 // =====================================================================
 // Driving logs (차량 운행 일지 — 차량 어플과 공유)
 // =====================================================================
-export async function getLatestDrivingLog(): Promise<DrivingLog | null> {
-  const { data, error } = await supabase
-    .from("driving_logs")
-    .select("*")
-    .order("driven_at", { ascending: false })
-    .order("created_at", { ascending: false })
-    .limit(1)
-    .maybeSingle();
-  if (error) return null;
-  if (!data) return null;
-  return normalizeDrivingLog(data as Record<string, unknown>);
-}
-
+// SEC-2: 로그인 필수. supabaseAdmin 은 RLS 를 우회하므로, export 된 서버 액션은
+//   상위 페이지 게이트와 별개로 여기서도 세션을 확인합니다(직접 호출 방어).
 export async function getDrivingLog(id: string): Promise<DrivingLog | null> {
+  await requireSession();
   if (!id) return null;
-  const { data, error } = await supabase
+  const { data, error } = await supabaseAdmin
     .from("driving_logs")
     .select("*")
     .eq("id", id)
@@ -911,7 +925,7 @@ export async function createActivity(formData: FormData) {
 
     const drivingPurpose = [visitLocation, purpose].filter(Boolean).join(" ").trim();
 
-    const { data: dlog, error: dlogErr } = await supabase
+    const { data: dlog, error: dlogErr } = await supabaseAdmin
       .from("driving_logs")
       .insert({
         driven_at: start_date,
@@ -935,7 +949,7 @@ export async function createActivity(formData: FormData) {
     try {
       await setSettingValue("initial_mileage", String(totalDistance));
     } catch (e) {
-      await supabase.from("driving_logs").delete().eq("id", drivingLogId);
+      await supabaseAdmin.from("driving_logs").delete().eq("id", drivingLogId);
       const msg = e instanceof Error ? e.message : "알 수 없는 오류";
       throw new Error(`차량 누적거리 동기화 실패: ${msg}`);
     }
@@ -943,7 +957,7 @@ export async function createActivity(formData: FormData) {
 
   async function rollbackVehicle() {
     if (drivingLogId) {
-      await supabase.from("driving_logs").delete().eq("id", drivingLogId);
+      await supabaseAdmin.from("driving_logs").delete().eq("id", drivingLogId);
     }
     if (prevTotalMileage != null) {
       try {
@@ -1126,9 +1140,9 @@ export async function deleteActivity(formData: FormData) {
     .driving_log_id;
   if (drivingLogId) {
     if (canManageAll) {
-      await supabase.from("driving_logs").delete().eq("id", drivingLogId);
+      await supabaseAdmin.from("driving_logs").delete().eq("id", drivingLogId);
     } else {
-      await supabase
+      await supabaseAdmin
         .from("driving_logs")
         .delete()
         .eq("id", drivingLogId)

@@ -920,7 +920,7 @@ export async function addInternalJudge(input: {
   if (!role) throw new Error("직급/역할을 입력해주세요.");
 
   // 직원 정보 조회.
-  const { data: driver, error: dErr } = await supabase
+  const { data: driver, error: dErr } = await supabaseAdmin
     .from("drivers")
     .select("id, name")
     .eq("id", driverId)
@@ -2162,7 +2162,7 @@ export async function assignInternalJudgeToPosting(
     const postingId = adm.posting.id;
 
     // 직원 정보 — name 스냅샷 + rank → role 기본값.
-    const { data: driver, error: dErr } = await supabase
+    const { data: driver, error: dErr } = await supabaseAdmin
       .from("drivers")
       .select("id, name, rank")
       .eq("id", dId)

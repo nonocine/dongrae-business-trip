@@ -36,7 +36,7 @@ async function getMyDriver(): Promise<Driver | null> {
   const session = await getSession();
   if (!session || session.kind !== "employee") return null;
 
-  const { data, error } = await supabase
+  const { data, error } = await supabaseAdmin
     .from("drivers")
     .select("id,name,rank,is_active,created_at")
     .eq("name", session.name)

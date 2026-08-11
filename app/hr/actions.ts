@@ -76,7 +76,7 @@ export async function requireHrAdmin(): Promise<{
     redirect("/");
   }
 
-  const { data, error } = await supabase
+  const { data, error } = await supabaseAdmin
     .from("drivers")
     .select("rank")
     .eq("name", session.name)
@@ -118,7 +118,7 @@ async function requireHrManagerOrAdmin(): Promise<void> {
   if (!session || session.kind !== "employee") {
     throw new Error("삭제 권한이 없습니다.");
   }
-  const { data } = await supabase
+  const { data } = await supabaseAdmin
     .from("drivers")
     .select("rank")
     .eq("name", session.name)
@@ -139,7 +139,7 @@ async function requireHrManagerOrAdmin(): Promise<void> {
 // 인사기록카드 입력 대상 후보 — drivers 전체(활성/비활성).
 export async function listDriversForHrProfile(): Promise<Driver[]> {
   await requireHrAdmin();
-  const { data, error } = await supabase
+  const { data, error } = await supabaseAdmin
     .from("drivers")
     .select("id,name,rank,is_active,created_at")
     .order("created_at", { ascending: true });

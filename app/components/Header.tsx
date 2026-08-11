@@ -1,5 +1,6 @@
 import { getSession, getGoogleSession, isManagerAdmin } from "@/app/actions";
-import { supabase, canAccessHr, type EmployeeRank } from "@/lib/supabase";
+import { canAccessHr, type EmployeeRank } from "@/lib/supabase";
+import { supabaseAdmin } from "@/lib/supabaseAdmin";
 import HeaderClient from "@/app/components/HeaderClient";
 
 export default async function Header() {
@@ -17,7 +18,7 @@ export default async function Header() {
       hrAccess = !!g.rank && canAccessHr(g.rank as EmployeeRank | null);
     } else if (session?.kind === "employee") {
       try {
-        const { data } = await supabase
+        const { data } = await supabaseAdmin
           .from("drivers")
           .select("rank")
           .eq("name", session.name)
