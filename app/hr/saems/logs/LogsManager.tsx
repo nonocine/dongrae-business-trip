@@ -279,7 +279,7 @@ export default function LogsManager({
           </p>
         ) : (
           <div className="overflow-x-auto">
-            <table className="w-full min-w-[720px] border-collapse">
+            <table className="w-full min-w-[820px] border-collapse">
               <thead>
                 <tr className="border-b border-line">
                   <th className={`${thCls} w-8`}></th>
@@ -377,7 +377,8 @@ function FragmentRow({ children }: { children: React.ReactNode }) {
 }
 
 // SA-18. 출석 요약 — 강사가 동래샘들에서 체크한 결과가 있을 때만 표시한다.
-//   "출석 n/정원" (지각은 출석에 포함, 상세는 title 로).
+//   SA-20. 합계 뱃지 아래에 결석·지각자 이름을 그대로 적는다. 합계만 보이던
+//   때는 "누가 결석했나"를 강사에게 카톡으로 되물어야 했다(이중 보고).
 function AttendanceCell({ row }: { row: LogRow }) {
   const a = row.attendance;
   if (!a) {
@@ -393,15 +394,27 @@ function AttendanceCell({ row }: { row: LogRow }) {
   const attended = a.present + a.late;
   const denom = row.capacity ?? row.enrolledCount ?? 0;
   return (
-    <span
-      className={a.absent > 0 ? badgeWarning : badgeSuccess}
-      title={`출석 ${a.present} · 지각 ${a.late} · 결석 ${a.absent} / 체크 ${a.checked}명 · 명단 ${row.enrolledCount}명${
-        row.capacity != null ? ` · 정원 ${row.capacity}명` : ""
-      }`}
-    >
-      출석 {attended}/{denom || a.checked}
-      {a.late > 0 && ` (지각 ${a.late})`}
-    </span>
+    <div className="flex max-w-[220px] flex-col items-start gap-0.5">
+      <span
+        className={a.absent > 0 ? badgeWarning : badgeSuccess}
+        title={`출석 ${a.present} · 지각 ${a.late} · 결석 ${a.absent} / 체크 ${a.checked}명 · 명단 ${row.enrolledCount}명${
+          row.capacity != null ? ` · 정원 ${row.capacity}명` : ""
+        }`}
+      >
+        출석 {attended}/{denom || a.checked}
+        {a.late > 0 && ` (지각 ${a.late})`}
+      </span>
+      {a.absentNames.length > 0 && (
+        <span className="whitespace-normal break-keep text-[11px] font-semibold leading-tight text-stamp">
+          결석 {a.absentNames.join(", ")}
+        </span>
+      )}
+      {a.lateNames.length > 0 && (
+        <span className="whitespace-normal break-keep text-[11px] leading-tight text-warning">
+          지각 {a.lateNames.join(", ")}
+        </span>
+      )}
+    </div>
   );
 }
 
@@ -451,11 +464,32 @@ function DetailModal({
           {row.confirmed ? "확정됨" : row.submitted ? "제출됨(미확정)" : "미제출"}
         </p>
         {row.attendance && (
-          <p className="mb-3 text-xs text-ink-body">
-            출석 체크 — 출석 {row.attendance.present} · 지각 {row.attendance.late} ·
-            결석 {row.attendance.absent} (명단 {row.enrolledCount}명
-            {row.capacity != null && ` · 정원 ${row.capacity}명`})
-          </p>
+          <div className="mb-3 rounded-md border border-line bg-surface/60 px-3 py-2">
+            <p className="text-xs text-ink-body">
+              출석 체크 — 출석 {row.attendance.present} · 지각{" "}
+              {row.attendance.late} · 결석 {row.attendance.absent} (명단{" "}
+              {row.enrolledCount}명
+              {row.capacity != null && ` · 정원 ${row.capacity}명`})
+            </p>
+            {/* 누가 결석·지각인지. 여기서 확인되면 카톡으로 되물을 일이 없다. */}
+            {row.attendance.absentNames.length > 0 && (
+              <p className="mt-1.5 text-xs leading-relaxed text-ink-body">
+                <span className="font-bold text-stamp">결석</span>{" "}
+                {row.attendance.absentNames.join(", ")}
+              </p>
+            )}
+            {row.attendance.lateNames.length > 0 && (
+              <p className="mt-1 text-xs leading-relaxed text-ink-body">
+                <span className="font-bold text-warning">지각</span>{" "}
+                {row.attendance.lateNames.join(", ")}
+              </p>
+            )}
+            {row.attendance.absent === 0 && row.attendance.late === 0 && (
+              <p className="mt-1.5 text-xs font-semibold text-ink-muted">
+                결석·지각 없음 (전원 출석)
+              </p>
+            )}
+          </div>
         )}
 
         <div className="space-y-3">

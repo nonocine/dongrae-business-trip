@@ -48,11 +48,18 @@ export async function getTermOptions(): Promise<TermOption[]> {
 }
 
 // SA-18. 회차별 출석 집계 — 강사가 동래샘들에서 체크한 결과(있을 때만).
+//   SA-20. 합계만으로는 "누가 결석했나"를 알 수 없어 강사에게 매번 되물어야 했다.
+//   그래서 결석·지각자 이름을 함께 싣는다.
+//     * 출석(present)자 이름은 담지 않는다 — 필요한 정보가 아니고,
+//       회차 × 인원만큼 payload 가 불어난다(결석은 소수).
+//     * 학생 정보는 이름만. 연락처·생년월일·학교는 읽지 않는다.
 export type AttendanceSummary = {
   present: number;
   late: number;
   absent: number;
   checked: number; // 체크된 학생 수(present+late+absent)
+  absentNames: string[]; // 결석자 이름(가나다순)
+  lateNames: string[]; // 지각자 이름(가나다순)
 };
 
 export type LogRow = {
@@ -170,20 +177,66 @@ export async function getLogs(input: {
   if (sessionIds.length) {
     const { data: atts } = await supabaseAdmin
       .from(ATTEND)
-      .select("session_id, status")
+      .select("session_id, enrollment_id, status")
       .in("session_id", sessionIds);
-    for (const a of atts ?? []) {
-      const row = a as { session_id: string; status: string };
+    const attRows = (atts ?? []) as {
+      session_id: string;
+      enrollment_id: string;
+      status: string;
+    }[];
+
+    // 결석·지각자 이름만 조회한다(출석자는 이름이 필요 없다).
+    //   select 는 student_name 하나만 — 연락처·비상연락처·생년월일·학교는
+    //   출결 확인에 쓰이지 않으므로 애초에 읽지 않는다.
+    const namedIds = [
+      ...new Set(
+        attRows
+          .filter((r) => r.status === "absent" || r.status === "late")
+          .map((r) => String(r.enrollment_id))
+      ),
+    ];
+    const nameById = new Map<string, string>();
+    if (namedIds.length) {
+      const { data: studs } = await supabaseAdmin
+        .from(ENROLL)
+        .select("id, student_name")
+        .in("id", namedIds);
+      for (const s of studs ?? []) {
+        const r = s as { id: string; student_name: string | null };
+        const nm = String(r.student_name ?? "").trim();
+        if (nm) nameById.set(String(r.id), nm);
+      }
+    }
+
+    for (const row of attRows) {
       const sid = String(row.session_id);
       const cur =
         attendanceBySession.get(sid) ??
-        { present: 0, late: 0, absent: 0, checked: 0 };
+        {
+          present: 0,
+          late: 0,
+          absent: 0,
+          checked: 0,
+          absentNames: [],
+          lateNames: [],
+        };
+      const name = nameById.get(String(row.enrollment_id));
       if (row.status === "present") cur.present += 1;
-      else if (row.status === "late") cur.late += 1;
-      else if (row.status === "absent") cur.absent += 1;
-      else continue; // 알 수 없는 상태는 집계에서 제외
+      else if (row.status === "late") {
+        cur.late += 1;
+        if (name) cur.lateNames.push(name);
+      } else if (row.status === "absent") {
+        cur.absent += 1;
+        if (name) cur.absentNames.push(name);
+      } else continue; // 알 수 없는 상태는 집계에서 제외
       cur.checked += 1;
       attendanceBySession.set(sid, cur);
+    }
+
+    // 이름 순서를 가나다로 고정 — 조회마다 순서가 흔들리지 않게.
+    for (const s of attendanceBySession.values()) {
+      s.absentNames.sort((a, b) => a.localeCompare(b, "ko"));
+      s.lateNames.sort((a, b) => a.localeCompare(b, "ko"));
     }
   }
 
