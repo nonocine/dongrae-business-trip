@@ -24,7 +24,8 @@ import {
 } from "@/app/hr/saems/enrollmentActions";
 import type { TermOption } from "@/app/hr/saems/logActions";
 import { TERM_STATUS_LABEL, type TermStatus } from "@/lib/saem";
-import { calcGrade } from "@/lib/schoolGrade";
+import { calcGrade, gradeLabelWithLevel } from "@/lib/schoolGrade";
+import { normalizeSchoolName } from "@/lib/schoolName";
 import {
   cardCls,
   btnPrimary,
@@ -899,7 +900,12 @@ function DetailModal({
                           </span>
                         )}
                       </td>
-                      <td className={tdCls}>{e.school ?? "-"}</td>
+                      {/* 표시만 정규화("교동초등학교/교동초/교동" → "교동초").
+                          원본(saem_enrollments.school)은 신청 기록이라 보존한다.
+                          수정 폼에는 원본을 그대로 넣는다. */}
+                      <td className={tdCls} title={e.school ?? undefined}>
+                        {normalizeSchoolName(e.school) || "-"}
+                      </td>
                       <td className={tdCls}>{e.grade ?? "-"}</td>
                       <td className={tdCls}>
                         <BirthDateCell
@@ -919,7 +925,7 @@ function DetailModal({
                                 : "text-ink-muted"
                             }
                           >
-                            {gradeInfo.label}
+                            {gradeLabelWithLevel(gradeInfo.grade)}
                           </span>
                         )}
                       </td>

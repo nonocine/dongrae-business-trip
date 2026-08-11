@@ -64,3 +64,20 @@ export function calcGrade(
   if (grade > LAST_GRADE) return { label: "중등이상", grade };
   return { label: `${grade}학년`, grade };
 }
+
+// =====================================================================
+// 표시용 라벨 조립 — calcGrade 는 학년 "숫자"만 책임지고, 문구는 여기서 만든다.
+//   화면마다 필요한 형식이 달라서다.
+//     · 수강생 명단   → "초등학교 3학년"   (gradeLabelWithLevel)
+//     · 출석부(B차)   → "교동초 6학년"     (학교명 + calcGrade().label)
+//   calcGrade 의 반환 형태는 건드리지 않는다 — 동래샘들과 통일할 여지를 남긴다.
+// =====================================================================
+
+// 교급까지 붙인 라벨. grade 는 calcGrade(...).grade 를 그대로 넘긴다.
+//   null(생년월일 없음/이상값) → "-", 초등 범위 밖은 범위 문구로 대체.
+export function gradeLabelWithLevel(grade: number | null | undefined): string {
+  if (grade == null) return "-";
+  if (grade < 1) return "미취학";
+  if (grade > LAST_GRADE) return "중등 이상";
+  return `초등학교 ${grade}학년`;
+}
