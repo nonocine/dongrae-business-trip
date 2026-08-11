@@ -14,6 +14,7 @@
     "test:edi": "tsx scripts/test-salary-edi.ts",
     "test:payslip": "tsx scripts/test-salary-payslip.ts",
     "test:enroll": "tsx scripts/test-saem-enrollment.ts",
+    "test:grade": "tsx scripts/test-school-grade.ts",
     "test:settle": "tsx scripts/test-settlement.ts",
     "gen:icons": "node scripts/gen-icons.mjs",
     "test:leave": "tsx scripts/test-leave-plan.ts",

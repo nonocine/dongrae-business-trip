@@ -13,6 +13,7 @@ import {
   applyErpUpload,
   addEnrollment,
   updateEnrollment,
+  updateEnrollmentBirthDate,
   setEnrollmentStatus,
   deleteEnrollment,
   type EnrollmentOverviewRow,
@@ -23,6 +24,7 @@ import {
 } from "@/app/hr/saems/enrollmentActions";
 import type { TermOption } from "@/app/hr/saems/logActions";
 import { TERM_STATUS_LABEL, type TermStatus } from "@/lib/saem";
+import { calcGrade } from "@/lib/schoolGrade";
 import {
   cardCls,
   btnPrimary,
@@ -681,9 +683,57 @@ const EMPTY_INPUT: EnrollmentInput = {
   student_name: "",
   school: null,
   grade: null,
+  birth_date: null,
   contact: null,
   emergency_contact: null,
 };
+
+// 생년월일 인라인 입력 — 158명을 연속으로 채워야 해서 행에서 고르면 바로 저장한다.
+//   저장돼도 명단 전체를 다시 불러오지 않는다(입력 흐름이 끊기지 않게).
+//   대신 onSaved 로 부모의 행만 갱신해 옆 칸 [학년]이 즉시 따라 바뀐다.
+function BirthDateCell({
+  row,
+  onSaved,
+  onError,
+}: {
+  row: EnrollmentRow;
+  onSaved: (id: string, birth: string | null) => void;
+  onError: (text: string) => void;
+}) {
+  const [value, setValue] = useState(row.birth_date ?? "");
+  const [state, setState] = useState<"idle" | "saving" | "saved">("idle");
+  const [, start] = useTransition();
+
+  function save(next: string) {
+    setValue(next);
+    setState("saving");
+    start(async () => {
+      const res = await updateEnrollmentBirthDate(row.id, next || null);
+      if (!res.ok) {
+        setValue(row.birth_date ?? ""); // 실패하면 화면을 되돌린다.
+        setState("idle");
+        onError(res.message);
+        return;
+      }
+      setState("saved");
+      onSaved(row.id, next || null);
+    });
+  }
+
+  return (
+    <div className="flex items-center gap-1">
+      <input
+        type="date"
+        value={value}
+        onChange={(e) => save(e.target.value)}
+        className={`${inCls} w-36 px-1.5 py-1 text-xs`}
+      />
+      <span className="w-3 shrink-0 text-xs text-ink-hint">
+        {state === "saving" ? "…" : state === "saved" ? "✓" : ""}
+      </span>
+    </div>
+  );
+}
 
 function DetailModal({
   program,
@@ -740,6 +790,13 @@ function DetailModal({
     await onChanged();
   }
 
+  // 생년월일 인라인 저장 후 해당 행만 갱신(전체 재조회 없이 [학년]을 즉시 반영).
+  function patchBirthDate(id: string, birth: string | null) {
+    setList((cur) =>
+      cur ? cur.map((r) => (r.id === id ? { ...r, birth_date: birth } : r)) : cur
+    );
+  }
+
   const active = (list ?? []).filter((e) => e.status === "active");
   const cancelled = (list ?? []).filter((e) => e.status !== "active");
 
@@ -767,7 +824,8 @@ function DetailModal({
         </div>
         <p className="mb-3 text-[11px] text-ink-hint">
           연락처·비상연락처는 직원만 보는 정보입니다. 강사 앱(동래샘들)에는 이름·학교·
-          교급만 전달됩니다.
+          교급만 전달됩니다. [교급]은 ERP 대상구분(초등학생 등)이고, [학년]은
+          생년월일로 자동 계산합니다 — 날짜를 고르면 바로 저장됩니다.
         </p>
 
         {msg && (
@@ -806,13 +864,15 @@ function DetailModal({
           </p>
         ) : (
           <div className="overflow-x-auto">
-            <table className="w-full min-w-[680px] border-collapse">
+            <table className="w-full min-w-[900px] border-collapse">
               <thead>
                 <tr className="border-b border-line">
                   <th className={`${thCls} w-10 text-right`}>순번</th>
                   <th className={thCls}>이름</th>
                   <th className={thCls}>학교</th>
                   <th className={thCls}>교급</th>
+                  <th className={thCls}>생년월일</th>
+                  <th className={thCls}>학년</th>
                   <th className={thCls}>연락처</th>
                   <th className={thCls}>비상연락처</th>
                   <th className={`${thCls} text-right`}>관리</th>
@@ -821,6 +881,7 @@ function DetailModal({
               <tbody>
                 {[...active, ...cancelled].map((e) => {
                   const off = e.status !== "active";
+                  const gradeInfo = calcGrade(e.birth_date);
                   return (
                     <tr
                       key={e.id}
@@ -840,6 +901,28 @@ function DetailModal({
                       </td>
                       <td className={tdCls}>{e.school ?? "-"}</td>
                       <td className={tdCls}>{e.grade ?? "-"}</td>
+                      <td className={tdCls}>
+                        <BirthDateCell
+                          row={e}
+                          onSaved={patchBirthDate}
+                          onError={(text) => setMsg({ ok: false, text })}
+                        />
+                      </td>
+                      <td className={tdCls}>
+                        {gradeInfo.grade == null ? (
+                          <span className="text-ink-hint">-</span>
+                        ) : (
+                          <span
+                            className={
+                              gradeInfo.grade >= 1 && gradeInfo.grade <= 6
+                                ? "font-semibold text-ink"
+                                : "text-ink-muted"
+                            }
+                          >
+                            {gradeInfo.label}
+                          </span>
+                        )}
+                      </td>
                       <td className={`${tdCls} font-mono text-xs`}>
                         {e.contact ?? "-"}
                       </td>
@@ -938,6 +1021,7 @@ function EnrollmentForm({
           student_name: row.student_name,
           school: row.school,
           grade: row.grade,
+          birth_date: row.birth_date,
           contact: row.contact,
           emergency_contact: row.emergency_contact,
         }
@@ -966,7 +1050,7 @@ function EnrollmentForm({
       <p className="mb-2 text-xs font-bold text-navy">
         {row ? `${row.student_name} 수정` : "수강생 직접 추가"}
       </p>
-      <div className="grid grid-cols-1 gap-2 sm:grid-cols-5">
+      <div className="grid grid-cols-1 gap-2 sm:grid-cols-6">
         <Field label="이름" required>
           <input
             value={form.student_name}
@@ -986,6 +1070,14 @@ function EnrollmentForm({
             value={form.grade ?? ""}
             onChange={(e) => set("grade", e.target.value)}
             placeholder="초등학생"
+            className={inCls}
+          />
+        </Field>
+        <Field label="생년월일">
+          <input
+            type="date"
+            value={form.birth_date ?? ""}
+            onChange={(e) => set("birth_date", e.target.value)}
             className={inCls}
           />
         </Field>

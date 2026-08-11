@@ -61,7 +61,8 @@ export type EnrollmentRow = {
   seq_no: number | null;
   student_name: string;
   school: string | null;
-  grade: string | null;
+  grade: string | null; // ERP "교급"(초등학생/영·유아) — 학년이 아니다.
+  birth_date: string | null; // "YYYY-MM-DD". 학년 자동계산용(lib/schoolGrade).
   contact: string | null;
   emergency_contact: string | null;
   status: string; // active | cancelled
@@ -80,6 +81,8 @@ function toEnrollment(r: Record<string, unknown>): EnrollmentRow {
     student_name: String(r.student_name ?? ""),
     school: s(r.school),
     grade: s(r.grade),
+    // date 컬럼은 supabase-js 가 "YYYY-MM-DD" 문자열로 준다(시각·타임존 없음).
+    birth_date: s(r.birth_date),
     contact: s(r.contact),
     emergency_contact: s(r.emergency_contact),
     status: String(r.status ?? "active"),
@@ -633,6 +636,7 @@ export type EnrollmentInput = {
   student_name: string;
   school: string | null;
   grade: string | null;
+  birth_date: string | null;
   contact: string | null;
   emergency_contact: string | null;
 };
@@ -647,6 +651,23 @@ function enrollPayload(i: EnrollmentInput) {
   };
 }
 
+const BIRTH_DATE_ERROR =
+  "생년월일이 올바른 날짜가 아닙니다. (YYYY-MM-DD 형식)";
+
+// 생년월일 정규화. 빈값 = null(지우기), 형식·실재하지 않는 날짜 = undefined(오류).
+//   Postgres date 컬럼에 쓰레기 값을 보내 500 이 나는 대신 사람이 읽는 메시지로
+//   돌려주기 위해 "지우기"와 "잘못된 값"을 구분한다.
+function cleanBirthDate(v: string | null | undefined): string | null | undefined {
+  const s = (v ?? "").trim();
+  if (!s) return null;
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(s)) return undefined;
+  const d = new Date(`${s}T00:00:00Z`);
+  if (Number.isNaN(d.getTime())) return undefined;
+  // 2026-02-31 처럼 존재하지 않는 날짜는 Date 가 조용히 넘겨 버리므로 되짚는다.
+  if (d.toISOString().slice(0, 10) !== s) return undefined;
+  return s;
+}
+
 export async function addEnrollment(
   programId: string,
   input: EnrollmentInput
@@ -656,9 +677,16 @@ export async function addEnrollment(
     const payload = enrollPayload(input);
     if (!programId || !payload.student_name)
       return { ok: false, message: "프로그램과 이름을 확인하세요." };
+    const birth = cleanBirthDate(input.birth_date);
+    if (birth === undefined) return { ok: false, message: BIRTH_DATE_ERROR };
     const { data, error } = await supabaseAdmin
       .from(ENROLL)
-      .insert({ ...payload, program_id: programId, status: "active" })
+      .insert({
+        ...payload,
+        birth_date: birth,
+        program_id: programId,
+        status: "active",
+      })
       .select("id")
       .single();
     if (error) throw new Error(describeError(error));
@@ -679,9 +707,11 @@ export async function updateEnrollment(
     const payload = enrollPayload(input);
     if (!id || !payload.student_name)
       return { ok: false, message: "이름을 확인하세요." };
+    const birth = cleanBirthDate(input.birth_date);
+    if (birth === undefined) return { ok: false, message: BIRTH_DATE_ERROR };
     const { data, error } = await supabaseAdmin
       .from(ENROLL)
-      .update(payload)
+      .update({ ...payload, birth_date: birth })
       .eq("id", id)
       .select("program_id")
       .maybeSingle();
@@ -689,6 +719,35 @@ export async function updateEnrollment(
     if (!data) return { ok: false, message: "수강생을 찾을 수 없습니다." };
     // 이름이 바뀌면 가나다순이 흐트러진다.
     await renumberProgram(String((data as { program_id: string }).program_id));
+    revalidatePath("/hr/saems/enrollments");
+    return { ok: true };
+  } catch (e) {
+    return { ok: false, message: describeError(e) };
+  }
+}
+
+// 생년월일만 갱신 — 명단에서 행마다 바로 입력하는 대량 입력용.
+//   이름이 바뀌지 않으므로 renumberProgram(순번 재부여)을 돌리지 않는다.
+//   158명을 연속으로 채우는 동선이라 한 건당 쿼리 1회로 끝내는 게 목적.
+export async function updateEnrollmentBirthDate(
+  id: string,
+  birthDate: string | null
+): Promise<{ ok: true } | { ok: false; message: string }> {
+  try {
+    await requireSaemAccess();
+    if (!id) return { ok: false, message: "대상이 없습니다." };
+    const birth = cleanBirthDate(birthDate);
+    if (birth === undefined) return { ok: false, message: BIRTH_DATE_ERROR };
+
+    const { data, error } = await supabaseAdmin
+      .from(ENROLL)
+      .update({ birth_date: birth })
+      .eq("id", id)
+      .select("id")
+      .maybeSingle();
+    if (error) throw new Error(describeError(error));
+    if (!data) return { ok: false, message: "수강생을 찾을 수 없습니다." };
+
     revalidatePath("/hr/saems/enrollments");
     return { ok: true };
   } catch (e) {
