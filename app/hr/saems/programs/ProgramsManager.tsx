@@ -451,21 +451,42 @@ export default function ProgramsManager({
                       </span>
                     </td>
                     <td className={`${tdCls} text-right`}>
-                      <div className="flex justify-end gap-1">
+                      {/* 출력 버튼이 늘어 한 줄에 다 못 담으면 줄바꿈 — 수정·삭제가
+                          가로 스크롤 밖으로 밀려나지 않게 한다. */}
+                      <div className="flex flex-wrap justify-end gap-1">
                         {p.sessionCount > 0 ? (
-                          <a
-                            href={`/hr/saems/programs/${p.id}/worklog`}
-                            className="inline-flex items-center rounded border border-navy/40 px-2 py-1 text-xs text-navy hover:bg-surface"
-                            title="양식대로 PDF 출력 — 결재란·서명란은 빈칸(종이 결재용)"
-                          >
-                            근무일지
-                          </a>
+                          <>
+                            <a
+                              href={`/hr/saems/programs/${p.id}/worklog`}
+                              className="inline-flex items-center rounded border border-navy/40 px-2 py-1 text-xs text-navy hover:bg-surface"
+                              title="양식대로 PDF 출력 — 결재란·서명란은 빈칸(종이 결재용)"
+                            >
+                              근무일지
+                            </a>
+                            {/* 출석부 — 출결 채운 판 / 손으로 체크할 빈 판. */}
+                            <span className="inline-flex overflow-hidden rounded border border-navy/40">
+                              <a
+                                href={`/hr/saems/programs/${p.id}/attendance-sheet`}
+                                className="px-2 py-1 text-xs text-navy hover:bg-surface"
+                                title="출결을 채운 출석부 PDF (서명칸은 빈칸)"
+                              >
+                                출석부
+                              </a>
+                              <a
+                                href={`/hr/saems/programs/${p.id}/attendance-sheet?blank=1`}
+                                className="border-l border-navy/40 px-2 py-1 text-xs text-navy hover:bg-surface"
+                                title="출결 칸이 빈 출석부 PDF (강사가 손으로 체크)"
+                              >
+                                빈
+                              </a>
+                            </span>
+                          </>
                         ) : (
                           <span
                             className="inline-flex items-center rounded border border-line/60 px-2 py-1 text-xs text-ink-hint"
                             title="회차가 없어 출력할 내용이 없습니다"
                           >
-                            근무일지
+                            근무일지·출석부
                           </span>
                         )}
                         <button
