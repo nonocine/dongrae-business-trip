@@ -1,6 +1,7 @@
 "use client";
 
-import { useEffect, useState, useTransition } from "react";
+import { useEffect, useRef, useState, useTransition } from "react";
+import { createPortal } from "react-dom";
 import { useRouter } from "next/navigation";
 import {
   listTerms,
@@ -57,6 +58,14 @@ const inCls =
 const thCls = "px-2 py-2 text-left text-xs font-semibold text-navy whitespace-nowrap";
 const tdCls = "px-2 py-2 align-middle text-sm text-ink-body whitespace-nowrap";
 const hhmm = (t: string | null) => (t ? t.slice(0, 5) : "");
+
+// 관리 열 버튼 — 출력(네이비)과 편집(회색)을 색으로도 구분한다.
+const outBtn =
+  "inline-flex items-center rounded border border-navy/40 px-2 py-1 text-xs text-navy hover:bg-surface";
+const outBtnOff =
+  "inline-flex items-center rounded border border-line/60 px-2 py-1 text-xs text-ink-hint";
+const editBtn =
+  "rounded border border-line px-2 py-1 text-xs text-ink-muted hover:bg-surface";
 
 type Modal =
   | { kind: "project" }
@@ -192,6 +201,101 @@ function SessionPreview({
         </p>
       )}
     </div>
+  );
+}
+
+// =====================================================================
+// PDF 출력 메뉴 — 근무일지 / 출석부(출결 포함·빈 양식).
+//   버튼을 따로 두면 관리 열이 표 밖으로 밀린다. 실측: 버튼 2개(근무일지·출석부)
+//   + 수정·삭제면 글자를 줄이고 여백을 깎아도 표가 67px 넘쳐 삭제가 잘렸다.
+//   그래서 출력 3종을 메뉴 하나로 접고, 관리 열을 [출력 ▼ | 수정 삭제] 한 줄로 둔다.
+//   표가 overflow-x-auto 라 일반 드롭다운은 잘린다 → portal + fixed 좌표로 띄운다
+//   (비품관리 AssetManager 의 ⋯ 메뉴와 같은 방식). 목록 끝 행에서는 위로 편다.
+// =====================================================================
+const MENU_W = 216;
+const MENU_H = 148;
+
+function OutputMenu({ programId }: { programId: string }) {
+  const [open, setOpen] = useState(false);
+  const btnRef = useRef<HTMLButtonElement>(null);
+  const [pos, setPos] = useState<{ top: number; left: number } | null>(null);
+
+  function toggle() {
+    if (!open && btnRef.current) {
+      const r = btnRef.current.getBoundingClientRect();
+      const below = r.bottom + 4;
+      const top =
+        below + MENU_H > window.innerHeight
+          ? Math.max(8, r.top - MENU_H - 4) // 아래가 좁으면 버튼 위로
+          : below;
+      const left = Math.min(
+        Math.max(8, r.right - MENU_W),
+        window.innerWidth - MENU_W - 8
+      );
+      setPos({ top, left });
+    }
+    setOpen((o) => !o);
+  }
+
+  const item =
+    "block w-full px-3 py-1.5 text-left text-xs text-ink-body hover:bg-surface";
+  const sub = "mt-0.5 block text-[10px] text-ink-hint";
+  const sheet = `/hr/saems/programs/${programId}/attendance-sheet`;
+
+  return (
+    <>
+      <button
+        ref={btnRef}
+        type="button"
+        onClick={toggle}
+        className={outBtn}
+        aria-haspopup="menu"
+        aria-expanded={open}
+        title="PDF 출력 — 근무일지 / 출석부"
+      >
+        출력
+        <span aria-hidden className="ml-1 text-[8px]">
+          ▼
+        </span>
+      </button>
+      {open &&
+        pos &&
+        createPortal(
+          <div className="fixed inset-0 z-[60]" onClick={() => setOpen(false)}>
+            <div
+              role="menu"
+              className="absolute overflow-hidden rounded-lg border border-line bg-card py-1 shadow-lg"
+              style={{ top: pos.top, left: pos.left, width: MENU_W }}
+              onClick={(e) => e.stopPropagation()}
+            >
+              <a
+                href={`/hr/saems/programs/${programId}/worklog`}
+                role="menuitem"
+                className={item}
+                onClick={() => setOpen(false)}
+              >
+                강사 근무일지
+                <span className={sub}>결재란·서명란은 빈칸</span>
+              </a>
+              <div className="my-1 border-t border-line/70" />
+              <a href={sheet} role="menuitem" className={item} onClick={() => setOpen(false)}>
+                출석부 · 출결 포함
+                <span className={sub}>체크된 출결이 채워진 출석부</span>
+              </a>
+              <a
+                href={`${sheet}?blank=1`}
+                role="menuitem"
+                className={item}
+                onClick={() => setOpen(false)}
+              >
+                출석부 · 빈 양식
+                <span className={sub}>출결 칸이 빈 — 손으로 체크</span>
+              </a>
+            </div>
+          </div>,
+          document.body
+        )}
+    </>
   );
 }
 
@@ -451,48 +555,23 @@ export default function ProgramsManager({
                       </span>
                     </td>
                     <td className={`${tdCls} text-right`}>
-                      {/* 출력 버튼이 늘어 한 줄에 다 못 담으면 줄바꿈 — 수정·삭제가
-                          가로 스크롤 밖으로 밀려나지 않게 한다. */}
-                      <div className="flex flex-wrap justify-end gap-1">
+                      {/* 출력(PDF) | 편집(수정·삭제) — 구분선으로 나눈 한 줄. */}
+                      <div className="flex items-center justify-end gap-1">
                         {p.sessionCount > 0 ? (
-                          <>
-                            <a
-                              href={`/hr/saems/programs/${p.id}/worklog`}
-                              className="inline-flex items-center rounded border border-navy/40 px-2 py-1 text-xs text-navy hover:bg-surface"
-                              title="양식대로 PDF 출력 — 결재란·서명란은 빈칸(종이 결재용)"
-                            >
-                              근무일지
-                            </a>
-                            {/* 출석부 — 출결 채운 판 / 손으로 체크할 빈 판. */}
-                            <span className="inline-flex overflow-hidden rounded border border-navy/40">
-                              <a
-                                href={`/hr/saems/programs/${p.id}/attendance-sheet`}
-                                className="px-2 py-1 text-xs text-navy hover:bg-surface"
-                                title="출결을 채운 출석부 PDF (서명칸은 빈칸)"
-                              >
-                                출석부
-                              </a>
-                              <a
-                                href={`/hr/saems/programs/${p.id}/attendance-sheet?blank=1`}
-                                className="border-l border-navy/40 px-2 py-1 text-xs text-navy hover:bg-surface"
-                                title="출결 칸이 빈 출석부 PDF (강사가 손으로 체크)"
-                              >
-                                빈
-                              </a>
-                            </span>
-                          </>
+                          <OutputMenu programId={p.id} />
                         ) : (
                           <span
-                            className="inline-flex items-center rounded border border-line/60 px-2 py-1 text-xs text-ink-hint"
+                            className={outBtnOff}
                             title="회차가 없어 출력할 내용이 없습니다"
                           >
-                            근무일지·출석부
+                            출력
                           </span>
                         )}
+                        <span aria-hidden className="h-4 w-px bg-line" />
                         <button
                           type="button"
                           onClick={() => setModal({ kind: "program", program: p })}
-                          className="rounded border border-line px-2 py-1 text-xs text-ink-muted hover:bg-surface"
+                          className={editBtn}
                         >
                           수정
                         </button>
