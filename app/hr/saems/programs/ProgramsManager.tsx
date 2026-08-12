@@ -452,6 +452,22 @@ export default function ProgramsManager({
                     </td>
                     <td className={`${tdCls} text-right`}>
                       <div className="flex justify-end gap-1">
+                        {p.sessionCount > 0 ? (
+                          <a
+                            href={`/hr/saems/programs/${p.id}/worklog`}
+                            className="inline-flex items-center rounded border border-navy/40 px-2 py-1 text-xs text-navy hover:bg-surface"
+                            title="양식대로 PDF 출력 — 결재란·서명란은 빈칸(종이 결재용)"
+                          >
+                            근무일지
+                          </a>
+                        ) : (
+                          <span
+                            className="inline-flex items-center rounded border border-line/60 px-2 py-1 text-xs text-ink-hint"
+                            title="회차가 없어 출력할 내용이 없습니다"
+                          >
+                            근무일지
+                          </span>
+                        )}
                         <button
                           type="button"
                           onClick={() => setModal({ kind: "program", program: p })}

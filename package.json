@@ -21,7 +21,8 @@
     "test:mutual": "tsx scripts/test-mutual.ts",
     "test:mutual-import": "tsx scripts/test-mutual-import.ts",
     "test:business-results": "node --import tsx scripts/test-business-results-export.ts",
-    "test:mail": "node --import tsx scripts/test-mail-parse.ts"
+    "test:mail": "node --import tsx scripts/test-mail-parse.ts",
+    "test:worklog": "node --import tsx scripts/test-worklog-pdf.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.116.0",
