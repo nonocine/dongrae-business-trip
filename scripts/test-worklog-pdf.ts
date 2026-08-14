@@ -13,14 +13,15 @@
 //   ⑦ ★강사 서명 — instructor_signed_at 있는 회차에만 이미지가 들어가고,
 //      서명이 없거나 깨져도 PDF 생성이 죽지 않는지. 이미지가 서명 칸 안에 있는지.
 //   DB를 타지 않는다 — 고정 데이터로만 검증(급여명세서 테스트와 같은 방식).
-import { deflateSync } from "zlib";
-import { PDFDocument, PDFArray, PDFRawStream, decodePDFRawStream } from "pdf-lib";
+import { PDFDocument } from "pdf-lib";
 import {
   buildWorkLogPdf,
   workLogPdfFilename,
   workLogTitle,
   type WorkLogData,
 } from "../lib/workLogPdf";
+// 콘텐츠 스트림 판독(rects·images)·서명 대역 PNG 는 출석부 테스트와 공용 — scripts/pdfProbe.
+import { pageOps, rects, images, signaturePng } from "./pdfProbe";
 
 let failures = 0;
 function expect(label: string, cond: boolean, detail?: string) {
@@ -28,50 +29,7 @@ function expect(label: string, cond: boolean, detail?: string) {
   console.log(`${cond ? "✓" : "✗"} ${label}${cond ? "" : ` — ${detail ?? ""}`}`);
 }
 
-// --- 손서명 대역: 실제 서명처럼 가로로 긴 투명 PNG 를 즉석에서 만든다. ---
-//   DB(saem_instructors.signature_data)에 들어 있는 것과 같은 모양의 dataURL.
-function crc32(buf: Buffer): number {
-  let c = ~0;
-  for (const b of buf) {
-    c ^= b;
-    for (let k = 0; k < 8; k++) c = (c >>> 1) ^ (0xedb88320 & -(c & 1));
-  }
-  return ~c >>> 0;
-}
-function pngChunk(type: string, data: Buffer): Buffer {
-  const len = Buffer.alloc(4);
-  len.writeUInt32BE(data.length);
-  const body = Buffer.concat([Buffer.from(type, "latin1"), data]);
-  const crc = Buffer.alloc(4);
-  crc.writeUInt32BE(crc32(body));
-  return Buffer.concat([len, body, crc]);
-}
-function signaturePng(w: number, h: number): string {
-  const ihdr = Buffer.alloc(13);
-  ihdr.writeUInt32BE(w, 0);
-  ihdr.writeUInt32BE(h, 4);
-  ihdr[8] = 8; // bit depth
-  ihdr[9] = 6; // RGBA
-  // 가로 획 하나(가운데 몇 줄만 불투명) — 트림된 손서명과 비슷한 비율.
-  const raw = Buffer.alloc((1 + w * 4) * h);
-  for (let y = 0; y < h; y++) {
-    const off = y * (1 + w * 4);
-    raw[off] = 0; // filter: none
-    const ink = y > h * 0.4 && y < h * 0.6;
-    for (let x = 0; x < w; x++) {
-      const p = off + 1 + x * 4;
-      raw[p] = raw[p + 1] = raw[p + 2] = 0;
-      raw[p + 3] = ink ? 255 : 0;
-    }
-  }
-  const png = Buffer.concat([
-    Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
-    pngChunk("IHDR", ihdr),
-    pngChunk("IDAT", deflateSync(raw)),
-    pngChunk("IEND", Buffer.alloc(0)),
-  ]);
-  return `data:image/png;base64,${png.toString("base64")}`;
-}
+// 실제 서명처럼 가로로 긴(3:1) 투명 PNG.
 const SIGN_PNG = signaturePng(240, 80);
 
 const base: WorkLogData = {
@@ -128,56 +86,6 @@ async function pageCount(d: WorkLogData): Promise<number> {
   const header = Buffer.from(bytes.slice(0, 5)).toString("latin1");
   expect(`%PDF 헤더 (${d.programName})`, header === "%PDF-", header);
   return (await PDFDocument.load(bytes)).getPageCount();
-}
-
-// --- 그려진 도형·이미지 좌표 읽기 ---
-//   pdf-lib 는 사각형을 `re` 가 아니라 translate(cm) + 경로(m/l)로 그린다.
-//   양식이 어디에 놓였는지(결재란이 정말 없는지, 서명이 칸 안인지)는 이 좌표로만 확인된다.
-async function pageOps(bytes: Uint8Array, pageIndex = 0): Promise<string> {
-  const doc = await PDFDocument.load(bytes);
-  const contents = doc.getPage(pageIndex).node.Contents();
-  if (!contents) return "";
-  const streams =
-    contents instanceof PDFArray
-      ? contents.asArray().map((r) => doc.context.lookup(r))
-      : [contents];
-  return streams
-    .map((s) =>
-      s instanceof PDFRawStream
-        ? Buffer.from(decodePDFRawStream(s).decode()).toString("latin1")
-        : ""
-    )
-    .join("\n");
-}
-
-// translate 뒤 `0 0 m / 0 H l / W H l` 경로 → {x, y, w, h} (PDF 좌표, y = 아래쪽 변).
-function rects(ops: string) {
-  const re =
-    /1 0 0 1 (-?[\d.]+) (-?[\d.]+) cm[\s\S]{0,80}?0 0 m\s+0 (-?[\d.]+) l\s+(-?[\d.]+) \3 l/g;
-  const out: { x: number; y: number; w: number; h: number }[] = [];
-  for (const m of ops.matchAll(re))
-    out.push({
-      x: Number(m[1]),
-      y: Number(m[2]),
-      w: Number(m[4]),
-      h: Number(m[3]),
-    });
-  return out;
-}
-
-// translate + rotate(항등) + scale + skew(항등) + `/X Do` → 그려진 이미지 박스.
-function images(ops: string) {
-  const re =
-    /1 0 0 1 (-?[\d.]+) (-?[\d.]+) cm\s+1 0 0 1 0 0 cm\s+(-?[\d.]+) 0 0 (-?[\d.]+) 0 0 cm\s+1 0 0 1 0 0 cm\s+\/[\w.-]+ Do/g;
-  const out: { x: number; y: number; w: number; h: number }[] = [];
-  for (const m of ops.matchAll(re))
-    out.push({
-      x: Number(m[1]),
-      y: Number(m[2]),
-      w: Number(m[3]),
-      h: Number(m[4]),
-    });
-  return out;
 }
 
 const A4_H = 841.89;
