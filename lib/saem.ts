@@ -244,3 +244,27 @@ export function formatKRW(n: number | null | undefined): string {
   if (n == null || !Number.isFinite(Number(n))) return "-";
   return Math.round(Number(n)).toLocaleString("ko-KR");
 }
+
+// =====================================================================
+// 강의확인증 — 강사가 동래샘들에서 신청(pending) → 담당자가 검토·승인/반려.
+//   승인된 것만 강사가 출력한다(출력 시 printed_at 기록 — 2부-b).
+//   ⚠️ 신청 데이터에 주민번호는 없다. 만들지도, 표시하지도 않는다.
+// =====================================================================
+export type CertStatus = "pending" | "approved" | "rejected";
+export const CERT_STATUS_LABEL: Record<CertStatus, string> = {
+  pending: "신청중",
+  approved: "승인",
+  rejected: "반려",
+};
+export function normalizeCertStatus(v: unknown): CertStatus {
+  return v === "approved" || v === "rejected" ? v : "pending";
+}
+
+// 발급번호 표시 — "제2026년-3호". 채번은 신청 시(1부-A)에 이미 끝났다.
+export function certNoLabel(
+  year: number | null | undefined,
+  no: number | null | undefined
+): string {
+  if (year == null || no == null) return "-";
+  return `제${year}년-${no}호`;
+}
