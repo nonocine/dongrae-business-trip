@@ -1,19 +1,25 @@
 // =====================================================================
-// 강사 근무일지 PDF — 프로그램 1개 = 종이 1장(양식 재현, 종이 결재용).
-//   * 양식: 제목("N차시 강사 근무일지") / 우측 상단 결재란(담당·부장·관장) /
-//     강사 인적사항(과정·프로그램명·성명·휴대전화) /
+// 강사 근무일지 PDF — 프로그램 1개 = 종이 1장(양식 재현).
+//   * 양식: 제목("N차시 강사 근무일지") / 강사 인적사항(과정·프로그램명·성명·휴대전화) /
 //     회차별 표(근무일 · 수업내용 및 특이사항 · 수강인원 · 근무시간 · 강사 담당(서명)).
-//   * 결재란·서명란은 빈칸으로 둔다 — 출력 후 사람이 직접 결재·서명하는 문서다.
-//     자동 날인·자동 서명 없음(증명서와 달리 관인도 쓰지 않는다).
+//   * 결재란(담당·부장·관장)은 없다 — 2026-08 이민정 요청으로 삭제했다. 그 자리 여백을
+//     본문이 회수해 A4 세로 1장에 제목·인적사항·회차표가 함께 들어간다.
+//   * "강사 담당(서명)" 칸은 자동으로 채운다 — 동래샘들에서 강사가 회차를 제출할 때
+//     손서명(canvas)을 하면 saem_sessions.instructor_signed_at 이 찍히고, 그 회차 칸에
+//     saem_instructors.signature_data(PNG dataURL)를 넣는다. 서명 안 한 회차는 빈칸.
+//     서명 이미지가 없거나 깨져도 PDF 생성은 계속된다(그 칸만 빈칸).
 //   * 미진행·미입력 회차는 날짜만 찍고 나머지를 비운다(빈 줄 = 앞으로 쓸 자리).
+//   * 회차가 많아 1장을 넘길 것 같으면 행 높이·본문 글자를 단계적으로 줄여 맞춘다
+//     (DENSITY). 최소 단계로도 안 되면 그때만 다음 장으로 넘긴다.
 //   * pdf-lib + fontkit + 나눔고딕 통임베드(subset:false — Vercel 글리프 누락 대응).
 //   * 가드 없음(라우트가 requireSaemAccess 후 호출). saem_* 읽기 전용.
 // =====================================================================
 
-import { PDFDocument, rgb, type PDFFont } from "pdf-lib";
+import { PDFDocument, rgb, type PDFFont, type PDFImage } from "pdf-lib";
 import fontkit from "@pdf-lib/fontkit";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
 import { formatPhone } from "@/lib/saemEnrollment";
+import { decodeDataUrl } from "@/lib/recruitmentApplicantDocData";
 // 폰트 로딩·글리프 대체(①·㎡·㈜ …)는 출석부와 공용 — lib/pdfFont.
 import { regularFont, boldFont, fkFont, fitToFont, spaced } from "@/lib/pdfFont";
 
@@ -29,6 +35,8 @@ export type WorkLogSession = {
   log_content: string | null;
   student_count: number | null;
   work_hours: number | null;
+  // 동래샘들에서 강사가 이 회차를 서명 제출한 시각. 있으면 서명 칸을 채운다.
+  instructor_signed_at: string | null;
 };
 
 export type WorkLogData = {
@@ -38,6 +46,8 @@ export type WorkLogData = {
   programName: string;
   instructorName: string;
   instructorPhone: string;
+  // 강사 손서명 PNG dataURL(강사당 1개). 어느 회차에 찍을지는 instructor_signed_at 이 정한다.
+  instructorSignature: string | null;
   sessions: WorkLogSession[];
 };
 
@@ -71,13 +81,15 @@ export async function loadProgramWorkLog(
     p.instructor_id
       ? supabaseAdmin
           .from("saem_instructors")
-          .select("name, phone")
+          .select("name, phone, signature_data")
           .eq("id", p.instructor_id)
           .maybeSingle()
       : Promise.resolve({ data: null }),
     supabaseAdmin
       .from("saem_sessions")
-      .select("session_no, session_date, log_content, student_count, work_hours")
+      .select(
+        "session_no, session_date, log_content, student_count, work_hours, instructor_signed_at"
+      )
       .eq("program_id", p.id)
       .order("session_no", { ascending: true }),
   ]);
@@ -92,7 +104,16 @@ export async function loadProgramWorkLog(
       .maybeSingle();
     courseName = String((proj as { name?: string | null } | null)?.name ?? "");
   }
-  const ins = instr as { name: string | null; phone: string | null } | null;
+  const ins = instr as {
+    name: string | null;
+    phone: string | null;
+    signature_data: string | null;
+  } | null;
+  // 서명은 문자열(dataURL)만 받는다 — 다른 형식이면 없는 것으로 본다.
+  const sig =
+    typeof ins?.signature_data === "string" && ins.signature_data.trim()
+      ? ins.signature_data
+      : null;
 
   return {
     programId: p.id,
@@ -101,6 +122,7 @@ export async function loadProgramWorkLog(
     programName: String(p.name ?? ""),
     instructorName: String(ins?.name ?? ""),
     instructorPhone: formatPhone(ins?.phone) ?? "",
+    instructorSignature: sig,
     sessions: (sess ?? []).map((r) => {
       const s = r as Record<string, unknown>;
       return {
@@ -110,6 +132,8 @@ export async function loadProgramWorkLog(
         student_count:
           s.student_count == null ? null : Number(s.student_count),
         work_hours: s.work_hours == null ? null : Number(s.work_hours),
+        instructor_signed_at:
+          (s.instructor_signed_at as string | null) ?? null,
       };
     }),
   };
@@ -159,6 +183,29 @@ const COL = {
   hours: 52,
   sign: 108,
 };
+
+// 세로 배치(top-origin). 결재란을 없앤 만큼 전부 위로 당겨 놓았다.
+const TITLE_TOP = 46;
+const TITLE_SIZE = 17;
+const INFO_TOP = 92;
+const INFO_H = 26;
+const TABLE_TOP = INFO_TOP + INFO_H * 2 + 16; // 160
+const HEAD_H = 26;
+
+// A4 1장에 맞추기 위한 단계별 밀도. 위에서부터 시도하고, 처음으로 들어가는 걸 쓴다.
+//   회차 8~9개는 첫 단계(size 9)로 넉넉히 들어간다. 수업내용이 길어 줄이 늘어나면
+//   글자·행 높이를 조금씩 줄인다. 마지막 단계로도 안 되면 다음 장으로 넘긴다.
+const DENSITY = [
+  { size: 9, lineH: 12, rowMin: 34 },
+  { size: 8.5, lineH: 11.5, rowMin: 31 },
+  { size: 8, lineH: 11, rowMin: 28 },
+  { size: 7.5, lineH: 10.5, rowMin: 26 },
+  { size: 7, lineH: 10, rowMin: 24 },
+];
+
+// 서명 이미지가 칸 밖으로 안 나가게 두는 안쪽 여백.
+const SIGN_PAD_X = 6;
+const SIGN_PAD_Y = 4;
 
 export async function buildWorkLogPdf(d: WorkLogData): Promise<Uint8Array> {
   const pdf = await PDFDocument.create();
@@ -275,43 +322,45 @@ export async function buildWorkLogPdf(d: WorkLogData): Promise<Uint8Array> {
     return out;
   };
 
-  // === 결재란(우측 상단) — 담당 / 부장 / 관장. 전부 빈칸(종이 결재용). ===
-  const APPR = { labelW: 20, cellW: 48, headH: 15, signH: 42 };
-  const apprW = APPR.labelW + APPR.cellW * 3;
-  const apprX = W - M - apprW;
-  const apprY = 38;
-  const apprH = APPR.headH + APPR.signH;
-  rect(apprX, apprY, APPR.labelW, apprH, { fill: LABEL_BG });
-  text(apprX, apprY + apprH / 2 - 11, "결", {
-    size: 9,
-    bold: true,
-    color: NAVY,
-    align: "center",
-    cellW: APPR.labelW,
-  });
-  text(apprX, apprY + apprH / 2 + 2, "재", {
-    size: 9,
-    bold: true,
-    color: NAVY,
-    align: "center",
-    cellW: APPR.labelW,
-  });
-  ["담당", "부장", "관장"].forEach((label, i) => {
-    const x = apprX + APPR.labelW + i * APPR.cellW;
-    cell(x, apprY, APPR.cellW, APPR.headH, label, {
-      size: 8.5,
-      bold: true,
-      color: NAVY,
-      fill: LABEL_BG,
-      align: "center",
+  // === 강사 서명 이미지 ===
+  //   강사당 1개. 서명한 회차 수만큼 같은 이미지를 재사용하므로 임베드는 한 번만.
+  //   dataURL 이 깨졌거나 PNG 가 아니면 null — 그 경우 서명 칸은 전부 빈칸으로 남는다.
+  let signImg: PDFImage | null = null;
+  const signBytes = decodeDataUrl(d.instructorSignature);
+  if (signBytes && signBytes.length > 0) {
+    try {
+      signImg = await pdf.embedPng(signBytes);
+    } catch {
+      try {
+        signImg = await pdf.embedJpg(signBytes);
+      } catch {
+        signImg = null;
+      }
+    }
+  }
+  // 서명 칸 안에 비율 유지로 앉힌다(칸보다 크면 줄이고, 작아도 칸에 맞춰 키운다).
+  const drawSign = (x: number, yTop: number, w: number, h: number) => {
+    if (!signImg) return;
+    const availW = w - SIGN_PAD_X * 2;
+    const availH = h - SIGN_PAD_Y * 2;
+    if (availW <= 0 || availH <= 0) return;
+    if (!signImg.width || !signImg.height) return;
+    const k = Math.min(availW / signImg.width, availH / signImg.height);
+    if (!Number.isFinite(k) || k <= 0) return;
+    const sw = signImg.width * k;
+    const sh = signImg.height * k;
+    page.drawImage(signImg, {
+      x: x + (w - sw) / 2,
+      y: H - (yTop + (h - sh) / 2) - sh,
+      width: sw,
+      height: sh,
     });
-    rect(x, apprY + APPR.headH, APPR.cellW, APPR.signH); // 서명 자리 — 비워 둔다
-  });
+  };
 
   // === 제목 ===
   const title = spaced(workLogTitle(d));
-  text(M, 116, title, {
-    size: 17,
+  text(M, TITLE_TOP, title, {
+    size: TITLE_SIZE,
     bold: true,
     color: NAVY,
     align: "center",
@@ -319,8 +368,8 @@ export async function buildWorkLogPdf(d: WorkLogData): Promise<Uint8Array> {
   });
 
   // === 강사 인적사항 ===
-  const infoTop = 168;
-  const infoH = 26;
+  const infoTop = INFO_TOP;
+  const infoH = INFO_H;
   const IL = 72; // 라벨 열
   const IV1 = 186; // 값 열 1
   const IV2 = CONTENT_W - IL * 2 - IV1; // 값 열 2
@@ -362,12 +411,37 @@ export async function buildWorkLogPdf(d: WorkLogData): Promise<Uint8Array> {
   );
 
   // === 회차별 표 ===
-  const HEAD_H = 26;
-  const ROW_MIN = 34;
-  const LINE_H = 12;
-  const CONTENT_SIZE = 9;
   const bottom = H - M;
-  let yTop = infoTop + infoH * 2 + 18;
+
+  // 밀도 결정 — 표 전체(머리 + 모든 행)가 첫 장 안에 들어가는 첫 단계를 쓴다.
+  //   행 높이는 수업내용 줄 수에 따라 달라지므로 단계마다 다시 잰다.
+  const measure = (dz: (typeof DENSITY)[number]) => {
+    const rows = d.sessions.map((s) => {
+      const lines = wrap(s.log_content ?? "", COL.content - 12, dz.size, font);
+      return { lines, h: Math.max(dz.rowMin, lines.length * dz.lineH + dz.lineH + 2) };
+    });
+    const total = rows.reduce((a, r) => a + r.h, 0);
+    return { rows, total };
+  };
+  const avail = bottom - TABLE_TOP - HEAD_H;
+  let dz = DENSITY[DENSITY.length - 1];
+  let rows = measure(dz).rows;
+  for (const cand of DENSITY) {
+    const m = measure(cand);
+    if (m.total <= avail) {
+      dz = cand;
+      rows = m.rows;
+      break;
+    }
+  }
+  const CONTENT_SIZE = dz.size;
+  const LINE_H = dz.lineH;
+  const ROW_MIN = dz.rowMin;
+  // 날짜·수강인원·근무시간은 본문보다 크지 않게(좁은 칸이라 넘치면 안 된다).
+  const CELL_SIZE = Math.min(9, CONTENT_SIZE);
+  const DATE_SIZE = Math.min(8.5, CONTENT_SIZE);
+
+  let yTop = TABLE_TOP;
 
   const drawTableHead = () => {
     let x = M;
@@ -400,14 +474,8 @@ export async function buildWorkLogPdf(d: WorkLogData): Promise<Uint8Array> {
     yTop += ROW_MIN;
   }
 
-  for (const s of d.sessions) {
-    const lines = wrap(
-      s.log_content ?? "",
-      COL.content - 12,
-      CONTENT_SIZE,
-      font
-    );
-    const h = Math.max(ROW_MIN, lines.length * LINE_H + 14);
+  d.sessions.forEach((s, i) => {
+    const { lines, h } = rows[i];
     if (yTop + h > bottom) {
       page = pdf.addPage([W, H]);
       yTop = M;
@@ -416,30 +484,32 @@ export async function buildWorkLogPdf(d: WorkLogData): Promise<Uint8Array> {
 
     let x = M;
     cell(x, yTop, COL.date, h, ymdWithWeekday(s.session_date), {
-      size: 8.5,
+      size: DATE_SIZE,
       align: "center",
     });
     x += COL.date;
     // 수업내용 — 여러 줄. 셀 테두리만 먼저 그리고 줄을 세로중앙에 앉힌다.
     rect(x, yTop, COL.content, h);
     const startY = yTop + (h - lines.length * LINE_H) / 2;
-    lines.forEach((ln, i) => {
-      text(x + 6, startY + i * LINE_H, ln, { size: CONTENT_SIZE });
+    lines.forEach((ln, li) => {
+      text(x + 6, startY + li * LINE_H, ln, { size: CONTENT_SIZE });
     });
     x += COL.content;
     cell(x, yTop, COL.count, h, countLabel(s.student_count), {
-      size: 9,
+      size: CELL_SIZE,
       align: "center",
     });
     x += COL.count;
     cell(x, yTop, COL.hours, h, hoursLabel(s.work_hours), {
-      size: 9,
+      size: CELL_SIZE,
       align: "center",
     });
     x += COL.hours;
-    rect(x, yTop, COL.sign, h); // 서명 자리 — 비워 둔다(그날 강사가 직접 서명)
+    // 강사 담당(서명) — 동래샘들에서 서명 제출한 회차만 채운다. 나머지는 빈칸.
+    rect(x, yTop, COL.sign, h);
+    if (s.instructor_signed_at) drawSign(x, yTop, COL.sign, h);
     yTop += h;
-  }
+  });
 
   return pdf.save();
 }

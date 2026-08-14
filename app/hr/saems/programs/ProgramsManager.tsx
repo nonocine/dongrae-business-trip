@@ -275,7 +275,7 @@ function OutputMenu({ programId }: { programId: string }) {
                 onClick={() => setOpen(false)}
               >
                 강사 근무일지
-                <span className={sub}>결재란·서명란은 빈칸</span>
+                <span className={sub}>강사 서명 자동 · A4 1장</span>
               </a>
               <div className="my-1 border-t border-line/70" />
               <a href={sheet} role="menuitem" className={item} onClick={() => setOpen(false)}>
