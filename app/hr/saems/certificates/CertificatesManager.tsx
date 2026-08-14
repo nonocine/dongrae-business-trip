@@ -3,7 +3,8 @@
 // 강의확인증 발급대장 — 목록(발급번호·강사명·강의내용·요청일·상태·출력일) + 상세 검토.
 //   담당자는 pending 건만 수정·승인·반려할 수 있고, 처리된 건은 읽기 전용이다.
 //   ⚠️ 주민번호는 신청 데이터에 없다 — 표시·입력 칸을 만들지 않는다.
-//   출력(PDF)은 2부-b. 여기서는 출력일자 열만 두고 값이 없으면 "-" 로 둔다.
+//   양식 미리보기(PDF)는 열어볼 수 있지만 주민번호 칸은 공란이고 출력 이력도 남지
+//   않는다. 실제 발급은 강사 화면(1부-B) 몫 — 출력일자 열은 값이 없으면 "-" 로 둔다.
 
 import { useMemo, useState, useTransition } from "react";
 import {
@@ -400,6 +401,18 @@ function DetailModal({
                 수정 취소
               </button>
             </>
+          )}
+          {!edit && (
+            // 미리보기 — 주민번호 칸은 공란으로 나간다(신청 데이터에 없음).
+            //   실제 발급(주민번호 기재)은 강사 화면에서 한다. 출력 이력도 남지 않는다.
+            <a
+              href={`/hr/saems/certificates/${row.id}/preview`}
+              target="_blank"
+              rel="noopener noreferrer"
+              className={btnSecondary}
+            >
+              양식 미리보기
+            </a>
           )}
           {!editable && (
             <span className={badgeNeutral}>
