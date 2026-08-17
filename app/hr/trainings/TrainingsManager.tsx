@@ -15,7 +15,14 @@ import {
   type MatrixCompletion,
 } from "@/app/hr/trainings/actions";
 import type { MandatoryTraining } from "@/lib/trainings";
-import { ddayLabel, cellKey, CERT_ACCEPT } from "@/lib/trainings";
+import {
+  ddayLabel,
+  cellKey,
+  targetStateOn,
+  targetReasonLabel,
+  trainingBaseYmd,
+  CERT_ACCEPT,
+} from "@/lib/trainings";
 import { fmtKstDate } from "@/lib/datetime";
 import {
   cardCls,
@@ -40,6 +47,7 @@ function fmtDue(due: string | null): string {
 
 type EditFields = {
   name: string;
+  held_on: string;
   due_date: string;
   site_url: string;
   note: string;
@@ -78,6 +86,7 @@ export default function TrainingsManager({
 
   // 신규 등록 폼.
   const [addName, setAddName] = useState("");
+  const [addHeld, setAddHeld] = useState("");
   const [addDue, setAddDue] = useState("");
   const [addUrl, setAddUrl] = useState("");
   const [addNote, setAddNote] = useState("");
@@ -162,21 +171,45 @@ export default function TrainingsManager({
     return m;
   }, [matrix.completions]);
 
-  // 교육별 미이수 인원(재직자 기준).
-  const notMetByTraining = useMemo(() => {
-    const m = new Map<string, number>();
+  // 셀별 대상 여부 — 판정은 서버(대시보드·D-7)와 같은 lib/trainings 함수로.
+  //   대상 아닌 셀은 "미이수"로 세지 않고 표에서도 "—" 로 표시합니다.
+  const targetMap = useMemo(() => {
+    const m = new Map<string, ReturnType<typeof targetStateOn>>();
     for (const t of matrix.trainings) {
-      let n = 0;
+      const base = trainingBaseYmd(t);
       for (const e of matrix.employees)
-        if (!compMap.has(cellKey(t.id, e.driver_id))) n += 1;
-      m.set(t.id, n);
+        m.set(cellKey(t.id, e.driver_id), targetStateOn(e, base));
     }
     return m;
-  }, [matrix.trainings, matrix.employees, compMap]);
+  }, [matrix.trainings, matrix.employees]);
+
+  // 교육별 대상 인원 / 미이수 인원.
+  const statsByTraining = useMemo(() => {
+    const m = new Map<string, { target: number; notMet: number }>();
+    for (const t of matrix.trainings) {
+      let target = 0;
+      let notMet = 0;
+      for (const e of matrix.employees) {
+        const key = cellKey(t.id, e.driver_id);
+        if (!targetMap.get(key)?.isTarget) continue;
+        target += 1;
+        if (!compMap.has(key)) notMet += 1;
+      }
+      m.set(t.id, { target, notMet });
+    }
+    return m;
+  }, [matrix.trainings, matrix.employees, targetMap, compMap]);
 
   const totalNotMet = useMemo(
-    () => Array.from(notMetByTraining.values()).reduce((a, b) => a + b, 0),
-    [notMetByTraining]
+    () =>
+      Array.from(statsByTraining.values()).reduce((a, s) => a + s.notMet, 0),
+    [statsByTraining]
+  );
+
+  // 입사일 미기재 직원 — 대상으로 유지하되 인사기록 보완이 필요합니다.
+  const missingJoinDate = useMemo(
+    () => matrix.employees.filter((e) => !e.joinDate).map((e) => e.name),
+    [matrix.employees]
   );
 
   function reload(y: number) {
@@ -200,6 +233,7 @@ export default function TrainingsManager({
       const res = await saveTraining({
         year,
         name: addName,
+        held_on: addHeld || null,
         due_date: addDue || null,
         site_url: addUrl || null,
         note: addNote || null,
@@ -214,6 +248,7 @@ export default function TrainingsManager({
         return;
       }
       setAddName("");
+      setAddHeld("");
       setAddDue("");
       setAddUrl("");
       setAddNote("");
@@ -229,6 +264,7 @@ export default function TrainingsManager({
     setEditId(t.id);
     setEdit({
       name: t.name,
+      held_on: t.held_on ?? "",
       due_date: t.due_date ?? "",
       site_url: t.site_url ?? "",
       note: t.note ?? "",
@@ -251,6 +287,7 @@ export default function TrainingsManager({
         id: editId,
         year,
         name: edit.name,
+        held_on: edit.held_on || null,
         due_date: edit.due_date || null,
         site_url: edit.site_url || null,
         note: edit.note || null,
@@ -442,6 +479,16 @@ export default function TrainingsManager({
             />
           </div>
           <div className="sm:col-span-2">
+            <label className={lblCls}>실시일</label>
+            <input
+              type="date"
+              className={`${inCls} mt-1`}
+              value={addHeld}
+              onChange={(e) => setAddHeld(e.target.value)}
+              title="대상자 판정 기준일. 비우면 이수기한을 기준으로 씁니다."
+            />
+          </div>
+          <div className="sm:col-span-2">
             <label className={lblCls}>이수기한</label>
             <input
               type="date"
@@ -459,7 +506,12 @@ export default function TrainingsManager({
               placeholder="https://"
             />
           </div>
-          <div className="sm:col-span-2">
+          <div className="flex items-end sm:col-span-1">
+            <button type="submit" className={`${btnPrimary} w-full`} disabled={busy}>
+              추가
+            </button>
+          </div>
+          <div className="sm:col-span-4">
             <label className={lblCls}>비고</label>
             <input
               className={`${inCls} mt-1`}
@@ -467,11 +519,11 @@ export default function TrainingsManager({
               onChange={(e) => setAddNote(e.target.value)}
             />
           </div>
-          <div className="flex items-end sm:col-span-1">
-            <button type="submit" className={`${btnPrimary} w-full`} disabled={busy}>
-              추가
-            </button>
-          </div>
+          <p className="text-[11px] leading-5 text-ink-hint sm:col-span-12">
+            <b>실시일</b>은 대상자 자동 판정 기준입니다 — 실시일에 재직 중이던
+            직원만 그 교육의 대상이 됩니다(입사 전 교육은 미이수로 잡히지
+            않습니다). 비워두면 <b>이수기한</b>을 기준일로 씁니다.
+          </p>
           {/* 종사자 교육 실적 반입용 — 채워두면 반입 행에 자동으로 들어갑니다. */}
           <div className="sm:col-span-4">
             <label className={lblCls}>장소</label>
@@ -509,6 +561,7 @@ export default function TrainingsManager({
               <tr className="border-b border-line text-left text-xs text-navy">
                 <th className="w-10 px-2 py-2 font-semibold">순서</th>
                 <th className="px-2 py-2 font-semibold">교육명</th>
+                <th className="px-2 py-2 font-semibold">실시일</th>
                 <th className="px-2 py-2 font-semibold">이수기한</th>
                 <th className="px-2 py-2 font-semibold">사이트</th>
                 <th className="px-2 py-2 font-semibold">비고</th>
@@ -520,7 +573,7 @@ export default function TrainingsManager({
               {trainings.length === 0 && (
                 <tr>
                   <td
-                    colSpan={7}
+                    colSpan={8}
                     className="px-2 py-6 text-center text-sm text-ink-hint"
                   >
                     등록된 교육이 없습니다. 위에서 교육을 추가하세요.
@@ -547,6 +600,17 @@ export default function TrainingsManager({
                         onChange={(e) =>
                           setEdit({ ...edit, name: e.target.value })
                         }
+                      />
+                    </td>
+                    <td className="px-2 py-2 align-top">
+                      <input
+                        type="date"
+                        className={inCls}
+                        value={edit.held_on}
+                        onChange={(e) =>
+                          setEdit({ ...edit, held_on: e.target.value })
+                        }
+                        title="대상자 판정 기준일. 비우면 이수기한을 기준으로 씁니다."
                       />
                     </td>
                     <td className="px-2 py-2 align-top">
@@ -616,7 +680,7 @@ export default function TrainingsManager({
                   {/* 종사자 교육 반입용 3필드 — 열이 많아 별도 행으로 둡니다. */}
                   <tr className="border-b border-line bg-navy-soft/30">
                     <td />
-                    <td colSpan={6} className="px-2 pb-2">
+                    <td colSpan={7} className="px-2 pb-2">
                       <div className="grid gap-2 sm:grid-cols-3">
                         {(
                           [
@@ -653,6 +717,18 @@ export default function TrainingsManager({
                     </td>
                     <td className="px-2 py-2 font-medium text-ink-body">
                       {t.name}
+                    </td>
+                    <td className="px-2 py-2 text-ink-body">
+                      {t.held_on ? (
+                        fmtDue(t.held_on)
+                      ) : (
+                        <span
+                          className="text-ink-hint"
+                          title="실시일 미입력 — 이수기한을 대상 판정 기준일로 씁니다."
+                        >
+                          기한 기준
+                        </span>
+                      )}
                     </td>
                     <td className="px-2 py-2 text-ink-body">
                       {fmtDue(t.due_date)}
@@ -726,6 +802,7 @@ export default function TrainingsManager({
               <b className={totalNotMet > 0 ? "text-stamp" : "text-success"}>
                 {totalNotMet}건
               </b>
+              <span className="ml-1 text-ink-hint">(대상자 기준)</span>
             </span>
             {isM0 && (
               <button
@@ -758,7 +835,8 @@ export default function TrainingsManager({
                     </th>
                     {matrix.trainings.map((t) => {
                       const overdue = t.dday != null && t.dday < 0;
-                      const notMet = notMetByTraining.get(t.id) ?? 0;
+                      const stat = statsByTraining.get(t.id);
+                      const notMet = stat?.notMet ?? 0;
                       return (
                         <th
                           key={t.id}
@@ -770,6 +848,12 @@ export default function TrainingsManager({
                             </span>
                             <span className="text-[10px] text-ink-hint">
                               {fmtDue(t.due_date)}
+                            </span>
+                            <span
+                              className="text-[10px] text-ink-hint"
+                              title={`대상 판정 기준일 ${trainingBaseYmd(t) ?? "없음"}`}
+                            >
+                              대상 {stat?.target ?? 0}명
                             </span>
                             <span
                               className={`text-[10px] font-semibold ${
@@ -805,6 +889,27 @@ export default function TrainingsManager({
                       {matrix.trainings.map((t) => {
                         const key = cellKey(t.id, emp.driver_id);
                         const done = compMap.get(key);
+                        const state = targetMap.get(key);
+                        const baseYmd = trainingBaseYmd(t);
+                        // 대상 아님 — 입사 전·퇴사 후 교육. 미이수로 세지 않고
+                        //   대리 업로드도 막습니다(대상 아닌데 이수 처리 방지).
+                        //   단 이미 이수 기록이 있으면 ✓ 를 남겨 열람·취소는 되게
+                        //   합니다(기존 기록이 화면에서 사라지지 않도록).
+                        if (state && !state.isTarget && !done) {
+                          return (
+                            <td
+                              key={t.id}
+                              className="border-b border-l border-line/70 bg-surface/60 p-0 text-center"
+                            >
+                              <div
+                                className="flex h-8 w-full items-center justify-center text-ink-hint"
+                                title={targetReasonLabel(state.reason, baseYmd)}
+                              >
+                                —
+                              </div>
+                            </td>
+                          );
+                        }
                         const overdue = t.dday != null && t.dday < 0;
                         const isSel =
                           sel?.trainingId === t.id &&
@@ -832,8 +937,14 @@ export default function TrainingsManager({
                               }`}
                               title={
                                 done
-                                  ? `이수 (${fmtKstDate(done.completed_at)})`
-                                  : "미이수 — 클릭해 수료증 업로드"
+                                  ? `이수 (${fmtKstDate(done.completed_at)})${
+                                      state && !state.isTarget
+                                        ? " · 대상 아님(기록 보존)"
+                                        : ""
+                                    }`
+                                  : state && state.reason !== "target"
+                                    ? targetReasonLabel(state.reason, baseYmd)
+                                    : "미이수 — 클릭해 수료증 업로드"
                               }
                             >
                               {done ? (
@@ -852,8 +963,17 @@ export default function TrainingsManager({
             </div>
             <p className="mt-2 text-[11px] text-ink-hint">
               ✓ 클릭 → 상세(수료증 열람/재업로드/취소), 빈 칸 클릭 → 대리 업로드.
-              붉은 칸은 기한이 지난 미이수입니다.
+              붉은 칸은 기한이 지난 미이수입니다. <b>—</b> 는 교육 실시일에 재직
+              중이 아니어서 <b>대상이 아닌</b> 칸입니다(입사 전·퇴사 후 — 미이수로
+              세지 않고 업로드도 막습니다).
             </p>
+            {missingJoinDate.length > 0 && (
+              <p className="mt-1 text-[11px] text-warning">
+                입사일 미기재 {missingJoinDate.length}명(
+                {missingJoinDate.join(", ")}) — 판정할 수 없어 모든 교육의 대상으로
+                둡니다. 인사기록에서 입사일을 채워주세요.
+              </p>
+            )}
           </>
         )}
 

@@ -14,6 +14,8 @@ import {
   sortTrainings,
   daysUntil,
   kstTodayYmd,
+  isTargetOn,
+  trainingBaseYmd,
   CERT_EXT,
   CERT_MAX_BYTES,
 } from "@/lib/trainings";
@@ -70,15 +72,29 @@ export async function getMyTrainings(): Promise<MyTrainings | null> {
   const year = currentYear();
   const today = kstTodayYmd();
 
-  const { data: trs } = await supabaseAdmin
-    .from("mandatory_trainings")
-    .select("*")
-    .eq("year", year)
-    .eq("is_active", true);
-  const trainings = sortTrainings(
+  const [{ data: trs }, { data: prof }] = await Promise.all([
+    supabaseAdmin
+      .from("mandatory_trainings")
+      .select("*")
+      .eq("year", year)
+      .eq("is_active", true),
+    supabaseAdmin
+      .from("employee_profiles")
+      .select("join_date, resignation_date")
+      .eq("driver_id", driver.id)
+      .maybeSingle(),
+  ]);
+  // 대상자 판정 — 실시일(held_on ?? due_date)에 재직 중이던 교육만 내 의무입니다.
+  //   판정 규칙은 lib/trainings 단일 출처(현황판·D-7 독촉과 동일).
+  const p = (prof ?? {}) as Record<string, unknown>;
+  const span = {
+    joinDate: (p.join_date as string | null) ?? null,
+    resignationDate: (p.resignation_date as string | null) ?? null,
+  };
+  const allTrainings = sortTrainings(
     (trs ?? []).map((r) => toTraining(r as Record<string, unknown>))
   );
-  if (trainings.length === 0) return { year, today, items: [] };
+  if (allTrainings.length === 0) return { year, today, items: [] };
 
   const { data: comps } = await supabaseAdmin
     .from("training_completions")
@@ -86,7 +102,7 @@ export async function getMyTrainings(): Promise<MyTrainings | null> {
     .eq("driver_id", driver.id)
     .in(
       "training_id",
-      trainings.map((t) => t.id)
+      allTrainings.map((t) => t.id)
     );
   const doneMap = new Map<
     string,
@@ -101,6 +117,12 @@ export async function getMyTrainings(): Promise<MyTrainings | null> {
         (r.certificate_path as string).length > 0,
     });
   }
+
+  // 대상 아닌 교육은 목록에서 제외 — 다만 이미 이수 기록이 있으면 남겨서
+  //   본인이 올린 수료증을 계속 열람할 수 있게 합니다(미이수로는 잡히지 않음).
+  const trainings = allTrainings.filter(
+    (t) => isTargetOn(span, trainingBaseYmd(t)) || doneMap.has(t.id),
+  );
 
   const items: MyTrainingItem[] = trainings.map((t) => {
     const done = doneMap.get(t.id);
@@ -131,13 +153,43 @@ export async function uploadMyCertificate(
     const trainingId = String(formData.get("training_id") ?? "").trim();
     if (!trainingId) return { ok: false, message: "교육 정보가 없습니다." };
 
-    // 교육 존재 확인(임의 id 주입 차단).
-    const { data: tr } = await supabaseAdmin
-      .from("mandatory_trainings")
-      .select("id")
-      .eq("id", trainingId)
-      .maybeSingle();
+    // 교육 존재 확인(임의 id 주입 차단) + 대상자 판정 + 기존 기록 확인.
+    const [{ data: tr }, { data: prof }, { data: prev }] = await Promise.all([
+      supabaseAdmin
+        .from("mandatory_trainings")
+        .select("id, held_on, due_date")
+        .eq("id", trainingId)
+        .maybeSingle(),
+      supabaseAdmin
+        .from("employee_profiles")
+        .select("join_date, resignation_date")
+        .eq("driver_id", driver.id)
+        .maybeSingle(),
+      supabaseAdmin
+        .from("training_completions")
+        .select("certificate_path")
+        .eq("training_id", trainingId)
+        .eq("driver_id", driver.id)
+        .maybeSingle(),
+    ]);
     if (!tr) return { ok: false, message: "존재하지 않는 교육입니다." };
+    // 이미 올린 기록이 있으면 재업로드는 허용하고, 새 이수 처리만 막습니다.
+    const p = (prof ?? {}) as Record<string, unknown>;
+    if (
+      !prev &&
+      !isTargetOn(
+        {
+          joinDate: (p.join_date as string | null) ?? null,
+          resignationDate: (p.resignation_date as string | null) ?? null,
+        },
+        trainingBaseYmd(tr as Record<string, string | null>),
+      )
+    ) {
+      return {
+        ok: false,
+        message: "교육 실시일 기준 재직 기간이 아니어서 이수 대상이 아닙니다.",
+      };
+    }
 
     const file = formData.get("file");
     if (!(file instanceof File) || file.size === 0) {
@@ -151,12 +203,6 @@ export async function uploadMyCertificate(
       return { ok: false, message: "PDF, JPG, PNG 형식만 업로드할 수 있습니다." };
     }
 
-    const { data: prev } = await supabaseAdmin
-      .from("training_completions")
-      .select("certificate_path")
-      .eq("training_id", trainingId)
-      .eq("driver_id", driver.id)
-      .maybeSingle();
     const oldPath =
       ((prev as { certificate_path?: unknown } | null)?.certificate_path as
         | string

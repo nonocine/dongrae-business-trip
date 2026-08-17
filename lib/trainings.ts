@@ -12,6 +12,7 @@ export type MandatoryTraining = {
   id: string;
   year: number;
   name: string;
+  held_on: string | null; // "YYYY-MM-DD" 실시일 — 대상자 판정 기준일
   due_date: string | null; // "YYYY-MM-DD"
   site_url: string | null;
   note: string | null;
@@ -79,6 +80,78 @@ export function isDueSoon(dday: number | null): boolean {
   return dday != null && dday <= 14;
 }
 
+// =====================================================================
+// 대상자 자동 판정 — "교육 실시일에 재직 중이던 직원만 그 교육의 대상"
+//   * 기준일 = held_on(실시일) ?? due_date(이수기한). 둘 다 없으면 판정 불가.
+//   * 판정 규칙은 이 파일 한 곳에만 둡니다. 현황판·대시보드 카드·D-7 독촉·
+//     마이페이지가 모두 이 함수를 호출해야 숫자가 어긋나지 않습니다.
+//   * 날짜는 전부 "YYYY-MM-DD"(KST 기준 date 컬럼)라 문자열 비교로 충분합니다.
+//   * 판정에 필요한 값이 없으면 "대상 유지"(안전측) — 누락 때문에 의무가 조용히
+//     사라지지 않게 하고, 화면에서 사유를 표시합니다.
+// =====================================================================
+
+// 직원의 재직 구간. 입·퇴사 반복은 지금 한 구간만 표현합니다(join/resignation).
+export type EmploymentSpan = {
+  joinDate: string | null;
+  resignationDate: string | null;
+};
+
+export type TargetReason =
+  | "target" // 실시일에 재직 중 → 대상
+  | "before-join" // 입사 전 교육 → 대상 아님
+  | "after-resign" // 퇴사 후 교육 → 대상 아님
+  | "no-join-date" // 입사일 미기재 → 대상 유지(안전측)
+  | "no-base-date"; // 실시일·이수기한 둘 다 없음 → 대상 유지(안전측)
+
+// 교육의 판정 기준일 — 실시일 우선, 없으면 이수기한.
+export function trainingBaseYmd(
+  t: { held_on?: string | null; due_date?: string | null } | null | undefined,
+): string | null {
+  if (!t) return null;
+  return t.held_on || t.due_date || null;
+}
+
+// 대상 여부 + 사유. 화면 표시는 사유로 분기합니다.
+export function targetStateOn(
+  span: EmploymentSpan,
+  baseYmd: string | null,
+): { isTarget: boolean; reason: TargetReason } {
+  if (!baseYmd) return { isTarget: true, reason: "no-base-date" };
+  if (!span.joinDate) return { isTarget: true, reason: "no-join-date" };
+  if (span.joinDate > baseYmd) return { isTarget: false, reason: "before-join" };
+  if (span.resignationDate && baseYmd > span.resignationDate)
+    return { isTarget: false, reason: "after-resign" };
+  return { isTarget: true, reason: "target" };
+}
+
+// 대상 여부만 — 집계용.
+export function isTargetOn(
+  span: EmploymentSpan,
+  baseYmd: string | null,
+): boolean {
+  return targetStateOn(span, baseYmd).isTarget;
+}
+
+// 대상 아닌 셀에 붙일 짧은 사유 문구(현황판 툴팁).
+export function targetReasonLabel(
+  reason: TargetReason,
+  baseYmd: string | null,
+): string {
+  const on = baseYmd ? `${baseYmd} 기준` : "기준일 없음";
+  switch (reason) {
+    case "before-join":
+      return `대상 아님 — 입사 전 교육(${on})`;
+    case "after-resign":
+      return `대상 아님 — 퇴사 후 교육(${on})`;
+    case "no-join-date":
+      return "입사일 미기재 — 대상으로 둡니다(인사기록 확인 필요)";
+    case "no-base-date":
+      return "실시일·이수기한 미입력 — 대상으로 둡니다(실시일 입력 권장)";
+    default:
+      return `대상 (${on})`;
+  }
+}
+
 // 표시순서 → 이름 순 정렬(현황판 열·마이페이지 목록 공용).
 export function sortTrainings<T extends { display_order: number; name: string }>(
   list: T[]
@@ -94,6 +167,7 @@ export function toTraining(raw: Record<string, unknown>): MandatoryTraining {
     id: String(raw.id ?? ""),
     year: Number(raw.year ?? 0),
     name: String(raw.name ?? ""),
+    held_on: (raw.held_on as string | null) ?? null,
     due_date: (raw.due_date as string | null) ?? null,
     site_url: (raw.site_url as string | null) ?? null,
     note: (raw.note as string | null) ?? null,

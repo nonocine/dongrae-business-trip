@@ -17,11 +17,14 @@ import {
   sortTrainings,
   daysUntil,
   kstTodayYmd,
+  isTargetOn,
+  trainingBaseYmd,
   CERT_EXT,
   CERT_MAX_BYTES,
   cellKey,
   type MandatoryTraining,
 } from "@/lib/trainings";
+import { loadTrainingRoster } from "@/lib/trainingRoster";
 import {
   runTrainingReminder,
   type TrainingReminderSummary,
@@ -77,6 +80,8 @@ export type TrainingInput = {
   id?: string | null;
   year: number;
   name: string;
+  // 실시일 — 대상자 자동 판정 기준일. 비우면 due_date 로 폴백합니다.
+  held_on?: string | null;
   due_date: string | null;
   site_url: string | null;
   note: string | null;
@@ -134,6 +139,7 @@ export async function saveTraining(
     const row = {
       year,
       name,
+      held_on: cleanStr(input.held_on),
       due_date: cleanStr(input.due_date),
       site_url: cleanStr(input.site_url),
       note: cleanStr(input.note),
@@ -239,6 +245,8 @@ export async function copyTrainingsFromYear(
       .map((t) => ({
         year: to,
         name: t.name,
+        // 실시일은 해마다 달라지므로 복사하지 않습니다(대상 판정 기준일 오염 방지).
+        held_on: null,
         due_date: t.due_date,
         site_url: t.site_url,
         note: t.note,
@@ -269,10 +277,14 @@ export async function copyTrainingsFromYear(
 // =====================================================================
 // 현황판 매트릭스 — 행=재직 직원, 열=활성 교육.
 // =====================================================================
+// 현황판 행 — 대상 판정을 클라이언트에서도 같은 규칙(lib/trainings.isTargetOn)으로
+//   할 수 있게 입사일·퇴사일을 함께 내려보냅니다(HR 전용 화면).
 export type RosterEmployee = {
   driver_id: string;
   name: string;
   rank: string | null;
+  joinDate: string | null;
+  resignationDate: string | null;
 };
 export type MatrixCompletion = {
   training_id: string;
@@ -288,42 +300,15 @@ export type TrainingMatrix = {
   completions: MatrixCompletion[];
 };
 
-// 재직자 명단 — drivers.is_active 이면서 employee_profiles.employment_status
-//   가 'resigned' 아닌 직원. 입사(created_at) 순.
+// 재직자 명단 — 규칙은 lib/trainingRoster 단일 출처(D-7 독촉과 공유).
 async function listActiveRoster(): Promise<RosterEmployee[]> {
-  const [{ data: drivers, error: dErr }, { data: profiles }] =
-    await Promise.all([
-      supabaseAdmin
-        .from("drivers")
-        .select("id, name, rank, is_active, created_at"),
-      supabaseAdmin
-        .from("employee_profiles")
-        .select("driver_id, employment_status"),
-    ]);
-  if (dErr) throw new Error(dErr.message);
-  const resigned = new Set<string>();
-  for (const p of profiles ?? []) {
-    const r = p as Record<string, unknown>;
-    if (r.employment_status === "resigned")
-      resigned.add(String(r.driver_id ?? ""));
-  }
-  const list = (drivers ?? [])
-    .map((row) => {
-      const r = row as Record<string, unknown>;
-      return {
-        driver_id: String(r.id ?? ""),
-        name: String(r.name ?? ""),
-        rank: (r.rank as string | null) ?? null,
-        is_active: r.is_active !== false,
-        created: String(r.created_at ?? ""),
-      };
-    })
-    .filter((e) => e.is_active && !resigned.has(e.driver_id));
-  list.sort((a, b) => a.created.localeCompare(b.created));
-  return list.map((e) => ({
+  const roster = await loadTrainingRoster();
+  return roster.map((e) => ({
     driver_id: e.driver_id,
     name: e.name,
     rank: e.rank,
+    joinDate: e.joinDate,
+    resignationDate: e.resignationDate,
   }));
 }
 
@@ -368,8 +353,10 @@ export async function getTrainingMatrix(year: number): Promise<TrainingMatrix> {
   return { today, trainings, employees, completions };
 }
 
-// 대시보드 관리 카드용 요약 — 올해 활성 교육 × 재직자 기준 미이수 총건.
-//   접근 없으면 null(카드 미노출).
+// 대시보드 관리 카드용 요약 — 올해 활성 교육 중 "대상"인 (교육×직원) 셀만 집계.
+//   * 대상 = 교육 실시일(held_on ?? due_date)에 재직 중이던 직원(lib/trainings).
+//     입사 전 교육은 분모에서 빠지므로 신규 입사자의 유령 미이수가 사라집니다.
+//   * 접근 없으면 null(카드 미노출).
 export async function getTrainingsAdminSummary(): Promise<
   { year: number; totalNotMet: number } | null
 > {
@@ -380,20 +367,29 @@ export async function getTrainingsAdminSummary(): Promise<
   const [{ data: trs }, employees] = await Promise.all([
     supabaseAdmin
       .from("mandatory_trainings")
-      .select("id")
+      .select("id, held_on, due_date")
       .eq("year", year)
       .eq("is_active", true),
     listActiveRoster(),
   ]);
-  const trainingIds = (trs ?? []).map((r) => String((r as { id: unknown }).id));
-  if (trainingIds.length === 0 || employees.length === 0) {
+  const trainings = ((trs ?? []) as Record<string, unknown>[]).map((r) => ({
+    id: String(r.id ?? ""),
+    baseYmd: trainingBaseYmd({
+      held_on: (r.held_on as string | null) ?? null,
+      due_date: (r.due_date as string | null) ?? null,
+    }),
+  }));
+  if (trainings.length === 0 || employees.length === 0) {
     return { year, totalNotMet: 0 };
   }
 
   const { data: comps } = await supabaseAdmin
     .from("training_completions")
     .select("training_id, driver_id")
-    .in("training_id", trainingIds);
+    .in(
+      "training_id",
+      trainings.map((t) => t.id),
+    );
   const roster = new Set(employees.map((e) => e.driver_id));
   const done = new Set<string>();
   for (const c of comps ?? []) {
@@ -401,7 +397,14 @@ export async function getTrainingsAdminSummary(): Promise<
     const did = String(r.driver_id ?? "");
     if (roster.has(did)) done.add(cellKey(String(r.training_id ?? ""), did));
   }
-  const totalNotMet = trainingIds.length * employees.length - done.size;
+
+  let totalNotMet = 0;
+  for (const t of trainings) {
+    for (const e of employees) {
+      if (!isTargetOn(e, t.baseYmd)) continue; // 대상 아님 → 미이수로 세지 않음
+      if (!done.has(cellKey(t.id, e.driver_id))) totalNotMet += 1;
+    }
+  }
   return { year, totalNotMet };
 }
 
@@ -422,21 +425,54 @@ export async function adminUploadCertificate(
       return { ok: false, message: "교육/직원 정보가 누락되었습니다." };
     }
 
-    // 존재 검증 — 임의 id 주입 차단.
-    const [{ data: tr }, { data: drv }] = await Promise.all([
-      supabaseAdmin
-        .from("mandatory_trainings")
-        .select("id")
-        .eq("id", trainingId)
-        .maybeSingle(),
-      supabaseAdmin
-        .from("drivers")
-        .select("id")
-        .eq("id", driverId)
-        .maybeSingle(),
-    ]);
+    // 존재 검증 — 임의 id 주입 차단. 기존 이수 기록(prev)도 함께 확인합니다.
+    const [{ data: tr }, { data: drv }, { data: prof }, { data: prev }] =
+      await Promise.all([
+        supabaseAdmin
+          .from("mandatory_trainings")
+          .select("id, held_on, due_date")
+          .eq("id", trainingId)
+          .maybeSingle(),
+        supabaseAdmin
+          .from("drivers")
+          .select("id")
+          .eq("id", driverId)
+          .maybeSingle(),
+        supabaseAdmin
+          .from("employee_profiles")
+          .select("join_date, resignation_date")
+          .eq("driver_id", driverId)
+          .maybeSingle(),
+        supabaseAdmin
+          .from("training_completions")
+          .select("certificate_path")
+          .eq("training_id", trainingId)
+          .eq("driver_id", driverId)
+          .maybeSingle(),
+      ]);
     if (!tr) return { ok: false, message: "존재하지 않는 교육입니다." };
     if (!drv) return { ok: false, message: "존재하지 않는 직원입니다." };
+
+    // 대상자 판정 — 실시일에 재직 중이 아니면 "새" 이수 처리를 막습니다.
+    //   이미 기록이 있는 셀(과거에 올린 수료증)의 재업로드는 그대로 허용합니다.
+    const p = (prof ?? {}) as Record<string, unknown>;
+    const baseYmd = trainingBaseYmd(tr as Record<string, string | null>);
+    if (
+      !prev &&
+      !isTargetOn(
+        {
+          joinDate: (p.join_date as string | null) ?? null,
+          resignationDate: (p.resignation_date as string | null) ?? null,
+        },
+        baseYmd,
+      )
+    ) {
+      return {
+        ok: false,
+        message:
+          "교육 실시일 기준 재직자가 아니라 이수 처리할 수 없습니다. (입사 전·퇴사 후 교육)",
+      };
+    }
 
     const file = formData.get("file");
     if (!(file instanceof File) || file.size === 0) {
@@ -450,13 +486,7 @@ export async function adminUploadCertificate(
       return { ok: false, message: "PDF, JPG, PNG 형식만 업로드할 수 있습니다." };
     }
 
-    // 기존 파일 경로 확인(확장자 바뀌면 옛 파일 삭제).
-    const { data: prev } = await supabaseAdmin
-      .from("training_completions")
-      .select("certificate_path")
-      .eq("training_id", trainingId)
-      .eq("driver_id", driverId)
-      .maybeSingle();
+    // 기존 파일 경로(확장자 바뀌면 옛 파일 삭제) — 위에서 함께 조회했습니다.
     const oldPath =
       ((prev as { certificate_path?: unknown } | null)?.certificate_path as
         | string

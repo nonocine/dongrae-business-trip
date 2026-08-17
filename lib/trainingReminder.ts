@@ -20,7 +20,13 @@ import {
   daysUntil,
   toTraining,
   cellKey,
+  isTargetOn,
+  trainingBaseYmd,
 } from "@/lib/trainings";
+import {
+  loadTrainingRoster,
+  type TrainingRosterEmployee,
+} from "@/lib/trainingRoster";
 import {
   CRIME_CHECK_SLOT,
   crimeCheckState,
@@ -107,43 +113,10 @@ async function scanCrimeCheckLines(today: string): Promise<string[]> {
   }
 }
 
-type Emp = { driver_id: string; name: string; email: string | null };
-
-// 재직자 명단(+이메일). drivers.is_active && employment_status != resigned.
-async function loadRosterWithEmail(): Promise<Emp[]> {
-  const [{ data: drivers, error: dErr }, { data: profiles, error: pErr }] =
-    await Promise.all([
-      supabaseAdmin.from("drivers").select("id, name, is_active"),
-      supabaseAdmin
-        .from("employee_profiles")
-        .select("driver_id, employment_status, email"),
-    ]);
-  if (dErr) throw new Error(dErr.message);
-  if (pErr) throw new Error(pErr.message);
-
-  const profByDriver = new Map<
-    string,
-    { status: string; email: string | null }
-  >();
-  for (const p of profiles ?? []) {
-    const r = p as Record<string, unknown>;
-    profByDriver.set(String(r.driver_id ?? ""), {
-      status: String(r.employment_status ?? "active"),
-      email: (r.email as string | null) ?? null,
-    });
-  }
-
-  const out: Emp[] = [];
-  for (const d of drivers ?? []) {
-    const r = d as Record<string, unknown>;
-    const id = String(r.id ?? "");
-    if (r.is_active === false) continue;
-    const prof = profByDriver.get(id);
-    if (prof?.status === "resigned") continue;
-    out.push({ driver_id: id, name: String(r.name ?? ""), email: prof?.email ?? null });
-  }
-  return out;
-}
+// 재직자 명단(+이메일·입사일)은 lib/trainingRoster 단일 출처를 씁니다.
+//   현황판·대시보드 카드와 같은 명단·같은 대상 판정을 쓰기 위한 것으로,
+//   여기서 따로 만들면 화면과 슬랙 숫자가 어긋납니다.
+type Emp = TrainingRosterEmployee;
 
 // dday 를 사람이 읽는 문구로.
 function ddayPhrase(dday: number): string {
@@ -314,7 +287,7 @@ export async function runTrainingReminder(): Promise<TrainingReminderSummary> {
   if (dueTrainings.length === 0) return crimeOnly();
 
   // 2) 재직자 + 이수기록.
-  const roster = await loadRosterWithEmail();
+  const roster = await loadTrainingRoster();
   if (roster.length === 0) return crimeOnly();
 
   const trainingIds = dueTrainings.map((x) => x.t.id);
@@ -336,6 +309,9 @@ export async function runTrainingReminder(): Promise<TrainingReminderSummary> {
   const adminLines: string[] = [];
   for (const emp of roster) {
     for (const { t, dday } of dueTrainings) {
+      // 실시일에 재직 중이 아니었으면 그 교육의 대상이 아닙니다(입사 전 교육 등).
+      //   → DM·관리자 요약 어느 쪽에도 넣지 않습니다.
+      if (!isTargetOn(emp, trainingBaseYmd(t))) continue;
       if (done.has(cellKey(t.id, emp.driver_id))) continue;
       const url = t.site_url || (base ? `${base}/profile/hr` : "/profile/hr");
       const bucket = perEmp.get(emp.driver_id) ?? { emp, items: [] };
