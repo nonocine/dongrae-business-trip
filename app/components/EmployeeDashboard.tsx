@@ -271,6 +271,12 @@ function AdminArea({
           title="사업실적"
           desc="월별 실적 취합·검토·결과보고서"
         />
+        <MenuCard
+          href="/hr/cards"
+          icon="💳"
+          title="명함첩"
+          desc="명함 촬영·AI 판독으로 거래처 연락처 보관"
+        />
       </div>
     </section>
   );
