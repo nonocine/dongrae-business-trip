@@ -20,7 +20,7 @@ import CoinPayTab from "./CoinPayTab";
 import DetailRowsEditor from "./DetailRowsEditor";
 import ProgramRegistryManager from "./ProgramRegistryManager";
 import StaffTrainingTab from "./StaffTrainingTab";
-import ProgramResultForm from "./ProgramResultForm";
+import ProgramResultForm, { type CarryOver } from "./ProgramResultForm";
 import type { RoomCounts } from "./RoomUsageSection";
 
 type Tab =
@@ -116,6 +116,10 @@ export default function BusinessResultsDashboard({
   const [editing, setEditing] = useState<BusinessResult | null>(null);
   // 홍보·대외협력 수정 대상(폼 프리필). 저장·취소 시 null 로 되돌립니다.
   const [editingPromo, setEditingPromo] = useState<PromotionResult | null>(null);
+  // 프로그램 실적 연속 입력 — seq 를 올려 폼을 새로 마운트(= 빈 폼)하고,
+  //   월·분야·담당자만 다음 건으로 이어받습니다.
+  const [newFormSeq, setNewFormSeq] = useState(0);
+  const [carryOver, setCarryOver] = useState<CarryOver | null>(null);
   const [pending, startTransition] = useTransition();
   const periodNames: Record<string, string> = {
     month: `${month}월`,
@@ -709,7 +713,7 @@ export default function BusinessResultsDashboard({
               제출된 자료도 수정 버튼으로 다시 열어 고칠 수 있습니다.
             </p>
             <ProgramResultForm
-              key={editing?.id ?? "new"}
+              key={editing?.id ?? `new-${newFormSeq}`}
               year={year}
               month={month}
               editing={editing}
@@ -717,10 +721,20 @@ export default function BusinessResultsDashboard({
               rooms={data.rooms}
               roomsConfigured={data.roomsConfigured}
               initialRoomCounts={editingRoomCounts}
+              carryOver={editing ? null : carryOver}
               onCancel={() => setEditing(null)}
               onSaved={(text) => {
                 setEditing(null);
                 setMessage(text);
+              }}
+              onSavedAndNext={(carry) => {
+                setEditing(null);
+                setCarryOver(carry);
+                setNewFormSeq((n) => n + 1);
+                setMessage(
+                  "저장했습니다. 이어서 다음 실적을 입력하세요(월·분야·담당자는 그대로 두었습니다).",
+                );
+                window.scrollTo({ top: 0, behavior: "smooth" });
               }}
             />
             {editing && data.detailsConfigured && (

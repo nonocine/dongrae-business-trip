@@ -2,7 +2,7 @@
 
 import { useMemo, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { btnPrimary, inputCls, labelCls } from "@/lib/ui";
+import { btnPrimary, btnSecondary, inputCls, labelCls } from "@/lib/ui";
 import {
   saveBusinessResult,
   type BusinessResult,
@@ -17,10 +17,12 @@ const CUSTOM = "__custom__";
 const readOnlyCls =
   "mt-1 block w-full rounded-lg border border-line bg-surface px-3 py-2 text-sm font-semibold text-ink shadow-sm";
 
-// 인원 정의(김혜지 확정) — 폼 하단 도움말과 같은 문구를 코드에서도 단일 출처로 둡니다.
+// 인원 입력 안내 — 폼 하단 도움말과 같은 문구를 코드에서도 단일 출처로 둡니다.
+//   연인원·실인원 자동계산은 김혜지 요청으로 제거했습니다(실제 운영과 맞지 않음).
+//   담당자가 직접 넣은 값이 그대로 저장됩니다.
 export const HEADCOUNT_HELP =
-  "연인원 = 참가인원 × 운영일수, 실인원 = 실별 사용 인원의 합 " +
-  "(예: 8명 × 1박2일 × 3개 실 → 연인원 16, 실인원 24)";
+  "연인원·실인원은 자동으로 계산하지 않습니다. 담당자가 실제 값을 직접 입력하세요 " +
+  "(계 칸만 청소년+기타로 자동 합산).";
 
 function NumberField({
   label,
@@ -57,6 +59,13 @@ function TotalField({ label, value }: { label: string; value: number }) {
   );
 }
 
+// 연속 입력 시 다음 건으로 이어받는 값 — 매번 다시 고르지 않아도 되는 항목만.
+export type CarryOver = {
+  month: number;
+  category: string;
+  managerName: string;
+};
+
 export default function ProgramResultForm({
   year,
   month,
@@ -65,8 +74,10 @@ export default function ProgramResultForm({
   rooms,
   roomsConfigured,
   initialRoomCounts,
+  carryOver,
   onCancel,
   onSaved,
+  onSavedAndNext,
 }: {
   year: number;
   month: number;
@@ -75,8 +86,10 @@ export default function ProgramResultForm({
   rooms: ReportRoom[];
   roomsConfigured: boolean;
   initialRoomCounts: RoomCounts;
+  carryOver: CarryOver | null;
   onCancel: () => void;
   onSaved: (message: string) => void;
+  onSavedAndNext: (carry: CarryOver) => void;
 }) {
   const router = useRouter();
   const [pending, start] = useTransition();
@@ -95,7 +108,7 @@ export default function ProgramResultForm({
   }, [activeCategories, editing]);
 
   const [category, setCategory] = useState(
-    editing?.category ?? categoryNames[0] ?? "",
+    editing?.category ?? carryOver?.category ?? categoryNames[0] ?? "",
   );
   const categoryId = useMemo(
     () => registry.categories.find((c) => c.name === category)?.id ?? "",
@@ -132,14 +145,11 @@ export default function ProgramResultForm({
   const [attendanceOther, setAttendanceOther] = useState(
     editing?.attendance_other ?? 0,
   );
-  // 연인원을 사용자가 직접 고친 뒤에는 자동 채움이 덮어쓰지 않습니다.
-  const [attendanceTouched, setAttendanceTouched] = useState(
-    Boolean(editing?.attendance_youth || editing?.attendance_other),
-  );
   const [youthUses, setYouthUses] = useState(editing?.youth_uses ?? 0);
   const [otherUses, setOtherUses] = useState(editing?.other_uses ?? 0);
 
-  // 실별 사용인원 — report_rooms 적용 시 실인원은 이 합계에서 파생합니다.
+  // 실별 사용인원 — 실별이용 보고(business_result_rooms)용 입력입니다.
+  //   실인원 칸에는 더 이상 자동 반영하지 않고, 아래에 참고용 합계만 보여줍니다.
   const [roomCounts, setRoomCounts] = useState<RoomCounts>(initialRoomCounts);
   const useRooms = roomsConfigured && rooms.length > 0;
   const roomTotals = useMemo(
@@ -151,13 +161,6 @@ export default function ProgramResultForm({
     [roomCounts],
   );
 
-  // 참가인원·운영일수 변경 시 연인원 자동 채움(청/기 각각 × 운영일수).
-  function autofillAttendance(py: number, po: number, days: number) {
-    if (attendanceTouched) return;
-    setAttendanceYouth(py * days);
-    setAttendanceOther(po * days);
-  }
-
   const resolvedName =
     programChoice && programChoice !== CUSTOM
       ? (registry.programs.find((p) => p.id === programChoice)?.name ?? "")
@@ -167,11 +170,27 @@ export default function ProgramResultForm({
   function onSubmit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
     const form = e.currentTarget;
+    // 누른 버튼(submit / continue)의 name·value 는 submitter 를 함께 넘겨야
+    // FormData 에 실립니다. new FormData(form) 만으로는 버튼이 빠집니다.
+    const submitter = (e.nativeEvent as SubmitEvent).submitter;
+    const fd = new FormData(
+      form,
+      submitter instanceof HTMLElement ? submitter : null,
+    );
+    const keepGoing = fd.get("continue") === "true";
     setError("");
     start(async () => {
       try {
-        await saveBusinessResult(new FormData(form));
-        onSaved("저장했습니다.");
+        await saveBusinessResult(fd);
+        if (keepGoing) {
+          onSavedAndNext({
+            month: Number(fd.get("month")) || month,
+            category,
+            managerName: String(fd.get("manager_name") ?? ""),
+          });
+        } else {
+          onSaved("저장했습니다.");
+        }
         router.refresh();
       } catch (err) {
         setError(err instanceof Error ? err.message : "저장하지 못했습니다.");
@@ -195,7 +214,7 @@ export default function ProgramResultForm({
         <select
           name="month"
           className={inputCls}
-          defaultValue={editing?.report_month ?? month}
+          defaultValue={editing?.report_month ?? carryOver?.month ?? month}
         >
           {Array.from({ length: 12 }, (_, i) => i + 1).map((v) => (
             <option key={v} value={v}>
@@ -279,7 +298,7 @@ export default function ProgramResultForm({
         <input
           name="manager_name"
           className={inputCls}
-          defaultValue={editing?.manager_name ?? ""}
+          defaultValue={editing?.manager_name ?? carryOver?.managerName ?? ""}
           placeholder="예: 김혜지"
         />
       </label>
@@ -293,29 +312,20 @@ export default function ProgramResultForm({
         label="운영일수"
         name="operating_days"
         value={operatingDays}
-        onChange={(v) => {
-          setOperatingDays(v);
-          autofillAttendance(participantsYouth, participantsOther, v);
-        }}
+        onChange={setOperatingDays}
       />
 
       <NumberField
         label="참가인원 (청소년)"
         name="participants_youth"
         value={participantsYouth}
-        onChange={(v) => {
-          setParticipantsYouth(v);
-          autofillAttendance(v, participantsOther, operatingDays);
-        }}
+        onChange={setParticipantsYouth}
       />
       <NumberField
         label="참가인원 (기타)"
         name="participants_other"
         value={participantsOther}
-        onChange={(v) => {
-          setParticipantsOther(v);
-          autofillAttendance(participantsYouth, v, operatingDays);
-        }}
+        onChange={setParticipantsOther}
       />
       <TotalField
         label="참가인원 (계)"
@@ -326,51 +336,42 @@ export default function ProgramResultForm({
         label="연인원 (청소년)"
         name="attendance_youth"
         value={attendanceYouth}
-        onChange={(v) => {
-          setAttendanceTouched(true);
-          setAttendanceYouth(v);
-        }}
+        onChange={setAttendanceYouth}
       />
       <NumberField
         label="연인원 (기타)"
         name="attendance_other"
         value={attendanceOther}
-        onChange={(v) => {
-          setAttendanceTouched(true);
-          setAttendanceOther(v);
-        }}
+        onChange={setAttendanceOther}
       />
       <TotalField label="연인원 (계)" value={attendanceYouth + attendanceOther} />
 
-      {useRooms ? (
-        <>
-          <TotalField label="실인원 (청소년)" value={roomTotals.youth} />
-          <TotalField label="실인원 (기타)" value={roomTotals.other} />
-          <TotalField
-            label="실인원 (계)"
-            value={roomTotals.youth + roomTotals.other}
-          />
-        </>
-      ) : (
-        <>
-          <NumberField
-            label="실인원 (청소년)"
-            name="youth_uses"
-            value={youthUses}
-            onChange={setYouthUses}
-          />
-          <NumberField
-            label="실인원 (기타)"
-            name="other_uses"
-            value={otherUses}
-            onChange={setOtherUses}
-          />
-          <TotalField label="실인원 (계)" value={youthUses + otherUses} />
-        </>
-      )}
+      <NumberField
+        label="실인원 (청소년)"
+        name="youth_uses"
+        value={youthUses}
+        onChange={setYouthUses}
+      />
+      <NumberField
+        label="실인원 (기타)"
+        name="other_uses"
+        value={otherUses}
+        onChange={setOtherUses}
+      />
+      <TotalField label="실인원 (계)" value={youthUses + otherUses} />
 
       <p className="rounded-lg bg-surface px-3 py-2 text-xs leading-5 text-ink-muted md:col-span-3">
         {HEADCOUNT_HELP}
+        {useRooms && (
+          <>
+            <br />
+            아래 실별 사용인원 합계는 참고용입니다 — 청소년{" "}
+            {roomTotals.youth.toLocaleString("ko-KR")} · 기타{" "}
+            {roomTotals.other.toLocaleString("ko-KR")} · 계{" "}
+            {(roomTotals.youth + roomTotals.other).toLocaleString("ko-KR")}
+            (실인원 칸에 자동으로 넣지 않습니다.)
+          </>
+        )}
       </p>
 
       {useRooms && (
@@ -411,7 +412,7 @@ export default function ProgramResultForm({
           {error}
         </p>
       )}
-      <div className="flex gap-2 md:col-span-3">
+      <div className="flex flex-wrap gap-2 md:col-span-3">
         <button disabled={pending} className={btnPrimary}>
           {editing ? "수정 후 임시저장" : "임시저장"}
         </button>
@@ -422,6 +423,16 @@ export default function ProgramResultForm({
           className={btnPrimary}
         >
           {editing ? "수정 후 제출" : "제출"}
+        </button>
+        {/* 여러 건 연속 입력 — 저장 후 빈 폼을 다시 엽니다(월·분야·담당자는 이어받음). */}
+        <button
+          disabled={pending}
+          name="continue"
+          value="true"
+          className={btnSecondary}
+          title="저장한 뒤 빈 입력칸을 다시 열어 다음 사업을 이어서 작성합니다"
+        >
+          + 저장 후 다음 실적 추가
         </button>
         {editing && (
           <button

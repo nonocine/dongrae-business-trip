@@ -454,8 +454,8 @@ export async function saveBusinessResult(formData: FormData) {
   const attendanceOther = asInt(formData.get("attendance_other"));
 
   // 실별 사용인원 — 폼의 room_{roomId}_youth / _other 를 수집합니다.
-  //   섹션이 노출된 경우(= report_rooms 적용)에만 필드가 오고, 이때 실인원은
-  //   실별 합계에서 파생합니다. 미적용이면 기존 직접 입력값을 그대로 씁니다.
+  //   실별이용 보고(business_result_rooms)용 자료로만 쓰고, 실인원(youth_uses/
+  //   other_uses)에는 반영하지 않습니다. 실인원은 담당자 수기 입력값이 정본입니다.
   const roomCounts = new Map<string, { youth: number; other: number }>();
   for (const [key, value] of formData.entries()) {
     const match = /^room_(.+)_(youth|other)$/.exec(key);
@@ -468,10 +468,6 @@ export async function saveBusinessResult(formData: FormData) {
     roomCounts.set(roomId, entry);
   }
   const roomsSubmitted = roomCounts.size > 0;
-  const roomTotals = [...roomCounts.values()].reduce(
-    (a, r) => ({ youth: a.youth + r.youth, other: a.other + r.other }),
-    { youth: 0, other: 0 },
-  );
 
   const payload = {
     report_year: asInt(formData.get("year"), 2020),
@@ -489,12 +485,9 @@ export async function saveBusinessResult(formData: FormData) {
     attendance_youth: attendanceYouth,
     attendance_other: attendanceOther,
     attendance: attendanceYouth + attendanceOther,
-    youth_uses: roomsSubmitted
-      ? roomTotals.youth
-      : asInt(formData.get("youth_uses")),
-    other_uses: roomsSubmitted
-      ? roomTotals.other
-      : asInt(formData.get("other_uses")),
+    // 실인원 — 수기 입력값 그대로(자동계산 제거).
+    youth_uses: asInt(formData.get("youth_uses")),
+    other_uses: asInt(formData.get("other_uses")),
     summary: String(formData.get("summary") ?? "").trim(),
     evaluation: String(formData.get("evaluation") ?? "").trim(),
     status: formData.get("submit") === "true" ? "submitted" : "draft",

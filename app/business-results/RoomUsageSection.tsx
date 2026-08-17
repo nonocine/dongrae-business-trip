@@ -4,8 +4,8 @@ import { useMemo, useState } from "react";
 import type { ReportRoom } from "./actions";
 
 // 보고용 26개 실의 청소년/기타 사용인원 입력 — 층별 그룹, 접이식.
-//   실인원 = 여기 입력값의 합. 서버가 business_results.youth_uses/other_uses 로
-//   동기화하므로 폼의 실인원 칸은 읽기 전용입니다.
+//   실별이용 보고(business_result_rooms)용 자료입니다. 실인원(youth_uses/
+//   other_uses)은 담당자가 폼에서 직접 입력하며 여기 합계와 무관합니다.
 const FLOOR_ORDER = ["지하1층", "1층", "2층", "3층", "온나"];
 
 const cellInput =
@@ -149,8 +149,8 @@ export default function RoomUsageSection({
             </div>
           ))}
           <p className="rounded-lg bg-surface px-3 py-2 text-xs text-ink-muted">
-            값이 0인 실은 저장하지 않습니다. 여기 합계가 위 실인원 칸에 그대로
-            반영됩니다.
+            값이 0인 실은 저장하지 않습니다. 여기 입력은 실별이용 보고에만
+            쓰이고, 위 실인원 칸은 직접 입력한 값이 저장됩니다.
           </p>
       </div>
     </div>
