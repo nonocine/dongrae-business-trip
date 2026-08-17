@@ -68,6 +68,7 @@ export default async function BusinessResultsPage({
           startMonth={startMonth}
           endMonth={endMonth}
           data={data}
+          currentUser={session.name}
         />
       </main>
     </>

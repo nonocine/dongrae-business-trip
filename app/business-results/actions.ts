@@ -633,6 +633,7 @@ export async function saveResultDetails(
 
 export async function savePromotion(formData: FormData) {
   const user = await requireUser();
+  const id = String(formData.get("id") ?? "").trim();
   const payload = {
     report_year: asInt(formData.get("year"), 2020),
     report_month: Math.min(12, asInt(formData.get("month"), 1)),
@@ -647,12 +648,51 @@ export async function savePromotion(formData: FormData) {
   if (!payload.activity_date || !payload.title) {
     throw new Error("날짜와 제목을 입력해주세요.");
   }
-  const { error } = await supabaseAdmin
-    .from("business_promotions")
-    .insert(payload);
-  if (error) throw new Error(error.message);
+  if (id) {
+    // 수정 — 관리자가 아니면 본인이 작성한 행만. author_name 은 원 작성자를 유지합니다.
+    const patch: Record<string, unknown> = {
+      ...payload,
+      updated_at: new Date().toISOString(),
+    };
+    delete patch.author_name;
+    let query = supabaseAdmin
+      .from("business_promotions")
+      .update(patch)
+      .eq("id", id);
+    if (!user.isAdmin) query = query.eq("author_name", user.name);
+    const { data, error } = await query.select("id").maybeSingle();
+    if (error) throw new Error(error.message);
+    if (!data) throw new Error("본인이 작성한 홍보 실적만 수정할 수 있습니다.");
+  } else {
+    const { error } = await supabaseAdmin
+      .from("business_promotions")
+      .insert(payload);
+    if (error) throw new Error(error.message);
+  }
   revalidatePath("/business-results");
   return { ok: true };
+}
+
+// 홍보·대외협력 삭제 — 물리 삭제(이 테이블에는 소프트 삭제 컬럼이 없습니다).
+//   권한 규칙은 수정과 동일: 관리자 또는 작성자 본인.
+export async function deletePromotion(id: string): Promise<ActionResult> {
+  try {
+    const user = await requireUser();
+    if (!id) return { ok: false, message: "대상이 없습니다." };
+    let query = supabaseAdmin
+      .from("business_promotions")
+      .delete()
+      .eq("id", id);
+    if (!user.isAdmin) query = query.eq("author_name", user.name);
+    const { data, error } = await query.select("id").maybeSingle();
+    if (error) throw new Error(error.message);
+    if (!data)
+      return { ok: false, message: "본인이 작성한 홍보 실적만 삭제할 수 있습니다." };
+    revalidatePath("/business-results");
+    return { ok: true };
+  } catch (e) {
+    return actionError(e, "홍보 실적을 삭제하지 못했습니다.");
+  }
 }
 
 // =====================================================================

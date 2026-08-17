@@ -10,9 +10,11 @@ import {
   labelCls,
 } from "@/lib/ui";
 import {
+  deletePromotion,
   savePromotion,
   type BusinessResult,
   type BusinessResultsData,
+  type PromotionResult,
 } from "./actions";
 import CoinPayTab from "./CoinPayTab";
 import DetailRowsEditor from "./DetailRowsEditor";
@@ -40,6 +42,7 @@ const promotionCategories = [
   "홈페이지",
   "밴드",
   "SNS",
+  "블로그",
   "언론보도",
   "학교연계",
   "지역기관",
@@ -97,6 +100,7 @@ export default function BusinessResultsDashboard({
   startMonth,
   endMonth,
   data,
+  currentUser,
 }: {
   year: number;
   month: number;
@@ -104,11 +108,14 @@ export default function BusinessResultsDashboard({
   startMonth: number;
   endMonth: number;
   data: BusinessResultsData;
+  currentUser: string;
 }) {
   const router = useRouter();
   const [tab, setTab] = useState<Tab>("overview");
   const [message, setMessage] = useState("");
   const [editing, setEditing] = useState<BusinessResult | null>(null);
+  // 홍보·대외협력 수정 대상(폼 프리필). 저장·취소 시 null 로 되돌립니다.
+  const [editingPromo, setEditingPromo] = useState<PromotionResult | null>(null);
   const [pending, startTransition] = useTransition();
   const periodNames: Record<string, string> = {
     month: `${month}월`,
@@ -244,21 +251,40 @@ export default function BusinessResultsDashboard({
       `/business-results?year=${nextYear}&period=${nextPeriod}&month=${nextMonth}`,
     );
   }
-  function submit(
-    action: (fd: FormData) => Promise<{ ok: boolean }>,
-    form: HTMLFormElement,
-  ) {
+  // 홍보·대외협력 — 관리자이거나 본인이 작성한 건만 수정·삭제할 수 있습니다.
+  //   (서버 액션에서도 같은 규칙으로 한 번 더 막습니다.)
+  function canManagePromo(row: PromotionResult) {
+    return data.isAdmin || row.author_name === currentUser;
+  }
+
+  function submitPromotion(form: HTMLFormElement) {
     setMessage("");
     startTransition(async () => {
       try {
-        await action(new FormData(form));
+        await savePromotion(new FormData(form));
         form.reset();
-        setEditing(null);
+        setEditingPromo(null);
         setMessage("저장했습니다.");
         router.refresh();
       } catch (e) {
         setMessage(e instanceof Error ? e.message : "저장하지 못했습니다.");
       }
+    });
+  }
+
+  function removePromotion(row: PromotionResult) {
+    if (!confirm(`'${row.title}' 홍보 실적을 삭제할까요? 되돌릴 수 없습니다.`))
+      return;
+    setMessage("");
+    startTransition(async () => {
+      const res = await deletePromotion(row.id);
+      if (!res.ok) {
+        setMessage(res.message);
+        return;
+      }
+      if (editingPromo?.id === row.id) setEditingPromo(null);
+      setMessage("삭제했습니다.");
+      router.refresh();
     });
   }
 
@@ -745,16 +771,41 @@ export default function BusinessResultsDashboard({
       )}
       {tab === "promotions" && (
         <section className={cardCls}>
-          <h2 className="font-bold text-ink">{periodLabel} 홍보·대외협력</h2>
+          <div className="flex items-center justify-between gap-3">
+            <h2 className="font-bold text-ink">
+              {editingPromo
+                ? "홍보·대외협력 수정"
+                : `${periodLabel} 홍보·대외협력`}
+            </h2>
+            {editingPromo && (
+              <button
+                type="button"
+                className="text-sm font-semibold text-ink-muted hover:underline"
+                onClick={() => setEditingPromo(null)}
+              >
+                수정 취소
+              </button>
+            )}
+          </div>
           <form
+            key={editingPromo?.id ?? "new"}
             className="mt-4 grid gap-3 md:grid-cols-3"
             onSubmit={(e) => {
               e.preventDefault();
-              submit(savePromotion, e.currentTarget);
+              submitPromotion(e.currentTarget);
             }}
           >
-            <input type="hidden" name="year" value={year} />
-            <input type="hidden" name="month" value={month} />
+            <input type="hidden" name="id" value={editingPromo?.id ?? ""} />
+            <input
+              type="hidden"
+              name="year"
+              value={editingPromo?.report_year ?? year}
+            />
+            <input
+              type="hidden"
+              name="month"
+              value={editingPromo?.report_month ?? month}
+            />
             <label className={labelCls}>
               날짜
               <input
@@ -762,12 +813,22 @@ export default function BusinessResultsDashboard({
                 type="date"
                 name="activity_date"
                 className={inputCls}
+                defaultValue={editingPromo?.activity_date ?? ""}
               />
             </label>
             <label className={labelCls}>
               구분
-              <select name="category" className={inputCls}>
-                {promotionCategories.map((v) => (
+              <select
+                name="category"
+                className={inputCls}
+                defaultValue={editingPromo?.category ?? promotionCategories[0]}
+              >
+                {/* 목록에 없는 과거 구분값도 수정 시 그대로 보존합니다. */}
+                {(editingPromo &&
+                !promotionCategories.includes(editingPromo.category)
+                  ? [editingPromo.category, ...promotionCategories]
+                  : promotionCategories
+                ).map((v) => (
                   <option key={v}>{v}</option>
                 ))}
               </select>
@@ -778,40 +839,79 @@ export default function BusinessResultsDashboard({
                 name="count"
                 type="number"
                 min="0"
-                defaultValue="1"
+                defaultValue={editingPromo?.count ?? 1}
                 className={inputCls}
               />
             </label>
             <label className={`${labelCls} md:col-span-2`}>
               제목
-              <input required name="title" className={inputCls} />
+              <input
+                required
+                name="title"
+                className={inputCls}
+                defaultValue={editingPromo?.title ?? ""}
+              />
             </label>
             <label className={labelCls}>
               링크
-              <input name="url" type="url" className={inputCls} />
+              <input
+                name="url"
+                type="url"
+                className={inputCls}
+                defaultValue={editingPromo?.url ?? ""}
+              />
             </label>
             <label className={`${labelCls} md:col-span-3`}>
               설명
-              <textarea name="description" rows={2} className={inputCls} />
+              <textarea
+                name="description"
+                rows={2}
+                className={inputCls}
+                defaultValue={editingPromo?.description ?? ""}
+              />
             </label>
             <button
               disabled={pending}
               className={`${btnPrimary} md:col-span-3 md:w-fit`}
             >
-              저장
+              {editingPromo ? "수정 저장" : "저장"}
             </button>
           </form>
           <div className="mt-6 space-y-2">
             {data.promotions.map((r) => (
               <div
                 key={r.id}
-                className="rounded-lg border border-line p-3 text-sm"
+                className="flex flex-wrap items-start justify-between gap-3 rounded-lg border border-line p-3 text-sm"
               >
-                <strong>{r.title}</strong>
-                <p className="mt-1 text-ink-muted">
-                  {r.activity_date} · {r.category} · {r.count}회 · 작성{" "}
-                  {r.author_name}
-                </p>
+                <div className="min-w-0">
+                  <strong>{r.title}</strong>
+                  <p className="mt-1 text-ink-muted">
+                    {r.activity_date} · {r.category} · {r.count}회 · 작성{" "}
+                    {r.author_name}
+                  </p>
+                </div>
+                {canManagePromo(r) && (
+                  <div className="flex shrink-0 gap-1">
+                    <button
+                      type="button"
+                      className="rounded-lg border border-line px-3 py-1.5 text-xs font-bold text-navy hover:bg-navy-soft"
+                      onClick={() => {
+                        setEditingPromo(r);
+                        window.scrollTo({ top: 0, behavior: "smooth" });
+                      }}
+                    >
+                      수정
+                    </button>
+                    <button
+                      type="button"
+                      disabled={pending}
+                      className="rounded-lg border border-line px-3 py-1.5 text-xs font-bold text-ink-muted hover:bg-surface"
+                      onClick={() => removePromotion(r)}
+                    >
+                      삭제
+                    </button>
+                  </div>
+                )}
               </div>
             ))}
           </div>
