@@ -277,12 +277,6 @@ function AdminArea({
           title="명함첩"
           desc="명함 촬영·AI 판독으로 거래처 연락처 보관"
         />
-        <MenuCard
-          href="/hr/partners"
-          icon="🤝"
-          title="거래처 관리"
-          desc="분야별 거래처·담당자 주소록 (인수인계용)"
-        />
       </div>
     </section>
   );
@@ -630,11 +624,18 @@ export default async function EmployeeDashboard({
                     title="안전점검"
                     desc="월별 안전점검표·PDF 출력"
                   />
-                  <PendingCard
-                    icon="🤝"
-                    title="거래처관리"
-                    desc="거래처 정보 관리"
-                  />
+                  {/* 거래처관리 — 진입점은 여기 한 곳입니다(관리자 영역에 중복
+                      배치하지 않음). 다만 게이트는 시설 직무가 아니라 거래처
+                      관리와 동일한 M0·hr(lib/partnerAccess)이라, 시설 직무만
+                      가진 사람에게는 눌러도 튕기는 버튼이 되므로 감춥니다. */}
+                  {(isM0 || roleSet.has("hr")) && (
+                    <MenuCard
+                      href="/hr/partners"
+                      icon="🤝"
+                      title="거래처관리"
+                      desc="분야별 거래처·담당자 주소록 (인수인계용)"
+                    />
+                  )}
                 </div>
               </div>
             )}
