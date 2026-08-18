@@ -8,8 +8,14 @@ import PartnersManager from "@/app/hr/partners/PartnersManager";
 
 export const dynamic = "force-dynamic";
 
-export default async function BusinessPartnersPage() {
+export default async function BusinessPartnersPage({
+  searchParams,
+}: {
+  // ?id=... — 명함첩의 "거래처 보기" 링크가 특정 거래처 상세를 바로 엽니다.
+  searchParams: Promise<{ id?: string }>;
+}) {
   await enforcePasswordChange();
+  const { id: openId } = await searchParams;
 
   // 접근: 로그인한 정식 직원이면 누구나. 미로그인만 / 로.
   //   비공개 거래처는 목록 조회(listPartners)가 서버에서 걸러냅니다.
@@ -49,6 +55,10 @@ export default async function BusinessPartnersPage() {
         <PartnersManager
           initialPartners={partners}
           isManager={access.isManager}
+          // 목록에 없는(=볼 수 없는) id 면 무시됩니다.
+          initialDetailId={
+            openId && partners.some((p) => p.id === openId) ? openId : null
+          }
         />
       </main>
     </>

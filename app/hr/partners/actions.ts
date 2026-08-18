@@ -7,6 +7,7 @@ import {
   requirePartnerAccess,
   requirePartnerManager,
 } from "@/lib/partnerAccess";
+import { loadPartnerForWrite } from "@/lib/directoryGuards";
 import {
   toBusinessPartner,
   toPartnerContact,
@@ -57,24 +58,6 @@ export async function isPartnerManager(): Promise<boolean> {
   return ctx?.isManager === true;
 }
 
-// 대상 거래처를 이 사용자가 다룰 수 있는지 확인하고 is_private 를 돌려줍니다.
-//   비공개인데 관리자가 아니면 "찾을 수 없음"으로 취급해 존재 자체를 감춥니다.
-async function loadPartnerForWrite(
-  id: string,
-  isManager: boolean,
-): Promise<{ ok: true; isPrivate: boolean } | { ok: false; message: string }> {
-  const { data } = await supabaseAdmin
-    .from("business_partners")
-    .select("id, is_private")
-    .eq("id", id)
-    .maybeSingle();
-  if (!data) return { ok: false, message: "거래처를 찾을 수 없습니다." };
-  const isPrivate = (data as { is_private?: unknown }).is_private === true;
-  if (isPrivate && !isManager) {
-    return { ok: false, message: "거래처를 찾을 수 없습니다." };
-  }
-  return { ok: true, isPrivate };
-}
 
 // =====================================================================
 // 목록 / 상세

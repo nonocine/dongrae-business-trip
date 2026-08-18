@@ -10,6 +10,7 @@ import {
   saveContact,
   deleteContact,
 } from "@/app/hr/partners/actions";
+import { getCardImageUrl } from "@/app/hr/cards/actions";
 import {
   PARTNER_CATEGORIES,
   PARTNER_CATEGORY_BADGE,
@@ -112,10 +113,13 @@ function categoryBadge(category: PartnerCategory): string {
 export default function PartnersManager({
   initialPartners,
   isManager,
+  initialDetailId = null,
 }: {
   initialPartners: PartnerWithContacts[];
   // M0·hr 여부. 비공개 배지·전환 토글의 노출만 결정합니다(차단은 서버).
   isManager: boolean;
+  // 명함첩에서 "거래처 보기"로 들어왔을 때 바로 열 거래처(/hr/partners?id=…).
+  initialDetailId?: string | null;
 }) {
   const [partners, setPartners] =
     useState<PartnerWithContacts[]>(initialPartners);
@@ -132,7 +136,7 @@ export default function PartnersManager({
   const [form, setForm] = useState<PartnerForm>({ ...EMPTY_PARTNER_FORM });
 
   // 상세(거래처 id) + 담당자 폼.
-  const [detailId, setDetailId] = useState<string | null>(null);
+  const [detailId, setDetailId] = useState<string | null>(initialDetailId);
   const [contactOpen, setContactOpen] = useState(false);
   const [contactForm, setContactForm] = useState<ContactForm>({
     ...EMPTY_CONTACT_FORM,
@@ -363,6 +367,24 @@ export default function PartnersManager({
         text: contactForm.id
           ? "담당자를 수정했습니다."
           : "담당자를 추가했습니다.",
+      });
+    });
+  }
+
+  // 담당자가 어느 명함에서 왔는지 — 원본 이미지를 새 창으로 엽니다.
+  //   권한·비공개 판정은 getCardImageUrl(서버)이 합니다. 못 내주면 null 이 옵니다.
+  function viewCardImage(cardId: string | null) {
+    if (!cardId) return;
+    setMsg(null);
+    startBusy(async () => {
+      const url = await getCardImageUrl(cardId);
+      if (url) {
+        window.open(url, "_blank", "noopener,noreferrer");
+        return;
+      }
+      setMsg({
+        kind: "err",
+        text: "이 명함의 원본 이미지를 열 수 없습니다. (사진이 없거나 열람 권한이 없습니다)",
       });
     });
   }
@@ -709,6 +731,22 @@ export default function PartnersManager({
                           </strong>
                           {c.is_primary && (
                             <span className={badgeNavy}>대표담당자</span>
+                          )}
+                          {/* 명함첩에서 편입된 담당자 — 원본 명함을 대조할 수
+                              있습니다. 비공개 명함 이미지는 기존 규칙대로
+                              관리자에게만 서명 URL 이 발급됩니다. */}
+                          {c.card_id && (
+                            <>
+                              <span className={badgeNeutral}>명함</span>
+                              <button
+                                type="button"
+                                className="text-[11px] text-navy underline-offset-2 hover:underline"
+                                disabled={busy}
+                                onClick={() => viewCardImage(c.card_id)}
+                              >
+                                명함 보기
+                              </button>
+                            </>
                           )}
                         </div>
                         <p className="mt-0.5 text-ink-muted">

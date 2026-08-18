@@ -24,10 +24,21 @@ export type BusinessCard = {
   // 비공개 — true 면 관리자(M0·hr)에게만 보입니다(원본 이미지 URL 포함).
   //   일반 직원에게는 서버에서 걸러져 아예 전달되지 않습니다.
   is_private: boolean;
+  // --- 2단계: 거래처 편입 ---
+  // 편입된 거래처. null 이면 아직 명함첩에만 있는 상태입니다.
+  //   연결해도 명함 행은 그대로 남습니다(원본 보관).
+  partner_id: string | null;
+  // 명함 자체의 분야 힌트 — 새 거래처로 등록할 때 분야를 프리필하는 데만 씁니다.
+  category: string;
   registered_by: string;
   created_at: string;
   updated_at: string;
 };
+
+// 목록·상세가 쓰는 형태 — 명함 + 연결된 거래처 이름.
+//   partner_id 는 있는데 partner_name 이 null 이면 "볼 수 없는(비공개) 거래처에
+//   편입됨" 입니다. 이름을 감춰 비공개 거래처의 존재가 새지 않게 합니다.
+export type CardWithLink = BusinessCard & { partner_name: string | null };
 
 // AI 가 추출하는 항목(메모·이미지 제외) — 폼 필드와 1:1 로 대응합니다.
 export const OCR_FIELD_KEYS = [
@@ -103,6 +114,8 @@ export function toBusinessCard(raw: Record<string, unknown>): BusinessCard {
     image_path: (raw.image_path as string | null) ?? null,
     // 기본값 false(공개) — 명시적으로 true 일 때만 비공개입니다.
     is_private: raw.is_private === true,
+    partner_id: (raw.partner_id as string | null) ?? null,
+    category: str(raw.category),
     registered_by: str(raw.registered_by),
     created_at: String(raw.created_at ?? ""),
     updated_at: String(raw.updated_at ?? ""),
