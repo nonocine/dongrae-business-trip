@@ -662,9 +662,13 @@ export default function MailInbox({
             return (
               // 행 전체가 버튼이면 안쪽에 체크박스·[적용] 버튼을 넣을 수 없어
               // (중첩 불가) 여는 영역만 버튼으로 두고 나머지는 형제로 뺐습니다.
+              //
+              // 반응형: 기본(폰)은 쌓고, sm 이상에서 원래의 가로 3단으로 되돌립니다.
+              //   폰에서는 flex-wrap 으로 [체크박스+본문] / [담당자] 두 줄이 되고,
+              //   sm:flex-nowrap 이 한 줄 배치를 복원합니다.
               <div
                 key={item.id}
-                className={`flex w-full items-start gap-3 px-3 py-3 transition-colors hover:bg-navy-soft/40 ${
+                className={`flex w-full flex-wrap items-start gap-x-3 gap-y-1.5 px-3 py-3 transition-colors hover:bg-navy-soft/40 sm:flex-nowrap sm:gap-3 ${
                   checked
                     ? "bg-navy-soft/30"
                     : unopened
@@ -683,21 +687,25 @@ export default function MailInbox({
                   type="button"
                   onClick={() => openIndex(index)}
                   aria-haspopup="dialog"
-                  className="flex min-w-0 flex-1 cursor-pointer items-start gap-3 text-left focus-visible:outline-none"
+                  className="flex min-w-0 flex-1 cursor-pointer flex-col gap-1 text-left focus-visible:outline-none sm:flex-row sm:items-start sm:gap-3"
                 >
-                  <span
-                    aria-hidden
-                    title={MAIL_STATUS_DOT_HINT[item.status]}
-                    className={`mt-1.5 h-2.5 w-2.5 shrink-0 rounded-full ${MAIL_STATUS_DOT[item.status]}`}
-                  />
-                  <span
-                    className={`mt-0.5 w-28 shrink-0 truncate text-sm ${
-                      unopened
-                        ? "font-bold text-ink"
-                        : "font-medium text-ink-body"
-                    }`}
-                  >
-                    {item.from_name || item.from_email || "(보낸사람 없음)"}
+                  {/* 상태점 + 보낸사람 — 폰에선 한 줄로 묶고, sm 이상에선 sm:contents
+                      로 이 래퍼를 없애 둘이 다시 버튼의 직접 자식(가로 3단)이 됩니다. */}
+                  <span className="flex min-w-0 items-center gap-2 sm:contents">
+                    <span
+                      aria-hidden
+                      title={MAIL_STATUS_DOT_HINT[item.status]}
+                      className={`h-2.5 w-2.5 shrink-0 rounded-full sm:mt-1.5 ${MAIL_STATUS_DOT[item.status]}`}
+                    />
+                    <span
+                      className={`min-w-0 flex-1 truncate text-sm sm:mt-0.5 sm:w-28 sm:flex-none sm:shrink-0 ${
+                        unopened
+                          ? "font-bold text-ink"
+                          : "font-medium text-ink-body"
+                      }`}
+                    >
+                      {item.from_name || item.from_email || "(보낸사람 없음)"}
+                    </span>
                   </span>
                   <span className="min-w-0 flex-1">
                     <span
@@ -715,7 +723,10 @@ export default function MailInbox({
                           {item.ai_category}
                         </span>
                       )}
-                      <span className="truncate">
+                      {/* min-w-0 필수 — flex 항목의 기본 min-width:auto 는 글자
+                          수만큼 최소폭을 잡아, 칸이 좁아지면 말줄임 대신 글자가
+                          접히거나 잘립니다. 폰에서 제목이 세로로 뭉개지던 원인. */}
+                      <span className="min-w-0 truncate">
                         {item.subject || "(제목 없음)"}
                       </span>
                       {item.has_attachments && (
@@ -734,9 +745,11 @@ export default function MailInbox({
                   </span>
                 </button>
 
-                {/* 담당자 — 미지정이고 추천이 있으면 추천과 [적용] 을 함께 */}
-                <span className="mt-0.5 flex w-28 shrink-0 flex-col items-end gap-1 sm:w-36">
-                  <span className="w-full truncate text-right text-xs text-ink-muted">
+                {/* 담당자 — 미지정이고 추천이 있으면 추천과 [적용] 을 함께.
+                    폰에선 제목 아래 한 줄(가로)로 내려오고, sm 이상에선 오른쪽
+                    고정폭 세로 칸으로 돌아갑니다. */}
+                <span className="flex w-full flex-row items-center justify-end gap-2 sm:mt-0.5 sm:w-36 sm:shrink-0 sm:flex-col sm:items-end sm:gap-1">
+                  <span className="min-w-0 truncate text-right text-xs text-ink-muted sm:w-full">
                     {assigneeLabel(item)}
                   </span>
                   {suggestion && (
