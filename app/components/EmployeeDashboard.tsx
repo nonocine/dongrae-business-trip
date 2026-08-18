@@ -277,6 +277,12 @@ function AdminArea({
           title="명함첩"
           desc="명함 촬영·AI 판독으로 거래처 연락처 보관"
         />
+        <MenuCard
+          href="/hr/partners"
+          icon="🤝"
+          title="거래처 관리"
+          desc="분야별 거래처·담당자 주소록 (인수인계용)"
+        />
       </div>
     </section>
   );
