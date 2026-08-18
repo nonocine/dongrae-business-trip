@@ -46,17 +46,9 @@ export type BusinessResultExportRow = {
   youth_uses: number;
   other_uses: number;
   summary: string;
-  evaluation: string;
   status: "draft" | "submitted";
   author_name: string;
   details?: BusinessDetailExportRow[];
-};
-
-export type RoomUsageExportRow = {
-  floor: string;
-  name: string;
-  youth: number;
-  other: number;
 };
 
 export type CoinPayExportRow = {
@@ -95,7 +87,6 @@ export type BusinessReportInput = {
   orgName: string;
   results: BusinessResultExportRow[];
   promotions: PromotionExportRow[];
-  rooms?: RoomUsageExportRow[];
   coinPay?: CoinPayExportRow[];
   coinPayCumulative?: number;
   staffTrainings?: StaffTrainingExportRow[];
@@ -383,7 +374,7 @@ function trioCells(
   return [String(y), String(o), String(y + o)];
 }
 
-// 사업별 세부표 — 일자형은 첫 열이 일자, 회차형은 "n회 (m일)".
+// 사업별 세부표 — 첫 열이 일자형은 일자, 회차형은 운영일수(김혜지 확정 6개 항목).
 function detailTables(results: BusinessResultExportRow[]) {
   const out: (Paragraph | Table)[] = [];
   for (const row of results) {
@@ -401,7 +392,7 @@ function detailTables(results: BusinessResultExportRow[]) {
     out.push(
       docTable(
         [
-          isSession ? "회차(일수)" : "일자",
+          isSession ? "운영일수" : "일자",
           "운영내용",
           "참가 청",
           "참가 기",
@@ -413,7 +404,7 @@ function detailTables(results: BusinessResultExportRow[]) {
         [1300, 3600, 760, 760, 760, 760, 760, 800],
         details.map((d) => [
           isSession
-            ? `${d.session_no ?? "-"}회 (${d.session_days ?? "-"}일)`
+            ? `${d.session_days ?? "-"}일`
             : (d.entry_date ?? "-"),
           d.content,
           String(d.participants_youth),
@@ -436,25 +427,24 @@ export async function buildBusinessReportDocx(
   const totals = calculateBusinessReportTotals(input);
   const period = reportPeriod(input);
   const periodEnd = new Date(input.year, period.endMonth, 0).getDate();
-  const roomRows = input.rooms ?? [];
   const coinPayRows = input.coinPay ?? [];
   const staffRows = input.staffTrainings ?? [];
   const detailRows = input.results.filter(
     (row) =>
-      (row.summary || row.evaluation) &&
+      row.summary &&
       !/^\d+월 최종 결과보고서 \d+번 사업 실적$/.test(row.summary),
   );
+  // 평가·향후 계획 열은 김혜지 요청으로 삭제 — 남은 열에 폭을 나눠 줍니다.
   const detailSection = detailRows.length
     ? [
         docTable(
-          ["번호", "사업명", "담당자", "주요 운영내용", "평가·향후 계획"],
-          [700, 2400, 900, 4530, 4530],
+          ["번호", "사업명", "담당자", "주요 운영내용"],
+          [700, 2900, 1000, 8460],
           detailRows.map((r) => [
             String(input.results.indexOf(r) + 1),
             r.program_name,
             r.manager_name ?? "",
             r.summary,
-            r.evaluation || "확인 필요",
           ]),
         ),
       ]
@@ -463,7 +453,7 @@ export async function buildBusinessReportDocx(
           spacing: { before: 40, after: 120 },
           children: [
             new TextRun({
-              text: "※ 프로그램 목록과 수치는 반영되었으며, 사업별 주요 내용·평가는 원자료 추가 입력 후 이 위치에 자동 출력됩니다.",
+              text: "※ 프로그램 목록과 수치는 반영되었으며, 사업별 주요 운영내용은 원자료 추가 입력 후 이 위치에 자동 출력됩니다.",
               size: 18,
               color: "666666",
               font: documentFontAttributes,
@@ -570,33 +560,6 @@ export async function buildBusinessReportDocx(
       ]),
       true,
     ),
-    new Paragraph({
-      spacing: { before: 150, after: 60 },
-      children: [
-        new TextRun({
-          text: "5. 실별 사용인원",
-          bold: true,
-          size: 20,
-          font: documentFontAttributes,
-        }),
-      ],
-    }),
-    ...(roomRows.length
-      ? [
-          docTable(
-            ["층", "실명", "청소년", "기타", "계"],
-            [1400, 3900, 1400, 1400, 1400],
-            roomRows.map((r) => [
-              r.floor,
-              r.name,
-              String(r.youth),
-              String(r.other),
-              String(r.youth + r.other),
-            ]),
-            true,
-          ),
-        ]
-      : [noDataParagraph()]),
     new Paragraph({
       pageBreakBefore: true,
       spacing: { before: 0, after: 0 },
@@ -830,7 +793,6 @@ export async function buildBusinessReportWorkbook(
   wb.creator = input.orgName;
   wb.created = new Date(Date.UTC(input.year, input.month - 1, 1));
 
-  const roomRows = input.rooms ?? [];
   const coinPayRows = input.coinPay ?? [];
   const staffRows = input.staffTrainings ?? [];
 
@@ -890,7 +852,7 @@ export async function buildBusinessReportWorkbook(
 
   const results = wb.addWorksheet("사업실적");
   results.addRow([`${input.year}년 ${period.label} 사업실적`]);
-  results.mergeCells("A1:R1");
+  results.mergeCells("A1:Q1");
   results.getCell("A1").font = {
     name: "맑은 고딕",
     size: 17,
@@ -916,7 +878,6 @@ export async function buildBusinessReportWorkbook(
     "실인원 기",
     "실인원 계",
     "주요 내용",
-    "평가·향후 계획",
     "상태",
     "작성자",
   ]);
@@ -939,7 +900,6 @@ export async function buildBusinessReportWorkbook(
       r.other_uses,
       { formula: `L${line}+M${line}` },
       r.summary,
-      r.evaluation,
       r.status === "submitted" ? "제출" : "작성 중",
       r.author_name,
     ]);
@@ -952,7 +912,7 @@ export async function buildBusinessReportWorkbook(
     ...["D", "E", "F", "G", "H", "I", "J", "K", "L", "M", "N"].map((col) => ({
       formula: `SUM(${col}5:${col}${sumTo})`,
     })),
-    "",
+    // 주요 내용 · 상태 · 작성자 — 합계 없는 열(평가 열 삭제로 3칸).
     "",
     "",
     "",
@@ -965,9 +925,9 @@ export async function buildBusinessReportWorkbook(
     fgColor: { argb: `FF${paleGray}` },
   };
   results.columns = [
-    14, 24, 10, 11, 10, 10, 10, 10, 11, 11, 11, 11, 11, 11, 34, 34, 11, 12,
+    14, 24, 10, 11, 10, 10, 10, 10, 11, 11, 11, 11, 11, 11, 48, 11, 12,
   ].map((width) => ({ width }));
-  results.autoFilter = `A4:R${results.rowCount}`;
+  results.autoFilter = `A4:Q${results.rowCount}`;
   styleSheet(results);
 
   const promotions = wb.addWorksheet("홍보대외협력");
@@ -1014,7 +974,7 @@ export async function buildBusinessReportWorkbook(
   promotions.autoFilter = `A4:G${promotions.rowCount}`;
   styleSheet(promotions);
 
-  // --- 신규 시트 3종: 실별이용 / 동전PAY / 종사자교육 -------------------
+  // --- 신규 시트 2종: 동전PAY / 종사자교육 ------------------------------
   const lastCol = (n: number) => String.fromCharCode(64 + n);
 
   function addDataSheet(
@@ -1043,30 +1003,6 @@ export async function buildBusinessReportWorkbook(
     sheet.autoFilter = `A4:${lastCol(headers.length)}${sheet.rowCount}`;
     styleSheet(sheet);
     return sheet;
-  }
-
-  const roomSheet = addDataSheet(
-    "실별이용",
-    `${input.year}년 ${period.label} 실별 사용인원`,
-    ["층", "실명", "청소년", "기타", "계"],
-    [14, 30, 12, 12, 12],
-    roomRows.map((r) => [r.floor, r.name, r.youth, r.other, r.youth + r.other]),
-  );
-  if (roomRows.length) {
-    const to = roomSheet.rowCount;
-    const roomTotal = roomSheet.addRow([
-      "합계",
-      "",
-      { formula: `SUM(C5:C${to})` },
-      { formula: `SUM(D5:D${to})` },
-      { formula: `SUM(E5:E${to})` },
-    ]);
-    roomTotal.font = { name: "맑은 고딕", bold: true };
-    roomTotal.fill = {
-      type: "pattern",
-      pattern: "solid",
-      fgColor: { argb: `FF${paleGray}` },
-    };
   }
 
   const coinSheet = addDataSheet(

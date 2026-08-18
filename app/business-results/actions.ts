@@ -23,6 +23,7 @@ export type BusinessResult = {
   youth_uses: number;
   other_uses: number;
   summary: string;
+  // 입력란·문서 출력은 없앴지만 컬럼과 과거 값은 그대로 보존합니다(김혜지 8/18).
   evaluation: string;
   status: "draft" | "submitted";
   author_name: string;
@@ -62,22 +63,6 @@ export type ProgramRegistry = {
   configured: boolean; // 레지스트리 테이블 적용 여부
   categories: BusinessCategory[];
   programs: BusinessProgram[];
-};
-
-// 보고용 실(26개) — 비품관리 facility_locations 와는 별개의 마스터입니다.
-export type ReportRoom = {
-  id: string;
-  floor: string;
-  name: string;
-  sort_order: number;
-  is_active: boolean;
-};
-
-export type ResultRoomUsage = {
-  result_id: string;
-  room_id: string;
-  youth_count: number;
-  other_count: number;
 };
 
 // 사업별 세부입력 — 일자형(date) / 회차형(session).
@@ -130,9 +115,6 @@ export type BusinessResultsData = {
   results: BusinessResult[];
   promotions: PromotionResult[];
   registry: ProgramRegistry;
-  roomsConfigured: boolean;
-  rooms: ReportRoom[];
-  roomUsage: ResultRoomUsage[];
   detailsConfigured: boolean;
   details: ResultDetail[];
   coinPayConfigured: boolean;
@@ -232,32 +214,6 @@ async function loadRegistry(): Promise<ProgramRegistry> {
   };
 }
 
-// 보고용 실 목록 — 미적용(42P01)이면 빈 목록으로 폴백(입력 섹션 숨김).
-async function loadRooms(): Promise<{
-  configured: boolean;
-  rooms: ReportRoom[];
-}> {
-  const { data, error } = await supabaseAdmin
-    .from("report_rooms")
-    .select("id,floor,name,sort_order,is_active")
-    .order("sort_order");
-  if (tableMissing(error)) return { configured: false, rooms: [] };
-  if (error) throw new Error(error.message);
-  return { configured: true, rooms: (data ?? []) as ReportRoom[] };
-}
-
-// 조회 기간 결과행들의 실별 인원 — 결과 id 목록으로 in 쿼리 1회.
-async function loadRoomUsage(resultIds: string[]): Promise<ResultRoomUsage[]> {
-  if (resultIds.length === 0) return [];
-  const { data, error } = await supabaseAdmin
-    .from("business_result_rooms")
-    .select("result_id,room_id,youth_count,other_count")
-    .in("result_id", resultIds);
-  if (tableMissing(error)) return [];
-  if (error) throw new Error(error.message);
-  return (data ?? []) as ResultRoomUsage[];
-}
-
 async function loadDetails(resultIds: string[]): Promise<{
   configured: boolean;
   details: ResultDetail[];
@@ -343,9 +299,6 @@ export async function getBusinessResultsData(
       results: [],
       promotions: [],
       registry: EMPTY_REGISTRY,
-      roomsConfigured: false,
-      rooms: [],
-      roomUsage: [],
       detailsConfigured: false,
       details: [],
       coinPayConfigured: false,
@@ -356,7 +309,7 @@ export async function getBusinessResultsData(
     };
   const isAdmin = await isManagerAdmin();
 
-  const [resultQuery, promotionQuery, registry, roomMaster, coinPay, staff] =
+  const [resultQuery, promotionQuery, registry, coinPay, staff] =
     await Promise.all([
     supabaseAdmin
       .from("business_results")
@@ -376,7 +329,6 @@ export async function getBusinessResultsData(
       .order("report_month", { ascending: false })
       .order("activity_date", { ascending: false }),
       loadRegistry(),
-      loadRooms(),
       loadCoinPay(year, startMonth, endMonth),
       loadStaffTrainings(year, startMonth, endMonth),
     ]);
@@ -388,9 +340,6 @@ export async function getBusinessResultsData(
       results: [],
       promotions: [],
       registry,
-      roomsConfigured: roomMaster.configured,
-      rooms: roomMaster.rooms,
-      roomUsage: [],
       detailsConfigured: false,
       details: [],
       coinPayConfigured: coinPay.configured,
@@ -406,11 +355,7 @@ export async function getBusinessResultsData(
   const results = ((resultQuery.data ?? []) as Record<string, unknown>[]).map(
     toResult,
   );
-  const resultIds = results.map((r) => r.id);
-  const [roomUsage, detailData] = await Promise.all([
-    loadRoomUsage(resultIds),
-    loadDetails(resultIds),
-  ]);
+  const detailData = await loadDetails(results.map((r) => r.id));
 
   return {
     configured: true,
@@ -418,9 +363,6 @@ export async function getBusinessResultsData(
     results,
     promotions: (promotionQuery.data ?? []) as PromotionResult[],
     registry,
-    roomsConfigured: roomMaster.configured,
-    rooms: roomMaster.rooms,
-    roomUsage,
     detailsConfigured: detailData.configured,
     details: detailData.details,
     coinPayConfigured: coinPay.configured,
@@ -453,22 +395,6 @@ export async function saveBusinessResult(formData: FormData) {
   const attendanceYouth = asInt(formData.get("attendance_youth"));
   const attendanceOther = asInt(formData.get("attendance_other"));
 
-  // 실별 사용인원 — 폼의 room_{roomId}_youth / _other 를 수집합니다.
-  //   실별이용 보고(business_result_rooms)용 자료로만 쓰고, 실인원(youth_uses/
-  //   other_uses)에는 반영하지 않습니다. 실인원은 담당자 수기 입력값이 정본입니다.
-  const roomCounts = new Map<string, { youth: number; other: number }>();
-  for (const [key, value] of formData.entries()) {
-    const match = /^room_(.+)_(youth|other)$/.exec(key);
-    if (!match) continue;
-    const [, roomId, kind] = match;
-    const entry = roomCounts.get(roomId) ?? { youth: 0, other: 0 };
-    const n = Math.max(0, Number.parseInt(String(value ?? "0"), 10) || 0);
-    if (kind === "youth") entry.youth = n;
-    else entry.other = n;
-    roomCounts.set(roomId, entry);
-  }
-  const roomsSubmitted = roomCounts.size > 0;
-
   const payload = {
     report_year: asInt(formData.get("year"), 2020),
     report_month: Math.min(12, asInt(formData.get("month"), 1)),
@@ -489,14 +415,13 @@ export async function saveBusinessResult(formData: FormData) {
     youth_uses: asInt(formData.get("youth_uses")),
     other_uses: asInt(formData.get("other_uses")),
     summary: String(formData.get("summary") ?? "").trim(),
-    evaluation: String(formData.get("evaluation") ?? "").trim(),
+    // 평가·향후 계획(evaluation)은 김혜지 요청으로 입력란을 없앴습니다.
+    //   컬럼은 남겨 과거 값을 보존하고, 저장 시에는 건드리지 않습니다.
     status: formData.get("submit") === "true" ? "submitted" : "draft",
     author_name: user.name,
     updated_by: user.name,
   };
 
-  // upsert 후 자식 테이블(실별 인원)을 교체하는 2단계 저장. 실패 시 그대로 throw.
-  let resultId = id;
   if (id) {
     let query = supabaseAdmin
       .from("business_results")
@@ -507,52 +432,40 @@ export async function saveBusinessResult(formData: FormData) {
     if (error) throw new Error(error.message);
     if (!data) throw new Error("본인이 작성한 실적만 수정할 수 있습니다.");
   } else {
-    const { data, error } = await supabaseAdmin
+    const { error } = await supabaseAdmin
       .from("business_results")
-      .insert(payload)
-      .select("id")
-      .single();
+      .insert(payload);
     if (error) throw new Error(error.message);
-    resultId = String((data as { id: string }).id);
   }
 
-  if (roomsSubmitted && resultId) {
-    await replaceResultRooms(resultId, roomCounts);
-  }
   revalidatePath("/business-results");
   return { ok: true };
 }
 
-// 실별 인원 delete-then-insert 교체. 0/0 인 실은 행을 만들지 않습니다.
-async function replaceResultRooms(
-  resultId: string,
-  roomCounts: Map<string, { youth: number; other: number }>,
-) {
-  const del = await supabaseAdmin
-    .from("business_result_rooms")
-    .delete()
-    .eq("result_id", resultId);
-  if (del.error) {
-    if (tableMissing(del.error)) return; // 테이블 미적용 — 실별 저장은 건너뜁니다.
-    throw new Error(del.error.message);
+// 프로그램 실적 삭제 — 물리 삭제. 권한 규칙은 수정과 동일(관리자 또는 작성자 본인).
+//   세부 실적·실별 인원 자식 행은 FK on delete cascade 로 함께 지워집니다.
+export async function deleteBusinessResult(id: string): Promise<ActionResult> {
+  try {
+    const user = await requireUser();
+    if (!id) return { ok: false, message: "대상이 없습니다." };
+    let query = supabaseAdmin.from("business_results").delete().eq("id", id);
+    if (!user.isAdmin) query = query.eq("author_name", user.name);
+    const { data, error } = await query.select("id").maybeSingle();
+    if (error) throw new Error(error.message);
+    if (!data)
+      return {
+        ok: false,
+        message: "본인이 작성한 실적만 삭제할 수 있습니다.",
+      };
+    revalidatePath("/business-results");
+    return { ok: true };
+  } catch (e) {
+    return actionError(e, "프로그램 실적을 삭제하지 못했습니다.");
   }
-  const rows = [...roomCounts.entries()]
-    .filter(([, v]) => v.youth > 0 || v.other > 0)
-    .map(([roomId, v]) => ({
-      result_id: resultId,
-      room_id: roomId,
-      youth_count: v.youth,
-      other_count: v.other,
-    }));
-  if (rows.length === 0) return;
-  const { error } = await supabaseAdmin
-    .from("business_result_rooms")
-    .insert(rows);
-  if (error) throw new Error(error.message);
 }
 
 // =====================================================================
-// 작업 5. 사업별 세부입력 — delete-then-insert 교체(실별 인원과 동일 패턴).
+// 작업 5. 사업별 세부입력 — 저장은 delete-then-insert 로 행 전체를 교체합니다.
 //   권한 규칙은 saveBusinessResult 와 동일: 비관리자는 본인 작성 행만.
 // =====================================================================
 export type ResultDetailInput = {

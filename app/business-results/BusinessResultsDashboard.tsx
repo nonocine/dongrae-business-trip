@@ -10,6 +10,7 @@ import {
   labelCls,
 } from "@/lib/ui";
 import {
+  deleteBusinessResult,
   deletePromotion,
   savePromotion,
   type BusinessResult,
@@ -21,7 +22,6 @@ import DetailRowsEditor from "./DetailRowsEditor";
 import ProgramRegistryManager from "./ProgramRegistryManager";
 import StaffTrainingTab from "./StaffTrainingTab";
 import ProgramResultForm, { type CarryOver } from "./ProgramResultForm";
-import type { RoomCounts } from "./RoomUsageSection";
 
 type Tab =
   | "overview"
@@ -185,19 +185,7 @@ export default function BusinessResultsDashboard({
       ),
     [aggregatedResults],
   );
-  // 수정 중인 실적의 실별 인원·세부 행 프리필.
-  const editingRoomCounts = useMemo<RoomCounts>(() => {
-    if (!editing) return {};
-    const out: RoomCounts = {};
-    for (const usage of data.roomUsage) {
-      if (usage.result_id !== editing.id) continue;
-      out[usage.room_id] = {
-        youth: usage.youth_count,
-        other: usage.other_count,
-      };
-    }
-    return out;
-  }, [editing, data.roomUsage]);
+  // 수정 중인 실적의 세부 행 프리필.
   const editingDetails = useMemo(
     () =>
       editing ? data.details.filter((d) => d.result_id === editing.id) : [],
@@ -255,10 +243,31 @@ export default function BusinessResultsDashboard({
       `/business-results?year=${nextYear}&period=${nextPeriod}&month=${nextMonth}`,
     );
   }
-  // 홍보·대외협력 — 관리자이거나 본인이 작성한 건만 수정·삭제할 수 있습니다.
+  // 관리자이거나 본인이 작성한 건만 수정·삭제할 수 있습니다.
   //   (서버 액션에서도 같은 규칙으로 한 번 더 막습니다.)
-  function canManagePromo(row: PromotionResult) {
+  function canManage(row: { author_name: string }) {
     return data.isAdmin || row.author_name === currentUser;
+  }
+
+  // 프로그램 실적 삭제 — 세부 실적·실별 인원 자식 행도 함께 지워집니다(FK cascade).
+  function removeResult(row: BusinessResult) {
+    if (
+      !confirm(
+        `'${row.program_name}' 프로그램 실적을 삭제할까요?\n세부 실적도 함께 지워지고 되돌릴 수 없습니다.`,
+      )
+    )
+      return;
+    setMessage("");
+    startTransition(async () => {
+      const res = await deleteBusinessResult(row.id);
+      if (!res.ok) {
+        setMessage(res.message);
+        return;
+      }
+      if (editing?.id === row.id) setEditing(null);
+      setMessage("삭제했습니다.");
+      router.refresh();
+    });
   }
 
   function submitPromotion(form: HTMLFormElement) {
@@ -718,9 +727,6 @@ export default function BusinessResultsDashboard({
               month={month}
               editing={editing}
               registry={data.registry}
-              rooms={data.rooms}
-              roomsConfigured={data.roomsConfigured}
-              initialRoomCounts={editingRoomCounts}
               carryOver={editing ? null : carryOver}
               onCancel={() => setEditing(null)}
               onSaved={(text) => {
@@ -760,16 +766,28 @@ export default function BusinessResultsDashboard({
                         {r.status === "submitted" ? "제출" : "작성 중"}
                       </span>
                     </div>
-                    <button
-                      type="button"
-                      className="shrink-0 rounded-lg border border-line px-3 py-1.5 text-xs font-bold text-navy hover:bg-navy-soft"
-                      onClick={() => {
-                        setEditing(r);
-                        window.scrollTo({ top: 0, behavior: "smooth" });
-                      }}
-                    >
-                      수정
-                    </button>
+                    <div className="flex shrink-0 gap-1">
+                      <button
+                        type="button"
+                        className="rounded-lg border border-line px-3 py-1.5 text-xs font-bold text-navy hover:bg-navy-soft"
+                        onClick={() => {
+                          setEditing(r);
+                          window.scrollTo({ top: 0, behavior: "smooth" });
+                        }}
+                      >
+                        수정
+                      </button>
+                      {canManage(r) && (
+                        <button
+                          type="button"
+                          disabled={pending}
+                          className="rounded-lg border border-line px-3 py-1.5 text-xs font-bold text-ink-muted hover:bg-surface"
+                          onClick={() => removeResult(r)}
+                        >
+                          삭제
+                        </button>
+                      )}
+                    </div>
                   </div>
                   <p className="mt-1 text-ink-muted">
                     {r.category} · {r.sessions}회 · 참가 {r.participants}명 ·
@@ -904,7 +922,7 @@ export default function BusinessResultsDashboard({
                     {r.author_name}
                   </p>
                 </div>
-                {canManagePromo(r) && (
+                {canManage(r) && (
                   <div className="flex shrink-0 gap-1">
                     <button
                       type="button"

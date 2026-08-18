@@ -7,9 +7,7 @@ import {
   saveBusinessResult,
   type BusinessResult,
   type ProgramRegistry,
-  type ReportRoom,
 } from "./actions";
-import RoomUsageSection, { type RoomCounts } from "./RoomUsageSection";
 
 // 사업명 드롭다운에서 "직접 입력"을 고르면 등록 목록에 없는 임시 사업을 쓸 수 있습니다.
 const CUSTOM = "__custom__";
@@ -71,9 +69,6 @@ export default function ProgramResultForm({
   month,
   editing,
   registry,
-  rooms,
-  roomsConfigured,
-  initialRoomCounts,
   carryOver,
   onCancel,
   onSaved,
@@ -83,9 +78,6 @@ export default function ProgramResultForm({
   month: number;
   editing: BusinessResult | null;
   registry: ProgramRegistry;
-  rooms: ReportRoom[];
-  roomsConfigured: boolean;
-  initialRoomCounts: RoomCounts;
   carryOver: CarryOver | null;
   onCancel: () => void;
   onSaved: (message: string) => void;
@@ -147,19 +139,6 @@ export default function ProgramResultForm({
   );
   const [youthUses, setYouthUses] = useState(editing?.youth_uses ?? 0);
   const [otherUses, setOtherUses] = useState(editing?.other_uses ?? 0);
-
-  // 실별 사용인원 — 실별이용 보고(business_result_rooms)용 입력입니다.
-  //   실인원 칸에는 더 이상 자동 반영하지 않고, 아래에 참고용 합계만 보여줍니다.
-  const [roomCounts, setRoomCounts] = useState<RoomCounts>(initialRoomCounts);
-  const useRooms = roomsConfigured && rooms.length > 0;
-  const roomTotals = useMemo(
-    () =>
-      Object.values(roomCounts).reduce(
-        (a, v) => ({ youth: a.youth + v.youth, other: a.other + v.other }),
-        { youth: 0, other: 0 },
-      ),
-    [roomCounts],
-  );
 
   const resolvedName =
     programChoice && programChoice !== CUSTOM
@@ -362,25 +341,7 @@ export default function ProgramResultForm({
 
       <p className="rounded-lg bg-surface px-3 py-2 text-xs leading-5 text-ink-muted md:col-span-3">
         {HEADCOUNT_HELP}
-        {useRooms && (
-          <>
-            <br />
-            아래 실별 사용인원 합계는 참고용입니다 — 청소년{" "}
-            {roomTotals.youth.toLocaleString("ko-KR")} · 기타{" "}
-            {roomTotals.other.toLocaleString("ko-KR")} · 계{" "}
-            {(roomTotals.youth + roomTotals.other).toLocaleString("ko-KR")}
-            (실인원 칸에 자동으로 넣지 않습니다.)
-          </>
-        )}
       </p>
-
-      {useRooms && (
-        <RoomUsageSection
-          rooms={rooms}
-          values={roomCounts}
-          onChange={setRoomCounts}
-        />
-      )}
 
       {!editing && (
         <p className="rounded-lg bg-surface px-3 py-2 text-xs leading-5 text-ink-muted md:col-span-3">
@@ -395,15 +356,6 @@ export default function ProgramResultForm({
           rows={3}
           className={inputCls}
           defaultValue={editing?.summary ?? ""}
-        />
-      </label>
-      <label className={`${labelCls} md:col-span-3`}>
-        평가·향후 계획
-        <textarea
-          name="evaluation"
-          rows={3}
-          className={inputCls}
-          defaultValue={editing?.evaluation ?? ""}
         />
       </label>
 

@@ -8,21 +8,21 @@ const input: BusinessReportInput = {
   year: 2099, month: 1, orgName: "테스트 기관",
   results: [
     // 청/기 구분이 있는 신규 행 + 세부표(일자형).
-    { category: "분류A", program_name: "가상 프로그램 A", manager_name: "담당 A", sessions: 3, operating_days: 2, participants: 42, participants_youth: 40, participants_other: 2, attendance: 116, attendance_youth: 110, attendance_other: 6, youth_uses: 116, other_uses: 8, summary: "합성 요약 A", evaluation: "합성 평가 A", status: "submitted", author_name: "사용자 A",
+    { category: "분류A", program_name: "가상 프로그램 A", manager_name: "담당 A", sessions: 3, operating_days: 2, participants: 42, participants_youth: 40, participants_other: 2, attendance: 116, attendance_youth: 110, attendance_other: 6, youth_uses: 116, other_uses: 8, summary: "합성 요약 A", status: "submitted", author_name: "사용자 A",
       details: [
         { entry_type: "date", entry_date: "2099-01-05", session_no: null, session_days: null, content: "합성 세부 A1", participants_youth: 20, participants_other: 1, room_youth: 20, room_other: 2 },
         { entry_type: "date", entry_date: "2099-01-06", session_no: null, session_days: null, content: "합성 세부 A2", participants_youth: 20, participants_other: 1, room_youth: 20, room_other: 2 },
       ] },
     // 청/기 구분이 없는 과거 행(계만 존재) — 문서에서 "-"/계 로 표기되어야 한다.
-    { category: "분류B", program_name: "가상 프로그램 B", sessions: 5, participants: 78, attendance: 135, youth_uses: 135, other_uses: 12, summary: "합성 요약 B", evaluation: "합성 평가 B", status: "draft", author_name: "사용자 B" },
+    //   세부표는 회차형 — 첫 열이 운영일수("N일")로 나와야 한다.
+    { category: "분류B", program_name: "가상 프로그램 B", sessions: 5, participants: 78, attendance: 135, youth_uses: 135, other_uses: 12, summary: "합성 요약 B", status: "draft", author_name: "사용자 B",
+      details: [
+        { entry_type: "session", entry_date: null, session_no: 1, session_days: 3, content: "합성 세부 B1", participants_youth: 30, participants_other: 2, room_youth: 30, room_other: 3 },
+      ] },
   ],
   promotions: [
     { activity_date: "2099-01-12", category: "채널A", title: "가상 홍보 A", count: 2, url: "https://example.com/a", description: "합성 설명 A", author_name: "사용자 A" },
     { activity_date: "2099-01-20", category: "채널B", title: "가상 홍보 B", count: 4, url: "", description: "합성 설명 B", author_name: "사용자 B" },
-  ],
-  rooms: [
-    { floor: "1층", name: "가상 실 1", youth: 80, other: 5 },
-    { floor: "2층", name: "가상 실 2", youth: 171, other: 15 },
   ],
   coinPay: [
     { entry_type: "적립", place: "가상 사용처 A", headcount: 30, amount: 3000, note: "" },
@@ -58,11 +58,10 @@ async function main() {
   const wb = new ExcelJS.Workbook();
   await wb.xlsx.load(Buffer.from(xlsx) as never);
   const names = wb.worksheets.map((s) => s.name).join(",");
-  if (names !== "종합현황,사업실적,홍보대외협력,실별이용,동전PAY,종사자교육") throw new Error(`시트 검증 실패: ${names}`);
+  if (names !== "종합현황,사업실적,홍보대외협력,동전PAY,종사자교육") throw new Error(`시트 검증 실패: ${names}`);
   if (wb.getWorksheet("종합현황")?.getCell("H5").value !== totals.youthRate) throw new Error("청소년 이용률 검증 실패");
   if (wb.getWorksheet("사업실적")?.getCell("H5").formula !== "F5+G5") throw new Error("참가인원 계 수식 검증 실패");
   if (wb.getWorksheet("사업실적")?.getCell("N5").formula !== "L5+M5") throw new Error("실인원 계 수식 검증 실패");
-  if (wb.getWorksheet("실별이용")?.getCell("A5").value !== "1층") throw new Error("실별이용 시트 검증 실패");
   if (wb.getWorksheet("종사자교육")?.getCell("D5").value !== "합성 교육 1") throw new Error("종사자교육 시트 검증 실패");
 
   // 신규 데이터가 전혀 없는 입력도 두 포맷 모두 생성되어야 한다.
@@ -70,7 +69,7 @@ async function main() {
   const emptyXlsx = await buildBusinessReportWorkbook(emptyExtras);
   const wb2 = new ExcelJS.Workbook();
   await wb2.xlsx.load(Buffer.from(emptyXlsx) as never);
-  if (wb2.worksheets.length !== 6) throw new Error(`빈 신규 데이터 시트 수 검증 실패: ${wb2.worksheets.length}`);
+  if (wb2.worksheets.length !== 5) throw new Error(`빈 신규 데이터 시트 수 검증 실패: ${wb2.worksheets.length}`);
 
   console.log(JSON.stringify({ ok: true, outputDir, totals, sheets: names }));
 }

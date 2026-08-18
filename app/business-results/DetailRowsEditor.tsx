@@ -15,7 +15,6 @@ type EntryType = "date" | "session";
 
 type Row = {
   entry_date: string;
-  session_no: number;
   session_days: number;
   content: string;
   participants_youth: number;
@@ -24,14 +23,21 @@ type Row = {
   room_other: number;
 };
 
+// 인원 4칸 — 라벨은 김혜지 확정 문구를 그대로 씁니다.
+const COUNT_FIELDS = [
+  ["participants_youth", "참가인원(청소년)"],
+  ["participants_other", "참가인원(기타)"],
+  ["room_youth", "실별인원(청소년)"],
+  ["room_other", "실별인원(기타)"],
+] as const;
+
 const cellInput =
   "w-full rounded-md border border-line bg-card px-2 py-1 text-sm text-ink-body shadow-sm focus:border-navy focus:outline-none focus:ring-1 focus:ring-navy";
 const numInput = `${cellInput} text-right tabular-nums`;
 
-function emptyRow(index: number): Row {
+function emptyRow(): Row {
   return {
     entry_date: "",
-    session_no: index + 1,
     session_days: 1,
     content: "",
     participants_youth: 0,
@@ -52,9 +58,8 @@ export default function DetailRowsEditor({
     details[0]?.entry_type === "session" ? "session" : "date";
   const [entryType, setEntryType] = useState<EntryType>(initialType);
   const [rows, setRows] = useState<Row[]>(() =>
-    details.map((d, i) => ({
+    details.map((d) => ({
       entry_date: d.entry_date ?? "",
-      session_no: d.session_no ?? i + 1,
       session_days: d.session_days ?? 1,
       content: d.content,
       participants_youth: d.participants_youth,
@@ -89,10 +94,11 @@ export default function DetailRowsEditor({
 
   function save() {
     setMsg(null);
-    const payload: ResultDetailInput[] = rows.map((r) => ({
+    // 회차 번호(session_no)는 입력칸을 없애고 줄 순서로 자동 부여합니다.
+    const payload: ResultDetailInput[] = rows.map((r, i) => ({
       entry_type: entryType,
       entry_date: r.entry_date || null,
-      session_no: r.session_no,
+      session_no: i + 1,
       session_days: r.session_days,
       content: r.content,
       participants_youth: r.participants_youth,
@@ -144,25 +150,21 @@ export default function DetailRowsEditor({
       </div>
 
       <div className="mt-3 overflow-x-auto">
-        <table className="w-full min-w-[760px] border-collapse text-sm">
+        <table className="w-full min-w-[860px] border-collapse text-sm">
           <thead>
             <tr className="border-b border-line text-xs text-ink-muted">
               <th className="w-36 px-2 py-1.5 text-left font-semibold">
-                {entryType === "date" ? "일자" : "회차 / 일수"}
+                {entryType === "date" ? "일자" : "운영일수"}
               </th>
               <th className="px-2 py-1.5 text-left font-semibold">운영내용</th>
-              <th className="w-20 px-2 py-1.5 text-right font-semibold">
-                참가 청
-              </th>
-              <th className="w-20 px-2 py-1.5 text-right font-semibold">
-                참가 기
-              </th>
-              <th className="w-20 px-2 py-1.5 text-right font-semibold">
-                실별 청
-              </th>
-              <th className="w-20 px-2 py-1.5 text-right font-semibold">
-                실별 기
-              </th>
+              {COUNT_FIELDS.map(([field, label]) => (
+                <th
+                  key={field}
+                  className="w-28 px-2 py-1.5 text-right font-semibold"
+                >
+                  {label}
+                </th>
+              ))}
               <th className="w-12 px-2 py-1.5" />
             </tr>
           </thead>
@@ -182,23 +184,13 @@ export default function DetailRowsEditor({
                       <input
                         type="number"
                         min="1"
-                        value={r.session_no}
-                        onChange={(e) =>
-                          patch(i, { session_no: Number(e.target.value) || 1 })
-                        }
-                        className={`${numInput} w-14`}
-                      />
-                      <span className="text-xs text-ink-hint">회</span>
-                      <input
-                        type="number"
-                        min="1"
                         value={r.session_days}
                         onChange={(e) =>
                           patch(i, {
                             session_days: Number(e.target.value) || 1,
                           })
                         }
-                        className={`${numInput} w-14`}
+                        className={`${numInput} w-20`}
                       />
                       <span className="text-xs text-ink-hint">일</span>
                     </div>
@@ -212,14 +204,7 @@ export default function DetailRowsEditor({
                     placeholder="운영내용"
                   />
                 </td>
-                {(
-                  [
-                    "participants_youth",
-                    "participants_other",
-                    "room_youth",
-                    "room_other",
-                  ] as const
-                ).map((field) => (
+                {COUNT_FIELDS.map(([field]) => (
                   <td key={field} className="px-2 py-1.5">
                     <input
                       type="number"
@@ -286,7 +271,7 @@ export default function DetailRowsEditor({
         <button
           type="button"
           className={btnSecondary}
-          onClick={() => setRows((prev) => [...prev, emptyRow(prev.length)])}
+          onClick={() => setRows((prev) => [...prev, emptyRow()])}
         >
           행 추가
         </button>
