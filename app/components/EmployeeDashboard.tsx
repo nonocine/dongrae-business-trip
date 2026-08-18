@@ -271,12 +271,6 @@ function AdminArea({
           title="사업실적"
           desc="월별 실적 취합·검토·결과보고서"
         />
-        <MenuCard
-          href="/hr/cards"
-          icon="💳"
-          title="명함첩"
-          desc="명함 촬영·AI 판독으로 거래처 연락처 보관"
-        />
       </div>
     </section>
   );
@@ -552,6 +546,25 @@ export default async function EmployeeDashboard({
             title="내 인사기록카드"
             desc="내 인사정보·증명사진·첨부서류 입력/수정"
           />
+          {/* 명함첩·거래처 — 관장 결정으로 전 직원 열람(협업 자산)이 되어 관리자
+              영역에서 여기로 내렸습니다. 비공개(🔒)로 표시된 항목만 관장·부장·인사
+              담당자에게 보이며, 그 필터는 서버에서 겁니다.
+              거래처관리는 시설관리 그룹에도 있어, 그 그룹을 보는 facility 직무
+              보유자에게는 여기서 빼 중복 노출을 막습니다. */}
+          <MenuCard
+            href="/hr/cards"
+            icon="💳"
+            title="명함첩"
+            desc="명함 촬영·AI 판독으로 거래처 연락처 보관"
+          />
+          {!roleSet.has("facility") && (
+            <MenuCard
+              href="/hr/partners"
+              icon="🤝"
+              title="거래처관리"
+              desc="분야별 거래처·담당자 주소록 (인수인계용)"
+            />
+          )}
           {/* 내 의무교육 — 올해 교육이 1개 이상일 때만 노출. */}
           {trainingSummary && trainingSummary.total > 0 && (
             <MenuCard
@@ -624,18 +637,17 @@ export default async function EmployeeDashboard({
                     title="안전점검"
                     desc="월별 안전점검표·PDF 출력"
                   />
-                  {/* 거래처관리 — 진입점은 여기 한 곳입니다(관리자 영역에 중복
-                      배치하지 않음). 다만 게이트는 시설 직무가 아니라 거래처
-                      관리와 동일한 M0·hr(lib/partnerAccess)이라, 시설 직무만
-                      가진 사람에게는 눌러도 튕기는 버튼이 되므로 감춥니다. */}
-                  {(isM0 || roleSet.has("hr")) && (
-                    <MenuCard
-                      href="/hr/partners"
-                      icon="🤝"
-                      title="거래처관리"
-                      desc="분야별 거래처·담당자 주소록 (인수인계용)"
-                    />
-                  )}
+                  {/* 거래처관리 — 관장 결정으로 열람이 전 직원에게 열려 M0·hr
+                      조건을 없앴습니다. 시설 담당에게는 "시설 거래처"가 곧 담당
+                      업무라 이 그룹에 그대로 둡니다. 시설 직무가 없는 직원을 위한
+                      진입점은 아래 공통 영역에 있습니다(중복 노출은 안 되도록
+                      공통 쪽에서 facility 보유자를 제외). */}
+                  <MenuCard
+                    href="/hr/partners"
+                    icon="🤝"
+                    title="거래처관리"
+                    desc="분야별 거래처·담당자 주소록 (인수인계용)"
+                  />
                 </div>
               </div>
             )}

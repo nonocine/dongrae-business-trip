@@ -43,6 +43,9 @@ export type BusinessPartner = {
   website: string;
   memo: string;
   is_active: boolean;
+  // 비공개 — true 면 관리자(M0·hr)에게만 보입니다. 소속 담당자도 함께 가려집니다.
+  //   일반 직원에게는 서버에서 걸러져 아예 전달되지 않습니다.
+  is_private: boolean;
   registered_by: string;
   created_at: string;
   updated_at: string;
@@ -123,6 +126,8 @@ export function toBusinessPartner(
     memo: str(raw.memo),
     // 기본값 true — 옛 행에 null 이 있어도 "거래 중"으로 봅니다.
     is_active: raw.is_active !== false,
+    // 기본값 false(공개) — 명시적으로 true 일 때만 비공개입니다.
+    is_private: raw.is_private === true,
     registered_by: str(raw.registered_by),
     created_at: String(raw.created_at ?? ""),
     updated_at: String(raw.updated_at ?? ""),

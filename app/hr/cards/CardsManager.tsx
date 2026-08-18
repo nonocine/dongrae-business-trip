@@ -6,6 +6,7 @@ import {
   scanBusinessCard,
   saveBusinessCard,
   deleteBusinessCard,
+  setCardPrivate,
   getCardImageUrl,
 } from "@/app/hr/cards/actions";
 import {
@@ -26,11 +27,15 @@ import {
   noticeError,
   noticeSuccess,
   badgeNeutral,
+  badgeWarning,
 } from "@/lib/ui";
 
 // 명함첩 — 촬영/업로드 → AI 판독 → 확인·수정 → 저장, 그리고 목록·상세·수정·삭제.
 //   * 이미지는 브라우저에서 압축(긴 변 1600px·JPEG)한 뒤에만 서버로 보냅니다.
 //   * AI 판독이 실패해도 폼은 그대로 열려 있어 수기로 저장할 수 있습니다.
+//   * 공개/비공개(isManager): 일반 직원에게는 비공개 명함이 서버에서 걸러져 애초에
+//     내려오지 않습니다(원본 이미지 서명 URL 도 발급되지 않음). 여기 isManager
+//     분기는 **배지·토글을 그릴지**만 정합니다. 실제 차단은 서버 액션이 합니다.
 
 const inCls =
   "block w-full rounded-md border border-line bg-card px-2.5 py-1.5 text-sm text-ink-body shadow-sm placeholder:text-ink-hint focus:border-navy focus:outline-none focus:ring-1 focus:ring-navy";
@@ -39,9 +44,12 @@ const lblCls = "block text-xs font-medium text-ink-muted";
 export default function CardsManager({
   initialCards,
   scanAvailable,
+  isManager,
 }: {
   initialCards: BusinessCard[];
   scanAvailable: boolean;
+  // M0·hr 여부. 비공개 배지·전환 토글의 노출만 결정합니다(차단은 서버).
+  isManager: boolean;
 }) {
   const [cards, setCards] = useState<BusinessCard[]>(initialCards);
   const [query, setQuery] = useState("");
@@ -60,6 +68,7 @@ export default function CardsManager({
   const [previewNote, setPreviewNote] = useState("");
   const [ocrRaw, setOcrRaw] = useState<unknown>(null);
   const [hasStoredImage, setHasStoredImage] = useState(false);
+  const [isPrivate, setIsPrivate] = useState(false);
 
   const [detail, setDetail] = useState<BusinessCard | null>(null);
 
@@ -80,6 +89,7 @@ export default function CardsManager({
     setPreviewNote("");
     setOcrRaw(null);
     setHasStoredImage(false);
+    setIsPrivate(false);
   }
 
   function openNew() {
@@ -108,6 +118,7 @@ export default function CardsManager({
     setPreviewNote("");
     setOcrRaw(null);
     setHasStoredImage(!!card.image_path);
+    setIsPrivate(card.is_private);
     setDetail(null);
     setFormOpen(true);
     setMsg(null);
@@ -171,6 +182,8 @@ export default function CardsManager({
         memo,
         imageDataUrl: preview,
         ocrRaw,
+        // 관리자가 아니면 서버가 무시합니다(보내지도 않습니다).
+        isPrivate: isManager ? isPrivate : undefined,
       });
       if (!res.ok) {
         setMsg({ kind: "err", text: res.message });
@@ -201,6 +214,38 @@ export default function CardsManager({
         setFormOpen(false);
       }
       setMsg({ kind: "ok", text: "명함을 삭제했습니다." });
+    });
+  }
+
+  // 공개 ↔ 비공개 전환 — 관리자만 호출합니다(서버에서 한 번 더 검증).
+  function togglePrivate(card: BusinessCard) {
+    const who = [card.company, card.person_name].filter(Boolean).join(" · ");
+    const next = !card.is_private;
+    if (
+      next &&
+      !confirm(
+        `'${who}' 명함을 비공개로 전환할까요?\n` +
+          "관장·부장·인사 담당자에게만 보이게 되고, 원본 이미지도 함께 가려집니다.",
+      )
+    )
+      return;
+    setMsg(null);
+    startBusy(async () => {
+      const res = await setCardPrivate(card.id, next);
+      if (!res.ok) {
+        setMsg({ kind: "err", text: res.message });
+        return;
+      }
+      await reload();
+      if (detail?.id === card.id) {
+        setDetail({ ...detail, is_private: next });
+      }
+      setMsg({
+        kind: "ok",
+        text: next
+          ? "비공개로 전환했습니다. 이제 관리자에게만 보입니다."
+          : "공개로 전환했습니다. 전 직원이 볼 수 있습니다.",
+      });
     });
   }
 
@@ -368,6 +413,17 @@ export default function CardsManager({
                 placeholder="만난 자리·용건 등"
               />
             </div>
+            {/* 비공개 지정은 관리자만 — 일반 직원 화면엔 이 줄 자체가 없습니다. */}
+            {isManager && (
+              <label className="flex items-center gap-1.5 text-xs text-ink-muted sm:col-span-2">
+                <input
+                  type="checkbox"
+                  checked={isPrivate}
+                  onChange={(e) => setIsPrivate(e.target.checked)}
+                />
+                🔒 비공개 (관장·부장·인사 담당자에게만 보임 — 원본 이미지도 가려짐)
+              </label>
+            )}
           </div>
 
           <div className="mt-3 flex flex-wrap gap-2">
@@ -398,8 +454,11 @@ export default function CardsManager({
         <section className={cardCls}>
           <div className="flex items-start justify-between gap-2">
             <div>
-              <h3 className="text-sm font-bold text-ink">
+              <h3 className="flex flex-wrap items-center gap-2 text-sm font-bold text-ink">
                 {detail.company || "(업체 없음)"}
+                {isManager && detail.is_private && (
+                  <span className={badgeWarning}>🔒 비공개</span>
+                )}
               </h3>
               <p className="mt-0.5 text-sm text-ink-body">
                 {[detail.person_name, detail.title, detail.department]
@@ -458,6 +517,22 @@ export default function CardsManager({
             >
               수정
             </button>
+            {/* 공개↔비공개 전환은 관리자에게만 보입니다. */}
+            {isManager && (
+              <button
+                type="button"
+                className={`${btnSecondary} h-8 px-3 text-xs`}
+                disabled={busy}
+                onClick={() => togglePrivate(detail)}
+                title={
+                  detail.is_private
+                    ? "전 직원이 볼 수 있게 바꿉니다"
+                    : "관장·부장·인사 담당자에게만 보이게 바꿉니다"
+                }
+              >
+                {detail.is_private ? "🔓 공개로 전환" : "🔒 비공개로 전환"}
+              </button>
+            )}
             <button
               type="button"
               className={`${btnDanger} h-8 px-3 text-xs`}
@@ -498,6 +573,9 @@ export default function CardsManager({
                   </strong>
                   {card.image_path && (
                     <span className={`${badgeNeutral} ml-2`}>사진</span>
+                  )}
+                  {isManager && card.is_private && (
+                    <span className={`${badgeWarning} ml-2`}>🔒 비공개</span>
                   )}
                   <p className="mt-0.5 truncate text-ink-muted">
                     {[card.person_name, card.title].filter(Boolean).join(" ") ||

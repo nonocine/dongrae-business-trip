@@ -5,6 +5,7 @@ import {
   listPartners,
   savePartner,
   setPartnerActive,
+  setPartnerPrivate,
   deletePartner,
   saveContact,
   deleteContact,
@@ -33,6 +34,7 @@ import {
   noticeSuccess,
   badgeNeutral,
   badgeNavy,
+  badgeWarning,
   tabBarCls,
   tabNavCls,
   tabItemCls,
@@ -42,6 +44,9 @@ import {
 //   * 명함첩이 "받은편지함"이라면 여기는 "정리된 주소록"입니다. 명함이 없어도
 //     수기로 등록할 수 있어야 해서 필수값은 거래처명 하나뿐입니다.
 //   * 거래 종료는 삭제가 아니라 is_active=false(기본 숨김)로 처리합니다.
+//   * 공개/비공개(isManager): 일반 직원에게는 비공개 거래처가 서버에서 걸러져
+//     애초에 내려오지 않습니다. 여기 isManager 분기는 **배지·토글을 그릴지**만
+//     정합니다(존재를 모르게). 실제 차단은 서버 액션이 담당합니다.
 //   * 명함첩 연결(card_id)은 2단계 — 이 화면에서는 다루지 않습니다.
 
 const inCls =
@@ -60,6 +65,7 @@ type PartnerForm = {
   website: string;
   memo: string;
   isActive: boolean;
+  isPrivate: boolean;
 };
 
 const EMPTY_PARTNER_FORM: PartnerForm = {
@@ -72,6 +78,7 @@ const EMPTY_PARTNER_FORM: PartnerForm = {
   website: "",
   memo: "",
   isActive: true,
+  isPrivate: false,
 };
 
 type ContactForm = {
@@ -104,8 +111,11 @@ function categoryBadge(category: PartnerCategory): string {
 
 export default function PartnersManager({
   initialPartners,
+  isManager,
 }: {
   initialPartners: PartnerWithContacts[];
+  // M0·hr 여부. 비공개 배지·전환 토글의 노출만 결정합니다(차단은 서버).
+  isManager: boolean;
 }) {
   const [partners, setPartners] =
     useState<PartnerWithContacts[]>(initialPartners);
@@ -173,6 +183,7 @@ export default function PartnersManager({
       website: p.website,
       memo: p.memo,
       isActive: p.is_active,
+      isPrivate: p.is_private,
     });
     setFormOpen(true);
     setMsg(null);
@@ -192,6 +203,8 @@ export default function PartnersManager({
         website: form.website,
         memo: form.memo,
         isActive: form.isActive,
+        // 관리자가 아니면 서버가 무시합니다(보내지도 않습니다).
+        isPrivate: isManager ? form.isPrivate : undefined,
       });
       if (!res.ok) {
         setMsg({ kind: "err", text: res.message });
@@ -237,6 +250,34 @@ export default function PartnersManager({
       setMsg({
         kind: "ok",
         text: next ? "거래를 재개했습니다." : "거래 종료로 표시했습니다.",
+      });
+    });
+  }
+
+  // 공개 ↔ 비공개 전환 — 관리자만 호출합니다(서버에서 한 번 더 검증).
+  function togglePrivate(p: PartnerWithContacts) {
+    const next = !p.is_private;
+    if (
+      next &&
+      !confirm(
+        `'${p.name}' 을(를) 비공개로 전환할까요?\n` +
+          "관장·부장·인사 담당자에게만 보이게 되고, 소속 담당자도 함께 가려집니다.",
+      )
+    )
+      return;
+    setMsg(null);
+    startBusy(async () => {
+      const res = await setPartnerPrivate(p.id, next);
+      if (!res.ok) {
+        setMsg({ kind: "err", text: res.message });
+        return;
+      }
+      await reload();
+      setMsg({
+        kind: "ok",
+        text: next
+          ? "비공개로 전환했습니다. 이제 관리자에게만 보입니다."
+          : "공개로 전환했습니다. 전 직원이 볼 수 있습니다.",
       });
     });
   }
@@ -500,6 +541,19 @@ export default function PartnersManager({
                 거래 중 (해제하면 목록에서 숨겨집니다)
               </label>
             )}
+            {/* 비공개 지정은 관리자만 — 일반 직원 화면엔 이 줄 자체가 없습니다. */}
+            {isManager && (
+              <label className="flex items-center gap-1.5 text-xs text-ink-muted sm:col-span-2">
+                <input
+                  type="checkbox"
+                  checked={form.isPrivate}
+                  onChange={(e) =>
+                    setForm({ ...form, isPrivate: e.target.checked })
+                  }
+                />
+                🔒 비공개 (관장·부장·인사 담당자에게만 보임 — 담당자도 함께 가려짐)
+              </label>
+            )}
           </div>
 
           <div className="mt-3 flex flex-wrap gap-2">
@@ -537,6 +591,9 @@ export default function PartnersManager({
                 </span>
                 {!detail.is_active && (
                   <span className={badgeNeutral}>거래종료</span>
+                )}
+                {isManager && detail.is_private && (
+                  <span className={badgeWarning}>🔒 비공개</span>
                 )}
               </div>
               <p className="mt-0.5 text-xs text-ink-hint">
@@ -592,6 +649,22 @@ export default function PartnersManager({
             >
               {detail.is_active ? "거래 종료" : "거래 재개"}
             </button>
+            {/* 공개↔비공개 전환은 관리자에게만 보입니다. */}
+            {isManager && (
+              <button
+                type="button"
+                className={`${btnSecondary} h-8 px-3 text-xs`}
+                disabled={busy}
+                onClick={() => togglePrivate(detail)}
+                title={
+                  detail.is_private
+                    ? "전 직원이 볼 수 있게 바꿉니다"
+                    : "관장·부장·인사 담당자에게만 보이게 바꿉니다"
+                }
+              >
+                {detail.is_private ? "🔓 공개로 전환" : "🔒 비공개로 전환"}
+              </button>
+            )}
             <button
               type="button"
               className={`${btnDanger} h-8 px-3 text-xs`}
@@ -815,6 +888,9 @@ export default function PartnersManager({
                       </span>
                       {!p.is_active && (
                         <span className={badgeNeutral}>거래종료</span>
+                      )}
+                      {isManager && p.is_private && (
+                        <span className={badgeWarning}>🔒 비공개</span>
                       )}
                     </span>
                     <p className="mt-0.5 truncate text-ink-muted">

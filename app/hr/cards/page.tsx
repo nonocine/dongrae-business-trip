@@ -12,7 +12,8 @@ export const dynamic = "force-dynamic";
 export default async function BusinessCardsPage() {
   await enforcePasswordChange();
 
-  // 접근: M0(관장·부장·master) 또는 hr(인사) 직무만. 그 외 / 로.
+  // 접근: 로그인한 정식 직원이면 누구나. 미로그인만 / 로.
+  //   비공개 명함은 목록 조회(listBusinessCards)가 서버에서 걸러냅니다.
   const access = await resolveCardAccess();
   if (!access) redirect("/");
 
@@ -43,6 +44,7 @@ export default async function BusinessCardsPage() {
         <CardsManager
           initialCards={cards}
           scanAvailable={isCardOcrConfigured()}
+          isManager={access.isManager}
         />
       </main>
     </>

@@ -21,6 +21,9 @@ export type BusinessCard = {
   website: string;
   memo: string;
   image_path: string | null;
+  // 비공개 — true 면 관리자(M0·hr)에게만 보입니다(원본 이미지 URL 포함).
+  //   일반 직원에게는 서버에서 걸러져 아예 전달되지 않습니다.
+  is_private: boolean;
   registered_by: string;
   created_at: string;
   updated_at: string;
@@ -98,6 +101,8 @@ export function toBusinessCard(raw: Record<string, unknown>): BusinessCard {
     website: str(raw.website),
     memo: str(raw.memo),
     image_path: (raw.image_path as string | null) ?? null,
+    // 기본값 false(공개) — 명시적으로 true 일 때만 비공개입니다.
+    is_private: raw.is_private === true,
     registered_by: str(raw.registered_by),
     created_at: String(raw.created_at ?? ""),
     updated_at: String(raw.updated_at ?? ""),
