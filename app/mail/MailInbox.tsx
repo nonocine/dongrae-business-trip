@@ -63,6 +63,9 @@ function formatReceived(iso: string | null): string {
   )} ${p2(kst.getUTCHours())}:${p2(kst.getUTCMinutes())}`;
 }
 
+// 페이지당 건수 — 비품관리(app/hr/facility/assets)와 같은 20건/페이지 방식입니다.
+const PAGE_SIZE = 20;
+
 const navBtn =
   "rounded-lg border border-line px-2.5 py-1.5 text-xs font-semibold text-ink-body hover:bg-surface disabled:opacity-40";
 
@@ -111,6 +114,27 @@ export default function MailInbox({
     null | "trash" | "purge"
   >(null);
 
+  // --- 페이지네이션(20건/페이지) — 비품관리와 같은 방식 ---
+  //   목록은 서버(getMailList)에서 이미 필터·검색·안읽음이 적용된 채 내려옵니다.
+  //   그 결과를 20건씩 잘라 보여주므로 페이지 계산은 항상 "필터된 전체 건수" 기준입니다.
+  const [page, setPage] = useState(1);
+  // 필터·검색·안읽음이 바뀌면(=URL 이 바뀌면) 1페이지로 되돌립니다.
+  //   props 가 바뀌는 렌더에서 곧바로 보정합니다 — effect 로 맞추면 한 프레임 동안
+  //   옛 페이지가 보이고 렌더가 한 번 더 돕니다.
+  const filterKey = `${filters.status}|${filters.assignee}|${filters.q}|${
+    filters.unreadOnly ? 1 : 0
+  }`;
+  const [seenFilterKey, setSeenFilterKey] = useState(filterKey);
+  if (filterKey !== seenFilterKey) {
+    setSeenFilterKey(filterKey);
+    setPage(1);
+  }
+  const totalPages = Math.max(1, Math.ceil(view.items.length / PAGE_SIZE));
+  const safePage = Math.min(page, totalPages);
+  const pageOffset = (safePage - 1) * PAGE_SIZE;
+  // 이 페이지에 보이는 메일 — 선택·일괄 처리는 모두 이 목록을 기준으로 합니다.
+  const pageItems = view.items.slice(pageOffset, pageOffset + PAGE_SIZE);
+
   const open = detail !== null;
   const trashView = filters.status === MAIL_TRASH_FILTER;
 
@@ -119,11 +143,13 @@ export default function MailInbox({
   //   되지 않습니다 — 보이지 않는 메일이 삭제되는 사고를 막는 핵심 장치입니다.
   //   (effect 로 state 를 동기화하면 렌더가 연쇄로 돌고, 동기화 직전 클릭에
   //    안 보이는 id 가 섞일 수 있어 파생값으로 둡니다.)
-  const selectedIds = view.items
+  //   ⚠️ 페이지네이션 이후 "보이는 것" 은 현재 페이지의 20건입니다 — 다른 페이지의
+  //   메일은 선택도 일괄 처리도 되지 않습니다(페이지를 넘기면 선택을 비웁니다).
+  const selectedIds = pageItems
     .filter((i) => selected.has(i.id))
     .map((i) => i.id);
   const allVisibleSelected =
-    view.items.length > 0 && view.items.every((i) => selected.has(i.id));
+    pageItems.length > 0 && pageItems.every((i) => selected.has(i.id));
 
   function toggleOne(id: string) {
     setSelected((prev) => {
@@ -134,12 +160,19 @@ export default function MailInbox({
     });
   }
 
+  // 전체 선택 = 이 페이지의 20건. 보이지 않는 페이지는 건드리지 않습니다.
   function toggleAll() {
     setSelected((prev) =>
-      view.items.length > 0 && view.items.every((i) => prev.has(i.id))
+      pageItems.length > 0 && pageItems.every((i) => prev.has(i.id))
         ? new Set()
-        : new Set(view.items.map((i) => i.id)),
+        : new Set(pageItems.map((i) => i.id)),
     );
+  }
+
+  // 페이지 이동 — 선택은 비웁니다(안 보이는 건이 선택된 채 남지 않게).
+  function goPage(p: number) {
+    setPage(p);
+    setSelected(new Set());
   }
 
   // 일괄 액션 공통 — 성공하면 선택을 비우고 목록을 새로고침합니다.
@@ -218,6 +251,8 @@ export default function MailInbox({
   function openIndex(index: number) {
     const item = view.items[index];
     if (!item) return;
+    // 이전/다음으로 페이지 경계를 넘었으면 뒤의 목록도 그 페이지로 따라갑니다.
+    setPage(Math.floor(index / PAGE_SIZE) + 1);
     setMsg(null);
     setLoadingId(item.id);
     setReplyOpen(false);
@@ -538,6 +573,8 @@ export default function MailInbox({
           </h2>
           <span className="text-xs text-ink-muted">
             최근 {view.items.length}건
+            {view.items.length > PAGE_SIZE &&
+              ` · ${safePage}/${totalPages}페이지`}
           </span>
         </div>
         {trashView && (
@@ -643,17 +680,20 @@ export default function MailInbox({
             aria-label="전체 선택"
             checked={allVisibleSelected}
             onChange={toggleAll}
-            disabled={view.items.length === 0}
+            disabled={pageItems.length === 0}
           />
           <span className="text-xs text-ink-muted">
-            {allVisibleSelected && view.items.length > 0
+            {allVisibleSelected && pageItems.length > 0
               ? "전체 선택됨"
               : "전체 선택"}
           </span>
         </div>
 
         <div className="divide-y divide-line overflow-hidden rounded-b-xl border border-line">
-          {view.items.map((item, index) => {
+          {pageItems.map((item, pageIndex) => {
+            // openIndex 에 넘기는 index 는 전체 목록 기준입니다 — 상세의 이전/다음이
+            // 페이지 경계에서 끊기지 않게 하려면 페이지 안 순번이면 안 됩니다.
+            const index = pageOffset + pageIndex;
             // ★ 굵기·배경은 '읽음 여부'(opened), 왼쪽 점 색은 '처리 상태'(status).
             //   서로 다른 축이라 절대 섞지 않습니다.
             const unopened = !item.opened;
@@ -780,6 +820,9 @@ export default function MailInbox({
             </p>
           )}
         </div>
+
+        {/* 20건 이하면 렌더되지 않습니다(1페이지). */}
+        <Pagination page={safePage} totalPages={totalPages} onChange={goPage} />
       </section>
 
       {/* 일괄 삭제/영구삭제 확인 — 되돌리기 어려운 동작이라 1회 확인 */}
@@ -1306,4 +1349,83 @@ export default function MailInbox({
       )}
     </div>
   );
+}
+
+// =====================================================================
+// 페이지네이션 — 20건/페이지, 목록 하단 이동.
+//   비품관리(app/hr/facility/assets/AssetManager.tsx)와 같은 방식·같은 모양입니다.
+//   폰에서는 버튼이 많아질 수 있어 flex-wrap 으로 줄이 넘어가게 둡니다.
+// =====================================================================
+function Pagination({
+  page,
+  totalPages,
+  onChange,
+}: {
+  page: number;
+  totalPages: number;
+  onChange: (p: number) => void;
+}) {
+  if (totalPages <= 1) return null;
+  const pages = pageList(page, totalPages);
+  return (
+    <div className="mt-4 flex flex-wrap items-center justify-center gap-1">
+      <PBtn disabled={page <= 1} onClick={() => onChange(page - 1)}>
+        ‹
+      </PBtn>
+      {pages.map((p, i) =>
+        p === "…" ? (
+          <span key={`e${i}`} className="px-1 text-xs text-ink-hint">
+            …
+          </span>
+        ) : (
+          <PBtn key={p} active={p === page} onClick={() => onChange(p)}>
+            {p}
+          </PBtn>
+        ),
+      )}
+      <PBtn disabled={page >= totalPages} onClick={() => onChange(page + 1)}>
+        ›
+      </PBtn>
+    </div>
+  );
+}
+
+function PBtn({
+  children,
+  active,
+  disabled,
+  onClick,
+}: {
+  children: React.ReactNode;
+  active?: boolean;
+  disabled?: boolean;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      disabled={disabled}
+      className={`min-w-[30px] rounded-md border px-2 py-1 text-xs ${
+        active
+          ? "border-navy bg-navy text-white"
+          : "border-line text-ink-body hover:bg-surface"
+      } disabled:opacity-40`}
+    >
+      {children}
+    </button>
+  );
+}
+
+// 1 … 4 5 6 … 20 형태의 페이지 번호 목록(총 7페이지 이하면 전부 나열).
+function pageList(page: number, total: number): (number | "…")[] {
+  if (total <= 7) return Array.from({ length: total }, (_, i) => i + 1);
+  const out: (number | "…")[] = [1];
+  const start = Math.max(2, page - 1);
+  const end = Math.min(total - 1, page + 1);
+  if (start > 2) out.push("…");
+  for (let i = start; i <= end; i++) out.push(i);
+  if (end < total - 1) out.push("…");
+  out.push(total);
+  return out;
 }
