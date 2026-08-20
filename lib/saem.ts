@@ -260,11 +260,17 @@ export function normalizeCertStatus(v: unknown): CertStatus {
   return v === "approved" || v === "rejected" ? v : "pending";
 }
 
-// 발급번호 표시 — "제2026년-3호". 채번은 신청 시(1부-A)에 이미 끝났다.
+// 발급번호 표시 — "제2026년-3호". 채번은 승인 시점에만 한다(2부-a) —
+//   신청중·반려 건은 번호가 없다(cert_no = null). 반려된 건이 번호를 먹으면
+//   승인건 번호가 건너뛰어지기 때문이다(이민정 요청, 2026-08-20).
+//   번호가 없으면 "" 를 준다 — 화면은 "미발급"(CERT_NO_UNISSUED), 양식(PDF)은 공란.
 export function certNoLabel(
   year: number | null | undefined,
   no: number | null | undefined
 ): string {
-  if (year == null || no == null) return "-";
+  if (year == null || no == null) return "";
   return `제${year}년-${no}호`;
 }
+
+// 아직 번호가 없는 건(신청중·반려)의 표기 — 발급대장·파일명이 함께 쓴다.
+export const CERT_NO_UNISSUED = "미발급";

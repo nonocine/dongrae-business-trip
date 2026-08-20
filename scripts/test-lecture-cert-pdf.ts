@@ -13,6 +13,8 @@
 //   ⑥ ★나눔고딕에 없는 글자(①·㎡·㈜)가 빈칸으로 사라지지 않는지.
 //   ⑦ 강의내용·강의일자가 길거나 여러 줄이어도 칸이 늘어나며 A4 1장을 지키는지.
 //   ⑧ 발급일자 표기가 "2026년  6월  17일" 인지.
+//   ⑨ ★발급번호가 없는 건(승인 전 미리보기)도 죽지 않고 번호 칸이 공란인지 —
+//      번호는 승인 시점에 부여된다(신청중·반려 건은 번호 없음).
 //   DB를 타지 않는다 — 고정 데이터로만 검증(근무일지·출석부 테스트와 같은 방식).
 import { PDFDocument } from "pdf-lib";
 import {
@@ -197,6 +199,27 @@ async function main() {
   expect(
     "형식이 아니면 원문 유지",
     formatLectureCertIssueDate("2026.6.17") === "2026.6.17"
+  );
+
+  // ⑨ 발급번호 없음(승인 전 미리보기) — 생성되고, 번호 칸은 공란.
+  const unissued: LectureCertData = { ...base, certNo: null };
+  const noNumPdf = await buildLectureCertPdf(unissued, null, ISSUE, noStamps);
+  const numPdf = await buildLectureCertPdf(base, null, ISSUE, noStamps);
+  expect("발급번호 없어도 생성됨", noNumPdf.length > 0);
+  expect(
+    "발급번호가 없으면 그 칸은 공란(번호가 있는 쪽이 더 큼)",
+    noNumPdf.length < numPdf.length,
+    `none=${noNumPdf.length} numbered=${numPdf.length}`
+  );
+  expect(
+    "발급번호 없는 건도 1페이지·칸 13개",
+    (await PDFDocument.load(noNumPdf)).getPageCount() === 1 &&
+      rects(await pageOps(noNumPdf)).length === 13
+  );
+  expect(
+    "파일명은 '미발급'",
+    lectureCertPdfFilename(unissued) === "강의확인증_최순안_미발급.pdf",
+    lectureCertPdfFilename(unissued)
   );
 
   console.log(failures === 0 ? "\n모두 통과" : `\n실패 ${failures}건`);

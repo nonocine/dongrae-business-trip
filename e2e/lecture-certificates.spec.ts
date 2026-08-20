@@ -6,7 +6,10 @@ import { createClient } from "@supabase/supabase-js";
 //   * 승인/반려는 실제 서버액션 → 실제 DB 갱신이라, 검증에는 pending 행이 필요합니다.
 //     라이브 DB 를 쓰므로 테스트 전용 행을 심고 끝나면 반드시 지웁니다.
 //     - 지우는 대상은 MARK 로 시작하는 applicant_name 뿐입니다(실제 신청 보호).
-//     - cert_no 는 실제 채번과 겹치지 않게 9900번대를 씁니다.
+//     - cert_year 는 실제 발급연도와 겹치지 않는 2999 를 씁니다(채번이 연도별이라
+//       실제 번호와 섞이지 않습니다).
+//   * 발급번호(cert_no)는 승인 시점에 부여됩니다 — 심는 행은 번호가 없고(null),
+//     승인한 건만 번호를 받습니다. 반려 건은 번호를 먹지 않습니다(이민정 요청).
 //   * ⚠️ 주민번호는 이 기능 어디에도 없습니다(컬럼 자체가 없음).
 const HR_NAME = process.env.E2E_HR_NAME;
 const URL_ = process.env.NEXT_PUBLIC_SUPABASE_URL;
@@ -27,13 +30,13 @@ async function anyInstructorId(): Promise<string> {
   return instructorId;
 }
 
-async function seed(certNo: number, name: string) {
+// 신청 상태 그대로 심는다 — cert_no 는 넣지 않는다(승인 때 부여된다).
+async function seed(name: string) {
   const { data, error } = await db!
     .from(CERT)
     .insert({
       instructor_id: await anyInstructorId(),
       cert_year: YEAR,
-      cert_no: certNo,
       applicant_name: `${MARK} ${name}`,
       address: "부산광역시 동래구 시험로 1",
       lecture_content: "E2E 검증용 강의내용",
@@ -49,7 +52,9 @@ async function seed(certNo: number, name: string) {
 async function readRow(id: string) {
   const { data } = await db!
     .from(CERT)
-    .select("status, reject_reason, reviewed_by, reviewed_at, applicant_name, lecture_content")
+    .select(
+      "status, cert_no, reject_reason, reviewed_by, reviewed_at, applicant_name, lecture_content"
+    )
     .eq("id", id)
     .maybeSingle();
   return data as Record<string, unknown> | null;
@@ -71,14 +76,14 @@ test.describe("강의확인증 발급대장", () => {
     });
 
     test("탭·목록에 신청이 뜨고 하이드레이션 에러가 없다", async ({ page }) => {
-      const id = await seed(9901, "목록");
+      const id = await seed("목록");
       const errors = collectErrors(page);
       await page.goto("/hr/saems/certificates");
 
       await expect(page.getByRole("link", { name: "강의확인증" })).toBeVisible();
       await expect(page.locator("body")).toContainText("강의확인증 발급대장");
-      // 발급번호·강사명·상태·출력일자(미출력이면 "-")
-      await expect(page.locator("body")).toContainText(`제${YEAR}년-9901호`);
+      // 신청중이라 발급번호는 아직 없다 — "미발급" 으로 보인다.
+      await expect(page.locator("body")).toContainText("미발급");
       await expect(page.locator("body")).toContainText(`${MARK} 목록`);
       await expect(page.getByText("신청중").first()).toBeVisible();
 
@@ -88,11 +93,11 @@ test.describe("강의확인증 발급대장", () => {
     });
 
     test("상세를 열어 내용을 수정·저장한다", async ({ page }) => {
-      const id = await seed(9902, "수정");
+      const id = await seed("수정");
       await page.goto("/hr/saems/certificates");
       await page.getByText(`${MARK} 수정`).first().click();
 
-      await expect(page.getByRole("heading", { name: `제${YEAR}년-9902호` })).toBeVisible();
+      await expect(page.getByRole("heading", { name: "강의확인증 신청" })).toBeVisible();
       await page.getByRole("button", { name: "내용 수정" }).click();
       await page.getByRole("textbox").nth(2).fill("수정된 강의내용 E2E");
       await page.getByRole("button", { name: "저장" }).click();
@@ -105,8 +110,10 @@ test.describe("강의확인증 발급대장", () => {
       expect((await readRow(id))?.status).toBe("pending");
     });
 
-    test("승인하면 status·reviewed_by·reviewed_at 이 기록된다", async ({ page }) => {
-      const id = await seed(9903, "승인");
+    test("승인하면 status·reviewed_by·reviewed_at 과 발급번호가 기록된다", async ({
+      page,
+    }) => {
+      const id = await seed("승인");
       await page.goto("/hr/saems/certificates");
       await page.getByText(`${MARK} 승인`).first().click();
       await page.getByRole("button", { name: "승인", exact: true }).click();
@@ -116,10 +123,43 @@ test.describe("강의확인증 발급대장", () => {
       const row = await readRow(id);
       expect(row?.reviewed_by).toBe(HR_NAME);
       expect(row?.reviewed_at).toBeTruthy();
+      // 승인 시점에 채번된다(신청 때는 번호가 없었다).
+      const no = Number(row?.cert_no);
+      expect(no).toBeGreaterThan(0);
+      await expect(page.locator("body")).toContainText(`제${YEAR}년-${no}호`);
+    });
+
+    // 이민정 검증(8/20)의 핵심 — 반려된 건이 번호를 먹으면 승인건 번호가 건너뛴다.
+    test("반려 건은 번호를 먹지 않고, 다음 승인이 그 번호를 잇는다", async ({
+      page,
+    }) => {
+      const firstId = await seed("번호첫승인");
+      const rejectId = await seed("번호반려");
+      const approveId = await seed("번호승인");
+
+      await page.goto("/hr/saems/certificates");
+      await page.getByText(`${MARK} 번호첫승인`).first().click();
+      await page.getByRole("button", { name: "승인", exact: true }).click();
+      await expect.poll(async () => (await readRow(firstId))?.status).toBe("approved");
+      const firstNo = Number((await readRow(firstId))?.cert_no);
+      expect(firstNo).toBeGreaterThan(0);
+
+      await page.getByText(`${MARK} 번호반려`).first().click();
+      await page.getByRole("button", { name: "반려", exact: true }).click();
+      await page.getByPlaceholder("예: 강의일자가").fill("번호 검증용 반려");
+      await page.getByRole("button", { name: "반려", exact: true }).last().click();
+      await expect.poll(async () => (await readRow(rejectId))?.status).toBe("rejected");
+      expect((await readRow(rejectId))?.cert_no).toBeNull();
+
+      await page.getByText(`${MARK} 번호승인`).first().click();
+      await page.getByRole("button", { name: "승인", exact: true }).click();
+      await expect.poll(async () => (await readRow(approveId))?.status).toBe("approved");
+      // 반려 건이 번호를 먹었다면 여기서 한 번호 건너뛴다 — 바로 다음 번호여야 한다.
+      expect(Number((await readRow(approveId))?.cert_no)).toBe(firstNo + 1);
     });
 
     test("반려하면 사유와 함께 rejected 로 기록된다", async ({ page }) => {
-      const id = await seed(9904, "반려");
+      const id = await seed("반려");
       await page.goto("/hr/saems/certificates");
       await page.getByText(`${MARK} 반려`).first().click();
       await page.getByRole("button", { name: "반려", exact: true }).click();
@@ -134,10 +174,13 @@ test.describe("강의확인증 발급대장", () => {
       const row = await readRow(id);
       expect(row?.reject_reason).toBe(why);
       expect(row?.reviewed_by).toBe(HR_NAME);
+      // 반려는 번호를 부여하지 않는다.
+      expect(row?.cert_no).toBeNull();
     });
 
     test("처리된 신청은 수정·승인·반려 버튼이 없다", async ({ page }) => {
-      const id = await seed(9905, "잠금");
+      const id = await seed("잠금");
+      // cert_no 는 넣지 않는다 — 이 행이 다른 테스트의 채번 순서에 끼어들지 않게.
       await db!.from(CERT).update({ status: "approved", reviewed_by: "이민정" }).eq("id", id);
 
       await page.goto("/hr/saems/certificates");
@@ -151,7 +194,7 @@ test.describe("강의확인증 발급대장", () => {
   });
 
   test("세션 없이 접근하면 막힌다", async ({ page }) => {
-    await seed(9906, "무권한");
+    await seed("무권한");
     await page.goto("/hr/saems/certificates");
     // 레이아웃 가드가 홈으로 돌려보낸다 — 발급대장 내용이 보이면 안 된다.
     await expect(page.locator("body")).not.toContainText("강의확인증 발급대장");

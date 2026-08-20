@@ -20,7 +20,7 @@ import { supabaseAdmin } from "@/lib/supabaseAdmin";
 import { downloadHrImage, safeFileBase } from "@/lib/recruitmentApplicantDocData";
 import { CERT_ORG, CERT_SEAL_PATH } from "@/lib/certificates";
 import { regularFont, boldFont, fkFont, fitToFont, spaced } from "@/lib/pdfFont";
-import { certNoLabel } from "@/lib/saem";
+import { CERT_NO_UNISSUED, certNoLabel } from "@/lib/saem";
 
 // 발급대장 행에서 PDF 에 필요한 값만. (주민번호는 여기에 없다 — 인자로 받는다)
 export type LectureCertData = {
@@ -79,7 +79,8 @@ function director(): { title: string; name: string } {
 }
 
 export function lectureCertPdfFilename(cert: LectureCertData): string {
-  const label = certNoLabel(cert.certYear, cert.certNo);
+  // 승인 전(미리보기)에는 발급번호가 없다 — 파일명은 "미발급" 으로 구분한다.
+  const label = certNoLabel(cert.certYear, cert.certNo) || CERT_NO_UNISSUED;
   const name = safeFileBase(cert.applicantName ?? "", "강사");
   return `강의확인증_${name}_${label}.pdf`;
 }
@@ -275,7 +276,11 @@ export async function buildLectureCertPdf(
   ) => cellLines(x, yTop, w, h, [s], opts);
 
   // ---- 발급번호(좌상단) ----
-  text(M, 85, `발급번호  ${certNoLabel(cert.certYear, cert.certNo)}`, { size: 11 });
+  //   번호는 승인 시 부여된다 — 승인 전 미리보기는 이 칸이 공란으로 나간다
+  //   (certNoLabel 이 "" 를 준다). 실제 발급되는 양식에는 항상 번호가 있다.
+  text(M, 85, `발급번호  ${certNoLabel(cert.certYear, cert.certNo)}`.trimEnd(), {
+    size: 11,
+  });
 
   // ---- 제목 ----
   text(W / 2, 108, spaced("강의확인증"), { size: 24, bold: true, align: "center" });
