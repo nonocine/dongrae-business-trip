@@ -13,6 +13,7 @@ import { getGoogleSession } from "@/app/actions";
 import { listAnnouncements } from "@/app/announcements/actions";
 import { getMyJudgeAssignments } from "@/app/hr/recruitment/[slug]/actions";
 import { getUnreadMailCount } from "@/app/mail/actions";
+import { getMyCredentialSummary } from "@/app/hr/credentials/actions";
 import { isM0Grant } from "@/lib/authLevels";
 import { ddayLabel } from "@/lib/trainings";
 import { roleLabel } from "@/lib/employeeRoles";
@@ -307,6 +308,9 @@ export default async function EmployeeDashboard({
   // 공용 메일함 미처리 건수 — 테이블 미적용이면 0 으로 폴백합니다.
   const unreadMailCount = await getUnreadMailCount();
 
+  // 공용 비밀번호 — 내가 열람 가능한 건수만(항목 이름·비번은 받지 않습니다).
+  const credentialSummary = await getMyCredentialSummary();
+
   const driver = my?.driver ?? null;
   const profile = my?.profile ?? null;
 
@@ -589,6 +593,22 @@ export default async function EmployeeDashboard({
             icon="🧾"
             title="증명서 발급"
             desc="재직증명서 즉시 발급 · 발급 이력"
+          />
+          {/* 공용 비밀번호 — 전 직원에게 보이되, 목록은 본인이 열람 가능한 항목만
+              나옵니다(지정 안 된 항목은 존재 자체가 보이지 않음). */}
+          <MenuCard
+            href="/hr/credentials"
+            icon="🔐"
+            title="비밀번호 관리"
+            desc={
+              credentialSummary == null
+                ? "앱·메일·구매·은행 계정 비밀번호 (암호화 보관)"
+                : credentialSummary.canManage
+                  ? `전 ${credentialSummary.count}건 관리 — 등록·열람자 지정`
+                  : credentialSummary.count > 0
+                    ? `열람 가능 ${credentialSummary.count}건 — 비밀번호 확인·복사`
+                    : "열람 가능한 항목이 없습니다"
+            }
           />
           {/* MU-5. 상조회는 직원 자치 조직 — 장부·회원·규정은 전 직원 열람. */}
           <MenuCard
