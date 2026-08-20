@@ -13,7 +13,9 @@
 //   DB 에 check 제약이 없어(자유 text) 저장 전 이 목록으로 정규화합니다.
 export const PARTNER_CATEGORIES = [
   "시설",
+  "안전",
   "회계",
+  "구매",
   "학교",
   "프로그램의뢰처",
   "기타",
@@ -26,7 +28,9 @@ export const DEFAULT_PARTNER_CATEGORY: PartnerCategory = "기타";
 // 분야별 배지 색 — 목록에서 분야를 한눈에 구분합니다(lib/ui 토큰 사용).
 export const PARTNER_CATEGORY_BADGE: Record<PartnerCategory, string> = {
   시설: "bg-brand-blue-soft text-brand-blue",
+  안전: "bg-brand-red/15 text-brand-red",
   회계: "bg-brand-green/15 text-brand-green",
+  구매: "bg-violet-100 text-violet-700",
   학교: "bg-brand-yellow/25 text-amber-800",
   프로그램의뢰처: "bg-navy-soft text-navy",
   기타: "bg-surface text-ink-muted",
