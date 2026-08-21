@@ -12,8 +12,11 @@
 //        확인합니다.
 //     4. 평문·암호문·마스터키를 console 등 어떤 로그에도 남기지 않습니다.
 //     5. 모든 액션이 진입 시 서버에서 권한을 재검증합니다(UI 우회 차단).
-//   * 권한: 열람 = M0 는 전 항목 / 그 외 직원은 credential_viewers 지정 항목만.
-//     등록·수정·삭제·열람자 지정 = M0 만. (lib/credentialAccess)
+//   * 권한 (2026-08-21 개정, lib/credentialAccess):
+//     - 열람 = M0 는 전 항목 / 그 외 직원은 credential_viewers 지정 항목만.
+//     - 등록 = 로그인 직원 누구나. 등록자는 자동으로 그 항목의 열람자가 됩니다.
+//     - 수정 = M0 또는 등록자 본인(created_by_driver_id 일치).
+//     - 삭제·열람자 지정 = M0 만. 비M0 가 보낸 viewerIds 는 서버에서 무시합니다.
 //   * shared_credentials·credential_viewers 는 RLS on(정책 0개) → service_role
 //     경유만 가능합니다.
 //   * 열람자는 credential_id FK on delete cascade — 항목을 지우면 함께 지워집니다.
@@ -24,6 +27,7 @@ import { supabaseAdmin } from "@/lib/supabaseAdmin";
 import {
   requireCredentialAccess,
   requireCredentialManager,
+  requireCredentialWriter,
 } from "@/lib/credentialAccess";
 import {
   decryptSecret,
@@ -43,7 +47,7 @@ const VIEWERS = "credential_viewers";
 
 // 목록에서 읽는 컬럼 — password_encrypted 는 여기 없습니다(규칙 3).
 const LIST_COLUMNS =
-  "id, name, category, account, url, memo, created_by, created_at, updated_at";
+  "id, name, category, account, url, memo, created_by, created_by_driver_id, created_at, updated_at";
 
 type ActionResult = { ok: true } | { ok: false; message: string };
 
@@ -141,6 +145,8 @@ export async function listCredentials(): Promise<CredentialRow[]> {
 
   return rows.map((r) => {
     const id = String(r.id ?? "");
+    // 등록자 driver_id 는 판정에만 쓰고 클라이언트로 내려보내지 않습니다.
+    const ownerId = r.created_by_driver_id == null ? "" : String(r.created_by_driver_id);
     return {
       id,
       name: String(r.name ?? ""),
@@ -154,18 +160,25 @@ export async function listCredentials(): Promise<CredentialRow[]> {
       viewerNames: (viewerNamesByCred.get(id) ?? []).sort((a, b) =>
         a.localeCompare(b, "ko-KR")
       ),
+      canEdit: ctx.isM0 || (!!ctx.driverId && ownerId === ctx.driverId),
     } satisfies CredentialRow;
   });
 }
 
-// 화면이 관리 UI(등록·수정 버튼)를 그릴지 정하는 표시용 값 + 마스터키 설정 여부.
+// 화면이 관리 UI(열람자 지정·삭제 버튼)를 그릴지 정하는 표시용 값 + 마스터키
+//   설정 여부. canCreate 는 등록 버튼 노출용입니다.
 //   ⚠️ 표시용일 뿐이며 실제 차단은 각 액션의 서버 재검증이 담당합니다.
 export async function getCredentialContext(): Promise<{
   canManage: boolean;
+  canCreate: boolean;
   keyConfigured: boolean;
 }> {
   const ctx = await requireCredentialAccess();
-  return { canManage: ctx.isM0, keyConfigured: isCredentialKeyConfigured() };
+  return {
+    canManage: ctx.isM0,
+    canCreate: ctx.isM0 || !!ctx.driverId,
+    keyConfigured: isCredentialKeyConfigured(),
+  };
 }
 
 // 열람자 지정 후보 — 재직 직원 명단(의무교육 로스터 단일 출처 재사용). M0 만.
@@ -222,6 +235,19 @@ export async function revealCredential(
   }
 }
 
+// 등록자 본인을 열람자로 추가 — 자기가 올린 비번은 자기가 봐야 합니다.
+//   이미 있으면 unique(credential_id, driver_id) 로 걸리므로 조용히 넘어갑니다.
+async function addSelfAsViewer(credentialId: string, driverId: string | null) {
+  if (!driverId) return; // driver 연결이 없는 M0(master 계정) — 전 항목을 보므로 불필요.
+  const { error } = await supabaseAdmin
+    .from(VIEWERS)
+    .upsert(
+      { credential_id: credentialId, driver_id: driverId },
+      { onConflict: "credential_id,driver_id", ignoreDuplicates: true }
+    );
+  if (error) throw new Error(error.message);
+}
+
 // 열람자 교체 — 지정된 driver_id 집합으로 통째로 바꿉니다(M0 전용 경로에서만 호출).
 async function replaceViewers(credentialId: string, viewerIds: string[]) {
   const ids = [...new Set((viewerIds ?? []).map((v) => trim(v, 60)).filter(Boolean))];
@@ -249,11 +275,14 @@ function validate(
   return { name, category: normalizeCredentialCategory(input.category) };
 }
 
+// 등록 — 로그인 직원 누구나. 등록자는 자동으로 열람자가 됩니다.
+//   ⚠️ 열람자 지정은 M0 만 — 비M0 가 보낸 viewerIds 는 서버에서 버립니다
+//   (UI 에 체크박스가 없더라도 요청은 위조될 수 있습니다).
 export async function createCredential(
   input: CredentialInput
 ): Promise<ActionResult> {
   try {
-    const ctx = await requireCredentialManager();
+    const ctx = await requireCredentialWriter();
     const checked = validate(input);
     if (typeof checked === "string") return { ok: false, message: checked };
     const password = String(input.password ?? "");
@@ -272,15 +301,16 @@ export async function createCredential(
         url: trim(input.url, 500) || null,
         memo: trim(input.memo, 1000) || null,
         created_by: ctx.name,
+        // 수정 권한 판정용 — 이름은 동명이인 위험이 있어 driver_id 로 남깁니다.
+        created_by_driver_id: ctx.driverId,
       })
       .select("id")
       .single();
     if (error) throw new Error(error.message);
 
-    await replaceViewers(
-      String((data as { id: string }).id),
-      input.viewerIds ?? []
-    );
+    const newId = String((data as { id: string }).id);
+    if (ctx.isM0) await replaceViewers(newId, input.viewerIds ?? []);
+    await addSelfAsViewer(newId, ctx.driverId);
     revalidatePath("/hr/credentials");
     return { ok: true };
   } catch (e) {
@@ -288,12 +318,15 @@ export async function createCredential(
   }
 }
 
+// 수정 — M0 또는 등록자 본인(사업실적의 "관리자 ∥ 작성자" 판정과 같은 논리).
+//   본인 항목이 아니면 "찾을 수 없음"으로 답합니다 — 존재 여부를 알리지 않습니다.
+//   열람자 교체는 M0 만 — 비M0 의 수정은 열람자를 건드리지 않습니다.
 export async function updateCredential(
   id: string,
   input: CredentialInput
 ): Promise<ActionResult> {
   try {
-    await requireCredentialManager();
+    const ctx = await requireCredentialAccess();
     const target = trim(id, 60);
     if (!target) return { ok: false, message: "대상이 없습니다." };
     const checked = validate(input);
@@ -312,16 +345,19 @@ export async function updateCredential(
     const password = String(input.password ?? "");
     if (password.trim()) fields.password_encrypted = encryptSecret(password);
 
-    const { data, error } = await supabaseAdmin
-      .from(CRED)
-      .update(fields)
-      .eq("id", target)
-      .select("id");
+    let q = supabaseAdmin.from(CRED).update(fields).eq("id", target);
+    // 비M0 는 자기가 등록한 항목만 — 조건을 쿼리에 넣어 남의 항목은 애초에
+    //   맞지 않게 합니다(0건 → "찾을 수 없음").
+    if (!ctx.isM0) {
+      if (!ctx.driverId) return { ok: false, message: "항목을 찾을 수 없습니다." };
+      q = q.eq("created_by_driver_id", ctx.driverId);
+    }
+    const { data, error } = await q.select("id");
     if (error) throw new Error(error.message);
     if ((data ?? []).length === 0)
       return { ok: false, message: "항목을 찾을 수 없습니다." };
 
-    await replaceViewers(target, input.viewerIds ?? []);
+    if (ctx.isM0) await replaceViewers(target, input.viewerIds ?? []);
     revalidatePath("/hr/credentials");
     return { ok: true };
   } catch (e) {

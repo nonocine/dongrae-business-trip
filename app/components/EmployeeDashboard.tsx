@@ -607,7 +607,7 @@ export default async function EmployeeDashboard({
                   ? `전 ${credentialSummary.count}건 관리 — 등록·열람자 지정`
                   : credentialSummary.count > 0
                     ? `열람 가능 ${credentialSummary.count}건 — 비밀번호 확인·복사`
-                    : "열람 가능한 항목이 없습니다"
+                    : "열람 가능한 항목이 없습니다 — 내 계정 비번을 등록할 수 있습니다"
             }
           />
           {/* MU-5. 상조회는 직원 자치 조직 — 장부·회원·규정은 전 직원 열람. */}

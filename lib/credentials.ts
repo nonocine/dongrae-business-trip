@@ -38,6 +38,10 @@ export type CredentialRow = {
   // 열람자 — M0 에게만 채워 보냅니다(누가 볼 수 있는지 관리 화면 표시용).
   viewerIds: string[];
   viewerNames: string[];
+  // 이 항목을 수정할 수 있는지 — M0 이거나 내가 등록한 항목. 서버에서 판정한
+  //   값이며(등록자 driver_id 는 내려보내지 않습니다), 실제 차단은 액션이 다시
+  //   확인합니다.
+  canEdit: boolean;
 };
 
 // 열람자 지정 체크박스 목록에 쓰는 직원 한 명.

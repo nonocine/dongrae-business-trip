@@ -6,8 +6,10 @@
 //     [👁 보기] 를 누를 때 revealCredential 로 그 한 건만 받아옵니다.
 //   * 받아온 평문은 이 컴포넌트 state 에만 두고, 다시 누르면 지웁니다.
 //     1분이 지나면 자동으로 가려집니다(화면 켜둔 채 자리를 비우는 경우 대비).
-//   * 등록·수정·삭제·열람자 지정은 M0(관장·부장)만 — canManage 는 표시용이고
-//     실제 차단은 서버 액션이 다시 확인합니다.
+//   * 권한(2026-08-21 개정): 등록은 로그인 직원 누구나(등록자는 자동으로 그 항목의
+//     열람자가 됩니다). 수정은 M0 또는 등록자 본인(행의 canEdit). 삭제·열람자
+//     지정은 M0 만(canManage). 이 값들은 모두 표시용이고, 실제 차단은 서버 액션이
+//     다시 확인합니다.
 //   * 반응형: 폰은 카드형(쌓임), sm 이상에서 표처럼 한 줄 배치.
 // =====================================================================
 
@@ -87,10 +89,12 @@ function CategoryBadge({ category }: { category: CredentialCategory }) {
 export default function CredentialsManager({
   initial,
   canManage,
+  canCreate,
   keyConfigured,
 }: {
   initial: CredentialRow[];
-  canManage: boolean;
+  canManage: boolean; // M0 — 삭제·열람자 지정
+  canCreate: boolean; // 로그인 직원(명부 연결) — 등록
   keyConfigured: boolean;
 }) {
   const [rows, setRows] = useState<CredentialRow[]>(initial);
@@ -208,7 +212,8 @@ export default function CredentialsManager({
           }
         : emptyForm()
     );
-    if (staff === null) {
+    // 열람자 지정은 M0 만 — 그 외에는 명단을 요청하지 않습니다(서버도 거부).
+    if (canManage && staff === null) {
       try {
         setStaff(await listCredentialStaff());
       } catch (e) {
@@ -269,7 +274,7 @@ export default function CredentialsManager({
 
   return (
     <div className="space-y-4">
-      {canManage && !keyConfigured && (
+      {canCreate && !keyConfigured && (
         <p className={noticeWarning}>
           암호화 마스터키(CREDENTIAL_MASTER_KEY)가 이 환경에 설정되지 않았습니다.
           등록·열람이 되지 않습니다 — 배포 환경변수에 등록한 뒤 다시 배포해
@@ -283,9 +288,9 @@ export default function CredentialsManager({
           <span className="text-xs text-ink-hint">
             {canManage
               ? "항목마다 열람할 수 있는 직원을 지정합니다."
-              : "나에게 열람 권한이 있는 항목만 보입니다."}
+              : "내가 올린 항목과, 열람 권한을 받은 항목만 보입니다."}
           </span>
-          {canManage && (
+          {canCreate && (
             <button
               type="button"
               className={`${btnPrimary} ml-auto`}
@@ -416,25 +421,26 @@ export default function CredentialsManager({
                         복사
                       </button>
                     )}
+                    {/* 수정 = M0 또는 내가 등록한 항목 / 삭제 = M0 만 */}
+                    {r.canEdit && (
+                      <button
+                        type="button"
+                        className={btnSecondary}
+                        onClick={() => openForm(r)}
+                        disabled={busy}
+                      >
+                        수정
+                      </button>
+                    )}
                     {canManage && (
-                      <>
-                        <button
-                          type="button"
-                          className={btnSecondary}
-                          onClick={() => openForm(r)}
-                          disabled={busy}
-                        >
-                          수정
-                        </button>
-                        <button
-                          type="button"
-                          className={btnDanger}
-                          onClick={() => setConfirmDelete(r)}
-                          disabled={busy}
-                        >
-                          삭제
-                        </button>
-                      </>
+                      <button
+                        type="button"
+                        className={btnDanger}
+                        onClick={() => setConfirmDelete(r)}
+                        disabled={busy}
+                      >
+                        삭제
+                      </button>
                     )}
                   </div>
                 </li>
@@ -456,6 +462,7 @@ export default function CredentialsManager({
           form={form}
           setForm={setForm}
           staff={staff}
+          canManage={canManage}
           busy={busy}
           onClose={() => setForm(null)}
           onSubmit={submitForm}
@@ -503,6 +510,7 @@ function FormModal({
   form,
   setForm,
   staff,
+  canManage,
   busy,
   onClose,
   onSubmit,
@@ -510,6 +518,7 @@ function FormModal({
   form: FormState;
   setForm: (f: FormState) => void;
   staff: CredentialStaff[] | null;
+  canManage: boolean; // 열람자 지정(M0)만 체크박스 목록을 봅니다
   busy: boolean;
   onClose: () => void;
   onSubmit: () => void;
@@ -610,11 +619,19 @@ function FormModal({
             />
           </label>
 
+          {!canManage ? (
+            // 일반 직원 등록·수정 — 열람자는 본인 하나로 자동 지정됩니다.
+            //   (추가 열람자 지정은 관장·부장 권한이라 폼에 체크박스가 없습니다)
+            <p className="rounded-lg border border-line bg-surface/60 px-3 py-2 text-[11px] text-ink-muted">
+              이 항목은 나와 관장·부장만 볼 수 있습니다. 다른 직원도 볼 수 있게
+              하려면 관장·부장에게 열람자 지정을 요청해 주세요.
+            </p>
+          ) : (
           <div>
             <p className={labelCls}>열람자 지정</p>
             <p className="mt-0.5 text-[11px] text-ink-hint">
               체크한 직원만 이 항목을 볼 수 있습니다. 관장·부장은 지정과 무관하게
-              전 항목을 봅니다.
+              전 항목을 봅니다. 등록자 본인은 자동으로 포함됩니다.
             </p>
             {staff === null ? (
               <p className="mt-2 text-xs text-ink-hint">명단을 불러오는 중…</p>
@@ -649,11 +666,12 @@ function FormModal({
             {form.viewerIds.length === 0 && (
               <p className="mt-1">
                 <span className={badgeNeutral}>
-                  지정 없음 — 관장·부장만 열람
+                  지정 없음 — 등록자와 관장·부장만 열람
                 </span>
               </p>
             )}
           </div>
+          )}
         </div>
 
         <div className="mt-4 flex gap-2">

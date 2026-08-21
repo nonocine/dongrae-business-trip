@@ -1,10 +1,15 @@
 // =====================================================================
 // 공용 비밀번호 관리 접근 게이트 — /hr/credentials
-//   * 정책 (관장 결정):
+//   * 정책 (관장 결정, 2026-08-21 개정):
 //     - 열람: M0(관장·부장·master)는 전 항목. 그 외 직원은 credential_viewers
 //       에 지정된 항목만. 지정되지 않은 항목은 목록에서도 보이지 않습니다
 //       (존재 자체를 숨김 — 비공개 거래처와 같은 방식).
-//     - 등록·수정·삭제·열람자 지정: M0 만.
+//     - 등록: **로그인한 직원 누구나**. 직원이 자기가 쓰는 비번(구매 사이트 등)을
+//       직접 올립니다. 등록자는 자동으로 그 항목의 열람자가 됩니다.
+//     - 수정: M0 또는 **등록자 본인**(created_by_driver_id 일치).
+//       사업실적(deleteBusinessResult)의 "관리자 ∥ 작성자" 판정과 같은 논리이며,
+//       동명이인 위험이 있는 이름 대신 driver_id 로 비교합니다.
+//     - 삭제·열람자 지정: M0 만.
 //   * 판정은 기존 방식 재사용 — getSession(직원 세션) + drivers 연결(driver_id)
 //     + isM0Grant(rank·구글 이메일·auth_level).
 //   * driver_id 가 없는 세션(명부에 없는 이름)은 열람자 지정 대상이 될 수 없어
@@ -65,12 +70,26 @@ export async function requireCredentialAccess(): Promise<CredentialAccess> {
   return ctx;
 }
 
-// 관리 동작(등록·수정·삭제·열람자 지정) — M0 아니면 throw.
+// 등록용 — 로그인한 직원이면 통과합니다.
+//   ⚠️ 비M0 는 drivers 연결(driver_id)이 있어야 합니다. 등록자를 그 항목의
+//   열람자로 넣어야 하는데, driver_id 가 없으면 자기가 올린 비번을 자기도 볼 수
+//   없는 항목이 만들어지기 때문입니다. M0 는 어차피 전 항목을 보므로 예외입니다.
+export async function requireCredentialWriter(): Promise<CredentialAccess> {
+  const ctx = await requireCredentialAccess();
+  if (!ctx.isM0 && !ctx.driverId) {
+    throw new Error(
+      `${WHAT} 등록은 직원 명부에 등록된 계정만 할 수 있습니다. 관리자에게 문의해 주세요.`
+    );
+  }
+  return ctx;
+}
+
+// 관리 동작(삭제·열람자 지정) — M0 아니면 throw.
 //   UI 를 우회한 서버 액션 직접 호출을 여기서 막습니다.
 export async function requireCredentialManager(): Promise<CredentialAccess> {
   const ctx = await requireCredentialAccess();
   if (!ctx.isM0) {
-    throw new Error(`${WHAT} 등록·수정·삭제는 관장·부장만 할 수 있습니다.`);
+    throw new Error(`${WHAT} 삭제·열람자 지정은 관장·부장만 할 수 있습니다.`);
   }
   return ctx;
 }
