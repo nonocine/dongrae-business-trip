@@ -3,6 +3,14 @@
 import { revalidatePath } from "next/cache";
 import { getSession, isManagerAdmin } from "@/app/actions";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
+import { kstTodayYmd } from "@/lib/trainings";
+import {
+  fetchRecentInstagramMedia,
+  instagramKstYmd,
+  instagramTitle,
+  isInstagramConfigured,
+  type InstagramMedia,
+} from "@/lib/instagramApi";
 
 export type BusinessResult = {
   id: string;
@@ -123,6 +131,9 @@ export type BusinessResultsData = {
   coinPayCumulative: number; // 센터 전체 누적(조회 기간과 무관)
   staffTrainingConfigured: boolean;
   staffTrainings: StaffTrainingResult[];
+  // 인스타그램 가져오기 버튼을 띄울지 — 토큰이 있을 때만 true.
+  //   선택 필드라 옛 응답 경로(테이블 미적용 등)에서는 버튼이 나오지 않습니다.
+  instagramConfigured?: boolean;
 };
 
 const EMPTY_REGISTRY: ProgramRegistry = {
@@ -371,6 +382,7 @@ export async function getBusinessResultsData(
     coinPayCumulative: coinPay.cumulative,
     staffTrainingConfigured: staff.configured,
     staffTrainings: staff.rows,
+    instagramConfigured: isInstagramConfigured(),
   };
 }
 
@@ -961,4 +973,128 @@ export async function updateBusinessProgram(
   } catch (e) {
     return actionError(e, "사업을 수정하지 못했습니다.");
   }
+}
+
+// =====================================================================
+// 인스타그램 게시물 가져오기 (관장 8/26 요청)
+//   * 센터 계정 게시물을 홍보실적으로 옮겨 적는 수고를 줄입니다. 자동 등록이
+//     아니라 후보를 보여주고 사람이 고른 것만 등록합니다.
+//   * 권한은 수기 입력과 동일 — requireUser(로그인한 직원). 별도 게이트 없음.
+//   * 구분(category)은 새 값을 만들지 않고 기존 목록의 "SNS" 를 씁니다.
+//   * 중복 방지: 게시물 permalink 가 이미 business_promotions.url 에 있으면
+//     후보 목록에서 '이미 등록됨' 으로 표시하고, 등록 단계에서도 다시 거릅니다
+//     (조회 이후에 다른 사람이 먼저 등록했을 수 있으므로).
+//   * ⚠️ 토큰은 lib/instagramApi 안에서만 다룹니다. 여기서는 값을 만지지 않습니다.
+// =====================================================================
+
+// 인스타그램 게시물의 구분값. BusinessResultsDashboard 의 promotionCategories
+//   안에 있는 값이어야 합니다("인스타그램" 같은 새 값을 만들지 않습니다).
+const INSTAGRAM_CATEGORY = "SNS";
+
+// 화면 목록 한 줄 — 원본 게시물 + 등록될 값 미리보기.
+export type InstagramCandidate = {
+  id: string;
+  caption: string;
+  mediaType: string;
+  thumbnailUrl: string | null;
+  permalink: string;
+  // 등록 시 들어갈 값(화면에서 그대로 보여줍니다).
+  title: string;
+  activityDate: string;
+  alreadyRegistered: boolean;
+};
+
+// 이미 등록된 permalink 집합 — 연·월과 무관하게 전체에서 확인합니다.
+async function registeredPermalinks(links: string[]): Promise<Set<string>> {
+  if (links.length === 0) return new Set();
+  const { data, error } = await supabaseAdmin
+    .from("business_promotions")
+    .select("url")
+    .in("url", links);
+  if (error) throw new Error(error.message);
+  const set = new Set<string>();
+  for (const row of data ?? []) {
+    const url = String((row as { url?: unknown }).url ?? "").trim();
+    if (url) set.add(url);
+  }
+  return set;
+}
+
+function toCandidate(m: InstagramMedia, registered: Set<string>) {
+  const activityDate = instagramKstYmd(m.timestamp);
+  return {
+    id: m.id,
+    caption: m.caption,
+    mediaType: m.mediaType,
+    thumbnailUrl: m.thumbnailUrl,
+    permalink: m.permalink,
+    title: instagramTitle(m.caption, activityDate),
+    activityDate,
+    alreadyRegistered: registered.has(m.permalink),
+  };
+}
+
+// 최근 게시물 후보 목록. 토큰 미설정·API 오류는 그대로 throw 되어 화면에
+//   "인스타그램 연결에 문제가…" 메시지로 표시됩니다(다른 기능은 영향 없음).
+export async function listInstagramCandidates(): Promise<InstagramCandidate[]> {
+  await requireUser();
+  const media = await fetchRecentInstagramMedia();
+  if (media.length === 0) return [];
+  const registered = await registeredPermalinks(media.map((m) => m.permalink));
+  return media.map((m) => toCandidate(m, registered));
+}
+
+// 선택한 게시물을 홍보실적으로 등록합니다.
+//   * 값은 클라이언트가 보낸 것을 믿지 않고 인스타그램에서 다시 읽어 씁니다
+//     (id 만 받습니다).
+//   * report_year·report_month 는 게시일(KST) 기준 — 7월 게시물은 7월 실적으로
+//     들어갑니다. 지금 보고 있는 기간과 다르면 화면에서 안내합니다.
+export async function importInstagramPromotions(input: {
+  ids: string[];
+}): Promise<{ ok: true; saved: number; skipped: number }> {
+  const user = await requireUser();
+  const wanted = new Set(
+    (input.ids ?? []).map((v) => String(v).trim()).filter(Boolean),
+  );
+  if (wanted.size === 0) throw new Error("등록할 게시물을 선택해주세요.");
+
+  const media = (await fetchRecentInstagramMedia()).filter((m) =>
+    wanted.has(m.id),
+  );
+  if (media.length === 0) {
+    throw new Error("선택한 게시물을 인스타그램에서 찾을 수 없습니다.");
+  }
+
+  // 조회 시점 이후에 누가 먼저 등록했을 수 있어 여기서 한 번 더 거릅니다.
+  const registered = await registeredPermalinks(media.map((m) => m.permalink));
+  const fresh = media.filter((m) => !registered.has(m.permalink));
+  const skipped = media.length - fresh.length;
+  if (fresh.length === 0) return { ok: true, saved: 0, skipped };
+
+  const today = kstTodayYmd();
+  const rows = fresh.map((m) => {
+    // 게시일을 못 읽는 경우(형식 이상)에만 오늘 날짜로 폴백합니다.
+    const activityDate = instagramKstYmd(m.timestamp) || today;
+    const [y, mo] = activityDate.split("-");
+    return {
+      report_year: Number(y),
+      report_month: Number(mo),
+      activity_date: activityDate,
+      // 새 구분값을 만들지 않고 기존 promotionCategories 의 "SNS" 를 씁니다.
+      category: INSTAGRAM_CATEGORY,
+      title: instagramTitle(m.caption, activityDate),
+      count: 1,
+      url: m.permalink,
+      description: m.caption,
+      author_name: user.name,
+    };
+  });
+
+  const { error } = await supabaseAdmin
+    .from("business_promotions")
+    .insert(rows);
+  if (error) throw new Error(error.message);
+
+  revalidatePath("/business-results");
+  return { ok: true, saved: rows.length, skipped };
 }

@@ -25,7 +25,8 @@
     "test:worklog": "node --import tsx scripts/test-worklog-pdf.ts",
     "test:attendance": "node --import tsx scripts/test-attendance-pdf.ts",
     "test:lecture-cert": "node --import tsx scripts/test-lecture-cert-pdf.ts",
-    "test:credential": "node --import tsx scripts/test-credential-crypto.ts"
+    "test:credential": "node --import tsx scripts/test-credential-crypto.ts",
+    "test:instagram": "node --import tsx scripts/test-instagram-import.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.116.0",

@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import {
   badgeNeutral,
   btnPrimary,
+  btnSecondary,
   cardCls,
   inputCls,
   labelCls,
@@ -12,9 +13,12 @@ import {
 import {
   deleteBusinessResult,
   deletePromotion,
+  importInstagramPromotions,
+  listInstagramCandidates,
   savePromotion,
   type BusinessResult,
   type BusinessResultsData,
+  type InstagramCandidate,
   type PromotionResult,
 } from "./actions";
 import CoinPayTab from "./CoinPayTab";
@@ -125,6 +129,10 @@ export default function BusinessResultsDashboard({
   const [promoChannelUrls, setPromoChannelUrls] = useState<
     Record<string, string>
   >({});
+  // 인스타그램 가져오기 — 후보 목록(열려 있을 때만 배열)과 체크한 게시물 id.
+  //   자동 등록이 아니라 고른 것만 등록하므로 목록·선택을 화면에서 들고 있습니다.
+  const [igItems, setIgItems] = useState<InstagramCandidate[] | null>(null);
+  const [igPicked, setIgPicked] = useState<string[]>([]);
   // 프로그램 실적 연속 입력 — seq 를 올려 폼을 새로 마운트(= 빈 폼)하고,
   //   월·분야·담당자만 다음 건으로 이어받습니다.
   const [newFormSeq, setNewFormSeq] = useState(0);
@@ -289,6 +297,60 @@ export default function BusinessResultsDashboard({
   function resetPromoChannels() {
     setPromoChannels([promotionCategories[0]]);
     setPromoChannelUrls({});
+  }
+
+  // 가져오기 — 누를 때마다 최신 목록을 다시 읽습니다(캐시 없음).
+  //   토큰 미설정·API 오류는 lib/instagramApi 가 만든 안내 문구가 그대로 옵니다.
+  function loadInstagram() {
+    setMessage("");
+    startTransition(async () => {
+      try {
+        const items = await listInstagramCandidates();
+        setIgItems(items);
+        setIgPicked([]);
+        if (items.length === 0) {
+          setMessage("가져올 인스타그램 게시물이 없습니다.");
+        }
+      } catch (e) {
+        setIgItems(null);
+        setMessage(
+          e instanceof Error ? e.message : "인스타그램 게시물을 가져오지 못했습니다.",
+        );
+      }
+    });
+  }
+
+  function toggleIgPick(id: string) {
+    setIgPicked((prev) =>
+      prev.includes(id) ? prev.filter((v) => v !== id) : [...prev, id],
+    );
+  }
+
+  function submitInstagram() {
+    if (igPicked.length === 0) return;
+    setMessage("");
+    startTransition(async () => {
+      try {
+        const res = await importInstagramPromotions({ ids: igPicked });
+        setIgItems(null);
+        setIgPicked([]);
+        setMessage(
+          [
+            `인스타그램 ${res.saved}건을 홍보실적에 등록했습니다.`,
+            res.skipped > 0 ? `(이미 등록된 ${res.skipped}건 제외)` : "",
+            // 지금 보는 달이 아니라 게시일이 속한 달로 들어갑니다.
+            res.saved > 0 ? "게시일 기준 월로 분류됩니다." : "",
+          ]
+            .filter(Boolean)
+            .join(" "),
+        );
+        router.refresh();
+      } catch (e) {
+        setMessage(
+          e instanceof Error ? e.message : "인스타그램 게시물을 등록하지 못했습니다.",
+        );
+      }
+    });
   }
 
   function submitPromotion(form: HTMLFormElement) {
@@ -835,19 +897,113 @@ export default function BusinessResultsDashboard({
                 ? "홍보·대외협력 수정"
                 : `${periodLabel} 홍보·대외협력`}
             </h2>
-            {editingPromo && (
-              <button
-                type="button"
-                className="text-sm font-semibold text-ink-muted hover:underline"
-                onClick={() => {
-                  setEditingPromo(null);
-                  resetPromoChannels();
-                }}
-              >
-                수정 취소
-              </button>
-            )}
+            <div className="flex items-center gap-3">
+              {/* 인스타그램 가져오기 — 토큰이 설정된 경우에만 보입니다.
+                  권한은 수기 입력과 동일(이 화면에 들어온 직원). */}
+              {data.instagramConfigured && !editingPromo && (
+                <button
+                  type="button"
+                  disabled={pending}
+                  className={`${btnSecondary} h-9 px-3 text-xs`}
+                  onClick={() => (igItems ? setIgItems(null) : loadInstagram())}
+                >
+                  {igItems ? "가져오기 닫기" : "📷 인스타그램에서 가져오기"}
+                </button>
+              )}
+              {editingPromo && (
+                <button
+                  type="button"
+                  className="text-sm font-semibold text-ink-muted hover:underline"
+                  onClick={() => {
+                    setEditingPromo(null);
+                    resetPromoChannels();
+                  }}
+                >
+                  수정 취소
+                </button>
+              )}
+            </div>
           </div>
+
+          {/* 가져온 게시물 후보 — 체크한 것만 등록됩니다(자동 등록 아님). */}
+          {igItems && igItems.length > 0 && (
+            <div className="mt-4 rounded-lg border border-dashed border-line bg-surface p-3">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <p className="text-xs text-ink-muted">
+                  최근 게시물 {igItems.length}건 — 등록할 것만 선택하세요. 구분은
+                  SNS, 게시일 기준 월로 저장됩니다.
+                </p>
+                <button
+                  type="button"
+                  disabled={pending || igPicked.length === 0}
+                  className={`${btnPrimary} h-8 px-3 text-xs`}
+                  onClick={submitInstagram}
+                >
+                  선택 항목 등록
+                  {igPicked.length > 0 ? ` (${igPicked.length})` : ""}
+                </button>
+              </div>
+              <ul className="mt-3 space-y-2">
+                {igItems.map((m) => {
+                  const on = igPicked.includes(m.id);
+                  return (
+                    <li
+                      key={m.id}
+                      className={`flex items-start gap-3 rounded-lg border bg-card p-2.5 ${
+                        m.alreadyRegistered ? "border-line opacity-60" : "border-line"
+                      }`}
+                    >
+                      <input
+                        type="checkbox"
+                        className="mt-1"
+                        checked={on}
+                        disabled={m.alreadyRegistered}
+                        onChange={() => toggleIgPick(m.id)}
+                      />
+                      {m.thumbnailUrl ? (
+                        // eslint-disable-next-line @next/next/no-img-element
+                        <img
+                          src={m.thumbnailUrl}
+                          alt=""
+                          className="h-14 w-14 shrink-0 rounded-md border border-line object-cover"
+                        />
+                      ) : (
+                        <div className="flex h-14 w-14 shrink-0 items-center justify-center rounded-md border border-dashed border-line text-lg text-ink-hint">
+                          🖼
+                        </div>
+                      )}
+                      <div className="min-w-0 flex-1">
+                        <p className="truncate text-sm font-semibold text-ink">
+                          {m.title}
+                        </p>
+                        <p className="mt-0.5 text-xs text-ink-muted">
+                          {m.activityDate} · {m.mediaType}
+                          {m.alreadyRegistered && (
+                            <span className={`${badgeNeutral} ml-1.5`}>
+                              이미 등록됨
+                            </span>
+                          )}
+                        </p>
+                        {m.caption && (
+                          <p className="mt-1 line-clamp-2 text-xs text-ink-hint">
+                            {m.caption}
+                          </p>
+                        )}
+                        <a
+                          href={m.permalink}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="mt-1 inline-block text-xs text-navy hover:underline"
+                        >
+                          게시물 열기 ↗
+                        </a>
+                      </div>
+                    </li>
+                  );
+                })}
+              </ul>
+            </div>
+          )}
           <form
             key={editingPromo?.id ?? "new"}
             className="mt-4 grid gap-3 md:grid-cols-3"
