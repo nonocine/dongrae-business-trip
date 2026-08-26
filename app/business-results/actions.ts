@@ -537,9 +537,26 @@ export async function saveResultDetails(
   }
 }
 
+// 같은 활동을 밴드·SNS·홈페이지에 함께 올린 경우 한 번 입력으로 채널 수만큼
+//   행을 만듭니다(이민정 7월 실적에서 같은 제목을 4번 타이핑하고 있었음).
+//   * 등록에만 적용합니다 — 수정은 지금처럼 1건 단위(category 단일 값).
+//   * 채널별 링크는 url_{채널} 로 따로 받고, 비어 있으면 공통 링크를 씁니다.
+//   * categories 가 아예 없는 요청(옛 폼·외부 호출)은 단일 category 로 폴백합니다.
+function pickPromotionChannels(formData: FormData): string[] {
+  const picked = formData
+    .getAll("categories")
+    .map((v) => String(v).trim())
+    .filter(Boolean);
+  const fallback = String(formData.get("category") ?? "").trim();
+  const list = picked.length > 0 ? picked : fallback ? [fallback] : [];
+  // 같은 채널을 두 번 보내와도 한 행만 만듭니다.
+  return [...new Set(list)];
+}
+
 export async function savePromotion(formData: FormData) {
   const user = await requireUser();
   const id = String(formData.get("id") ?? "").trim();
+  const commonUrl = String(formData.get("url") ?? "").trim();
   const payload = {
     report_year: asInt(formData.get("year"), 2020),
     report_month: Math.min(12, asInt(formData.get("month"), 1)),
@@ -547,7 +564,7 @@ export async function savePromotion(formData: FormData) {
     category: String(formData.get("category") ?? "기타").trim() || "기타",
     title: String(formData.get("title") ?? "").trim(),
     count: asInt(formData.get("count"), 1),
-    url: String(formData.get("url") ?? "").trim(),
+    url: commonUrl,
     description: String(formData.get("description") ?? "").trim(),
     author_name: user.name,
   };
@@ -569,14 +586,29 @@ export async function savePromotion(formData: FormData) {
     const { data, error } = await query.select("id").maybeSingle();
     if (error) throw new Error(error.message);
     if (!data) throw new Error("본인이 작성한 홍보 실적만 수정할 수 있습니다.");
-  } else {
-    const { error } = await supabaseAdmin
-      .from("business_promotions")
-      .insert(payload);
-    if (error) throw new Error(error.message);
+
+    revalidatePath("/business-results");
+    return { ok: true, saved: 1 };
   }
+
+  // 등록 — 선택한 채널 수만큼 행을 만듭니다(1개만 고르면 기존과 똑같이 1건).
+  const channels = pickPromotionChannels(formData);
+  if (channels.length === 0) {
+    throw new Error("채널(구분)을 1개 이상 선택해주세요.");
+  }
+  const rows = channels.map((category) => ({
+    ...payload,
+    category,
+    // 채널별 링크가 있으면 그것을, 없으면 공통 링크를 씁니다.
+    url: String(formData.get(`url_${category}`) ?? "").trim() || commonUrl,
+  }));
+  const { error } = await supabaseAdmin
+    .from("business_promotions")
+    .insert(rows);
+  if (error) throw new Error(error.message);
+
   revalidatePath("/business-results");
-  return { ok: true };
+  return { ok: true, saved: rows.length };
 }
 
 // 홍보·대외협력 삭제 — 물리 삭제(이 테이블에는 소프트 삭제 컬럼이 없습니다).

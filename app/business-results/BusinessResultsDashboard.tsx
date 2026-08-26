@@ -116,6 +116,15 @@ export default function BusinessResultsDashboard({
   const [editing, setEditing] = useState<BusinessResult | null>(null);
   // 홍보·대외협력 수정 대상(폼 프리필). 저장·취소 시 null 로 되돌립니다.
   const [editingPromo, setEditingPromo] = useState<PromotionResult | null>(null);
+  // 홍보 등록 — 같은 활동을 여러 채널에 함께 올린 경우 한 번에 등록합니다.
+  //   체크한 채널 수만큼 행이 만들어지고, 1개만 체크하면 기존과 똑같이 1건입니다.
+  //   (수정은 종전대로 1건 단위라 이 상태를 쓰지 않습니다.)
+  const [promoChannels, setPromoChannels] = useState<string[]>([
+    promotionCategories[0],
+  ]);
+  const [promoChannelUrls, setPromoChannelUrls] = useState<
+    Record<string, string>
+  >({});
   // 프로그램 실적 연속 입력 — seq 를 올려 폼을 새로 마운트(= 빈 폼)하고,
   //   월·분야·담당자만 다음 건으로 이어받습니다.
   const [newFormSeq, setNewFormSeq] = useState(0);
@@ -270,14 +279,31 @@ export default function BusinessResultsDashboard({
     });
   }
 
+  function togglePromoChannel(name: string) {
+    setPromoChannels((prev) =>
+      prev.includes(name) ? prev.filter((v) => v !== name) : [...prev, name],
+    );
+  }
+
+  // 채널 선택은 제어 상태라 form.reset() 으로 돌아가지 않습니다 — 따로 되돌립니다.
+  function resetPromoChannels() {
+    setPromoChannels([promotionCategories[0]]);
+    setPromoChannelUrls({});
+  }
+
   function submitPromotion(form: HTMLFormElement) {
     setMessage("");
     startTransition(async () => {
       try {
-        await savePromotion(new FormData(form));
+        const res = await savePromotion(new FormData(form));
         form.reset();
+        resetPromoChannels();
         setEditingPromo(null);
-        setMessage("저장했습니다.");
+        setMessage(
+          res.saved > 1
+            ? `${res.saved}개 채널에 저장했습니다.`
+            : "저장했습니다.",
+        );
         router.refresh();
       } catch (e) {
         setMessage(e instanceof Error ? e.message : "저장하지 못했습니다.");
@@ -813,7 +839,10 @@ export default function BusinessResultsDashboard({
               <button
                 type="button"
                 className="text-sm font-semibold text-ink-muted hover:underline"
-                onClick={() => setEditingPromo(null)}
+                onClick={() => {
+                  setEditingPromo(null);
+                  resetPromoChannels();
+                }}
               >
                 수정 취소
               </button>
@@ -838,6 +867,82 @@ export default function BusinessResultsDashboard({
               name="month"
               value={editingPromo?.report_month ?? month}
             />
+            {editingPromo ? (
+              <label className={labelCls}>
+                구분
+                <select
+                  name="category"
+                  className={inputCls}
+                  defaultValue={editingPromo.category}
+                >
+                  {/* 목록에 없는 과거 구분값도 수정 시 그대로 보존합니다. */}
+                  {(!promotionCategories.includes(editingPromo.category)
+                    ? [editingPromo.category, ...promotionCategories]
+                    : promotionCategories
+                  ).map((v) => (
+                    <option key={v}>{v}</option>
+                  ))}
+                </select>
+              </label>
+            ) : (
+              /* 등록 — 같은 활동을 밴드·SNS·홈페이지에 함께 올렸다면 모두 체크하면
+                 됩니다. 날짜·제목·횟수·설명은 한 번만 쓰고, 체크한 채널 수만큼
+                 저장됩니다. 1개만 체크하면 종전과 같은 1건 등록입니다. */
+              <div className={`${labelCls} md:col-span-3`}>
+                구분 — 여러 채널에 함께 올렸다면 모두 선택하세요 (선택한 수만큼
+                저장됩니다)
+                <div className="mt-1 flex flex-wrap gap-1.5">
+                  {promotionCategories.map((c) => {
+                    const on = promoChannels.includes(c);
+                    return (
+                      <label
+                        key={c}
+                        className={`flex cursor-pointer items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-xs font-semibold ${
+                          on
+                            ? "border-navy bg-navy-soft text-navy"
+                            : "border-line text-ink-muted hover:bg-surface"
+                        }`}
+                      >
+                        <input
+                          type="checkbox"
+                          name="categories"
+                          value={c}
+                          checked={on}
+                          onChange={() => togglePromoChannel(c)}
+                        />
+                        {c}
+                      </label>
+                    );
+                  })}
+                </div>
+                {/* 채널이 2개 이상일 때만 채널별 링크 칸을 엽니다 — 밴드 링크와
+                    블로그 링크가 다른 경우용. 비우면 아래 공통 링크로 저장됩니다. */}
+                {promoChannels.length > 1 && (
+                  <div className="mt-2 grid gap-1.5 sm:grid-cols-2">
+                    {promoChannels.map((c) => (
+                      <label key={c} className="flex items-center gap-2">
+                        <span className="w-16 shrink-0 text-xs font-semibold text-ink-body">
+                          {c}
+                        </span>
+                        <input
+                          name={`url_${c}`}
+                          type="url"
+                          className={`${inputCls} mt-0`}
+                          value={promoChannelUrls[c] ?? ""}
+                          onChange={(e) =>
+                            setPromoChannelUrls((prev) => ({
+                              ...prev,
+                              [c]: e.target.value,
+                            }))
+                          }
+                          placeholder="이 채널 링크 (비우면 공통 링크)"
+                        />
+                      </label>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
             <label className={labelCls}>
               날짜
               <input
@@ -849,23 +954,6 @@ export default function BusinessResultsDashboard({
               />
             </label>
             <label className={labelCls}>
-              구분
-              <select
-                name="category"
-                className={inputCls}
-                defaultValue={editingPromo?.category ?? promotionCategories[0]}
-              >
-                {/* 목록에 없는 과거 구분값도 수정 시 그대로 보존합니다. */}
-                {(editingPromo &&
-                !promotionCategories.includes(editingPromo.category)
-                  ? [editingPromo.category, ...promotionCategories]
-                  : promotionCategories
-                ).map((v) => (
-                  <option key={v}>{v}</option>
-                ))}
-              </select>
-            </label>
-            <label className={labelCls}>
               횟수
               <input
                 name="count"
@@ -875,6 +963,15 @@ export default function BusinessResultsDashboard({
                 className={inputCls}
               />
             </label>
+            <label className={labelCls}>
+              {!editingPromo && promoChannels.length > 1 ? "공통 링크" : "링크"}
+              <input
+                name="url"
+                type="url"
+                className={inputCls}
+                defaultValue={editingPromo?.url ?? ""}
+              />
+            </label>
             <label className={`${labelCls} md:col-span-2`}>
               제목
               <input
@@ -882,15 +979,6 @@ export default function BusinessResultsDashboard({
                 name="title"
                 className={inputCls}
                 defaultValue={editingPromo?.title ?? ""}
-              />
-            </label>
-            <label className={labelCls}>
-              링크
-              <input
-                name="url"
-                type="url"
-                className={inputCls}
-                defaultValue={editingPromo?.url ?? ""}
               />
             </label>
             <label className={`${labelCls} md:col-span-3`}>
