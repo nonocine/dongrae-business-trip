@@ -22,8 +22,9 @@ export type BusinessResult = {
   attendance_other: number;
   youth_uses: number;
   other_uses: number;
+  // 입력란·문서 출력은 없앴지만 컬럼과 과거 값은 그대로 보존합니다
+  //   (evaluation 김혜지 8/18, summary 이민정 8/25).
   summary: string;
-  // 입력란·문서 출력은 없앴지만 컬럼과 과거 값은 그대로 보존합니다(김혜지 8/18).
   evaluation: string;
   status: "draft" | "submitted";
   author_name: string;
@@ -414,9 +415,8 @@ export async function saveBusinessResult(formData: FormData) {
     // 실인원 — 수기 입력값 그대로(자동계산 제거).
     youth_uses: asInt(formData.get("youth_uses")),
     other_uses: asInt(formData.get("other_uses")),
-    summary: String(formData.get("summary") ?? "").trim(),
-    // 평가·향후 계획(evaluation)은 김혜지 요청으로 입력란을 없앴습니다.
-    //   컬럼은 남겨 과거 값을 보존하고, 저장 시에는 건드리지 않습니다.
+    // 주요 내용(summary)·평가(evaluation)는 입력란을 없앴습니다(evaluation 김혜지 8/18,
+    //   summary 이민정 8/25). 컬럼은 남겨 과거 값을 보존하고 저장 시에는 건드리지 않습니다.
     status: formData.get("submit") === "true" ? "submitted" : "draft",
     author_name: user.name,
     updated_by: user.name,

@@ -45,7 +45,6 @@ export type BusinessResultExportRow = {
   attendance_other?: number;
   youth_uses: number;
   other_uses: number;
-  summary: string;
   status: "draft" | "submitted";
   author_name: string;
   details?: BusinessDetailExportRow[];
@@ -184,17 +183,27 @@ function docCell(
       new Paragraph({
         alignment: options?.align ?? AlignmentType.CENTER,
         spacing: { before: 0, after: 0, line: 230 },
-        children: [
-          new TextRun({
-            text: text || "-",
-            bold: options?.header,
-            size: options?.small ? 14 : 18,
-            font: documentFontAttributes,
-          }),
-        ],
+        // 입력값의 줄바꿈은 한 문단 안에서 줄바꿈 문자로 이어 붙입니다 — 표 한 칸
+        //   안에서 여러 줄로 보이되 셀 테두리는 그대로 유지됩니다(이민정 8/25).
+        children: splitLines(text).map(
+          (line, index) =>
+            new TextRun({
+              text: line,
+              break: index === 0 ? undefined : 1,
+              bold: options?.header,
+              size: options?.small ? 14 : 18,
+              font: documentFontAttributes,
+            }),
+        ),
       }),
     ],
   });
+}
+
+// 빈 값은 "-", 값이 있으면 개행 기준으로 잘라 줄 배열로 돌려줍니다.
+function splitLines(text: string): string[] {
+  const lines = (text ?? "").replace(/\r\n?/g, "\n").split("\n");
+  return lines.some((line) => line.trim()) ? lines : ["-"];
 }
 
 function colorRule() {
@@ -429,31 +438,17 @@ export async function buildBusinessReportDocx(
   const periodEnd = new Date(input.year, period.endMonth, 0).getDate();
   const coinPayRows = input.coinPay ?? [];
   const staffRows = input.staffTrainings ?? [];
-  const detailRows = input.results.filter(
-    (row) =>
-      row.summary &&
-      !/^\d+월 최종 결과보고서 \d+번 사업 실적$/.test(row.summary),
-  );
-  // 평가·향후 계획 열은 김혜지 요청으로 삭제 — 남은 열에 폭을 나눠 줍니다.
-  const detailSection = detailRows.length
-    ? [
-        docTable(
-          ["번호", "사업명", "담당자", "주요 운영내용"],
-          [700, 2900, 1000, 8460],
-          detailRows.map((r) => [
-            String(input.results.indexOf(r) + 1),
-            r.program_name,
-            r.manager_name ?? "",
-            r.summary,
-          ]),
-        ),
-      ]
+  // 사업별 실적보고는 세부표만으로 구성합니다 — 평가 열은 김혜지 8/18,
+  //   '주요 내용'(summary) 표는 이민정 8/25 요청으로 삭제했습니다.
+  const detailBlocks = detailTables(input.results);
+  const detailSection = detailBlocks.length
+    ? detailBlocks
     : [
         new Paragraph({
           spacing: { before: 40, after: 120 },
           children: [
             new TextRun({
-              text: "※ 프로그램 목록과 수치는 반영되었으며, 사업별 주요 운영내용은 원자료 추가 입력 후 이 위치에 자동 출력됩니다.",
+              text: "※ 프로그램 목록과 수치는 반영되었으며, 사업별 세부 실적은 원자료 추가 입력 후 이 위치에 자동 출력됩니다.",
               size: 18,
               color: "666666",
               font: documentFontAttributes,
@@ -568,7 +563,6 @@ export async function buildBusinessReportDocx(
     sectionTitle("Ⅱ.", "사업별 실적보고"),
     new Paragraph({ spacing: { before: 70, after: 0 }, children: [] }),
     ...detailSection,
-    ...detailTables(input.results),
     new Paragraph({ spacing: { before: 150, after: 0 }, children: [] }),
     sectionTitle("Ⅲ.", "홍보·대외협력 실적"),
     new Paragraph({ spacing: { before: 70, after: 0 }, children: [] }),
@@ -852,7 +846,7 @@ export async function buildBusinessReportWorkbook(
 
   const results = wb.addWorksheet("사업실적");
   results.addRow([`${input.year}년 ${period.label} 사업실적`]);
-  results.mergeCells("A1:Q1");
+  results.mergeCells("A1:P1");
   results.getCell("A1").font = {
     name: "맑은 고딕",
     size: 17,
@@ -877,7 +871,6 @@ export async function buildBusinessReportWorkbook(
     "실인원 청",
     "실인원 기",
     "실인원 계",
-    "주요 내용",
     "상태",
     "작성자",
   ]);
@@ -899,7 +892,6 @@ export async function buildBusinessReportWorkbook(
       r.youth_uses,
       r.other_uses,
       { formula: `L${line}+M${line}` },
-      r.summary,
       r.status === "submitted" ? "제출" : "작성 중",
       r.author_name,
     ]);
@@ -912,8 +904,7 @@ export async function buildBusinessReportWorkbook(
     ...["D", "E", "F", "G", "H", "I", "J", "K", "L", "M", "N"].map((col) => ({
       formula: `SUM(${col}5:${col}${sumTo})`,
     })),
-    // 주요 내용 · 상태 · 작성자 — 합계 없는 열(평가 열 삭제로 3칸).
-    "",
+    // 상태 · 작성자 — 합계 없는 열(평가·주요 내용 열 삭제로 2칸).
     "",
     "",
   ]);
@@ -925,9 +916,9 @@ export async function buildBusinessReportWorkbook(
     fgColor: { argb: `FF${paleGray}` },
   };
   results.columns = [
-    14, 24, 10, 11, 10, 10, 10, 10, 11, 11, 11, 11, 11, 11, 48, 11, 12,
+    14, 24, 10, 11, 10, 10, 10, 10, 11, 11, 11, 11, 11, 11, 11, 12,
   ].map((width) => ({ width }));
-  results.autoFilter = `A4:Q${results.rowCount}`;
+  results.autoFilter = `A4:P${results.rowCount}`;
   styleSheet(results);
 
   const promotions = wb.addWorksheet("홍보대외협력");

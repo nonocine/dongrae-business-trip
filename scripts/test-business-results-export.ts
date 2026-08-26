@@ -1,6 +1,7 @@
 import { mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
 import ExcelJS from "exceljs";
+import JSZip from "jszip";
 import { buildBusinessReportDocx, buildBusinessReportWorkbook, calculateBusinessReportTotals, type BusinessReportInput } from "../lib/businessResultsExport";
 
 const input: BusinessReportInput = {
@@ -8,14 +9,14 @@ const input: BusinessReportInput = {
   year: 2099, month: 1, orgName: "테스트 기관",
   results: [
     // 청/기 구분이 있는 신규 행 + 세부표(일자형).
-    { category: "분류A", program_name: "가상 프로그램 A", manager_name: "담당 A", sessions: 3, operating_days: 2, participants: 42, participants_youth: 40, participants_other: 2, attendance: 116, attendance_youth: 110, attendance_other: 6, youth_uses: 116, other_uses: 8, summary: "합성 요약 A", status: "submitted", author_name: "사용자 A",
+    { category: "분류A", program_name: "가상 프로그램 A", manager_name: "담당 A", sessions: 3, operating_days: 2, participants: 42, participants_youth: 40, participants_other: 2, attendance: 116, attendance_youth: 110, attendance_other: 6, youth_uses: 116, other_uses: 8, status: "submitted", author_name: "사용자 A",
       details: [
-        { entry_type: "date", entry_date: "2099-01-05", session_no: null, session_days: null, content: "합성 세부 A1", participants_youth: 20, participants_other: 1, room_youth: 20, room_other: 2 },
+        { entry_type: "date", entry_date: "2099-01-05", session_no: null, session_days: null, content: "합성 세부 A1 첫째 줄\n합성 세부 A1 둘째 줄", participants_youth: 20, participants_other: 1, room_youth: 20, room_other: 2 },
         { entry_type: "date", entry_date: "2099-01-06", session_no: null, session_days: null, content: "합성 세부 A2", participants_youth: 20, participants_other: 1, room_youth: 20, room_other: 2 },
       ] },
     // 청/기 구분이 없는 과거 행(계만 존재) — 문서에서 "-"/계 로 표기되어야 한다.
     //   세부표는 회차형 — 첫 열이 운영일수("N일")로 나와야 한다.
-    { category: "분류B", program_name: "가상 프로그램 B", sessions: 5, participants: 78, attendance: 135, youth_uses: 135, other_uses: 12, summary: "합성 요약 B", status: "draft", author_name: "사용자 B",
+    { category: "분류B", program_name: "가상 프로그램 B", sessions: 5, participants: 78, attendance: 135, youth_uses: 135, other_uses: 12, status: "draft", author_name: "사용자 B",
       details: [
         { entry_type: "session", entry_date: null, session_no: 1, session_days: 3, content: "합성 세부 B1", participants_youth: 30, participants_other: 2, room_youth: 30, room_other: 3 },
       ] },
@@ -63,6 +64,17 @@ async function main() {
   if (wb.getWorksheet("사업실적")?.getCell("H5").formula !== "F5+G5") throw new Error("참가인원 계 수식 검증 실패");
   if (wb.getWorksheet("사업실적")?.getCell("N5").formula !== "L5+M5") throw new Error("실인원 계 수식 검증 실패");
   if (wb.getWorksheet("종사자교육")?.getCell("D5").value !== "합성 교육 1") throw new Error("종사자교육 시트 검증 실패");
+  // 주요 내용(summary) 열은 삭제됐다 — 실인원 계(N) 다음은 곧바로 상태(O)여야 한다.
+  const header = wb.getWorksheet("사업실적")?.getRow(4);
+  if (header?.getCell("O").value !== "상태" || header?.getCell("P").value !== "작성자" || header?.getCell("Q").value) throw new Error("사업실적 헤더 검증 실패");
+
+  // Word — 주요 내용은 사라지고, 운영내용의 줄바꿈은 <w:br/> 로 보존되어야 한다.
+  const zip = await JSZip.loadAsync(Buffer.from(docx));
+  const documentXml = (await zip.file("word/document.xml")?.async("string")) ?? "";
+  if (documentXml.includes("주요 운영내용") || documentXml.includes("합성 요약")) throw new Error("Word 주요 내용 삭제 검증 실패");
+  const first = documentXml.indexOf("합성 세부 A1 첫째 줄");
+  const second = documentXml.indexOf("합성 세부 A1 둘째 줄");
+  if (first < 0 || second < first || !documentXml.slice(first, second).includes("<w:br")) throw new Error("Word 운영내용 줄바꿈 검증 실패");
 
   // 신규 데이터가 전혀 없는 입력도 두 포맷 모두 생성되어야 한다.
   await buildBusinessReportDocx(emptyExtras);

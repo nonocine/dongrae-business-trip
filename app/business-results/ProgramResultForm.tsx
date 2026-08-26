@@ -349,16 +349,6 @@ export default function ProgramResultForm({
         </p>
       )}
 
-      <label className={`${labelCls} md:col-span-3`}>
-        주요 내용
-        <textarea
-          name="summary"
-          rows={3}
-          className={inputCls}
-          defaultValue={editing?.summary ?? ""}
-        />
-      </label>
-
       {error && (
         <p className="rounded-lg bg-stamp-soft px-3 py-2 text-xs text-stamp md:col-span-3">
           {error}

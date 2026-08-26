@@ -34,6 +34,8 @@ const COUNT_FIELDS = [
 const cellInput =
   "w-full rounded-md border border-line bg-card px-2 py-1 text-sm text-ink-body shadow-sm focus:border-navy focus:outline-none focus:ring-1 focus:ring-navy";
 const numInput = `${cellInput} text-right tabular-nums`;
+// 운영내용은 여러 줄 입력 — 기존 '주요 내용' 칸만큼 크게 두고 Enter 로 줄바꿈합니다(이민정 8/25).
+const contentTextarea = `${cellInput} min-h-[5.5rem] resize-y py-1.5 leading-5`;
 
 function emptyRow(): Row {
   return {
@@ -150,13 +152,15 @@ export default function DetailRowsEditor({
       </div>
 
       <div className="mt-3 overflow-x-auto">
-        <table className="w-full min-w-[860px] border-collapse text-sm">
+        <table className="w-full min-w-[960px] border-collapse text-sm">
           <thead>
             <tr className="border-b border-line text-xs text-ink-muted">
               <th className="w-36 px-2 py-1.5 text-left font-semibold">
                 {entryType === "date" ? "일자" : "운영일수"}
               </th>
-              <th className="px-2 py-1.5 text-left font-semibold">운영내용</th>
+              <th className="min-w-[18rem] px-2 py-1.5 text-left font-semibold">
+                운영내용
+              </th>
               {COUNT_FIELDS.map(([field, label]) => (
                 <th
                   key={field}
@@ -197,11 +201,12 @@ export default function DetailRowsEditor({
                   )}
                 </td>
                 <td className="px-2 py-1.5">
-                  <input
+                  <textarea
+                    rows={3}
                     value={r.content}
                     onChange={(e) => patch(i, { content: e.target.value })}
-                    className={cellInput}
-                    placeholder="운영내용"
+                    className={contentTextarea}
+                    placeholder="운영내용 (Enter 로 줄바꿈)"
                   />
                 </td>
                 {COUNT_FIELDS.map(([field]) => (
