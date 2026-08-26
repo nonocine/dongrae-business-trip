@@ -289,6 +289,40 @@ async function run() {
     }
   }
 
+  // 최종합격자 공고 제출서류 — 관장 지시로 6개 → 3개. 본문까지 확인한다.
+  //   (지원 단계에서 학력·경력·자격증을 이미 받으므로 임용 단계에서 다시 안 받음)
+  console.log("\n[단위] 최종합격자 공고 제출서류");
+  {
+    const JSZip = (await import("jszip")).default;
+    const zip = await JSZip.loadAsync(
+      Buffer.from(await buildFinalNoticeDoc(normal))
+    );
+    const xml = (await zip.file("word/document.xml")?.async("string")) ?? "";
+    const must = [
+      "임용신청서(센터 양식) 1부",
+      "기본증명서·주민등록등본 각 1부",
+      "성범죄경력 및 아동학대 범죄전력 조회 회신서 1부",
+    ];
+    const mustNot = [
+      "채용신체검사서",
+      "졸업(성적)증명서",
+      "경력증명서",
+      "자격증 사본",
+    ];
+    for (const text of must) {
+      const ok = xml.includes(text);
+      console.log(`  ${ok ? "✓" : "✗"} 포함: ${text}`);
+      if (ok) pass++;
+      else fail++;
+    }
+    for (const text of mustNot) {
+      const ok = !xml.includes(text);
+      console.log(`  ${ok ? "✓" : "✗"} 제거됨: ${text}`);
+      if (ok) pass++;
+      else fail++;
+    }
+  }
+
   // 마스킹 단독 확인(공고문 핵심 안전장치).
   const { maskName } = await import("../lib/recruitmentDocx");
   const maskCases: [string, string][] = [
