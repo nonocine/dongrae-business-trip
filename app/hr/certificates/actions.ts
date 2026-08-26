@@ -24,9 +24,71 @@ import {
 import { buildCertificatePdf } from "@/lib/certificatePdf";
 import { downloadHrImage } from "@/lib/recruitmentApplicantDocData";
 import { kstTodayYmd } from "@/lib/trainings";
-import { sendSlack } from "@/lib/slack";
+import {
+  sendSlack,
+  sendSlackDMDetailed,
+  siteBaseUrl,
+  slackLink,
+} from "@/lib/slack";
 
 const SLACK_ADMIN = "SLACK_WEBHOOK_ADMIN"; // 관장·부장 비공개 채널
+
+// =====================================================================
+// 신청자 본인 알림 (관장 2026-08-26 요청)
+//   * 그동안 승인·반려는 관리자 채널에만 갔고, 신청자는 직접 들어와 확인해야
+//     했습니다. 의무교육 D-7 독촉(lib/trainingReminder)이 쓰는 개인 DM 패턴을
+//     그대로 재사용합니다.
+//   * ⚠️ 알림은 부가기능 — DM 이 실패해도 승인·반려 처리 자체는 그대로
+//     진행됩니다(슬랙 격리 원칙). sendSlackDMDetailed 는 throw 하지 않지만
+//     이메일 조회까지 포함해 한 번 더 감싸 둡니다.
+//   * ⚠️ 개인정보(주민번호·주소 등)는 DM 에 넣지 않습니다. 발급번호와 상태만.
+// =====================================================================
+
+// 신청자 이메일(인사기록카드 email). 없거나 조회 실패면 null.
+async function emailOfDriver(driverId: string): Promise<string | null> {
+  try {
+    if (!driverId) return null;
+    const { data } = await supabaseAdmin
+      .from("employee_profiles")
+      .select("email")
+      .eq("driver_id", driverId)
+      .maybeSingle();
+    const email = (data as { email?: string | null } | null)?.email ?? null;
+    return email && email.trim() ? email.trim() : null;
+  } catch (e) {
+    console.warn(
+      "[certificates] 신청자 이메일 조회 실패:",
+      e instanceof Error ? e.message : e
+    );
+    return null;
+  }
+}
+
+// 마이페이지 '증명서 발급' 링크 — 절대 URL 이 없으면 링크를 생략합니다.
+function myCertificatesLink(label: string): string {
+  const base = siteBaseUrl();
+  return base ? ` ${slackLink(`${base}/profile/hr#my-certificates`, label)}` : "";
+}
+
+// 신청자 본인에게 DM. 관리자 채널 알림에 덧붙일 꼬리표를 돌려줍니다
+//   (성공이면 빈 문자열, 실패면 "⚠️ 본인 알림 실패 — 사유").
+async function notifyRequester(
+  driverId: string | null,
+  name: string,
+  text: string
+): Promise<string> {
+  try {
+    const email = await emailOfDriver(driverId ?? "");
+    const { ok, reason } = await sendSlackDMDetailed(email, text);
+    if (ok) return "";
+    console.warn(`[certificates] 본인 DM 실패(${name}) — ${reason ?? "사유 미상"}`);
+    return `\n⚠️ 본인 알림 실패 — ${reason ?? "사유 미상"}`;
+  } catch (e) {
+    const reason = e instanceof Error ? e.message : "알 수 없는 오류";
+    console.warn(`[certificates] 본인 DM 실패(${name}) — ${reason}`);
+    return `\n⚠️ 본인 알림 실패 — ${reason}`;
+  }
+}
 
 // 관인 바이트 로드(비공개 hr-documents, service_role). 없으면 null(발급은 계속).
 async function loadSeal(): Promise<Uint8Array | null> {
@@ -572,9 +634,18 @@ export async function approveRequest(
       .eq("status", "pending"); // 동시 승인 방지
     if (upErr) throw new Error(upErr.message);
 
+    // 신청자 본인에게 먼저 알리고, 그 결과를 관리자 알림에 덧붙입니다.
+    const dmTail = await notifyRequester(
+      req.driver_id,
+      prof.name,
+      `✅ 재직증명서(${snapshot.issueLabel})가 승인·발급됐습니다.\n` +
+        `동업자씨 > 증명서 발급에서 PDF를 받으실 수 있어요.` +
+        myCertificatesLink("증명서 받으러 가기")
+    );
+
     await sendSlack(
       SLACK_ADMIN,
-      `✅ ${snapshot.issueLabel} 승인·발급 (처리: ${access.name})`
+      `✅ ${snapshot.issueLabel} 승인·발급 (처리: ${access.name})${dmTail}`
     );
 
     revalidatePath("/hr/certificates");
@@ -611,12 +682,26 @@ export async function rejectRequest(
       })
       .eq("id", id)
       .eq("status", "pending")
-      .select("employee_name")
+      // driver_id 는 신청자 본인 DM 대상(이메일 조회)에 씁니다.
+      .select("employee_name, driver_id")
       .maybeSingle();
     if (error) throw new Error(error.message);
 
-    const name = (updated as { employee_name?: string } | null)?.employee_name;
-    if (name) await sendSlack(SLACK_ADMIN, `❌ ${name}님 신청 반려`);
+    const row = updated as {
+      employee_name?: string;
+      driver_id?: string | null;
+    } | null;
+    const name = row?.employee_name;
+    if (name) {
+      const dmTail = await notifyRequester(
+        row?.driver_id ?? null,
+        name,
+        `❌ 재직증명서 신청이 반려되었습니다.\n사유: ${r}\n` +
+          `필요하시면 다시 신청해 주세요.` +
+          myCertificatesLink("증명서 발급 화면 열기")
+      );
+      await sendSlack(SLACK_ADMIN, `❌ ${name}님 신청 반려${dmTail}`);
+    }
 
     revalidatePath("/hr/certificates");
     revalidatePath("/profile/hr");
