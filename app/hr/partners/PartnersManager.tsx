@@ -9,6 +9,8 @@ import {
   deletePartner,
   saveContact,
   deleteContact,
+  savePartnerLog,
+  deletePartnerLog,
 } from "@/app/hr/partners/actions";
 import { getCardImageUrl } from "@/app/hr/cards/actions";
 import {
@@ -19,13 +21,16 @@ import {
   DEFAULT_PARTNER_CATEGORY,
   contactLine,
   countByCategory,
+  latestTransactionLog,
   partnerSearchText,
   primaryContact,
   type PartnerCategory,
   type PartnerContact,
+  type PartnerTransactionLog,
   type PartnerWithContacts,
 } from "@/lib/businessPartners";
 import { fmtKstDate } from "@/lib/datetime";
+import { kstTodayYmd } from "@/lib/trainings";
 import {
   cardCls,
   btnPrimary,
@@ -48,6 +53,10 @@ import {
 //   * 공개/비공개(isManager): 일반 직원에게는 비공개 거래처가 서버에서 걸러져
 //     애초에 내려오지 않습니다. 여기 isManager 분기는 **배지·토글을 그릴지**만
 //     정합니다(존재를 모르게). 실제 차단은 서버 액션이 담당합니다.
+//   * 거래 이력: 담당자 명단이 "누구와 연락하는가"라면 거래 이력은 "무엇을
+//     했는가"입니다. 등록은 이 화면을 볼 수 있는 직원 누구나, 수정·삭제는
+//     등록자 본인 또는 관장·부장 — 버튼 노출은 서버가 준 canEdit 로 정하고
+//     실제 차단은 액션이 다시 합니다.
 //   * 명함첩 연결(card_id)은 2단계 — 이 화면에서는 다루지 않습니다.
 
 const inCls =
@@ -106,6 +115,14 @@ const EMPTY_CONTACT_FORM: ContactForm = {
   isPrimary: false,
 };
 
+type LogForm = {
+  id: string | null;
+  occurred_on: string; // "YYYY-MM-DD"
+  content: string;
+};
+
+const EMPTY_LOG_FORM: LogForm = { id: null, occurred_on: "", content: "" };
+
 function categoryBadge(category: PartnerCategory): string {
   return `inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-semibold ${PARTNER_CATEGORY_BADGE[category]}`;
 }
@@ -141,6 +158,10 @@ export default function PartnersManager({
   const [contactForm, setContactForm] = useState<ContactForm>({
     ...EMPTY_CONTACT_FORM,
   });
+
+  // 거래 이력 폼.
+  const [logOpen, setLogOpen] = useState(false);
+  const [logForm, setLogForm] = useState<LogForm>({ ...EMPTY_LOG_FORM });
 
   const detail = useMemo(
     () => partners.find((p) => p.id === detailId) ?? null,
@@ -407,6 +428,74 @@ export default function PartnersManager({
     });
   }
 
+  // --- 거래 이력 폼 ---
+  //   kstTodayYmd 는 렌더가 아니라 클릭 시점에만 부릅니다(하이드레이션 안전).
+  function openNewLog() {
+    setLogForm({ ...EMPTY_LOG_FORM, occurred_on: kstTodayYmd() });
+    setLogOpen(true);
+    setMsg(null);
+  }
+
+  function openEditLog(l: PartnerTransactionLog) {
+    setLogForm({
+      id: l.id,
+      occurred_on: l.occurred_on,
+      content: l.content,
+    });
+    setLogOpen(true);
+    setMsg(null);
+  }
+
+  function closeLogForm() {
+    setLogForm({ ...EMPTY_LOG_FORM });
+    setLogOpen(false);
+  }
+
+  function submitLog() {
+    if (!detail) return;
+    setMsg(null);
+    startBusy(async () => {
+      const res = await savePartnerLog({
+        id: logForm.id,
+        partnerId: detail.id,
+        occurredOn: logForm.occurred_on,
+        content: logForm.content,
+      });
+      if (!res.ok) {
+        setMsg({ kind: "err", text: res.message });
+        return;
+      }
+      await reload();
+      closeLogForm();
+      setMsg({
+        kind: "ok",
+        text: logForm.id ? "거래 이력을 수정했습니다." : "거래 이력을 추가했습니다.",
+      });
+    });
+  }
+
+  function removeLog(l: PartnerTransactionLog) {
+    if (
+      !confirm(
+        `거래 이력을 삭제할까요?
+${l.occurred_on} ${l.content}
+되돌릴 수 없습니다.`,
+      )
+    )
+      return;
+    setMsg(null);
+    startBusy(async () => {
+      const res = await deletePartnerLog(l.id);
+      if (!res.ok) {
+        setMsg({ kind: "err", text: res.message });
+        return;
+      }
+      await reload();
+      if (logForm.id === l.id) closeLogForm();
+      setMsg({ kind: "ok", text: "거래 이력을 삭제했습니다." });
+    });
+  }
+
   const endedCount = partners.filter((p) => !p.is_active).length;
 
   return (
@@ -619,7 +708,8 @@ export default function PartnersManager({
                 )}
               </div>
               <p className="mt-0.5 text-xs text-ink-hint">
-                담당자 {detail.contacts.length}명 · 최근수정{" "}
+                담당자 {detail.contacts.length}명 · 거래이력{" "}
+                {detail.logs.length}건 · 최근수정{" "}
                 {fmtKstDate(detail.updated_at)}
                 {detail.registered_by ? ` · 등록 ${detail.registered_by}` : ""}
               </p>
@@ -630,6 +720,7 @@ export default function PartnersManager({
               onClick={() => {
                 setDetailId(null);
                 setContactOpen(false);
+                closeLogForm();
               }}
             >
               닫기 ✕
@@ -887,6 +978,146 @@ export default function PartnersManager({
               </div>
             )}
           </div>
+
+          {/* 거래 이력 — "이 업체와 무엇을 했는가"를 시간순으로 남깁니다.
+              담당자가 바뀌어도, 담당 직원이 바뀌어도 인수인계 때 그대로 읽힙니다.
+              등록은 누구나, 수정·삭제는 등록자 본인 또는 관장·부장(canEdit). */}
+          <div className="mt-4 border-t border-line pt-3">
+            <div className="flex items-center justify-between gap-2">
+              <h4 className="text-sm font-bold tracking-wide text-navy">
+                거래 이력 ({detail.logs.length})
+              </h4>
+              <button
+                type="button"
+                className={`${btnSecondary} h-8 px-3 text-xs`}
+                onClick={openNewLog}
+              >
+                + 이력 추가
+              </button>
+            </div>
+
+            {detail.logs.length === 0 ? (
+              <p className="py-6 text-center text-sm text-ink-hint">
+                등록된 거래 이력이 없습니다. 예: 2026-03 간판 제작
+              </p>
+            ) : (
+              <ul className="mt-3 space-y-2">
+                {detail.logs.map((l) => (
+                  <li
+                    key={l.id}
+                    className="rounded-lg border border-line p-3 text-sm"
+                  >
+                    <div className="flex flex-wrap items-start justify-between gap-2">
+                      <div className="min-w-0">
+                        <div className="flex flex-wrap items-center gap-2">
+                          <strong className="text-ink">
+                            {l.occurred_on
+                              ? fmtKstDate(l.occurred_on)
+                              : "날짜 없음"}
+                          </strong>
+                          {l.created_by && (
+                            <span className={badgeNeutral}>{l.created_by}</span>
+                          )}
+                        </div>
+                        <p className="mt-0.5 whitespace-pre-wrap text-ink-body">
+                          {l.content || <span className="text-ink-hint">-</span>}
+                        </p>
+                      </div>
+                      {/* 남이 등록한 이력에는 버튼 자체가 나오지 않습니다.
+                          (서버 판정값 canEdit — 실제 차단도 서버에서) */}
+                      {l.canEdit && (
+                        <div className="flex shrink-0 gap-1">
+                          <button
+                            type="button"
+                            className={`${btnSecondary} h-8 px-3 text-xs`}
+                            onClick={() => openEditLog(l)}
+                          >
+                            수정
+                          </button>
+                          <button
+                            type="button"
+                            className={`${btnDanger} h-8 px-3 text-xs`}
+                            disabled={busy}
+                            onClick={() => removeLog(l)}
+                          >
+                            삭제
+                          </button>
+                        </div>
+                      )}
+                    </div>
+                  </li>
+                ))}
+              </ul>
+            )}
+
+            {/* 이력 등록 · 수정 */}
+            {logOpen && (
+              <div className="mt-3 rounded-lg border border-dashed border-line bg-surface p-3">
+                <div className="flex items-center justify-between gap-2">
+                  <h5 className="text-xs font-bold tracking-wide text-navy">
+                    {logForm.id ? "거래 이력 수정" : "거래 이력 추가"}
+                  </h5>
+                  <button
+                    type="button"
+                    className="text-xs text-ink-hint hover:underline"
+                    onClick={closeLogForm}
+                  >
+                    닫기 ✕
+                  </button>
+                </div>
+
+                <div className="mt-2 grid grid-cols-1 gap-2 sm:grid-cols-3">
+                  <div>
+                    <label className={lblCls} htmlFor="log-occurred-on">
+                      거래 일자<span className="text-stamp"> *</span>
+                    </label>
+                    <input
+                      id="log-occurred-on"
+                      type="date"
+                      className={`${inCls} mt-1`}
+                      value={logForm.occurred_on}
+                      onChange={(e) =>
+                        setLogForm({ ...logForm, occurred_on: e.target.value })
+                      }
+                    />
+                  </div>
+                  <div className="sm:col-span-2">
+                    <label className={lblCls} htmlFor="log-content">
+                      내용<span className="text-stamp"> *</span>
+                    </label>
+                    <textarea
+                      id="log-content"
+                      className={`${inCls} mt-1`}
+                      rows={2}
+                      value={logForm.content}
+                      onChange={(e) =>
+                        setLogForm({ ...logForm, content: e.target.value })
+                      }
+                      placeholder="예: 간판 제작 — 견적·시공 내용, 특이사항"
+                    />
+                  </div>
+                </div>
+
+                <div className="mt-3 flex flex-wrap gap-2">
+                  <button
+                    type="button"
+                    className={`${btnPrimary} h-8 px-3 text-xs`}
+                    disabled={busy}
+                    onClick={submitLog}
+                  >
+                    {logForm.id ? "수정 저장" : "추가"}
+                  </button>
+                  <button
+                    type="button"
+                    className={`${btnSecondary} h-8 px-3 text-xs`}
+                    onClick={closeLogForm}
+                  >
+                    취소
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
         </section>
       )}
 
@@ -905,6 +1136,8 @@ export default function PartnersManager({
           <ul className="space-y-2">
             {filtered.map((p) => {
               const head = primaryContact(p.contacts);
+              // 최근 거래 이력 한 줄 — 목록에서 "이 업체와 뭘 했더라"를 바로 봅니다.
+              const lastLog = latestTransactionLog(p.logs);
               return (
                 <li
                   key={p.id}
@@ -917,6 +1150,7 @@ export default function PartnersManager({
                       setDetailId(p.id);
                       setContactOpen(false);
                       setContactForm({ ...EMPTY_CONTACT_FORM });
+                      closeLogForm();
                     }}
                   >
                     <span className="flex flex-wrap items-center gap-2">
@@ -937,6 +1171,13 @@ export default function PartnersManager({
                       {head ? ` (${contactLine(head)})` : ""}
                       {` · 최근수정 ${fmtKstDate(p.updated_at)}`}
                     </p>
+                    {lastLog && (
+                      <p className="mt-0.5 truncate text-xs text-ink-hint">
+                        최근 거래 {fmtKstDate(lastLog.occurred_on)} ·{" "}
+                        {lastLog.content}
+                        {p.logs.length > 1 ? ` 외 ${p.logs.length - 1}건` : ""}
+                      </p>
+                    )}
                   </button>
                   <div className="flex shrink-0 gap-1">
                     <button

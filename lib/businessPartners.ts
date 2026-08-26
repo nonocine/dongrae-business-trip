@@ -2,8 +2,9 @@
 // 거래처 관리 — 공용 타입·순수 헬퍼 (클라이언트 안전).
 //   * 서버 액션(app/hr/partners)·화면이 공유하는 단일 출처.
 //     여기에는 DB 접근 코드를 두지 않습니다(순수 함수·상수만).
-//   * 테이블: business_partners(거래처) 1 : N partner_contacts(담당자).
-//     둘 다 RLS on → service_role 경유만 가능.
+//   * 테이블: business_partners(거래처) 1 : N partner_contacts(담당자),
+//     그리고 1 : N partner_transaction_logs(거래이력).
+//     모두 RLS on → service_role 경유만 가능.
 //   * 명함첩(business_cards)이 "받은편지함"이라면 거래처는 "정리된 주소록"입니다.
 //     명함이 없어도(학교·프로그램 의뢰처처럼) 수기로 등록할 수 있어야 합니다.
 //   * ⚠️ 거래처 담당자는 외부인 개인정보입니다. 값을 로그로 출력하지 마세요.
@@ -73,9 +74,26 @@ export type PartnerContact = {
   updated_at: string;
 };
 
-// 목록·상세가 함께 쓰는 형태 — 거래처 + 소속 담당자.
+// partner_transaction_logs 한 행 — 그 거래처와 실제로 주고받은 일의 기록.
+//   담당자 명단(누구와 연락하는가)과 거래이력(무엇을 했는가)은 다른 개념이라
+//   테이블을 나눴습니다. 예: "2026-03 간판 제작", "2026-07 인테리어 공사".
+export type PartnerTransactionLog = {
+  id: string;
+  partner_id: string;
+  // 거래 일자 "YYYY-MM-DD" (미입력이면 "").
+  occurred_on: string;
+  content: string;
+  created_by: string;
+  created_at: string;
+  // 이 이력을 수정·삭제할 수 있는지 — 서버가 판정해 내려줍니다(M0 또는 등록자
+  //   본인). 실제 차단은 액션이 다시 확인합니다.
+  canEdit: boolean;
+};
+
+// 목록·상세가 함께 쓰는 형태 — 거래처 + 소속 담당자 + 거래이력.
 export type PartnerWithContacts = BusinessPartner & {
   contacts: PartnerContact[];
+  logs: PartnerTransactionLog[];
 };
 
 // --- 화면 라벨 (등록 폼·상세 공용) ---
@@ -155,6 +173,45 @@ export function toPartnerContact(raw: Record<string, unknown>): PartnerContact {
     created_at: String(raw.created_at ?? ""),
     updated_at: String(raw.updated_at ?? ""),
   };
+}
+
+// 거래이력 한 행. canEdit 은 서버가 계산해 넘깁니다(클라이언트에서 만들지 않습니다).
+export function toPartnerTransactionLog(
+  raw: Record<string, unknown>,
+  canEdit: boolean,
+): PartnerTransactionLog {
+  return {
+    id: String(raw.id ?? ""),
+    partner_id: String(raw.partner_id ?? ""),
+    // date 컬럼은 "YYYY-MM-DD" 로 옵니다. null 이면 빈 문자열.
+    occurred_on: str(raw.occurred_on),
+    content: str(raw.content),
+    created_by: str(raw.created_by),
+    created_at: String(raw.created_at ?? ""),
+    canEdit,
+  };
+}
+
+// 거래이력 정렬 — 최신순(거래 일자 내림차순, 같으면 등록 늦은 것 먼저).
+//   일자가 비어 있는 행은 뒤로 보냅니다.
+export function sortTransactionLogs(
+  list: PartnerTransactionLog[],
+): PartnerTransactionLog[] {
+  return [...list].sort((a, b) => {
+    if (a.occurred_on !== b.occurred_on) {
+      if (!a.occurred_on) return 1;
+      if (!b.occurred_on) return -1;
+      return b.occurred_on.localeCompare(a.occurred_on);
+    }
+    return b.created_at.localeCompare(a.created_at);
+  });
+}
+
+// 목록 미리보기용 — 가장 최근 거래이력 한 건(없으면 null).
+export function latestTransactionLog(
+  logs: PartnerTransactionLog[],
+): PartnerTransactionLog | null {
+  return sortTransactionLogs(logs)[0] ?? null;
 }
 
 // 담당자 정렬 — 대표담당자 먼저, 그다음 등록순.

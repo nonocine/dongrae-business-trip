@@ -11,9 +11,12 @@ import { loadPartnerForWrite } from "@/lib/directoryGuards";
 import {
   toBusinessPartner,
   toPartnerContact,
+  toPartnerTransactionLog,
   normalizePartnerCategory,
   sortContacts,
+  sortTransactionLogs,
   type PartnerContact,
+  type PartnerTransactionLog,
   type PartnerWithContacts,
 } from "@/lib/businessPartners";
 
@@ -28,7 +31,11 @@ import {
 //     비공개 거래처가 가려지면 그 소속 담당자도 함께 가려집니다.
 //   * business_partners·partner_contacts 는 RLS on(정책 0개) → service_role
 //     경유만 가능. 모든 액션이 진입 시 권한을 재검증합니다.
-//   * 담당자는 partner_id FK on delete cascade — 거래처를 지우면 함께 지워집니다.
+//   * 거래이력(partner_transaction_logs): 등록은 거래처를 볼 수 있는 직원 누구나,
+//     수정·삭제는 **등록자 본인 또는 M0**(관장·부장). 사업실적 삭제와 같은 논리이며
+//     created_by(등록자 이름)로 비교합니다. 비공개 거래처의 이력은 거래처 가드를
+//     그대로 태워 함께 가려집니다.
+//   * 담당자·거래이력은 partner_id FK on delete cascade — 거래처를 지우면 함께 지워집니다.
 //     거래 종료는 삭제 대신 is_active=false(소프트 비활성)를 권장합니다.
 //   * 명함첩 연결(card_id, business_cards.partner_id)은 2단계 — 여기서는
 //     card_id 를 읽기만 하고 세팅하지 않습니다.
@@ -45,6 +52,18 @@ function actionError(
 }
 
 const trim = (v: unknown, max: number) => String(v ?? "").trim().slice(0, max);
+
+// 거래이력을 수정·삭제할 수 있는지 — M0(관장·부장) 또는 등록자 본인.
+//   사업실적(deleteBusinessResult)의 "관리자 ∥ 작성자" 판정과 같은 논리입니다.
+//   created_by 가 비어 있는 행(옛 데이터)은 M0 만 손댈 수 있습니다.
+function canEditLog(
+  createdBy: string,
+  ctx: { isM0: boolean; name: string },
+): boolean {
+  if (ctx.isM0) return true;
+  const owner = createdBy.trim();
+  return owner !== "" && owner === ctx.name.trim();
+}
 
 // 페이지용 — 접근 가능 여부만(로그인 직원이면 true).
 export async function canAccessPartners(): Promise<boolean> {
@@ -101,9 +120,32 @@ export async function listPartners(): Promise<PartnerWithContacts[]> {
     else byPartner.set(c.partner_id, [c]);
   }
 
+  // 거래이력도 "보이는 거래처"의 것만 — 담당자와 같은 방식입니다.
+  const { data: logRows, error: lErr } = await supabaseAdmin
+    .from("partner_transaction_logs")
+    .select("*")
+    .in(
+      "partner_id",
+      partners.map((p) => p.id),
+    );
+  if (lErr) throw new Error(lErr.message);
+
+  const logsByPartner = new Map<string, PartnerTransactionLog[]>();
+  for (const raw of logRows ?? []) {
+    const row = raw as Record<string, unknown>;
+    const log = toPartnerTransactionLog(
+      row,
+      canEditLog(String(row.created_by ?? ""), ctx),
+    );
+    const list = logsByPartner.get(log.partner_id);
+    if (list) list.push(log);
+    else logsByPartner.set(log.partner_id, [log]);
+  }
+
   return partners.map((p) => ({
     ...p,
     contacts: sortContacts(byPartner.get(p.id) ?? []),
+    logs: sortTransactionLogs(logsByPartner.get(p.id) ?? []),
   }));
 }
 
@@ -132,10 +174,25 @@ export async function getPartner(
     .eq("partner_id", id);
   if (cErr) throw new Error(cErr.message);
 
+  const { data: logs, error: lErr } = await supabaseAdmin
+    .from("partner_transaction_logs")
+    .select("*")
+    .eq("partner_id", id);
+  if (lErr) throw new Error(lErr.message);
+
   return {
     ...toBusinessPartner(data as Record<string, unknown>),
     contacts: sortContacts(
       (contacts ?? []).map((r) => toPartnerContact(r as Record<string, unknown>)),
+    ),
+    logs: sortTransactionLogs(
+      (logs ?? []).map((r) => {
+        const row = r as Record<string, unknown>;
+        return toPartnerTransactionLog(
+          row,
+          canEditLog(String(row.created_by ?? ""), ctx),
+        );
+      }),
     ),
   };
 }
@@ -408,5 +465,126 @@ export async function deleteContact(id: string): Promise<ActionResult> {
     return { ok: true };
   } catch (e) {
     return actionError(e, "담당자를 삭제하지 못했습니다.");
+  }
+}
+
+// =====================================================================
+// 거래이력 등록 / 수정 / 삭제
+//   한 거래처에 여러 건("2026-03 간판 제작", "2026-07 인테리어 공사").
+//   담당자가 바뀌어도, 담당 직원이 바뀌어도 "이 업체와 무엇을 했는지"가 남아
+//   인수인계 때 바로 읽힙니다.
+//   * 등록: 거래처를 볼 수 있는 직원이면 누구나(관장 결정 2026-08-25).
+//   * 수정·삭제: 등록자 본인 또는 M0. UI 버튼을 숨기는 것과 별개로 여기서
+//     다시 막습니다.
+// =====================================================================
+export type SavePartnerLogInput = {
+  id?: string | null;
+  partnerId: string;
+  // "YYYY-MM-DD". 화면에서 date 입력으로 받습니다.
+  occurredOn?: string | null;
+  content?: string | null;
+};
+
+export async function savePartnerLog(
+  input: SavePartnerLogInput,
+): Promise<{ ok: true; id: string } | { ok: false; message: string }> {
+  try {
+    const ctx = await requirePartnerAccess();
+
+    const partnerId = trim(input.partnerId, 100);
+    if (!partnerId)
+      return { ok: false, message: "거래처가 지정되지 않았습니다." };
+
+    // 비공개 거래처의 이력은 관리자만 건드릴 수 있습니다(담당자와 동일).
+    const guard = await loadPartnerForWrite(partnerId, ctx.isManager);
+    if (!guard.ok) return guard;
+
+    const occurredOn = trim(input.occurredOn, 10);
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(occurredOn)) {
+      return { ok: false, message: "거래 일자를 입력해주세요." };
+    }
+    const content = trim(input.content, 2000);
+    if (!content) return { ok: false, message: "거래 내용을 입력해주세요." };
+
+    const row = { occurred_on: occurredOn, content };
+
+    const id = trim(input.id, 100);
+    if (id) {
+      // 수정 대상이 이 거래처의 이력인지 + 손댈 수 있는 사람인지 확인합니다.
+      const { data: prev } = await supabaseAdmin
+        .from("partner_transaction_logs")
+        .select("id, created_by")
+        .eq("id", id)
+        .eq("partner_id", partnerId)
+        .maybeSingle();
+      if (!prev) return { ok: false, message: "거래이력을 찾을 수 없습니다." };
+      if (
+        !canEditLog(String((prev as { created_by?: unknown }).created_by ?? ""), ctx)
+      ) {
+        return {
+          ok: false,
+          message: "본인이 등록한 거래이력만 수정할 수 있습니다.",
+        };
+      }
+
+      const { error } = await supabaseAdmin
+        .from("partner_transaction_logs")
+        .update(row)
+        .eq("id", id);
+      if (error) throw new Error(error.message);
+      revalidatePath("/hr/partners");
+      return { ok: true, id };
+    }
+
+    const { data, error } = await supabaseAdmin
+      .from("partner_transaction_logs")
+      .insert({ ...row, partner_id: partnerId, created_by: ctx.name })
+      .select("id")
+      .single();
+    if (error) throw new Error(error.message);
+    revalidatePath("/hr/partners");
+    return { ok: true, id: String((data as { id: string }).id) };
+  } catch (e) {
+    return actionError(e, "거래이력을 저장하지 못했습니다.");
+  }
+}
+
+export async function deletePartnerLog(id: string): Promise<ActionResult> {
+  try {
+    const ctx = await requirePartnerAccess();
+    if (!id) return { ok: false, message: "대상이 없습니다." };
+
+    const { data: prev } = await supabaseAdmin
+      .from("partner_transaction_logs")
+      .select("id, partner_id, created_by")
+      .eq("id", id)
+      .maybeSingle();
+    if (!prev) return { ok: false, message: "거래이력을 찾을 수 없습니다." };
+
+    const row = prev as { partner_id?: unknown; created_by?: unknown };
+
+    // 소속 거래처가 비공개면 관리자만 — "없는 것"으로 응답합니다.
+    const guard = await loadPartnerForWrite(
+      String(row.partner_id ?? ""),
+      ctx.isManager,
+    );
+    if (!guard.ok) return { ok: false, message: "거래이력을 찾을 수 없습니다." };
+
+    if (!canEditLog(String(row.created_by ?? ""), ctx)) {
+      return {
+        ok: false,
+        message: "본인이 등록한 거래이력만 삭제할 수 있습니다.",
+      };
+    }
+
+    const { error } = await supabaseAdmin
+      .from("partner_transaction_logs")
+      .delete()
+      .eq("id", id);
+    if (error) throw new Error(error.message);
+    revalidatePath("/hr/partners");
+    return { ok: true };
+  } catch (e) {
+    return actionError(e, "거래이력을 삭제하지 못했습니다.");
   }
 }
