@@ -150,13 +150,10 @@ export default function CredentialsManager({
   }, [rows, filter, q]);
 
   const counts = useMemo(() => {
-    const c: Record<Filter, number> = {
-      all: rows.length,
-      메일: 0,
-      구매: 0,
-      은행: 0,
-      기타: 0,
-    };
+    // 분야가 늘어도 여기를 손댈 일이 없도록 상수에서 만듭니다
+    //   (관장 8/25 요청으로 4개 → 7개가 되면서 하드코딩을 걷어냈습니다).
+    const c = { all: rows.length } as Record<Filter, number>;
+    for (const cat of CREDENTIAL_CATEGORIES) c[cat] = 0;
     for (const r of rows) c[r.category]++;
     return c;
   }, [rows]);

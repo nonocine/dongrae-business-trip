@@ -7,7 +7,18 @@
 //     열람 액션(revealCredential)만 반환합니다.
 // =====================================================================
 
-export const CREDENTIAL_CATEGORIES = ["메일", "구매", "은행", "기타"] as const;
+// 분야 — 등록 폼 드롭다운·목록 탭이 모두 이 배열에서 파생됩니다(순서 그대로).
+//   관장 8/25 요청으로 앱·SNS·프로그램을 더해 7개가 되었습니다. 기존에 "기타"로
+//   등록된 항목은 자동으로 옮기지 않습니다 — 화면에서 수정해 옮기면 됩니다.
+export const CREDENTIAL_CATEGORIES = [
+  "메일",
+  "앱",
+  "SNS",
+  "프로그램",
+  "구매",
+  "은행",
+  "기타",
+] as const;
 export type CredentialCategory = (typeof CREDENTIAL_CATEGORIES)[number];
 
 // 자유 text 컬럼 값 → 알려진 카테고리(모르면 "기타").
@@ -20,6 +31,9 @@ export function normalizeCredentialCategory(v: unknown): CredentialCategory {
 
 export const CREDENTIAL_CATEGORY_BADGE: Record<CredentialCategory, string> = {
   메일: "bg-navy-soft text-navy",
+  앱: "bg-brand-blue-soft text-brand-blue",
+  SNS: "bg-violet-100 text-violet-700",
+  프로그램: "bg-brand-yellow/25 text-amber-800",
   구매: "bg-success-soft text-success",
   은행: "bg-warning-soft text-warning",
   기타: "bg-surface text-ink-muted",
