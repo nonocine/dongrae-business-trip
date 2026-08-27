@@ -227,6 +227,8 @@ function computeFromProfile(
     baseSalary: base,
     extra: prof.extra,
     config: ctx.configMap,
+    // 교통보조비는 8월부터 급수 구간별 차등 — 급수를 함께 넘깁니다.
+    grade: prof.grade,
   });
   return { payItems: calc.payItems, deductItems: calc.deductItems };
 }

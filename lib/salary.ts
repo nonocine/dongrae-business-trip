@@ -197,6 +197,22 @@ export function certAllowanceKey(level: SalaryExtra["cert_level"]): string | nul
   return level ? `cert_allowance_${level}` : null;
 }
 
+// 교통보조비 급수 구간 → salary_config key.
+//   * 8월 임금 권고안부터 급수별 차등입니다(그전에는 전 직원 동일 5만원).
+//     1~2급 / 3~4급 / 5~6급 / 7급 네 구간이며, 자격수당이 cert_allowance_{n} 으로
+//     나뉜 것과 같은 방식입니다.
+//   * ⚠️ 금액은 코드에 두지 않습니다 — salary_config 값을 그대로 씁니다.
+//     (권고안이 바뀌면 화면에서 기준값만 고치면 됩니다)
+//   * 급수를 구간으로 읽을 수 없으면 null → 호출부가 옛 단일 key 로 폴백합니다.
+export function transportAllowanceKey(grade: string): string | null {
+  const n = gradeSortKey(grade); // "6급" → 6, 숫자가 없으면 9999
+  if (n >= 1 && n <= 2) return "transport_allowance_12";
+  if (n >= 3 && n <= 4) return "transport_allowance_34";
+  if (n >= 5 && n <= 6) return "transport_allowance_56";
+  if (n === 7) return "transport_allowance_7";
+  return null;
+}
+
 // 알 수 없는 jsonb → 안전한 SalaryExtra 로 보정.
 export function normalizeSalaryExtra(raw: unknown): SalaryExtra {
   if (raw == null || typeof raw !== "object" || Array.isArray(raw)) {
@@ -317,8 +333,10 @@ export function calcMonthlyPayroll(input: {
   baseSalary: number;
   extra: SalaryExtra;
   config: Record<string, number>;
+  // 교통보조비 급수 구간 판정용(예: "6급"). 없으면 옛 단일 key 로 계산합니다.
+  grade?: string;
 }): MonthlyPayroll {
-  const { baseSalary, extra, config } = input;
+  const { baseSalary, extra, config, grade } = input;
   const cfg = (key: string): number => {
     const v = Number(config[key]);
     return Number.isFinite(v) ? v : 0;
@@ -347,7 +365,16 @@ export function calcMonthlyPayroll(input: {
   }
   add(payItems, "family_allowance", "가족수당", Math.round(extra.family_allowance));
   if (extra.transport_target) {
-    add(payItems, "transport_allowance", "교통보조비", cfg("transport_allowance"));
+    // 급수 구간별 차등(8월 권고안). 구간 key 가 salary_config 에 아직 없으면
+    //   cfg 가 0 을 돌려주고 add 가 줄을 빼므로 명세가 깨지지 않습니다.
+    //   급수를 구간으로 읽을 수 없는 예외에서만 옛 단일 key 로 폴백합니다.
+    const transportKey = transportAllowanceKey(grade ?? "");
+    add(
+      payItems,
+      "transport_allowance",
+      "교통보조비",
+      cfg(transportKey ?? "transport_allowance")
+    );
   }
 
   const totalPay = payItems.reduce((s, i) => s + i.amount, 0);
@@ -386,6 +413,8 @@ export function estimateInsuranceByRate(input: {
   baseSalary: number;
   extra: SalaryExtra;
   config: Record<string, number>;
+  // 지급총액에 교통보조비(급수 구간별)가 들어가므로 급수도 함께 받습니다.
+  grade?: string;
 }): InsuranceEstimate {
   const { config } = input;
   const cfg = (key: string): number => {

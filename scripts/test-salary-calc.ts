@@ -7,6 +7,7 @@
 import {
   calcMonthlyPayroll,
   normalizeSalaryExtra,
+  transportAllowanceKey,
   type SalaryExtra,
 } from "../lib/salary";
 
@@ -44,6 +45,11 @@ function expectAbsent(
   const ok = !items.some((i) => i.key === key);
   if (!ok) failures++;
   console.log(`${ok ? "✓" : "✗"} ${label}: 공제내역에 '${key}' 줄 없음`);
+}
+function expectStr(label: string, actual: string, expected: string) {
+  const ok = actual === expected;
+  if (!ok) failures++;
+  console.log(`${ok ? "✓" : "✗"} ${label}: ${actual} (기대 ${expected})`);
 }
 const amt = (items: { key: string; amount: number }[], key: string): number =>
   items.find((i) => i.key === key)?.amount ?? 0;
@@ -157,6 +163,75 @@ expectAbsent("급식비 해제 → 미표시", noMealTransport.payItems, "meal_a
 expectAbsent(
   "교통보조비 해제 → 미표시",
   noMealTransport.payItems,
+  "transport_allowance"
+);
+
+
+// ---------------------------------------------------------------------
+// 케이스 5: 교통보조비 급수 구간별 차등 (8월 권고안)
+//   전 직원 5만원 → 1~2급 15만 / 3~4급 14만 / 5~6급 13만 / 7급 12만.
+//   금액은 salary_config 값이고, 코드는 급수로 key 만 고른다.
+// ---------------------------------------------------------------------
+console.log("\n=== 케이스 5: 교통보조비 급수 구간 ===");
+const CONFIG_TRANSPORT: Record<string, number> = {
+  ...CONFIG_2026,
+  transport_allowance_12: 150000,
+  transport_allowance_34: 140000,
+  transport_allowance_56: 130000,
+  transport_allowance_7: 120000,
+};
+const transportOf = (grade: string, cfg = CONFIG_TRANSPORT): number =>
+  amt(
+    calcMonthlyPayroll({
+      baseSalary: 2064690,
+      extra: normalizeSalaryExtra({}),
+      config: cfg,
+      grade,
+    }).payItems,
+    "transport_allowance"
+  );
+
+expectEq("1급 → 150,000", transportOf("1급"), 150000);
+expectEq("2급 → 150,000", transportOf("2급"), 150000);
+expectEq("3급 → 140,000", transportOf("3급"), 140000);
+expectEq("4급 → 140,000", transportOf("4급"), 140000);
+expectEq("5급 → 130,000", transportOf("5급"), 130000);
+expectEq("6급 → 130,000", transportOf("6급"), 130000);
+expectEq("7급 → 120,000", transportOf("7급"), 120000);
+
+// key 매핑 단독 확인.
+expectStr("키: 6급 → _56", transportAllowanceKey("6급") ?? "", "transport_allowance_56");
+expectStr("키: 2급 → _12", transportAllowanceKey("2급") ?? "", "transport_allowance_12");
+expectStr("키: 급수 불명 → null", transportAllowanceKey("") ?? "(null)", "(null)");
+
+// 구간 key 가 아직 salary_config 에 없으면 0 → 명세서에서 줄이 빠진다(에러 없음).
+console.log("\n--- 구간 key 미등록(관리자가 넣기 전) ---");
+expectEq("6급, 구간값 없음 → 0", transportOf("6급", CONFIG_2026), 0);
+expectAbsent(
+  "구간값 없으면 줄 자체가 빠짐",
+  calcMonthlyPayroll({
+    baseSalary: 2064690,
+    extra: normalizeSalaryExtra({}),
+    config: CONFIG_2026,
+    grade: "6급",
+  }).payItems,
+  "transport_allowance"
+);
+
+// 급수를 구간으로 읽을 수 없는 예외 → 옛 단일 key 로 폴백(명세가 0 으로 깨지지 않게).
+console.log("\n--- 급수 예외 → 옛 단일 key 폴백 ---");
+expectEq("급수 없음 → 종전 5만원", transportOf(""), 50000);
+expectEq("급수 9급(구간 밖) → 종전 5만원", transportOf("9급"), 50000);
+
+// 교통보조비 대상 해제는 급수와 무관하게 계속 제외.
+expectAbsent(
+  "교통 해제 직원은 구간과 무관하게 미표시",
+  calcMonthlyPayroll({
+    baseSalary: 2064690,
+    extra: normalizeSalaryExtra({ transport_target: false }),
+    config: CONFIG_TRANSPORT,
+    grade: "1급",
+  }).payItems,
   "transport_allowance"
 );
 

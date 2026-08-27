@@ -994,6 +994,8 @@ function EmployeeSalaryEditor({
       baseSalary: previewBase,
       extra: previewRow.extra,
       config,
+      // 교통보조비 급수 구간 판정 — 명세서 계산과 같은 입력을 줍니다.
+      grade: previewRow.grade,
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [hasConfig, previewBase, config, previewRow, previewExtraKey]);
@@ -1097,6 +1099,7 @@ function EmployeeSalaryEditor({
                   baseSalary: base,
                   extra: r.extra,
                   config,
+                  grade: r.grade,
                 })
               : null;
           return (
