@@ -4,6 +4,7 @@ import { revalidatePath } from "next/cache";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
 import { resolveSalaryAccess, requireSalaryAccess } from "@/lib/salaryAccess";
 import {
+  currentEffectiveFrom,
   normalizeSalaryExtra,
   validateMonthRanges,
   type SalaryGradeRow,
@@ -11,6 +12,7 @@ import {
   type EmployeeSalaryProfileRow,
   type SalaryExtra,
 } from "@/lib/salary";
+import { kstTodayYmd } from "@/lib/trainings";
 
 // =====================================================================
 // 급여 기준 관리 — /hr/salary (급여 1차)
@@ -34,6 +36,8 @@ function toGradeRow(raw: Record<string, unknown>): SalaryGradeRow {
     grade: String(raw.grade ?? ""),
     step: Number(raw.step ?? 0),
     base_salary: Number(raw.base_salary ?? 0),
+    // date 컬럼은 "YYYY-MM-DD" 로 옵니다.
+    effective_from: String(raw.effective_from ?? ""),
   };
 }
 function toConfigRow(raw: Record<string, unknown>): SalaryConfigRow {
@@ -93,16 +97,35 @@ export async function createSalaryYear(
       return { ok: false, message: `${y}년 데이터가 이미 존재합니다.` };
     }
     if (copyFromYear != null) {
-      const { data: grades } = await supabaseAdmin
+      // 연중 발효분이 여럿이면 **가장 최신 발효분만** 복사합니다. 새 연도의
+      //   출발 단가는 직전 연도 말 단가여야 하고, 옛 발효월을 그대로 들고 오면
+      //   새 연도에서 소급 계산이 생깁니다.
+      const { data: allGrades } = await supabaseAdmin
         .from("salary_grade_table")
-        .select("grade, step, base_salary")
+        .select("grade, step, base_salary, effective_from")
         .eq("year", copyFromYear);
+      const sourceRows = (allGrades ?? []).map((r) => ({
+        grade: String((r as { grade: unknown }).grade ?? ""),
+        step: Number((r as { step: unknown }).step ?? 0),
+        base_salary: Number((r as { base_salary: unknown }).base_salary ?? 0),
+        effective_from: String(
+          (r as { effective_from?: unknown }).effective_from ?? "",
+        ),
+      }));
+      const latest = [...new Set(sourceRows.map((r) => r.effective_from))]
+        .filter(Boolean)
+        .sort()
+        .pop();
+      const grades = latest
+        ? sourceRows.filter((r) => r.effective_from === latest)
+        : sourceRows;
       if (grades && grades.length > 0) {
         const rows = grades.map((r) => ({
           year: y,
-          grade: String((r as { grade: unknown }).grade ?? ""),
-          step: Number((r as { step: unknown }).step ?? 0),
-          base_salary: Number((r as { base_salary: unknown }).base_salary ?? 0),
+          grade: r.grade,
+          step: r.step,
+          base_salary: r.base_salary,
+          effective_from: `${y}-01-01`,
         }));
         const { error } = await supabaseAdmin
           .from("salary_grade_table")
@@ -139,6 +162,10 @@ export async function createSalaryYear(
 // =====================================================================
 // 호봉표 (salary_grade_table)
 // =====================================================================
+// 호봉표는 (year, grade, step, effective_from) 단위라 한 연도에 발효분이 여럿
+//   있습니다. 화면·직원 설정에는 **지금 유효한 최신 발효분만** 내려보냅니다.
+//   지난 발효분(구 단가)은 DB 에 이력으로 남고, 명세서 계산은 급여월 기준으로
+//   따로 고릅니다(monthlyActions → pickEffectiveBase).
 export async function listGradeTable(year: number): Promise<SalaryGradeRow[]> {
   await requireSalaryAccess();
   const { data, error } = await supabaseAdmin
@@ -146,15 +173,42 @@ export async function listGradeTable(year: number): Promise<SalaryGradeRow[]> {
     .select("*")
     .eq("year", year);
   if (error) throw new Error(error.message);
-  return (data ?? []).map((r) => toGradeRow(r as Record<string, unknown>));
+  const rows = (data ?? []).map((r) => toGradeRow(r as Record<string, unknown>));
+  const current = currentEffectiveFrom(rows, kstTodayYmd());
+  if (!current) return rows;
+  return rows.filter((r) => (r.effective_from || current) === current);
 }
 
+// 그 연도에 존재하는 발효월 목록(최신순) — 화면 안내에 씁니다.
+export async function listGradeEffectiveDates(
+  year: number,
+): Promise<{ dates: string[]; current: string | null }> {
+  await requireSalaryAccess();
+  const { data, error } = await supabaseAdmin
+    .from("salary_grade_table")
+    .select("effective_from")
+    .eq("year", year);
+  if (error) throw new Error(error.message);
+  const rows = (data ?? []).map((r) => ({
+    effective_from: String(
+      (r as { effective_from?: unknown }).effective_from ?? "",
+    ),
+  }));
+  const dates = [...new Set(rows.map((r) => r.effective_from).filter(Boolean))]
+    .sort()
+    .reverse();
+  return { dates, current: currentEffectiveFrom(rows, kstTodayYmd()) };
+}
+
+// 편집 대상은 화면에 보이는 발효분(=지금 유효한 최신 발효분)입니다.
+//   effective_from 을 받지 못하면 그 연도의 현재 발효분으로 맞춥니다.
 export async function saveGradeRow(input: {
   id: string | null;
   year: number;
   grade: string;
   step: number;
   base_salary: number;
+  effective_from?: string | null;
 }): Promise<{ ok: true } | { ok: false; message: string }> {
   try {
     await requireSalaryAccess();
@@ -170,33 +224,47 @@ export async function saveGradeRow(input: {
     if (!Number.isFinite(base) || base < 0)
       return { ok: false, message: "기본급은 0 이상이어야 합니다." };
 
-    // (year, grade, step) 중복 방지 — 자기 자신(id)은 제외.
+    // 발효월 — 넘어온 값이 없으면 그 연도의 현재 발효분에 맞춥니다.
+    let effectiveFrom = String(input.effective_from ?? "").trim();
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(effectiveFrom)) {
+      const { current } = await listGradeEffectiveDates(year);
+      effectiveFrom = current ?? `${year}-01-01`;
+    }
+
+    // (year, grade, step, effective_from) 중복 방지 — 자기 자신(id)은 제외.
+    //   같은 급수·호봉이라도 발효월이 다르면 별개 행입니다(연중 인상 이력).
     const { data: dup } = await supabaseAdmin
       .from("salary_grade_table")
       .select("id")
       .eq("year", year)
       .eq("grade", grade)
-      .eq("step", step);
+      .eq("step", step)
+      .eq("effective_from", effectiveFrom);
     const conflict = (dup ?? []).some(
       (r) => String((r as { id: unknown }).id) !== (input.id ?? "")
     );
     if (conflict) {
       return {
         ok: false,
-        message: `${year}년 ${grade} ${step}호봉이 이미 있습니다.`,
+        message: `${year}년 ${grade} ${step}호봉(${effectiveFrom} 발효)이 이미 있습니다.`,
       };
     }
 
     if (input.id) {
+      // 발효월은 옮기지 않습니다 — 단가만 고칩니다(이력이 뒤섞이지 않게).
       const { error } = await supabaseAdmin
         .from("salary_grade_table")
         .update({ grade, step, base_salary: Math.round(base) })
         .eq("id", input.id);
       if (error) throw new Error(error.message);
     } else {
-      const { error } = await supabaseAdmin
-        .from("salary_grade_table")
-        .insert({ year, grade, step, base_salary: Math.round(base) });
+      const { error } = await supabaseAdmin.from("salary_grade_table").insert({
+        year,
+        grade,
+        step,
+        base_salary: Math.round(base),
+        effective_from: effectiveFrom,
+      });
       if (error) throw new Error(error.message);
     }
     revalidatePath("/hr/salary");

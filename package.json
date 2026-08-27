@@ -11,6 +11,7 @@
     "test:e2e:ui": "playwright test --ui",
     "test:docs": "tsx scripts/test-recruitment-docs.ts",
     "test:salary": "tsx scripts/test-salary-calc.ts",
+    "test:effective": "node --import tsx scripts/test-salary-effective.ts",
     "test:edi": "tsx scripts/test-salary-edi.ts",
     "test:payslip": "tsx scripts/test-salary-payslip.ts",
     "test:enroll": "tsx scripts/test-saem-enrollment.ts",

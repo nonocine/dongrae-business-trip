@@ -6,6 +6,8 @@ import { requireSalaryAccess } from "@/lib/salaryAccess";
 import {
   calcMonthlyPayroll,
   normalizeSalaryExtra,
+  payrollEffectiveDate,
+  pickEffectiveBase,
   recalcTotals,
   rangeIncludesMonth,
   isEmployedInMonth,
@@ -82,8 +84,13 @@ type ProfileRow = {
   end_month: number;
   extra: SalaryExtra;
 };
+// 호봉표 한 칸의 발효 이력 — 같은 (grade, step) 에 발효월이 다른 단가가 여럿.
+type GradeBase = { effective_from: string; base_salary: number };
+
 type GenContext = {
-  gradeMap: Map<string, number>; // `${grade}::${step}` → base_salary
+  // `${grade}::${step}` → 발효분 목록. 기본급은 급여월 기준으로 골라 씁니다
+  //   (연중 인상분이 과거로 소급되지 않게) → pickEffectiveBase.
+  gradeMap: Map<string, GradeBase[]>;
   configMap: Record<string, number>;
   profilesByDriver: Map<string, ProfileRow[]>;
   empByDriver: Map<string, EmpMeta>;
@@ -93,7 +100,7 @@ async function loadContext(year: number): Promise<GenContext> {
   const [gradeRes, configRes, profRes, driverRes, empRes] = await Promise.all([
     supabaseAdmin
       .from("salary_grade_table")
-      .select("grade, step, base_salary")
+      .select("grade, step, base_salary, effective_from")
       .eq("year", year),
     supabaseAdmin
       .from("salary_config")
@@ -109,13 +116,18 @@ async function loadContext(year: number): Promise<GenContext> {
       .select("driver_id, employment_status, resignation_date"),
   ]);
 
-  const gradeMap = new Map<string, number>();
+  // ⚠️ 같은 (grade, step) 에 발효월이 다른 행이 여럿이라 set 으로 덮어쓰면
+  //    어느 단가가 남는지 순서에 좌우됩니다. 전부 모아 두고 계산 시점에 고릅니다.
+  const gradeMap = new Map<string, GradeBase[]>();
   for (const g of gradeRes.data ?? []) {
     const r = g as Record<string, unknown>;
-    gradeMap.set(
-      `${String(r.grade ?? "")}::${Number(r.step ?? 0)}`,
-      Number(r.base_salary ?? 0)
-    );
+    const key = `${String(r.grade ?? "")}::${Number(r.step ?? 0)}`;
+    const list = gradeMap.get(key) ?? [];
+    list.push({
+      effective_from: String(r.effective_from ?? ""),
+      base_salary: Number(r.base_salary ?? 0),
+    });
+    gradeMap.set(key, list);
   }
   const configMap: Record<string, number> = {};
   for (const c of configRes.data ?? []) {
@@ -194,11 +206,22 @@ function isTarget(
 }
 
 // 설정 기준 명세서 계산(base + extra). base 없으면 null.
+//   ★ 기본급은 **급여월 기준**으로 유효한 발효분에서 끌어옵니다. 8월 인상분이
+//     7월 명세서에 소급되지 않게 하는 지점입니다(관장 지시, 2026-08).
+//     - 7월 계산 → 2026-01-01 발효분(구 단가)
+//     - 8월 이후 → 2026-08-01 발효분(신 단가)
+//   급식비·자격수당·교통보조비 등 나머지 수당은 여전히 수동 입력값(extra)을
+//   그대로 씁니다 — 이번 자동화 범위는 기본급 하나입니다.
 function computeFromProfile(
   ctx: GenContext,
-  prof: ProfileRow
+  prof: ProfileRow,
+  year: number,
+  month: number
 ): { payItems: PayItem[]; deductItems: PayItem[] } | null {
-  const base = ctx.gradeMap.get(`${prof.grade}::${prof.step}`);
+  const base = pickEffectiveBase(
+    ctx.gradeMap.get(`${prof.grade}::${prof.step}`) ?? [],
+    payrollEffectiveDate(year, month)
+  );
   if (base == null) return null;
   const calc = calcMonthlyPayroll({
     baseSalary: base,
@@ -264,7 +287,7 @@ export async function generateMonthlyPayroll(input: {
       const prof = isTarget(ctx, driverId, year, month);
       if (!prof) continue;
       targets++;
-      const computed = computeFromProfile(ctx, prof);
+      const computed = computeFromProfile(ctx, prof, year, month);
       if (!computed) {
         noBase.push(emp.name);
         continue;
@@ -390,7 +413,7 @@ export async function listMonthlyPayroll(input: {
     // 설정과 다름 — 설정 기준 재계산과 저장값 비교.
     let modified = false;
     if (prof) {
-      const base = computeFromProfile(ctx, prof);
+      const base = computeFromProfile(ctx, prof, year, month);
       if (base) {
         modified =
           !itemsEqual(base.payItems, rec.pay_items) ||

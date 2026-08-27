@@ -3,7 +3,12 @@
 //   * 급여 "1차": 계산·명세서·발송은 없음. 기준값/설정 데이터 모델과 검증만.
 //   * 서버 액션(app/hr/salary/actions.ts)과 클라이언트(SalaryManager)가 공유합니다.
 //   * DB 테이블(조사 결과):
-//     - salary_grade_table(id, year, grade text, step int, base_salary int)
+//     - salary_grade_table(id, year, grade text, step int, base_salary int,
+//                           effective_from date)
+//       ⚠️ 호봉표는 (year, grade, step, effective_from) 단위입니다. 임금 인상이
+//       연중에 발효되므로 같은 (year, grade, step) 에 발효월이 다른 행이 여럿
+//       있습니다(2026: 01-01 구 단가 / 08-01 신 단가). 기본급을 끌어올 때는
+//       반드시 급여월 기준으로 유효한 발효분을 골라야 합니다 → pickEffectiveBase.
 //     - salary_config(id, year, config_key text, config_value numeric, label text)
 //     - employee_salary_profiles(id, driver_id, year, grade text, step int,
 //                                start_month int, end_month int, extra jsonb)
@@ -15,7 +20,66 @@ export type SalaryGradeRow = {
   grade: string;
   step: number;
   base_salary: number;
+  // 이 단가가 발효되는 날 "YYYY-MM-DD". 연중 인상분을 소급하지 않기 위한 축.
+  effective_from: string;
 };
+
+// =====================================================================
+// 발효월(effective_from) 규칙 — 기본급 조회의 단일 출처
+//   * 급여월이 M월이면 그 달 1일을 기준으로, effective_from <= 기준일 인 행 중
+//     effective_from 이 가장 큰(최신) 행의 base_salary 를 씁니다.
+//       - 2026년 7월 계산 → 2026-01-01 만 조건 충족 → 구 단가
+//       - 2026년 8월 이후 → 2026-08-01 이 최신     → 신 단가
+//   * 인상분이 과거로 소급되지 않게 하는 것이 이 규칙의 목적입니다.
+//     확정·발송된 지난달 명세서를 다시 계산해도 그때 단가가 그대로 나옵니다.
+//   * 날짜는 "YYYY-MM-DD" 문자열 비교로 충분합니다(사전순 = 시간순).
+// =====================================================================
+
+const pad2 = (n: number) => String(n).padStart(2, "0");
+
+// 급여월의 기준일 — 그 달 1일.
+export function payrollEffectiveDate(year: number, month: number): string {
+  return `${year}-${pad2(month)}-01`;
+}
+
+// 발효월이 유효한 행들 중 가장 최신 것. 없으면 null.
+export function pickEffectiveRow<T extends { effective_from: string }>(
+  rows: T[],
+  asOf: string,
+): T | null {
+  let best: T | null = null;
+  for (const row of rows) {
+    // 발효월이 비어 있는 행(옛 데이터)은 항상 유효한 것으로 봅니다.
+    const from = row.effective_from || "";
+    if (from && from > asOf) continue;
+    if (!best || from > (best.effective_from || "")) best = row;
+  }
+  return best;
+}
+
+// 급여월 기준 기본급. 해당 (grade, step) 에 유효한 발효분이 없으면 null.
+export function pickEffectiveBase(
+  rows: { effective_from: string; base_salary: number }[],
+  asOf: string,
+): number | null {
+  const hit = pickEffectiveRow(rows, asOf);
+  return hit ? hit.base_salary : null;
+}
+
+// 화면에 보여줄(=편집 대상) 발효분 — "지금 유효한 최신 발효분".
+//   today 기준으로 아직 발효 전인 세트만 있으면 가장 이른 것으로 폴백합니다.
+//   지난 발효분(구 단가)은 이력으로 DB 에 남고 화면에서만 빠집니다.
+export function currentEffectiveFrom(
+  rows: { effective_from: string }[],
+  today: string,
+): string | null {
+  const dates = [...new Set(rows.map((r) => r.effective_from || ""))]
+    .filter(Boolean)
+    .sort();
+  if (dates.length === 0) return null;
+  const valid = dates.filter((d) => d <= today);
+  return valid.length > 0 ? valid[valid.length - 1] : dates[0];
+}
 
 export type SalaryConfigRow = {
   id: string;

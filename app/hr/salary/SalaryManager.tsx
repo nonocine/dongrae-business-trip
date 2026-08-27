@@ -301,6 +301,10 @@ function GradeTableSection({
   onRefresh: () => void;
 }) {
   const sorted = useMemo(() => sortGradeRows(grades), [grades]);
+  // 화면에 내려온 호봉표는 "지금 유효한 최신 발효분" 한 세트입니다(서버에서 필터).
+  //   추가·수정도 그 발효분에 붙습니다. 지난 발효분(구 단가)은 DB 에 이력으로 남고
+  //   명세서 계산이 급여월 기준으로 알아서 골라 씁니다.
+  const effectiveFrom = sorted[0]?.effective_from ?? "";
   const [editId, setEditId] = useState<string | null>(null);
   const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
   const [pending, start] = useTransition();
@@ -327,6 +331,7 @@ function GradeTableSection({
         grade: form.grade,
         step: Number(form.step),
         base_salary: Number(form.base),
+        effective_from: effectiveFrom || null,
       });
       if (res.ok) {
         setEditId(null);
@@ -353,8 +358,19 @@ function GradeTableSection({
 
   return (
     <section className={cardCls}>
-      <div className="mb-3 flex items-center justify-between">
-        <h3 className="text-sm font-bold text-ink">{year}년 호봉표</h3>
+      <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+        <div>
+          <h3 className="text-sm font-bold text-ink">{year}년 호봉표</h3>
+          {/* 임금 인상이 연중에 발효되므로 호봉표는 발효월 단위로 쌓입니다.
+              화면·편집 대상은 지금 유효한 최신 발효분이고, 지난 발효분은 이력으로
+              남아 그 달 명세서에 계속 쓰입니다(과거 소급 방지). */}
+          {effectiveFrom && (
+            <p className="mt-0.5 text-xs text-ink-muted">
+              {effectiveFrom} 발효분 ({sorted.length}행) — 이 단가는 발효월부터
+              적용됩니다. 이전 발효분은 그 달 명세서용으로 보존됩니다.
+            </p>
+          )}
+        </div>
         {editId !== "new" && (
           <button type="button" onClick={beginAdd} className={btnSecondary}>
             + 호봉 추가
