@@ -235,7 +235,7 @@ export async function getClubDashboard(
         .in("program_id", ids)
         .eq("status", "active"),
       supabaseAdmin
-        .from("club_budget_plans")
+        .from("saem_club_budget_plans")
         .select("id,program_id,budget_category,description,amount,sort_order")
         .in("program_id", ids)
         .eq("plan_year", year)
@@ -251,7 +251,7 @@ export async function getClubDashboard(
     if (query.error) throw new Error(query.error.message);
   }
 
-  // 예산계획(club_budget_plans)은 이 조회만 실패해도 화면 전체를 막지 않는다.
+  // 예산계획(saem_club_budget_plans)은 이 조회만 실패해도 화면 전체를 막지 않는다.
   //   테이블이 아직 없는 경우(missingSchema)가 대표적이며, 그 밖의 오류도 계획을 비워 표시한다.
   const budgetPlanRows =
     budgetPlansQuery.error && !missingSchema(budgetPlansQuery.error)
@@ -823,7 +823,7 @@ export async function addClubBudgetPlan(input: {
     const category = input.category.trim();
     if (!category) return { ok: false, message: "예산 항목을 입력하세요." };
     const amount = Math.max(0, Math.round(Number(input.amount) || 0));
-    const { error } = await supabaseAdmin.from("club_budget_plans").insert({
+    const { error } = await supabaseAdmin.from("saem_club_budget_plans").insert({
       program_id: input.programId,
       plan_year: input.year,
       budget_category: category,
@@ -849,7 +849,7 @@ export async function deleteClubBudgetPlan(input: {
   try {
     await requireClubAccess();
     const { error } = await supabaseAdmin
-      .from("club_budget_plans")
+      .from("saem_club_budget_plans")
       .delete()
       .eq("id", input.planId);
     if (error) throw new Error(error.message);
