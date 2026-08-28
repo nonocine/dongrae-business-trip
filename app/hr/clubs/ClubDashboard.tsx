@@ -216,17 +216,25 @@ export default function ClubDashboard({
             등록된 동아리가 없습니다.
           </p>
         ) : (
-          <div className="mt-4 space-y-3">
-            {data.clubs.map((club) => (
-              <ClubCard
-                key={club.id}
-                club={club}
-                year={year}
-                month={month}
-                pending={pending}
-                run={run}
-              />
-            ))}
+          <div className="mt-4">
+            {data.clubs.length > 1 && (
+              <p className="mb-2 text-xs text-ink-muted">
+                동아리명을 눌러 펼치면 활동계획·예산·월간보고를 관리할 수
+                있습니다.
+              </p>
+            )}
+            <div className="space-y-3">
+              {data.clubs.map((club) => (
+                <ClubCard
+                  key={club.id}
+                  club={club}
+                  year={year}
+                  month={month}
+                  pending={pending}
+                  run={run}
+                />
+              ))}
+            </div>
           </div>
         )}
       </section>
@@ -494,6 +502,7 @@ function ClubCard({
   const [planCategory, setPlanCategory] = useState("");
   const [planDescription, setPlanDescription] = useState("");
   const [planAmount, setPlanAmount] = useState("");
+  const [open, setOpen] = useState(false);
   const executionRate =
     club.budgetPlanTotal > 0
       ? Math.round((club.expenseTotal / club.budgetPlanTotal) * 100)
@@ -507,400 +516,412 @@ function ClubCard({
       : badgeNeutral;
   return (
     <article className="rounded-xl border border-line bg-card p-4">
-      <div className="flex flex-wrap items-start justify-between gap-2">
-        <div>
-          <h3 className="font-bold text-ink">{club.name}</h3>
-          <p className="mt-0.5 text-xs text-ink-muted">
-            {club.teacherName ? `동아리샘 ${club.teacherName}` : "동아리샘 미지정"}
-            {club.room ? ` · ${club.room}` : ""}
-          </p>
-        </div>
-        <span className={statusClass}>
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        aria-expanded={open}
+        className="flex w-full flex-wrap items-center gap-x-2 gap-y-1 text-left"
+      >
+        <span className="text-xs text-ink-hint">{open ? "▼" : "▶"}</span>
+        <span className="font-bold text-ink">{club.name}</span>
+        <span className="text-xs text-ink-muted">
+          {club.teacherName ? `동아리샘 ${club.teacherName}` : "동아리샘 미지정"}
+          {club.room ? ` · ${club.room}` : ""}
+        </span>
+        <span className="text-xs text-ink-muted">
+          활동 {club.sessionCount}회 · 제출 {club.submittedCount}/
+          {club.sessionCount} · 연인원 {club.attendanceTotal}명
+        </span>
+        <span className={`ml-auto shrink-0 ${statusClass}`}>
           {club.reportStatus === "confirmed"
             ? "월간보고 확정"
             : ready
             ? "확정 가능"
             : "작성 중"}
         </span>
-      </div>
-      <dl className="mt-3 grid grid-cols-2 gap-2 text-sm sm:grid-cols-5">
-        <Metric label="등록" value={`${club.registeredCount}명`} />
-        <Metric label="활동" value={`${club.sessionCount}회`} />
-        <Metric label="제출" value={`${club.submittedCount}/${club.sessionCount}`} />
-        <Metric label="연인원" value={`${club.attendanceTotal}명`} />
-        <Metric
-          label="예산"
-          value={`${club.expenseTotal.toLocaleString("ko-KR")}원`}
-        />
-      </dl>
-      <div className="mt-3">
-        <p className="text-sm font-semibold text-navy">이 달 활동계획</p>
-        {club.sessions.length === 0 ? (
-          <p className="mt-2 text-xs text-ink-muted">
-            이 달 활동계획이 없습니다.
-          </p>
-        ) : (
-          <div className="mt-2 overflow-x-auto">
-            <table className="w-full min-w-[720px] border-collapse text-sm">
-              <thead>
-                <tr className="border-b border-line text-left text-xs text-ink-hint">
-                  <th className="py-1.5 pr-2 font-medium">회차</th>
-                  <th className="py-1.5 pr-2 font-medium">날짜</th>
-                  <th className="py-1.5 pr-2 font-medium">활동내용</th>
-                  <th className="py-1.5 pr-2 font-medium">장소</th>
-                  <th className="py-1.5 pr-2 font-medium">참여인원</th>
-                  <th className="py-1.5 pr-2 font-medium">상태</th>
-                  <th className="py-1.5 font-medium">관리</th>
-                </tr>
-              </thead>
-              <tbody>
-                {club.sessions.map((session) =>
-                  editingId === session.id ? (
-                    <tr key={session.id} className="border-b border-line">
-                      <td colSpan={7} className="py-2">
-                        <div className="grid gap-2 sm:grid-cols-2">
-                          <input
-                            type="date"
-                            value={editDate}
-                            onChange={(e) => setEditDate(e.target.value)}
-                            className={inputCls}
-                          />
-                          <input
-                            value={editLocation}
-                            onChange={(e) => setEditLocation(e.target.value)}
-                            placeholder="활동장소"
-                            className={inputCls}
-                          />
-                          <textarea
-                            rows={2}
-                            value={editContent}
-                            onChange={(e) => setEditContent(e.target.value)}
-                            placeholder="활동내용"
-                            className={`${inputCls} sm:col-span-2`}
-                          />
-                        </div>
-                        <div className="mt-2 flex gap-2">
-                          <button
-                            type="button"
-                            disabled={pending}
-                            onClick={() =>
-                              run(async () => {
-                                const result = await updateClubSession({
-                                  sessionId: session.id,
-                                  date: editDate,
-                                  content: editContent,
-                                  location: editLocation,
-                                });
-                                if (result.ok) setEditingId(null);
-                                return result;
-                              }, "활동계획을 수정했습니다.")
+      </button>
+      {open && (
+        <>
+        <dl className="mt-3 grid grid-cols-2 gap-2 text-sm sm:grid-cols-5">
+          <Metric label="등록" value={`${club.registeredCount}명`} />
+          <Metric label="활동" value={`${club.sessionCount}회`} />
+          <Metric label="제출" value={`${club.submittedCount}/${club.sessionCount}`} />
+          <Metric label="연인원" value={`${club.attendanceTotal}명`} />
+          <Metric
+            label="예산"
+            value={`${club.expenseTotal.toLocaleString("ko-KR")}원`}
+          />
+        </dl>
+        <div className="mt-3">
+          <p className="text-sm font-semibold text-navy">이 달 활동계획</p>
+          {club.sessions.length === 0 ? (
+            <p className="mt-2 text-xs text-ink-muted">
+              이 달 활동계획이 없습니다.
+            </p>
+          ) : (
+            <div className="mt-2 overflow-x-auto">
+              <table className="w-full min-w-[720px] border-collapse text-sm">
+                <thead>
+                  <tr className="border-b border-line text-left text-xs text-ink-hint">
+                    <th className="py-1.5 pr-2 font-medium">회차</th>
+                    <th className="py-1.5 pr-2 font-medium">날짜</th>
+                    <th className="py-1.5 pr-2 font-medium">활동내용</th>
+                    <th className="py-1.5 pr-2 font-medium">장소</th>
+                    <th className="py-1.5 pr-2 font-medium">참여인원</th>
+                    <th className="py-1.5 pr-2 font-medium">상태</th>
+                    <th className="py-1.5 font-medium">관리</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {club.sessions.map((session) =>
+                    editingId === session.id ? (
+                      <tr key={session.id} className="border-b border-line">
+                        <td colSpan={7} className="py-2">
+                          <div className="grid gap-2 sm:grid-cols-2">
+                            <input
+                              type="date"
+                              value={editDate}
+                              onChange={(e) => setEditDate(e.target.value)}
+                              className={inputCls}
+                            />
+                            <input
+                              value={editLocation}
+                              onChange={(e) => setEditLocation(e.target.value)}
+                              placeholder="활동장소"
+                              className={inputCls}
+                            />
+                            <textarea
+                              rows={2}
+                              value={editContent}
+                              onChange={(e) => setEditContent(e.target.value)}
+                              placeholder="활동내용"
+                              className={`${inputCls} sm:col-span-2`}
+                            />
+                          </div>
+                          <div className="mt-2 flex gap-2">
+                            <button
+                              type="button"
+                              disabled={pending}
+                              onClick={() =>
+                                run(async () => {
+                                  const result = await updateClubSession({
+                                    sessionId: session.id,
+                                    date: editDate,
+                                    content: editContent,
+                                    location: editLocation,
+                                  });
+                                  if (result.ok) setEditingId(null);
+                                  return result;
+                                }, "활동계획을 수정했습니다.")
+                              }
+                              className={btnSecondary}
+                            >
+                              저장
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => setEditingId(null)}
+                              className={btnSecondary}
+                            >
+                              취소
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                    ) : (
+                      <tr
+                        key={session.id}
+                        className="border-b border-line align-top"
+                      >
+                        <td className="py-2 pr-2 text-ink-body">
+                          {session.sessionNo}
+                        </td>
+                        <td className="py-2 pr-2 text-ink-body">
+                          {session.date}
+                        </td>
+                        <td className="py-2 pr-2 text-ink-body">
+                          {session.planContent || "-"}
+                          {session.submitted && session.logContent ? (
+                            <span className="mt-0.5 block text-xs text-ink-muted">
+                              기록: {session.logContent}
+                            </span>
+                          ) : null}
+                        </td>
+                        <td className="py-2 pr-2 text-ink-body">
+                          {session.location || "-"}
+                        </td>
+                        <td className="py-2 pr-2 text-ink-body">
+                          {session.participants}명
+                        </td>
+                        <td className="py-2 pr-2">
+                          <span
+                            className={
+                              session.submitted ? badgeSuccess : badgeNeutral
                             }
-                            className={btnSecondary}
                           >
-                            저장
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => setEditingId(null)}
-                            className={btnSecondary}
-                          >
-                            취소
-                          </button>
-                        </div>
-                      </td>
-                    </tr>
-                  ) : (
-                    <tr
-                      key={session.id}
-                      className="border-b border-line align-top"
-                    >
-                      <td className="py-2 pr-2 text-ink-body">
-                        {session.sessionNo}
-                      </td>
-                      <td className="py-2 pr-2 text-ink-body">
-                        {session.date}
-                      </td>
-                      <td className="py-2 pr-2 text-ink-body">
-                        {session.planContent || "-"}
-                        {session.submitted && session.logContent ? (
-                          <span className="mt-0.5 block text-xs text-ink-muted">
-                            기록: {session.logContent}
+                            {session.submitted ? "제출완료" : "예정"}
                           </span>
-                        ) : null}
-                      </td>
-                      <td className="py-2 pr-2 text-ink-body">
-                        {session.location || "-"}
-                      </td>
-                      <td className="py-2 pr-2 text-ink-body">
-                        {session.participants}명
-                      </td>
-                      <td className="py-2 pr-2">
-                        <span
-                          className={
-                            session.submitted ? badgeSuccess : badgeNeutral
-                          }
-                        >
-                          {session.submitted ? "제출완료" : "예정"}
-                        </span>
-                      </td>
-                      <td className="py-2">
-                        <div className="flex gap-1">
+                        </td>
+                        <td className="py-2">
+                          <div className="flex gap-1">
+                            <button
+                              type="button"
+                              disabled={pending}
+                              onClick={() => {
+                                setEditingId(session.id);
+                                setEditDate(session.date);
+                                setEditContent(session.planContent);
+                                setEditLocation(session.location);
+                              }}
+                              className={btnSecondary}
+                            >
+                              수정
+                            </button>
+                            <button
+                              type="button"
+                              disabled={pending || session.submitted}
+                              onClick={() =>
+                                run(
+                                  () =>
+                                    deleteClubSession({ sessionId: session.id }),
+                                  "활동계획을 삭제했습니다."
+                                )
+                              }
+                              className={btnSecondary}
+                            >
+                              삭제
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                    )
+                  )}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+        <details className="mt-3 rounded-lg bg-surface p-3">
+          <summary className="cursor-pointer text-sm font-semibold text-navy">
+            {year}년 예산 사용 계획
+          </summary>
+          <div className="mt-3">
+            {club.budgetPlans.length === 0 ? (
+              <p className="text-xs text-ink-muted">예산계획이 없습니다.</p>
+            ) : (
+              <div className="overflow-x-auto">
+                <table className="w-full min-w-[480px] border-collapse text-sm">
+                  <thead>
+                    <tr className="border-b border-line text-left text-xs text-ink-hint">
+                      <th className="py-1.5 pr-2 font-medium">항목</th>
+                      <th className="py-1.5 pr-2 font-medium">내역</th>
+                      <th className="py-1.5 pr-2 text-right font-medium">계획액</th>
+                      <th className="py-1.5 font-medium">관리</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {club.budgetPlans.map((plan: ClubBudgetPlanRow) => (
+                      <tr key={plan.id} className="border-b border-line">
+                        <td className="py-2 pr-2 text-ink-body">{plan.category}</td>
+                        <td className="py-2 pr-2 text-ink-body">
+                          {plan.description || "-"}
+                        </td>
+                        <td className="py-2 pr-2 text-right text-ink-body">
+                          {plan.amount.toLocaleString("ko-KR")}원
+                        </td>
+                        <td className="py-2">
                           <button
                             type="button"
                             disabled={pending}
-                            onClick={() => {
-                              setEditingId(session.id);
-                              setEditDate(session.date);
-                              setEditContent(session.planContent);
-                              setEditLocation(session.location);
-                            }}
-                            className={btnSecondary}
-                          >
-                            수정
-                          </button>
-                          <button
-                            type="button"
-                            disabled={pending || session.submitted}
                             onClick={() =>
                               run(
-                                () =>
-                                  deleteClubSession({ sessionId: session.id }),
-                                "활동계획을 삭제했습니다."
+                                () => deleteClubBudgetPlan({ planId: plan.id }),
+                                "예산계획을 삭제했습니다."
                               )
                             }
                             className={btnSecondary}
                           >
                             삭제
                           </button>
-                        </div>
-                      </td>
-                    </tr>
-                  )
-                )}
-              </tbody>
-            </table>
-          </div>
-        )}
-      </div>
-      <details className="mt-3 rounded-lg bg-surface p-3">
-        <summary className="cursor-pointer text-sm font-semibold text-navy">
-          {year}년 예산 사용 계획
-        </summary>
-        <div className="mt-3">
-          {club.budgetPlans.length === 0 ? (
-            <p className="text-xs text-ink-muted">예산계획이 없습니다.</p>
-          ) : (
-            <div className="overflow-x-auto">
-              <table className="w-full min-w-[480px] border-collapse text-sm">
-                <thead>
-                  <tr className="border-b border-line text-left text-xs text-ink-hint">
-                    <th className="py-1.5 pr-2 font-medium">항목</th>
-                    <th className="py-1.5 pr-2 font-medium">내역</th>
-                    <th className="py-1.5 pr-2 text-right font-medium">계획액</th>
-                    <th className="py-1.5 font-medium">관리</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {club.budgetPlans.map((plan: ClubBudgetPlanRow) => (
-                    <tr key={plan.id} className="border-b border-line">
-                      <td className="py-2 pr-2 text-ink-body">{plan.category}</td>
-                      <td className="py-2 pr-2 text-ink-body">
-                        {plan.description || "-"}
-                      </td>
-                      <td className="py-2 pr-2 text-right text-ink-body">
-                        {plan.amount.toLocaleString("ko-KR")}원
-                      </td>
-                      <td className="py-2">
-                        <button
-                          type="button"
-                          disabled={pending}
-                          onClick={() =>
-                            run(
-                              () => deleteClubBudgetPlan({ planId: plan.id }),
-                              "예산계획을 삭제했습니다."
-                            )
-                          }
-                          className={btnSecondary}
-                        >
-                          삭제
-                        </button>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          )}
-          <p className="mt-2 text-xs text-ink-muted">
-            계획 합계 {club.budgetPlanTotal.toLocaleString("ko-KR")}원 · 집행{" "}
-            {club.expenseTotal.toLocaleString("ko-KR")}원 (
-            <span
-              className={executionRate > 100 ? "font-semibold text-stamp" : ""}
-            >
-              {executionRate}%
-            </span>
-            )
-          </p>
-          <div className="mt-3 grid grid-cols-2 gap-2">
-            <input
-              value={planCategory}
-              onChange={(e) => setPlanCategory(e.target.value)}
-              placeholder="예산 항목"
-              className={inputCls}
-            />
-            <input
-              type="number"
-              min={0}
-              value={planAmount}
-              onChange={(e) => setPlanAmount(e.target.value)}
-              placeholder="계획액"
-              className={inputCls}
-            />
-            <input
-              value={planDescription}
-              onChange={(e) => setPlanDescription(e.target.value)}
-              placeholder="내역"
-              className={`${inputCls} col-span-2`}
-            />
-            <button
-              type="button"
-              disabled={pending}
-              onClick={() =>
-                run(async () => {
-                  const result = await addClubBudgetPlan({
-                    programId: club.id,
-                    year,
-                    category: planCategory,
-                    description: planDescription,
-                    amount: Number(planAmount),
-                  });
-                  if (result.ok) {
-                    setPlanCategory("");
-                    setPlanDescription("");
-                    setPlanAmount("");
-                  }
-                  return result;
-                }, "예산계획을 추가했습니다.")
-              }
-              className={`${btnSecondary} col-span-2`}
-            >
-              예산계획 추가
-            </button>
-          </div>
-        </div>
-      </details>
-      <details className="mt-3 rounded-lg bg-surface p-3">
-        <summary className="cursor-pointer text-sm font-semibold text-navy">
-          활동·예산 추가
-        </summary>
-        <div className="mt-3 grid gap-3 lg:grid-cols-2">
-          <div className="grid grid-cols-2 gap-2">
-            <input
-              type="date"
-              value={sessionDate}
-              onChange={(e) => setSessionDate(e.target.value)}
-              className={inputCls}
-            />
-            <input
-              value={sessionLocation}
-              onChange={(e) => setSessionLocation(e.target.value)}
-              placeholder="활동장소"
-              className={inputCls}
-            />
-            <textarea
-              rows={2}
-              value={sessionContent}
-              onChange={(e) => setSessionContent(e.target.value)}
-              placeholder="활동내용"
-              className={`${inputCls} col-span-2`}
-            />
-            <button
-              type="button"
-              disabled={pending}
-              onClick={() =>
-                run(async () => {
-                  const result = await addClubSession({
-                    programId: club.id,
-                    date: sessionDate,
-                    content: sessionContent,
-                    location: sessionLocation,
-                  });
-                  if (result.ok) {
-                    setSessionContent("");
-                    setSessionLocation("");
-                  }
-                  return result;
-                }, "활동계획을 추가했습니다.")
-              }
-              className={`${btnSecondary} col-span-2`}
-            >
-              활동일 추가
-            </button>
-          </div>
-          <div className="grid grid-cols-2 gap-2">
-            <input
-              type="date"
-              value={expenseDate}
-              onChange={(e) => setExpenseDate(e.target.value)}
-              className={inputCls}
-            />
-            <input
-              value={category}
-              onChange={(e) => setCategory(e.target.value)}
-              placeholder="예산 항목"
-              className={inputCls}
-            />
-            <input
-              value={description}
-              onChange={(e) => setDescription(e.target.value)}
-              placeholder="지출내역"
-              className={inputCls}
-            />
-            <input
-              type="number"
-              min={0}
-              value={amount}
-              onChange={(e) => setAmount(e.target.value)}
-              placeholder="금액"
-              className={inputCls}
-            />
-            <button
-              type="button"
-              disabled={pending}
-              onClick={() =>
-                run(
-                  () =>
-                    addClubExpense({
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+            <p className="mt-2 text-xs text-ink-muted">
+              계획 합계 {club.budgetPlanTotal.toLocaleString("ko-KR")}원 · 집행{" "}
+              {club.expenseTotal.toLocaleString("ko-KR")}원 (
+              <span
+                className={executionRate > 100 ? "font-semibold text-stamp" : ""}
+              >
+                {executionRate}%
+              </span>
+              )
+            </p>
+            <div className="mt-3 grid grid-cols-2 gap-2">
+              <input
+                value={planCategory}
+                onChange={(e) => setPlanCategory(e.target.value)}
+                placeholder="예산 항목"
+                className={inputCls}
+              />
+              <input
+                type="number"
+                min={0}
+                value={planAmount}
+                onChange={(e) => setPlanAmount(e.target.value)}
+                placeholder="계획액"
+                className={inputCls}
+              />
+              <input
+                value={planDescription}
+                onChange={(e) => setPlanDescription(e.target.value)}
+                placeholder="내역"
+                className={`${inputCls} col-span-2`}
+              />
+              <button
+                type="button"
+                disabled={pending}
+                onClick={() =>
+                  run(async () => {
+                    const result = await addClubBudgetPlan({
                       programId: club.id,
-                      date: expenseDate,
-                      budgetCategory: category,
-                      description,
-                      amount: Number(amount),
-                    }),
-                  "예산 내역을 추가했습니다."
-                )
-              }
-              className={`${btnSecondary} col-span-2`}
-            >
-              예산 추가
-            </button>
+                      year,
+                      category: planCategory,
+                      description: planDescription,
+                      amount: Number(planAmount),
+                    });
+                    if (result.ok) {
+                      setPlanCategory("");
+                      setPlanDescription("");
+                      setPlanAmount("");
+                    }
+                    return result;
+                  }, "예산계획을 추가했습니다.")
+                }
+                className={`${btnSecondary} col-span-2`}
+              >
+                예산계획 추가
+              </button>
+            </div>
           </div>
-        </div>
-      </details>
-      {club.reportStatus !== "confirmed" && (
-        <button
-          type="button"
-          disabled={pending || !ready}
-          onClick={() =>
-            run(
-              () => confirmClubReport({ programId: club.id, year, month }),
-              `${club.name} ${month}월 보고를 확정했습니다.`
-            )
-          }
-          className={`${btnPrimary} mt-3`}
-        >
-          {ready ? "월간보고 확정" : "활동일지 제출 후 확정 가능"}
-        </button>
+        </details>
+        <details className="mt-3 rounded-lg bg-surface p-3">
+          <summary className="cursor-pointer text-sm font-semibold text-navy">
+            활동·예산 추가
+          </summary>
+          <div className="mt-3 grid gap-3 lg:grid-cols-2">
+            <div className="grid grid-cols-2 gap-2">
+              <input
+                type="date"
+                value={sessionDate}
+                onChange={(e) => setSessionDate(e.target.value)}
+                className={inputCls}
+              />
+              <input
+                value={sessionLocation}
+                onChange={(e) => setSessionLocation(e.target.value)}
+                placeholder="활동장소"
+                className={inputCls}
+              />
+              <textarea
+                rows={2}
+                value={sessionContent}
+                onChange={(e) => setSessionContent(e.target.value)}
+                placeholder="활동내용"
+                className={`${inputCls} col-span-2`}
+              />
+              <button
+                type="button"
+                disabled={pending}
+                onClick={() =>
+                  run(async () => {
+                    const result = await addClubSession({
+                      programId: club.id,
+                      date: sessionDate,
+                      content: sessionContent,
+                      location: sessionLocation,
+                    });
+                    if (result.ok) {
+                      setSessionContent("");
+                      setSessionLocation("");
+                    }
+                    return result;
+                  }, "활동계획을 추가했습니다.")
+                }
+                className={`${btnSecondary} col-span-2`}
+              >
+                활동일 추가
+              </button>
+            </div>
+            <div className="grid grid-cols-2 gap-2">
+              <input
+                type="date"
+                value={expenseDate}
+                onChange={(e) => setExpenseDate(e.target.value)}
+                className={inputCls}
+              />
+              <input
+                value={category}
+                onChange={(e) => setCategory(e.target.value)}
+                placeholder="예산 항목"
+                className={inputCls}
+              />
+              <input
+                value={description}
+                onChange={(e) => setDescription(e.target.value)}
+                placeholder="지출내역"
+                className={inputCls}
+              />
+              <input
+                type="number"
+                min={0}
+                value={amount}
+                onChange={(e) => setAmount(e.target.value)}
+                placeholder="금액"
+                className={inputCls}
+              />
+              <button
+                type="button"
+                disabled={pending}
+                onClick={() =>
+                  run(
+                    () =>
+                      addClubExpense({
+                        programId: club.id,
+                        date: expenseDate,
+                        budgetCategory: category,
+                        description,
+                        amount: Number(amount),
+                      }),
+                    "예산 내역을 추가했습니다."
+                  )
+                }
+                className={`${btnSecondary} col-span-2`}
+              >
+                예산 추가
+              </button>
+            </div>
+          </div>
+        </details>
+        {club.reportStatus !== "confirmed" && (
+          <button
+            type="button"
+            disabled={pending || !ready}
+            onClick={() =>
+              run(
+                () => confirmClubReport({ programId: club.id, year, month }),
+                `${club.name} ${month}월 보고를 확정했습니다.`
+              )
+            }
+            className={`${btnPrimary} mt-3`}
+          >
+            {ready ? "월간보고 확정" : "활동일지 제출 후 확정 가능"}
+          </button>
+        )}
+        </>
       )}
     </article>
   );
