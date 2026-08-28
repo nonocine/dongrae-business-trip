@@ -545,6 +545,12 @@ export default async function EmployeeDashboard({
             desc="담당 사업의 월별 실적·홍보내용 입력"
           />
           <MenuCard
+            href="/hr/clubs"
+            icon="🎸"
+            title="동아리관리"
+            desc="동아리샘·활동일지·월간 결과보고·실적 연계"
+          />
+          <MenuCard
             href="/profile/hr"
             icon="🗂"
             title="내 인사기록카드"
