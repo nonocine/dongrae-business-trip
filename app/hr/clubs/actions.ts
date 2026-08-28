@@ -33,6 +33,13 @@ export type InstructorPickRow = {
   alreadyClub: boolean;
 };
 
+export type ClubBudgetPlanRow = {
+  id: string;
+  category: string;
+  description: string;
+  amount: number;
+};
+
 export type ClubMonthRow = {
   id: string;
   name: string;
@@ -49,6 +56,18 @@ export type ClubMonthRow = {
   attendanceTotal: number;
   expenseTotal: number;
   reportStatus: "draft" | "submitted" | "confirmed";
+  sessions: Array<{
+    id: string;
+    date: string;
+    sessionNo: number;
+    planContent: string;
+    logContent: string;
+    location: string;
+    participants: number;
+    submitted: boolean;
+  }>;
+  budgetPlans: ClubBudgetPlanRow[]; // 그 해 예산계획 목록
+  budgetPlanTotal: number; // 계획 합계
 };
 
 export type ClubDashboardData = {
@@ -183,12 +202,17 @@ export async function getClubDashboard(
 
   const ids = programs.map((p) => p.id);
   const range = monthRange(year, month);
-  const [sessionsQuery, expensesQuery, reportsQuery, enrollmentsQuery] =
-    await Promise.all([
+  const [
+    sessionsQuery,
+    expensesQuery,
+    reportsQuery,
+    enrollmentsQuery,
+    budgetPlansQuery,
+  ] = await Promise.all([
       supabaseAdmin
         .from("saem_sessions")
         .select(
-          "program_id,session_date,student_count,instructor_submitted_at,staff_confirmed_at"
+          "id,program_id,session_no,session_date,plan_content,log_content,activity_location,student_count,instructor_submitted_at,staff_confirmed_at"
         )
         .in("program_id", ids)
         .gte("session_date", range.start)
@@ -210,6 +234,13 @@ export async function getClubDashboard(
         .select("program_id,status")
         .in("program_id", ids)
         .eq("status", "active"),
+      supabaseAdmin
+        .from("club_budget_plans")
+        .select("id,program_id,budget_category,description,amount,sort_order")
+        .in("program_id", ids)
+        .eq("plan_year", year)
+        .order("sort_order")
+        .order("created_at"),
     ]);
   for (const query of [
     sessionsQuery,
@@ -218,6 +249,32 @@ export async function getClubDashboard(
     enrollmentsQuery,
   ]) {
     if (query.error) throw new Error(query.error.message);
+  }
+
+  // 예산계획(club_budget_plans)은 이 조회만 실패해도 화면 전체를 막지 않는다.
+  //   테이블이 아직 없는 경우(missingSchema)가 대표적이며, 그 밖의 오류도 계획을 비워 표시한다.
+  const budgetPlanRows =
+    budgetPlansQuery.error && !missingSchema(budgetPlansQuery.error)
+      ? []
+      : ((budgetPlansQuery.data ?? []) as Array<{
+          id: string;
+          program_id: string;
+          budget_category: string | null;
+          description: string | null;
+          amount: number | null;
+        }>);
+  const budgetPlansBy = new Map<string, ClubBudgetPlanRow[]>();
+  for (const row of budgetPlanRows) {
+    const id = String(row.program_id);
+    budgetPlansBy.set(id, [
+      ...(budgetPlansBy.get(id) ?? []),
+      {
+        id: String(row.id),
+        category: String(row.budget_category ?? ""),
+        description: String(row.description ?? ""),
+        amount: Number(row.amount ?? 0),
+      },
+    ]);
   }
 
   const teacherName = new Map(teachers.map((t) => [t.id, t.name]));
@@ -252,6 +309,10 @@ export async function getClubDashboard(
 
   const clubs = programs.map((program): ClubMonthRow => {
     const sessions = sessionsBy.get(program.id) ?? [];
+    const budgetPlans = budgetPlansBy.get(program.id) ?? [];
+    const sessionsSorted = [...sessions].sort((a, b) =>
+      String(a.session_date ?? "").localeCompare(String(b.session_date ?? ""))
+    );
     return {
       id: program.id,
       name: program.name,
@@ -275,6 +336,18 @@ export async function getClubDashboard(
       ),
       expenseTotal: expenseBy.get(program.id) ?? 0,
       reportStatus: reportBy.get(program.id) ?? "draft",
+      sessions: sessionsSorted.map((s) => ({
+        id: String(s.id),
+        date: String(s.session_date ?? ""),
+        sessionNo: Number(s.session_no ?? 0),
+        planContent: String(s.plan_content ?? ""),
+        logContent: String(s.log_content ?? ""),
+        location: String(s.activity_location ?? ""),
+        participants: Number(s.student_count ?? 0),
+        submitted: s.instructor_submitted_at != null,
+      })),
+      budgetPlans,
+      budgetPlanTotal: budgetPlans.reduce((sum, plan) => sum + plan.amount, 0),
     };
   });
   return { configured: true, teachers, instructors, clubs };
@@ -601,6 +674,8 @@ async function requireClubProgram(programId: string) {
 export async function addClubSession(input: {
   programId: string;
   date: string;
+  content?: string;
+  location?: string;
 }): Promise<ActionResult> {
   try {
     await requireClubAccess();
@@ -621,6 +696,8 @@ export async function addClubSession(input: {
       program_id: input.programId,
       session_no: nextNo,
       session_date: input.date,
+      plan_content: input.content?.trim() || null,
+      activity_location: input.location?.trim() || null,
     });
     if (error) throw new Error(error.message);
     revalidatePath("/hr/clubs");
@@ -630,6 +707,70 @@ export async function addClubSession(input: {
       ok: false,
       message:
         error instanceof Error ? error.message : "활동일을 추가하지 못했습니다.",
+    };
+  }
+}
+
+// 활동계획 수정(날짜·내용·장소). 이미 제출된 활동일지의 기록(log_content)은 건드리지 않는다.
+export async function updateClubSession(input: {
+  sessionId: string;
+  date: string;
+  content?: string;
+  location?: string;
+}): Promise<ActionResult> {
+  try {
+    await requireClubAccess();
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(input.date)) {
+      return { ok: false, message: "활동일을 선택하세요." };
+    }
+    const { error } = await supabaseAdmin
+      .from("saem_sessions")
+      .update({
+        session_date: input.date,
+        plan_content: input.content?.trim() || null,
+        activity_location: input.location?.trim() || null,
+      })
+      .eq("id", input.sessionId);
+    if (error) throw new Error(error.message);
+    revalidatePath("/hr/clubs");
+    return { ok: true };
+  } catch (error) {
+    return {
+      ok: false,
+      message: error instanceof Error ? error.message : "수정하지 못했습니다.",
+    };
+  }
+}
+
+// 활동계획 삭제. 이미 제출된 활동일지는 삭제하지 않는다(실적 보존).
+export async function deleteClubSession(input: {
+  sessionId: string;
+}): Promise<ActionResult> {
+  try {
+    await requireClubAccess();
+    const { data: found } = await supabaseAdmin
+      .from("saem_sessions")
+      .select("id,instructor_submitted_at")
+      .eq("id", input.sessionId)
+      .maybeSingle();
+    if (!found) return { ok: false, message: "활동을 찾을 수 없습니다." };
+    if (
+      (found as { instructor_submitted_at: string | null })
+        .instructor_submitted_at
+    ) {
+      return { ok: false, message: "이미 제출된 활동일지는 삭제할 수 없습니다." };
+    }
+    const { error } = await supabaseAdmin
+      .from("saem_sessions")
+      .delete()
+      .eq("id", input.sessionId);
+    if (error) throw new Error(error.message);
+    revalidatePath("/hr/clubs");
+    return { ok: true };
+  } catch (error) {
+    return {
+      ok: false,
+      message: error instanceof Error ? error.message : "삭제하지 못했습니다.",
     };
   }
 }
@@ -665,6 +806,59 @@ export async function addClubExpense(input: {
     return {
       ok: false,
       message: error instanceof Error ? error.message : "지출을 저장하지 못했습니다.",
+    };
+  }
+}
+
+export async function addClubBudgetPlan(input: {
+  programId: string;
+  year: number;
+  category: string;
+  description: string;
+  amount: number;
+}): Promise<ActionResult> {
+  try {
+    const access = await requireClubAccess();
+    await requireClubProgram(input.programId);
+    const category = input.category.trim();
+    if (!category) return { ok: false, message: "예산 항목을 입력하세요." };
+    const amount = Math.max(0, Math.round(Number(input.amount) || 0));
+    const { error } = await supabaseAdmin.from("club_budget_plans").insert({
+      program_id: input.programId,
+      plan_year: input.year,
+      budget_category: category,
+      description: input.description?.trim() || "",
+      amount,
+      created_by: access.name,
+    });
+    if (error) throw new Error(error.message);
+    revalidatePath("/hr/clubs");
+    return { ok: true };
+  } catch (error) {
+    return {
+      ok: false,
+      message:
+        error instanceof Error ? error.message : "예산계획을 저장하지 못했습니다.",
+    };
+  }
+}
+
+export async function deleteClubBudgetPlan(input: {
+  planId: string;
+}): Promise<ActionResult> {
+  try {
+    await requireClubAccess();
+    const { error } = await supabaseAdmin
+      .from("club_budget_plans")
+      .delete()
+      .eq("id", input.planId);
+    if (error) throw new Error(error.message);
+    revalidatePath("/hr/clubs");
+    return { ok: true };
+  } catch (error) {
+    return {
+      ok: false,
+      message: error instanceof Error ? error.message : "삭제하지 못했습니다.",
     };
   }
 }
