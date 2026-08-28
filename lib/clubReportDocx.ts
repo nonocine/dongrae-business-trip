@@ -18,6 +18,8 @@ import {
 import type { ClubReportRow } from "@/app/hr/clubs/actions";
 
 const TABLE_W = 10120;
+// 라벨 열 폭 — 활동표 첫 열(구분)과 같아야 세로선이 맞는다.
+const LABEL_W = 1780;
 const FONT = "맑은 고딕";
 const GRAY = "F0F0F0";
 const BRAND = ["E84538", "416CB3", "3FAE5E", "F3C83E"];
@@ -185,23 +187,23 @@ function clubChildren(year: number, month: number, club: ClubReportRow) {
         new TableRow({
           cantSplit: true,
           children: [
-            cell("목적 및 목표", 1900, { bold: true, fill: GRAY, align: AlignmentType.CENTER, size: 21 }),
-            cell(club.goal || "-", TABLE_W - 1900, { size: 20 }),
+            cell("목적 및 목표", LABEL_W, { bold: true, fill: GRAY, align: AlignmentType.CENTER, size: 21 }),
+            cell(club.goal || "-", TABLE_W - LABEL_W, { size: 20 }),
           ],
         }),
         new TableRow({
           cantSplit: true,
           children: [
-            cell("대상 및 인원", 1900, { bold: true, fill: GRAY, align: AlignmentType.CENTER, size: 21 }),
-            cell(`${club.target || "청소년"} / ${club.registeredCount}명`, TABLE_W - 1900, { align: AlignmentType.CENTER, size: 20 }),
+            cell("대상 및 인원", LABEL_W, { bold: true, fill: GRAY, align: AlignmentType.CENTER, size: 21 }),
+            cell(`${club.target || "청소년"} / ${club.registeredCount}명`, TABLE_W - LABEL_W, { align: AlignmentType.CENTER, size: 20 }),
           ],
         }),
       ],
-      [1900, TABLE_W - 1900]
+      [LABEL_W, TABLE_W - LABEL_W]
     )
   );
 
-  const activityWidths = [1780, 5040, 1960, TABLE_W - 1780 - 5040 - 1960];
+  const activityWidths = [LABEL_W, 5040, 1960, TABLE_W - LABEL_W - 5040 - 1960];
   const activityRows = club.sessions.length
     ? club.sessions
     : [{ date: "-", content: "활동 내역 없음", location: "-", participants: 0 }];
@@ -251,14 +253,29 @@ function clubChildren(year: number, month: number, club: ClubReportRow) {
 
   items.push(new Paragraph({ spacing: { before: 80, after: 0 }, children: [] }));
   const budgetWidths = [2400, 1740, 4480, TABLE_W - 2400 - 1740 - 4480];
-  const budgetRows = club.expenses.length
-    ? club.expenses
-    : [{ date: "-", fundingSource: "", budgetCategory: "-", description: "-", amount: 0 }];
+  // 집행 내역이 없고 예산계획만 있으면 계획으로 표를 채운다(실적과 섞지 않는다).
+  const planMode = club.expenses.length === 0 && club.budgetPlans.length > 0;
+  const budgetSource = planMode
+    ? club.budgetPlans.map((plan) => ({
+        fundingSource: "",
+        budgetCategory: plan.category,
+        description: plan.description,
+        amount: plan.amount,
+      }))
+    : club.expenses.map((expense) => ({
+        fundingSource: expense.fundingSource,
+        budgetCategory: expense.budgetCategory,
+        description: expense.description,
+        amount: expense.amount,
+      }));
+  const budgetRows = budgetSource.length
+    ? budgetSource
+    : [{ fundingSource: "", budgetCategory: "-", description: "-", amount: 0 }];
   const budgetTableRows: TableRow[] = [
     new TableRow({
       cantSplit: true,
       children: [
-        cell("소요예산", TABLE_W, { bold: true, fill: GRAY, align: AlignmentType.CENTER, size: 22, columnSpan: 4 }),
+        cell(planMode ? "소요예산 (계획)" : "소요예산", TABLE_W, { bold: true, fill: GRAY, align: AlignmentType.CENTER, size: 22, columnSpan: 4 }),
       ],
     }),
     new TableRow({
@@ -282,7 +299,7 @@ function clubChildren(year: number, month: number, club: ClubReportRow) {
           }),
           cell(expense.budgetCategory || "-", budgetWidths[1], { align: AlignmentType.CENTER, size: 19 }),
           cell(expense.description || "-", budgetWidths[2], { size: 19 }),
-          cell(club.expenses.length ? `${expense.amount.toLocaleString("ko-KR")}원` : "-", budgetWidths[3], {
+          cell(budgetSource.length ? `${expense.amount.toLocaleString("ko-KR")}원` : "-", budgetWidths[3], {
             align: AlignmentType.RIGHT,
             size: 19,
           }),
@@ -302,8 +319,8 @@ function clubChildren(year: number, month: number, club: ClubReportRow) {
           columnSpan: 3,
         }),
         cell(
-          club.expenses.length
-            ? `${club.expenses.reduce((sum, row) => sum + row.amount, 0).toLocaleString("ko-KR")}원`
+          budgetSource.length
+            ? `${budgetSource.reduce((sum, row) => sum + row.amount, 0).toLocaleString("ko-KR")}원`
             : "-",
           budgetWidths[3],
           { bold: true, align: AlignmentType.RIGHT, size: 20 }

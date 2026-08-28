@@ -88,6 +88,12 @@ export type ClubReportRow = {
     content: string;
     location: string;
     participants: number;
+    submitted: boolean;
+  }>;
+  budgetPlans: Array<{
+    category: string;
+    description: string;
+    amount: number;
   }>;
   expenses: Array<{
     date: string;
@@ -376,16 +382,15 @@ export async function getClubReportData(
   }>;
   if (!programRows.length) return [];
   const ids = programRows.map((p) => p.id);
-  const [sessions, expenses, enrollments] = await Promise.all([
+  const [sessions, expenses, enrollments, budgetPlans] = await Promise.all([
     supabaseAdmin
       .from("saem_sessions")
       .select(
-        "program_id,session_date,log_content,plan_content,activity_location,student_count"
+        "program_id,session_date,log_content,plan_content,activity_location,student_count,instructor_submitted_at"
       )
       .in("program_id", ids)
       .gte("session_date", range.start)
       .lt("session_date", range.endExclusive)
-      .not("instructor_submitted_at", "is", null)
       .order("session_date"),
     supabaseAdmin
       .from("saem_club_expenses")
@@ -401,9 +406,42 @@ export async function getClubReportData(
       .select("program_id")
       .in("program_id", ids)
       .eq("status", "active"),
+    supabaseAdmin
+      .from("saem_club_budget_plans")
+      .select("program_id,budget_category,description,amount,sort_order")
+      .in("program_id", ids)
+      .eq("plan_year", year)
+      .order("sort_order")
+      .order("created_at"),
   ]);
   for (const query of [sessions, expenses, enrollments]) {
     if (query.error) throw new Error(query.error.message);
+  }
+
+  // 예산계획은 이 조회만 실패해도 보고서 전체를 막지 않는다(테이블 미생성 등).
+  const planRows =
+    budgetPlans.error && !missingSchema(budgetPlans.error)
+      ? []
+      : ((budgetPlans.data ?? []) as Array<{
+          program_id: string;
+          budget_category: string | null;
+          description: string | null;
+          amount: number | null;
+        }>);
+  const plansBy = new Map<
+    string,
+    Array<{ category: string; description: string; amount: number }>
+  >();
+  for (const row of planRows) {
+    const id = String(row.program_id);
+    plansBy.set(id, [
+      ...(plansBy.get(id) ?? []),
+      {
+        category: String(row.budget_category ?? ""),
+        description: String(row.description ?? ""),
+        amount: Number(row.amount ?? 0),
+      },
+    ]);
   }
   const enrolled = new Map<string, number>();
   for (const row of enrollments.data ?? []) {
@@ -428,8 +466,10 @@ export async function getClubReportData(
           content: String(item.log_content ?? item.plan_content ?? ""),
           location: String(item.activity_location ?? program.room ?? ""),
           participants: Number(item.student_count ?? 0),
+          submitted: item.instructor_submitted_at != null,
         };
       }),
+    budgetPlans: plansBy.get(program.id) ?? [],
     expenses: (expenses.data ?? [])
       .filter(
         (row) =>

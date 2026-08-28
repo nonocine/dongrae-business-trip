@@ -6,6 +6,8 @@ import type { ClubReportRow } from "@/app/hr/clubs/actions";
 const PAGE_W = 595.28;
 const PAGE_H = 841.89;
 const MARGIN = 43;
+// 라벨 열 폭 — 활동표 첫 열(구분)과 같아야 세로선이 맞는다.
+const LABEL_W = 88;
 const INK = rgb(0.03, 0.03, 0.03);
 const LINE = rgb(0.08, 0.08, 0.08);
 const HEAD = rgb(0.94, 0.94, 0.94);
@@ -183,14 +185,14 @@ export async function buildClubReportPdf(
     drawText(page, bold, title, MARGIN + 5, 78, titleSize, tableW - 10, "center");
 
     let top = 126;
-    cell(page, bold, "목적 및 목표", MARGIN, top, 91, 43, { fill: true, align: "center", size: 10.2 });
-    cell(page, regular, club.goal || "-", MARGIN + 91, top, tableW - 91, 43, { maxLines: 3, size: 9.7 });
+    cell(page, bold, "목적 및 목표", MARGIN, top, LABEL_W, 43, { fill: true, align: "center", size: 10.2 });
+    cell(page, regular, club.goal || "-", MARGIN + LABEL_W, top, tableW - LABEL_W, 43, { maxLines: 3, size: 9.7 });
     top += 43;
-    cell(page, bold, "대상 및 인원", MARGIN, top, 91, 30, { fill: true, align: "center", size: 10.2 });
-    cell(page, regular, `${club.target || "청소년"} / ${club.registeredCount}명`, MARGIN + 91, top, tableW - 91, 30, { align: "center", size: 9.7 });
+    cell(page, bold, "대상 및 인원", MARGIN, top, LABEL_W, 30, { fill: true, align: "center", size: 10.2 });
+    cell(page, regular, `${club.target || "청소년"} / ${club.registeredCount}명`, MARGIN + LABEL_W, top, tableW - LABEL_W, 30, { align: "center", size: 9.7 });
 
     top += 30;
-    const activityCols = [88, 257, 99, tableW - 88 - 257 - 99];
+    const activityCols = [LABEL_W, 257, 99, tableW - LABEL_W - 257 - 99];
     let x = MARGIN;
     for (const [label, width] of [
       ["구분", activityCols[0]],
@@ -228,11 +230,26 @@ export async function buildClubReportPdf(
       top += 22;
     }
     const attendance = club.sessions.reduce((sum, row) => sum + row.participants, 0);
-    cell(page, bold, "연인원", MARGIN, top, tableW - 67, 28, { fill: true, align: "center", size: 10.2 });
-    cell(page, bold, `${attendance}명`, MARGIN + tableW - 67, top, 67, 28, { align: "center", size: 10.2 });
+    cell(page, bold, "연인원", MARGIN, top, tableW - activityCols[3], 28, { fill: true, align: "center", size: 10.2 });
+    cell(page, bold, `${attendance}명`, MARGIN + tableW - activityCols[3], top, activityCols[3], 28, { align: "center", size: 10.2 });
 
     top += 39;
-    cell(page, bold, "소요예산", MARGIN, top, tableW, 28, { fill: true, align: "center", size: 10.7 });
+    // 집행 내역이 없고 예산계획만 있으면 계획으로 표를 채운다(실적과 섞지 않는다).
+    const planMode = club.expenses.length === 0 && club.budgetPlans.length > 0;
+    const budgetSource = planMode
+      ? club.budgetPlans.map((plan) => ({
+          fundingSource: "",
+          budgetCategory: plan.category,
+          description: plan.description,
+          amount: plan.amount,
+        }))
+      : club.expenses.map((expense) => ({
+          fundingSource: expense.fundingSource,
+          budgetCategory: expense.budgetCategory,
+          description: expense.description,
+          amount: expense.amount,
+        }));
+    cell(page, bold, planMode ? "소요예산 (계획)" : "소요예산", MARGIN, top, tableW, 28, { fill: true, align: "center", size: 10.7 });
     top += 28;
     const sourceW = 118;
     const categoryW = 86;
@@ -243,10 +260,10 @@ export async function buildClubReportPdf(
     top += 28;
 
     const maxBudgetRows = Math.max(1, Math.min(4, Math.floor((784 - top - 28) / 31)));
-    const visibleExpenses = club.expenses.slice(0, maxBudgetRows);
+    const visibleExpenses = budgetSource.slice(0, maxBudgetRows);
     const budgetRows = visibleExpenses.length
       ? visibleExpenses
-      : [{ date: "-", fundingSource: "", budgetCategory: "-", description: "-", amount: 0 }];
+      : [{ fundingSource: "", budgetCategory: "-", description: "-", amount: 0 }];
     const budgetRowH = 31;
     const source = fundingLabel(budgetRows[0].fundingSource);
     cell(page, regular, source, MARGIN, top, sourceW, budgetRows.length * budgetRowH, {
@@ -270,12 +287,12 @@ export async function buildClubReportPdf(
       );
       top += budgetRowH;
     }
-    const total = club.expenses.reduce((sum, row) => sum + row.amount, 0);
+    const total = budgetSource.reduce((sum, row) => sum + row.amount, 0);
     cell(page, bold, "총계", MARGIN, top, tableW - amountW, 28, { fill: true, align: "center", size: 10.2 });
     cell(
       page,
       bold,
-      club.expenses.length ? `${total.toLocaleString("ko-KR")}원` : "-",
+      budgetSource.length ? `${total.toLocaleString("ko-KR")}원` : "-",
       MARGIN + tableW - amountW,
       top,
       amountW,
