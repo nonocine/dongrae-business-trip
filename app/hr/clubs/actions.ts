@@ -218,13 +218,13 @@ export async function getClubDashboard(
         .gte("session_date", range.start)
         .lt("session_date", range.endExclusive),
       supabaseAdmin
-        .from("club_expenses")
+        .from("saem_club_expenses")
         .select("program_id,amount")
         .in("program_id", ids)
         .gte("expense_date", range.start)
         .lt("expense_date", range.endExclusive),
       supabaseAdmin
-        .from("club_monthly_reports")
+        .from("saem_club_monthly_reports")
         .select("program_id,status")
         .in("program_id", ids)
         .eq("report_year", year)
@@ -388,7 +388,7 @@ export async function getClubReportData(
       .not("instructor_submitted_at", "is", null)
       .order("session_date"),
     supabaseAdmin
-      .from("club_expenses")
+      .from("saem_club_expenses")
       .select(
         "program_id,expense_date,funding_source,budget_category,description,amount"
       )
@@ -790,7 +790,7 @@ export async function addClubExpense(input: {
       return { ok: false, message: "지출일과 지출내역을 입력하세요." };
     }
     const amount = Math.max(0, Math.round(Number(input.amount) || 0));
-    const { error } = await supabaseAdmin.from("club_expenses").insert({
+    const { error } = await supabaseAdmin.from("saem_club_expenses").insert({
       program_id: input.programId,
       expense_date: input.date,
       funding_source: input.fundingSource?.trim() || "동래구동아리지원사업비",
@@ -885,7 +885,7 @@ export async function confirmClubReport(input: {
         .gte("session_date", range.start)
         .lt("session_date", range.endExclusive),
       supabaseAdmin
-        .from("club_expenses")
+        .from("saem_club_expenses")
         .select("amount")
         .eq("program_id", input.programId)
         .gte("expense_date", range.start)
@@ -909,7 +909,7 @@ export async function confirmClubReport(input: {
       return { ok: false, message: "아직 제출되지 않은 활동일지가 있습니다." };
     }
     const now = new Date().toISOString();
-    const { error } = await supabaseAdmin.from("club_monthly_reports").upsert(
+    const { error } = await supabaseAdmin.from("saem_club_monthly_reports").upsert(
       {
         program_id: input.programId,
         report_year: input.year,
@@ -970,7 +970,7 @@ export async function syncClubBusinessResult(input: {
     const access = await requireClubAccess();
     const range = monthRange(input.year, input.month);
     const { data: reports, error: reportError } = await supabaseAdmin
-      .from("club_monthly_reports")
+      .from("saem_club_monthly_reports")
       .select("program_id,registered_count,attendance_total")
       .eq("report_year", input.year)
       .eq("report_month", input.month)
