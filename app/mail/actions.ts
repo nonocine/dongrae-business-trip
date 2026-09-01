@@ -20,6 +20,7 @@ import {
 import {
   MAIL_BUCKET,
   MAIL_TRASH_FILTER,
+  isMailFetchStale,
   isMailStatus,
   type AttachmentSkipReason,
   type MailAttachmentMeta,
@@ -154,19 +155,29 @@ export async function getMailList(filters?: {
       );
   }
 
-  const [listQuery, unreadQuery, assignedQuery, staff] = await Promise.all([
-    query,
-    supabaseAdmin
-      .from("mail_messages")
-      .select("id", { count: "exact", head: true })
-      .eq("status", "unread")
-      .is("deleted_at", null),
-    supabaseAdmin
-      .from("mail_messages")
-      .select("assignee_name")
-      .is("deleted_at", null),
-    loadActiveStaff(),
-  ]);
+  const [listQuery, unreadQuery, assignedQuery, lastFetchQuery, staff] =
+    await Promise.all([
+      query,
+      supabaseAdmin
+        .from("mail_messages")
+        .select("id", { count: "exact", head: true })
+        .eq("status", "unread")
+        .is("deleted_at", null),
+      supabaseAdmin
+        .from("mail_messages")
+        .select("assignee_name")
+        .is("deleted_at", null),
+      // 마지막 수집 시각 = MAX(fetched_at). 휴지통·삭제 여부와 무관하게 봅니다 —
+      //   이 값은 "수집기가 언제 마지막으로 돌았는가" 이지 목록 상태가 아닙니다.
+      supabaseAdmin
+        .from("mail_messages")
+        .select("fetched_at")
+        .not("fetched_at", "is", null)
+        .order("fetched_at", { ascending: false })
+        .limit(1)
+        .maybeSingle(),
+      loadActiveStaff(),
+    ]);
 
   if (tableMissing(listQuery.error)) {
     return {
@@ -175,6 +186,8 @@ export async function getMailList(filters?: {
       unreadCount: 0,
       assignees: staff,
       usedAssignees: [],
+      lastFetchedAt: null,
+      fetchStale: false,
     };
   }
   if (listQuery.error) throw new Error(listQuery.error.message);
@@ -185,12 +198,19 @@ export async function getMailList(filters?: {
     if (n) used.add(n);
   }
 
+  const lastFetchedAt =
+    ((lastFetchQuery.data as { fetched_at?: string | null } | null)
+      ?.fetched_at) ?? null;
+
   return {
     configured: true,
     items: ((listQuery.data ?? []) as Record<string, unknown>[]).map(toListItem),
     unreadCount: unreadQuery.count ?? 0,
     assignees: staff,
     usedAssignees: [...used].sort((a, b) => a.localeCompare(b, "ko")),
+    lastFetchedAt,
+    // 지연 판정은 서버에서 — 클라이언트에서 계산하면 하이드레이션이 어긋납니다.
+    fetchStale: isMailFetchStale(lastFetchedAt, Date.now()),
   };
 }
 

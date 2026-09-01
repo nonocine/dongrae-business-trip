@@ -142,7 +142,7 @@ async function main() {
     `dot-unstuffing 실패: ${JSON.stringify(unstuffDots(stuffed).toString("ascii"))}`,
   );
 
-  // 5) UIDL 중복 스킵 + 30통 상한 + 백로그 이월
+  // 5) UIDL 중복 스킵 + 30통 상한 + 백로그 이월 + 최신 메일 우선
   const known = new Set(["uid-1", "uid-3"]);
   const pairs: string[][] = [
     ["1", "uid-1"],
@@ -152,8 +152,9 @@ async function main() {
   ];
   const picked = selectNewUids(pairs, known, 30);
   assert(picked.picks.length === 2, `중복 스킵 실패: ${picked.picks.length}`);
+  // UIDL 은 오래된 순으로 오지만, 수집은 최신(뒤)부터 합니다.
   assert(
-    picked.picks.map((p) => p.uid).join(",") === "uid-2,uid-4",
+    picked.picks.map((p) => p.uid).join(",") === "uid-4,uid-2",
     "신규 선별 순서/내용 실패",
   );
   assert(picked.remaining === 0, "남은 백로그 계산 실패");
@@ -165,7 +166,16 @@ async function main() {
   const limited = selectNewUids(many, new Set(), 30);
   assert(limited.picks.length === 30, `수집 상한 실패: ${limited.picks.length}`);
   assert(limited.remaining === 15, `백로그 이월 실패: ${limited.remaining}`);
-  assert(limited.picks[0].uid === "bulk-1", "오래된 메일부터 처리하지 않음");
+  // ★ 최신 메일부터: 45통 중 뒤쪽 30통(bulk-45 → bulk-16)을 먼저 가져오고,
+  //   가장 오래된 15통(bulk-1 ~ bulk-15)이 다음 주기로 남습니다.
+  assert(
+    limited.picks[0].uid === "bulk-45",
+    `최신 메일부터 처리하지 않음: ${limited.picks[0].uid}`,
+  );
+  assert(
+    limited.picks[29].uid === "bulk-16",
+    `최신 30통 범위가 어긋남: ${limited.picks[29].uid}`,
+  );
 
   // 6) 잘못된 UIDL 행 방어
   const dirty = selectNewUids([["", ""], ["x", "y"], ["5", "ok"]], new Set(), 30);

@@ -7,6 +7,8 @@
 //
 //   * 중복 방지: mail_messages.pop_uid(unique) 에 없는 UIDL 만 RETR.
 //   * 1회 최대 30통 — 서버리스 실행시간 한도 대비. 백로그는 다음 주기에 이어서.
+//   * 최신 메일부터 가져옵니다 — POP3 메일 번호는 오래된 순이라 앞에서부터 읽으면
+//     밀린 백로그를 다 훑어야 최신에 닿습니다. selectNewUids 주석 참고.
 //   * 개별 메일 파싱 실패는 건너뛰고 계속(전체를 죽이지 않음).
 //   * "use server" 아님 — 라우트/액션이 각자 인증 후 호출.
 // =====================================================================
@@ -17,11 +19,24 @@ import { parseRawMail, selectNewUids, storageSafeName } from "@/lib/mailParse";
 import { MAIL_BUCKET, type MailAttachmentMeta } from "@/lib/mail";
 import { runMailClassification } from "@/lib/mailClassifier";
 import { notifyAutoAssigned } from "@/lib/mailNotify";
+import { sendSlack, siteBaseUrl, slackLink } from "@/lib/slack";
+import { fmtKstDateTime } from "@/lib/datetime";
 
 const POP_HOST = "pop.naver.com";
 const POP_PORT = 995;
 const FETCH_LIMIT = 30; // 1회 수집 상한
 const ATTACHMENT_MAX_BYTES = 10 * 1024 * 1024; // 10MB 초과는 메타데이터만
+
+// --- 수집 실패 알림(접속·인증 단계) ---
+//   ★ 2026-08 사고: 네이버 인증이 막혔는데 알림도 기록도 없어 11일간 아무도
+//     몰랐습니다. 실패는 반드시 사람에게 닿아야 합니다.
+//   Cron 이 10분 주기라 그대로 두면 하루 144번 도배되므로, 마지막 발송 시각을
+//   settings 에 남겨 같은 실패는 1시간에 1회만 알립니다.
+const FETCH_ALERT_KEY = "mail_fetch_alert_at";
+const FETCH_ALERT_INTERVAL_MS = 60 * 60 * 1000;
+// 전용 웹훅(SLACK_WEBHOOK_MAIL)은 없으므로 관리자 채널을 씁니다 —
+//   메일 다이제스트(lib/mailDigest.ts)·백업 실패(lib/backupEngine.ts)와 같은 채널.
+const FETCH_ALERT_WEBHOOK = "SLACK_WEBHOOK_ADMIN";
 
 export type MailFetchSummary = {
   ok: boolean;
@@ -42,24 +57,103 @@ export type MailFetchSummary = {
   message?: string;
 };
 
-function emptySummary(message: string): MailFetchSummary {
+// 네이버 자격증명 — 환경변수를 그대로 믿지 않고 여기서 한 번 다듬습니다.
+//   * trim: 값 끝에 붙은 공백·개행 하나로도 인증이 깨집니다.
+//   * @ 보정: 네이버 단체 아이디는 POP3 인증에 전체 주소가 필요한데 아이디만
+//     ("onnainna") 들어 있어 수집이 멈춘 적이 있습니다. lib/mailReply.ts 의
+//     senderAddress() 와 같은 방식으로 맞춰, 환경변수가 어느 형식이든 동작하게 합니다.
+//   * 비어 있으면 POP3 접속을 시도하지 않고 즉시 throw — "설정이 없다" 와
+//     "인증이 거부됐다" 를 로그·화면에서 구분할 수 있어야 합니다.
+function popCredentials(): { user: string; password: string } {
+  const rawUser = (process.env.NAVER_POP_USER ?? "").trim();
+  const password = (process.env.NAVER_POP_PASSWORD ?? "").trim();
+  if (!rawUser || !password) {
+    throw new Error(
+      "메일 계정 설정(NAVER_POP_USER/NAVER_POP_PASSWORD)이 비어 있습니다.",
+    );
+  }
   return {
-    ok: false,
-    total: 0,
-    newFound: 0,
-    saved: 0,
-    failed: 0,
-    remaining: 0,
-    attachmentsSaved: 0,
-    attachmentsSkipped: 0,
-    newMails: [],
-    classified: 0,
-    autoAssigned: 0,
-    dmSent: 0,
-    slackUnreachable: [],
-    dmFailures: [],
-    message,
+    user: rawUser.includes("@") ? rawUser : `${rawUser}@naver.com`,
+    password,
   };
+}
+
+// settings 는 프로젝트 공용 Key-Value 테이블입니다(app/actions.ts 와 같은 구조).
+//   알림 억제 상태 하나 때문에 새 테이블을 만들지 않고 여기에 얹습니다.
+async function readAlertMark(): Promise<string | null> {
+  const { data, error } = await supabaseAdmin
+    .from("settings")
+    .select("value")
+    .eq("key", FETCH_ALERT_KEY)
+    .maybeSingle();
+  if (error || !data) return null;
+  const value = (data as { value: unknown }).value;
+  return value == null ? null : String(value);
+}
+
+async function writeAlertMark(value: string): Promise<void> {
+  const { data: existing } = await supabaseAdmin
+    .from("settings")
+    .select("id")
+    .eq("key", FETCH_ALERT_KEY)
+    .maybeSingle();
+  if (existing) {
+    await supabaseAdmin
+      .from("settings")
+      .update({ value })
+      .eq("key", FETCH_ALERT_KEY);
+  } else {
+    await supabaseAdmin
+      .from("settings")
+      .insert({ key: FETCH_ALERT_KEY, value });
+  }
+}
+
+// 수집이 정상으로 돌아오면 억제를 풉니다 — 다음에 또 끊겼을 때 24시간을
+//   기다리지 않고 바로 알리기 위해서입니다.
+async function clearAlertMark(): Promise<void> {
+  try {
+    await supabaseAdmin.from("settings").delete().eq("key", FETCH_ALERT_KEY);
+  } catch (e) {
+    console.warn(
+      "[mail] 수집 실패 알림 억제 해제 실패:",
+      e instanceof Error ? e.message : e,
+    );
+  }
+}
+
+// 접속·인증 실패 슬랙 알림.
+//   ★ 알림은 부가기능 — 여기서 무슨 일이 생겨도 절대 throw 하지 않습니다
+//     (프로젝트 원칙: 알림 실패가 본 작업을 막지 않는다).
+//   실제로 발송된 경우에만 억제 기록을 남깁니다. 웹훅이 미설정이면 기록하지
+//   않으므로, 나중에 웹훅을 넣는 즉시 알림이 나갑니다.
+async function notifyFetchFailure(error: unknown): Promise<void> {
+  try {
+    const now = new Date();
+    const last = await readAlertMark();
+    if (last) {
+      const at = Date.parse(last);
+      if (!Number.isNaN(at) && now.getTime() - at < FETCH_ALERT_INTERVAL_MS)
+        return;
+    }
+
+    const base = siteBaseUrl();
+    const link = base ? slackLink(`${base}/mail`, "공용 메일함 열기") : "/mail";
+    const lines = [
+      "🚨 공용 메일함이 메일을 가져오지 못하고 있습니다. 네이버 계정 설정을 확인해주세요.",
+      `실패 시각: ${fmtKstDateTime(now.toISOString())} (KST)`,
+      `오류: ${error instanceof Error ? error.message : String(error)}`,
+      "※ 같은 실패가 반복돼도 이 알림은 1시간에 1회만 보냅니다.",
+      link,
+    ];
+    const sent = await sendSlack(FETCH_ALERT_WEBHOOK, lines.join("\n"));
+    if (sent) await writeAlertMark(now.toISOString());
+  } catch (e) {
+    console.warn(
+      "[mail] 수집 실패 알림 실패:",
+      e instanceof Error ? e.message : e,
+    );
+  }
 }
 
 // RETR 스트림을 Buffer 로 모읍니다.
@@ -115,12 +209,16 @@ async function ensureBucket(): Promise<void> {
 //   ★ AI·슬랙은 전부 부가기능 — 여기서 실패해도 수집·저장 결과는 유지됩니다.
 //   notify 옵션은 제거했습니다 — 다시 생기면 같은 버그가 재발합니다.
 export async function runMailFetch(): Promise<MailFetchSummary> {
-  const user = process.env.NAVER_POP_USER;
-  const password = process.env.NAVER_POP_PASSWORD;
-  if (!user || !password) {
-    return emptySummary(
-      "NAVER_POP_USER / NAVER_POP_PASSWORD 환경변수가 설정되지 않았습니다.",
-    );
+  // 설정이 비어 있으면 접속을 시도하지 않고 알린 뒤 throw 합니다.
+  //   예전에는 ok:false 요약을 조용히 돌려줘 Cron 이 200 으로 끝났고, 그래서
+  //   아무도 눈치채지 못했습니다.
+  let user: string;
+  let password: string;
+  try {
+    ({ user, password } = popCredentials());
+  } catch (e) {
+    await notifyFetchFailure(e);
+    throw e;
   }
 
   const knownUids = await loadKnownUids();
@@ -157,8 +255,18 @@ export async function runMailFetch(): Promise<MailFetchSummary> {
   const savedIds: string[] = [];
 
   try {
-    const uidlRaw = await pop.UIDL();
-    const pairs = (Array.isArray(uidlRaw) ? uidlRaw : []) as string[][];
+    // node-pop3 는 첫 명령에서 접속·USER/PASS 인증을 함께 수행합니다 —
+    //   자격증명이 틀리면 네이버의 -ERR 응답이 여기서 그대로 예외로 올라옵니다.
+    let pairs: string[][] = [];
+    try {
+      const uidlRaw = await pop.UIDL();
+      pairs = (Array.isArray(uidlRaw) ? uidlRaw : []) as string[][];
+    } catch (e) {
+      await notifyFetchFailure(e);
+      throw e;
+    }
+    // 여기까지 왔으면 접속·인증은 성공 — 이전 실패의 알림 억제를 풉니다.
+    await clearAlertMark();
     summary.total = pairs.length;
 
     const { picks, remaining } = selectNewUids(pairs, knownUids, FETCH_LIMIT);

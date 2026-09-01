@@ -117,7 +117,27 @@ export type MailListView = {
   unreadCount: number;
   assignees: string[]; // 재직자 목록(담당자 셀렉트)
   usedAssignees: string[]; // 실제 배정된 담당자(필터용)
+  lastFetchedAt: string | null; // MAX(fetched_at) — 마지막으로 수집이 성공한 시각
+  fetchStale: boolean; // 그 시각이 너무 오래됐는지(서버에서 판정)
 };
+
+// --- 수집 지연 경고 ---
+//   Cron 이 10분 주기이므로 2시간이면 12번 연속으로 못 가져왔다는 뜻입니다.
+export const MAIL_FETCH_STALE_MS = 2 * 60 * 60 * 1000;
+
+// ★ 판정은 반드시 서버(getMailList)에서 합니다. 클라이언트 렌더에서 Date.now()
+//   를 쓰면 SSR 결과와 어긋나 하이드레이션 불일치가 납니다(lib/datetime.ts 주석).
+//   수집 기록이 아예 없으면(신규 설치) 경고하지 않습니다 — 고장이 아니라 아직
+//   한 통도 안 온 상태일 수 있습니다.
+export function isMailFetchStale(
+  lastFetchedAt: string | null,
+  now: number,
+): boolean {
+  if (!lastFetchedAt) return false;
+  const at = Date.parse(lastFetchedAt);
+  if (Number.isNaN(at)) return false;
+  return now - at > MAIL_FETCH_STALE_MS;
+}
 
 export function isMailStatus(v: unknown): v is MailStatus {
   return (MAIL_STATUSES as readonly unknown[]).includes(v);

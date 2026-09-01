@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import {
   badgeNeutral,
+  badgeWarning,
   btnPrimary,
   btnSecondary,
   cardCls,
@@ -11,7 +12,9 @@ import {
   labelCls,
   noticeError,
   noticeSuccess,
+  noticeWarning,
 } from "@/lib/ui";
+import { fmtKstMonthDayTime } from "@/lib/datetime";
 import {
   MAIL_STATUSES,
   MAIL_STATUS_BADGE,
@@ -430,8 +433,12 @@ export default function MailInbox({
         setMsg({ ok: false, text: res.message });
         return;
       }
+      // 최신 메일부터 가져오므로, 남은 건 "아직 못 본 최신" 이 아니라 과거 메일입니다.
+      //   그 점이 드러나지 않으면 "왜 아직 최신이 없지" 로 읽힙니다.
       const tail =
-        res.remaining > 0 ? ` (남은 ${res.remaining}통은 다음 주기에)` : "";
+        res.remaining > 0
+          ? ` 최신 메일부터 가져왔고, 과거 메일 ${res.remaining}통은 이후 자동으로 수집됩니다.`
+          : "";
       const failed = res.failed > 0 ? ` · 실패 ${res.failed}건` : "";
       // AI 분류는 부가기능이라 0건이어도 수집 자체는 성공입니다.
       const ai =
@@ -518,8 +525,15 @@ export default function MailInbox({
               />
             </label>
           </div>
-          <div className="flex shrink-0 items-center gap-2">
+          <div className="flex shrink-0 flex-wrap items-center gap-2">
             <span className={badgeNeutral}>미처리 {view.unreadCount}건</span>
+            {/* 수집이 멈춰도 아무도 모르던 문제 — 마지막 수집 시각을 항상 보입니다. */}
+            <span className={view.fetchStale ? badgeWarning : badgeNeutral}>
+              마지막 수집:{" "}
+              {view.lastFetchedAt
+                ? fmtKstMonthDayTime(view.lastFetchedAt)
+                : "기록 없음"}
+            </span>
             <button
               type="button"
               className={btnSecondary}
@@ -530,6 +544,14 @@ export default function MailInbox({
             </button>
           </div>
         </div>
+
+        {view.fetchStale && (
+          <p className={`mt-3 ${noticeWarning}`}>
+            ⚠️ 2시간 넘게 메일을 가져오지 못했습니다. 네이버 계정 설정(POP3
+            사용 여부·비밀번호)을 확인해주세요. 원본은 네이버에 그대로 남아
+            있으므로, 설정을 고치면 밀린 메일을 이어서 가져옵니다.
+          </p>
+        )}
 
         {/* 안읽음만 토글 + 점 색 범례 (색 의미를 화면에 명시) */}
         <div className="mt-3 flex flex-wrap items-center justify-between gap-3 border-t border-line pt-3">

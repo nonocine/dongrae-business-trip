@@ -118,6 +118,14 @@ export async function parseRawMail(raw: Buffer): Promise<ParsedMail> {
 // UIDL 목록에서 "아직 저장하지 않은 것"만 골라 최대 limit 통까지 선별합니다.
 //   * uidlPairs: node-pop3 UIDL() 결과 [[msgNumber, uid], ...] (오래된 것부터)
 //   * 백로그가 limit 보다 많으면 남은 수를 remaining 으로 알려 다음 주기에 이어갑니다.
+//
+//   ★ 최신 메일부터 가져옵니다(순서 뒤집기).
+//     POP3 메일 번호는 오래된 것부터 매겨지므로 UIDL 목록의 앞쪽이 과거입니다.
+//     앞에서부터 30통씩 읽으면 밀린 2400여 통을 다 훑은 뒤에야 최신에 닿습니다
+//     (10분 주기 기준 약 14시간). 사람이 기다리는 건 최신 메일이므로 목록을
+//     뒤집어 최신 30통을 먼저 가져오고, 과거 메일은 이후 주기에 채웁니다.
+//     한 배치 안에서도 최신 → 과거 순으로 돌려, 서버리스 실행시간에 걸려
+//     중간에 끊기더라도 최신 메일이 먼저 남습니다.
 export function selectNewUids(
   uidlPairs: string[][],
   knownUids: Set<string>,
@@ -131,8 +139,9 @@ export function selectNewUids(
     if (knownUids.has(uid)) continue;
     fresh.push({ msgNumber, uid });
   }
+  const newestFirst = fresh.reverse(); // fresh 는 이 함수의 지역 배열이라 안전
   return {
-    picks: fresh.slice(0, limit),
-    remaining: Math.max(0, fresh.length - limit),
+    picks: newestFirst.slice(0, limit),
+    remaining: Math.max(0, newestFirst.length - limit),
   };
 }

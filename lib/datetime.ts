@@ -38,6 +38,13 @@ export function fmtKstDateTime(
   return `${date} ${p2(p.h)}:${p2(p.mi)}`;
 }
 
+// "M월 D일 HH:mm" — 최근 시각을 짧게 보일 때(연도 생략).
+export function fmtKstMonthDayTime(iso: string | null | undefined): string {
+  const p = kstParts(iso);
+  if (!p) return "-";
+  return `${p.mo}월 ${p.da}일 ${p2(p.h)}:${p2(p.mi)}`;
+}
+
 // "YYYY.MM.DD" (시각 없음).
 export function fmtKstDate(iso: string | null | undefined): string {
   const p = kstParts(iso);
