@@ -3,10 +3,13 @@
 //   * 입력: ERP에서 내려받은 xlsx (1행 머리글, 신청 1건 = 1행).
 //   * 출력: (프로그램명, 수업시간) 그룹별 수강생 목록 + saem_programs 매칭 후보.
 //
-//   ⚠ 개인정보 최소화(절대 준수) — 파서가 밖으로 내보내는 학생 필드는 7개뿐:
-//       erp_no · student_name · school · grade · contact · emergency_contact
+//   ⚠ 개인정보 최소화 — 파서가 밖으로 내보내는 학생 필드는 아래 7개뿐:
+//       erp_no · student_name · school · grade · birth_date ·
+//       contact · emergency_contact
 //       (+ seq_no 는 저장 직전 가나다순으로 부여)
-//     생년월일·성별·장애여부·환불계좌·회원ID 는 읽더라도 결과에 담지 않는다.
+//     생년월일은 자동 반영한다(2026-09 관장 승인 — 취급 직원은 개인정보 취급
+//     허가·정기 교육 대상). 성별·장애여부·환불계좌·회원ID 는 여전히 읽더라도
+//     결과에 담지 않는다.
 //   ⚠ 상태가 "예약 확정" 인 행만 반영. 취소 건은 excluded 로만 집계한다.
 //
 //   * @/ 별칭·DB 의존 없음 → scripts/test-saem-enrollment.ts 로 단독 테스트 가능.
@@ -20,6 +23,7 @@ export type ErpStudent = {
   student_name: string;
   school: string | null;
   grade: string | null;
+  birth_date: string | null; // "YYYY-MM-DD" — 못 읽으면 null(건너뜀, 오류 아님)
   contact: string | null;
   emergency_contact: string | null;
 };
@@ -137,6 +141,19 @@ export function formatPhone(v: unknown): string | null {
   return raw;
 }
 
+// 생년월일 — ERP 는 "2014-10-23" 텍스트로 준다(날짜 서식 셀 아님).
+//   읽지 못하는 값은 오류가 아니라 null 로 건너뛴다. 명단 업로드 전체를 세우는
+//   대신 그 사람만 빈칸으로 두고, 직원이 명단 화면에서 채우면 된다.
+//   Postgres date 컬럼에 쓰레기 값이 가지 않도록 실재하는 날짜인지까지 본다.
+export function parseBirthDate(v: unknown): string | null {
+  const s = txt(v);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(s)) return null;
+  const d = new Date(`${s}T00:00:00Z`);
+  if (Number.isNaN(d.getTime())) return null;
+  // 2014-02-31 처럼 없는 날짜는 Date 가 조용히 넘겨 버리므로 되짚는다.
+  return d.toISOString().slice(0, 10) === s ? s : null;
+}
+
 // "예약 확정" 판정 — 공백 차이만 허용. 그 외 상태(취소·대기 등)는 전부 제외.
 export function isConfirmedStatus(v: unknown): boolean {
   const s = squash(v);
@@ -156,6 +173,7 @@ const COLUMN_ALIASES = {
   capacity: ["정원"],
   name: ["이름", "성명"],
   grade: ["소속(교급)", "소속", "교급"],
+  birthDate: ["생년월일"],
   contact: ["연락처", "휴대전화", "휴대폰"],
   emergency: ["비상연락처"],
   school: ["학교명", "학교"],
@@ -313,6 +331,7 @@ export function parseErpRows(
       student_name: studentName,
       school: nullable(cell(row, "school")),
       grade: nullable(cell(row, "grade")),
+      birth_date: parseBirthDate(cell(row, "birthDate")),
       contact: formatPhone(cell(row, "contact")),
       emergency_contact: formatPhone(cell(row, "emergency")),
     });

@@ -14,6 +14,7 @@ import {
   addEnrollment,
   updateEnrollment,
   updateEnrollmentBirthDate,
+  updateEnrollmentSchool,
   setEnrollmentStatus,
   deleteEnrollment,
   type EnrollmentOverviewRow,
@@ -362,6 +363,7 @@ function UploadModal({
   const groups = preview?.ok ? preview.groups : [];
   const assigned = groups.filter((g) => decisions[g.key]?.programId);
   const applyCount = assigned.reduce((s, g) => s + g.fileCount, 0);
+  const birthAutoTotal = assigned.reduce((s, g) => s + g.birthAutoCount, 0);
   const dupProgram = (() => {
     const ids = assigned.map((g) => decisions[g.key].programId);
     return ids.some((id, i) => ids.indexOf(id) !== i);
@@ -395,6 +397,7 @@ function UploadModal({
         `신규 ${res.inserted}명`,
         `갱신 ${res.updated}명`,
       ];
+      if (res.birthFilled > 0) parts.push(`생년월일 자동 입력 ${res.birthFilled}명`);
       if (res.cancelled > 0) parts.push(`취소 처리 ${res.cancelled}명`);
       onApplied(`명단을 반영했습니다. (${parts.join(" · ")})`);
     });
@@ -416,8 +419,9 @@ function UploadModal({
         <p className="mb-3 text-xs text-ink-hint">
           ERP 신청자 목록 엑셀(xlsx)을 올리면 (프로그램명·수업시간)별로 묶어
           프로그램에 자동 배정합니다. 상태가 <b>예약 확정</b>인 신청만 반영되고,
-          이름·학교·교급·연락처·비상연락처만 저장합니다. (생년월일·성별·장애여부·
-          환불계좌·회원ID는 저장하지 않습니다.)
+          이름·학교·교급·생년월일·연락처·비상연락처를 저장합니다. 생년월일은
+          자동으로 반영됩니다. (성별·장애여부·환불계좌·회원ID는 저장하지
+          않습니다.) 이미 저장된 생년월일·학교명은 파일 값으로 덮어쓰지 않습니다.
         </p>
 
         <div className="flex flex-wrap items-end gap-2">
@@ -494,7 +498,8 @@ function UploadModal({
 
             <div className="flex flex-wrap items-center gap-2 border-t border-line pt-3">
               <p className="text-xs text-ink-muted">
-                배정된 그룹 {assigned.length}개 · 반영 인원 {applyCount}명
+                배정된 그룹 {assigned.length}개 · 반영 인원 {applyCount}명 ·
+                생년월일 자동 입력 {birthAutoTotal}명
               </p>
               <div className="ml-auto flex gap-2">
                 <button type="button" onClick={onClose} className={btnSecondary}>
@@ -593,16 +598,24 @@ function GroupCard({
       </div>
 
       {/* 대조 결과 */}
-      <div className="mt-2 grid grid-cols-2 gap-2 sm:grid-cols-4">
+      <div className="mt-2 grid grid-cols-2 gap-2 sm:grid-cols-5">
         <Mini label="반영 인원" value={`${group.fileCount}명`} tone="navy" />
         <Mini label="신규 추가" value={`${group.addedNames.length}명`} />
         <Mini label="기존 유지" value={`${group.keptNames.length}명`} />
+        <Mini label="생년월일 자동" value={`${group.birthAutoCount}명`} />
         <Mini
           label="파일에서 사라짐"
           value={`${group.missing.length}명`}
           tone={group.missing.length > 0 ? "warn" : undefined}
         />
       </div>
+      {group.schoolKeptCount > 0 && (
+        <p className="mt-1.5 text-[11px] text-ink-muted">
+          학교명이 파일과 다른 {group.schoolKeptCount}명은 저장된 값을
+          유지합니다(직원이 고친 값 보호). 파일 쪽이 맞으면 명단에서 직접
+          고치세요.
+        </p>
+      )}
       {group.restoredNames.length > 0 && (
         <p className="mt-1.5 text-[11px] text-ink-muted">
           취소였다가 다시 신청 {group.restoredNames.length}명 →{" "}
@@ -736,6 +749,82 @@ function BirthDateCell({
   );
 }
 
+// 학교명 인라인 입력 — ERP 표기가 흔들려("교동초등학교/교동초/교동") 직원이
+//   행에서 바로 고친다. 평소엔 정규화된 표기를 보여 주고, 누르면 원본이 담긴
+//   입력칸으로 바뀐다. 저장하는 값은 언제나 원본(표시용 정규화는 화면에서만).
+//   Enter·포커스 아웃 = 저장, Esc = 되돌리기. 생년월일 칸과 같은 즉시저장 방식.
+function SchoolCell({
+  row,
+  onSaved,
+  onError,
+}: {
+  row: EnrollmentRow;
+  onSaved: (id: string, school: string | null) => void;
+  onError: (text: string) => void;
+}) {
+  const [editing, setEditing] = useState(false);
+  const [value, setValue] = useState(row.school ?? "");
+  const [state, setState] = useState<"idle" | "saving" | "saved">("idle");
+  const [, start] = useTransition();
+
+  function save() {
+    setEditing(false);
+    const next = value.trim();
+    if (next === (row.school ?? "")) return; // 안 바뀌었으면 쿼리도 보내지 않는다.
+    setState("saving");
+    start(async () => {
+      const res = await updateEnrollmentSchool(row.id, next || null);
+      if (!res.ok) {
+        setValue(row.school ?? ""); // 실패하면 화면을 되돌린다.
+        setState("idle");
+        onError(res.message);
+        return;
+      }
+      setState("saved");
+      onSaved(row.id, next || null);
+    });
+  }
+
+  if (editing) {
+    return (
+      <input
+        autoFocus
+        value={value}
+        onChange={(e) => setValue(e.target.value)}
+        onBlur={save}
+        onKeyDown={(e) => {
+          if (e.key === "Enter") save();
+          if (e.key === "Escape") {
+            setValue(row.school ?? "");
+            setEditing(false);
+          }
+        }}
+        placeholder="교동초"
+        className={`${inCls} w-32 px-1.5 py-1 text-xs`}
+      />
+    );
+  }
+
+  return (
+    <div className="flex items-center gap-1">
+      <button
+        type="button"
+        onClick={() => {
+          setValue(row.school ?? "");
+          setEditing(true);
+        }}
+        title={row.school ? `원본: ${row.school}` : "누르면 입력합니다"}
+        className="rounded px-1 py-0.5 text-left text-sm text-ink-body hover:bg-surface"
+      >
+        {normalizeSchoolName(row.school) || "-"}
+      </button>
+      <span className="w-3 shrink-0 text-xs text-ink-hint">
+        {state === "saving" ? "…" : state === "saved" ? "✓" : ""}
+      </span>
+    </div>
+  );
+}
+
 function DetailModal({
   program,
   onClose,
@@ -798,6 +887,13 @@ function DetailModal({
     );
   }
 
+  // 학교명 인라인 저장 후 해당 행만 갱신(생년월일과 같은 방식).
+  function patchSchool(id: string, school: string | null) {
+    setList((cur) =>
+      cur ? cur.map((r) => (r.id === id ? { ...r, school } : r)) : cur
+    );
+  }
+
   const active = (list ?? []).filter((e) => e.status === "active");
   const cancelled = (list ?? []).filter((e) => e.status !== "active");
 
@@ -826,7 +922,9 @@ function DetailModal({
         <p className="mb-3 text-[11px] text-ink-hint">
           연락처·비상연락처는 직원만 보는 정보입니다. 강사 앱(동래샘들)에는 이름·학교·
           교급만 전달됩니다. [교급]은 ERP 대상구분(초등학생 등)이고, [학년]은
-          생년월일로 자동 계산합니다 — 날짜를 고르면 바로 저장됩니다.
+          생년월일로 자동 계산합니다. [학교]·[생년월일]은 칸을 눌러 바로 고칠 수
+          있고 고치는 즉시 저장됩니다 — 여기서 고친 값은 엑셀을 다시 올려도
+          덮어쓰지 않습니다.
         </p>
 
         {msg && (
@@ -901,10 +999,13 @@ function DetailModal({
                         )}
                       </td>
                       {/* 표시만 정규화("교동초등학교/교동초/교동" → "교동초").
-                          원본(saem_enrollments.school)은 신청 기록이라 보존한다.
-                          수정 폼에는 원본을 그대로 넣는다. */}
-                      <td className={tdCls} title={e.school ?? undefined}>
-                        {normalizeSchoolName(e.school) || "-"}
+                          저장되는 값은 언제나 원본이다(누르면 원본이 뜬다). */}
+                      <td className={tdCls}>
+                        <SchoolCell
+                          row={e}
+                          onSaved={patchSchool}
+                          onError={(text) => setMsg({ ok: false, text })}
+                        />
                       </td>
                       <td className={tdCls}>{e.grade ?? "-"}</td>
                       <td className={tdCls}>

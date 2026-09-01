@@ -325,10 +325,14 @@ export default function LogsManager({
                         </td>
                         <td className={tdCls}>{r.instructorName ?? "-"}</td>
                         <td className={tdCls}>
+                          {/* 제출 ≠ 서명 — 강사가 동래샘들에서 손서명까지
+                              마쳐야 근무일지 PDF 에 서명이 찍힌다. */}
                           {r.confirmed ? (
                             <span className={badgeSuccess}>확정</span>
                           ) : r.submitted ? (
-                            <span className={badgeWarning}>제출됨</span>
+                            <span className={badgeWarning}>
+                              {r.signed ? "제출됨·서명완료" : "제출됨"}
+                            </span>
                           ) : (
                             <span className={badgeNeutral}>미제출</span>
                           )}
@@ -462,6 +466,7 @@ function DetailModal({
           강사 {row.instructorName ?? "-"} · 인원 {row.student_count ?? "-"} · 시간{" "}
           {row.work_hours ?? "-"}h ·{" "}
           {row.confirmed ? "확정됨" : row.submitted ? "제출됨(미확정)" : "미제출"}
+          {row.submitted && (row.signed ? " · 서명완료" : " · 서명 없음")}
         </p>
         {row.attendance && (
           <div className="mb-3 rounded-md border border-line bg-surface/60 px-3 py-2">

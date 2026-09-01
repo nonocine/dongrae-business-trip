@@ -76,6 +76,7 @@ export type LogRow = {
   capacity: number | null;
   sortOrder: number;
   submitted: boolean;
+  signed: boolean; // 강사가 동래샘들에서 손서명까지 마쳤는지(instructor_signed_at)
   confirmed: boolean;
   student_count: number | null;
   work_hours: number | null;
@@ -148,7 +149,7 @@ export async function getLogs(input: {
   let sq = supabaseAdmin
     .from(SESS)
     .select(
-      "id, program_id, session_no, session_date, plan_content, log_content, note, student_count, work_hours, instructor_submitted_at, staff_confirmed_at"
+      "id, program_id, session_no, session_date, plan_content, log_content, note, student_count, work_hours, instructor_submitted_at, instructor_signed_at, staff_confirmed_at"
     )
     .in("program_id", programs.map((p) => p.id))
     .order("session_date", { ascending: true })
@@ -257,6 +258,7 @@ export async function getLogs(input: {
       capacity: prog?.capacity ?? null,
       sortOrder: prog?.sort_order ?? 0,
       submitted: !!r.instructor_submitted_at,
+      signed: !!r.instructor_signed_at,
       confirmed: !!r.staff_confirmed_at,
       student_count: (r.student_count as number | null) ?? null,
       work_hours: (r.work_hours as number | null) ?? null,

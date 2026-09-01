@@ -6,7 +6,8 @@
 //     ① "두둠칫 댄스교실 (10:00~11:20)" → 2교시(11:30~12:50)가 아니라
 //        1교시(10:00~11:20) 프로그램에 매칭되는가.
 //     ② 상태 "예약 확정"만 반영되고 "취소"는 제외되는가.
-//     ③ 생년월일·성별·장애여부·환불계좌·회원ID가 결과에 담기지 않는가.
+//     ③ 생년월일은 결과에 담기고(2026-09 정책 변경 — 관장 승인),
+//        성별·장애여부·환불계좌·회원ID는 여전히 담기지 않는가.
 import * as XLSX from "xlsx";
 import {
   parseErpRows,
@@ -229,11 +230,12 @@ expectEq(
   false
 );
 
-console.log("\n--- 개인정보 최소화 ---");
+console.log("\n--- 개인정보 최소화(생년월일은 수집, 나머지는 계속 미수집) ---");
 expectEq(
-  "학생 필드 6개(erp_no·이름·학교·교급·연락처·비상연락처)",
+  "학생 필드 7개(erp_no·이름·학교·교급·생년월일·연락처·비상연락처)",
   Object.keys(g.students[0]).sort(),
   [
+    "birth_date",
     "contact",
     "emergency_contact",
     "erp_no",
@@ -244,13 +246,72 @@ expectEq(
 );
 const serialized = JSON.stringify(g.students);
 for (const forbidden of [
-  "2018-09-27", // 생년월일
   "여", // 성별
   "비장애", // 장애여부
   "mid0", // 회원ID
 ]) {
   expectEq(`금지 값 '${forbidden}' 미포함`, serialized.includes(forbidden), false);
 }
+
+console.log("\n--- 생년월일 파싱 ---");
+expectEq("생년월일이 결과에 담김", g.students[0].birth_date, "2018-09-27");
+expectEq(
+  "13명 모두 생년월일 있음",
+  g.students.filter((s) => s.birth_date).length,
+  13
+);
+// 읽지 못하는 값은 오류가 아니라 null — 그 사람만 빈칸으로 두고 나머지는 반영한다.
+const birthSheet = [
+  HEADER,
+  ...[
+    { no: "8001", birth: "2018-09-27", label: "정상" },
+    { no: "8002", birth: "", label: "빈칸" },
+    { no: "8003", birth: "2018.09.27", label: "점 구분" },
+    { no: "8004", birth: "18-09-27", label: "두자리 연도" },
+    { no: "8005", birth: "2018-02-31", label: "없는 날짜" },
+  ].map((b) =>
+    row({
+      no: b.no,
+      prog: DANCE,
+      time: T1,
+      cap: CAP,
+      name: `테스트${b.no}`,
+      memberId: "mid",
+      grade: "초등학생",
+      birth: b.birth,
+      sex: "여",
+      phone: "010-0000-0000",
+      disabled: "비장애",
+      emergency: "01000000000",
+      school: "교동초",
+      status: "예약 확정",
+    })
+  ),
+];
+expectEq(
+  "정상만 담기고 나머지는 null(YYYY-MM-DD·실재 날짜만)",
+  parseErpRows(birthSheet).groups[0].students.map((s) => s.birth_date),
+  ["2018-09-27", null, null, null, null]
+);
+expectEq(
+  "생년월일을 못 읽어도 그 행은 반영된다",
+  parseErpRows(birthSheet).confirmedRows,
+  5
+);
+
+// "생년월일" 열이 아예 없는 파일도 그대로 동작해야 한다(경고 없이 null).
+const noBirthHeader = HEADER.filter((h) => h !== "생년월일");
+const noBirthSheet = [
+  noBirthHeader,
+  ...DATA_ROWS.map((r) => r.filter((_, i) => HEADER[i] !== "생년월일")),
+];
+const noBirth = parseErpRows(noBirthSheet);
+expectEq("생년월일 열 없어도 파싱됨", noBirth.confirmedRows, 13);
+expectEq(
+  "생년월일 열 없으면 전원 null",
+  noBirth.groups[0].students.every((s) => s.birth_date === null),
+  true
+);
 
 console.log("\n--- 프로그램 매칭(교시 구분) ---");
 const m = matchErpGroup(g, PROGRAMS);

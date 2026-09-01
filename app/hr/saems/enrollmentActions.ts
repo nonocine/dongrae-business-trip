@@ -3,7 +3,8 @@
 // =====================================================================
 // SA-18. 수강생 명단 — 현황 조회 / ERP 엑셀 업로드(미리보기→적용) / 수동 CRUD
 //   * saem_enrollments 만 다룬다. RLS 0개 → 모든 함수 첫 줄이 requireSaemAccess.
-//   * 저장 필드는 7개로 고정(개인정보 최소화) — lib/saemEnrollment 참조.
+//   * 저장 필드는 개인정보 최소화 원칙으로 고정 — lib/saemEnrollment 참조.
+//     생년월일은 엑셀에서 자동 반영하되, 직원이 채워 둔 값은 덮어쓰지 않는다.
 //   * 연락처·비상연락처는 직원 화면 전용. 강사 앱(동래샘들)에는 내보내지 않는다.
 // =====================================================================
 
@@ -303,6 +304,8 @@ export type GroupPreview = {
   keptNames: string[]; // 기존 유지(정보 갱신)
   restoredNames: string[]; // 취소였다가 파일에 다시 있어 활성 복원
   missing: { id: string; erp_no: string; student_name: string }[]; // 파일에서 사라진 기존
+  birthAutoCount: number; // 엑셀에서 생년월일이 자동 입력되는 인원
+  schoolKeptCount: number; // 파일과 학교명이 달라 저장값을 유지하는 인원
   duplicateProgram: boolean; // 다른 그룹과 같은 프로그램에 배정됨
 };
 
@@ -343,13 +346,36 @@ function toMatchTargets(programs: ProgRow[]): MatchTarget[] {
   }));
 }
 
+// =====================================================================
+// 재업로드 보존 규칙 — "기존 값이 비어 있을 때만" 파일 값으로 채운다.
+//   생년월일·학교명은 직원이 명단 화면에서 손으로 고치는 필드다. 파일 값으로
+//   매번 덮어쓰면 그 수정이 재업로드 때마다 되돌아간다.
+//   "직원이 고친 값"과 "파일에서 정상적으로 들어온 값"을 구분할 컬럼이 없어
+//   빈칸일 때만 채우는 쪽을 택했다(덮어쓰기보다 유지가 안전하다). 대신 파일과
+//   저장값이 다른 인원 수를 미리보기에 띄워, 유지된 사실이 묻히지 않게 한다.
+//   반환 undefined = "update 절에 넣지 않는다"(=건드리지 않는다).
+// =====================================================================
+function fillIfEmpty(
+  prev: string | null,
+  fromFile: string | null
+): string | undefined {
+  if (!fromFile) return undefined; // 파일에 값이 없다 → 기존 값을 지우지 않는다.
+  if (prev) return undefined; // 이미 값이 있다 → 유지한다.
+  return fromFile;
+}
+
 // 그룹 → 배정 프로그램의 대조 결과. existing 은 그 프로그램의 기존 명단 전체.
 function diffGroup(
   group: ErpGroup,
   existing: EnrollmentRow[]
 ): Pick<
   GroupPreview,
-  "addedNames" | "keptNames" | "restoredNames" | "missing"
+  | "addedNames"
+  | "keptNames"
+  | "restoredNames"
+  | "missing"
+  | "birthAutoCount"
+  | "schoolKeptCount"
 > {
   const byErp = new Map(
     existing.filter((e) => e.erp_no).map((e) => [e.erp_no as string, e])
@@ -358,11 +384,19 @@ function diffGroup(
   const addedNames: string[] = [];
   const keptNames: string[] = [];
   const restoredNames: string[] = [];
+  let birthAutoCount = 0; // 파일 값으로 생년월일이 새로 채워지는 인원
+  let schoolKeptCount = 0; // 파일과 학교명이 다르지만 저장값을 유지하는 인원
   for (const s of orderByKoreanName(group.students)) {
     const prev = byErp.get(s.erp_no);
-    if (!prev) addedNames.push(s.student_name);
-    else if (prev.status === "active") keptNames.push(s.student_name);
+    if (!prev) {
+      addedNames.push(s.student_name);
+      if (s.birth_date) birthAutoCount++; // 신규는 파일 값을 그대로 넣는다.
+      continue;
+    }
+    if (prev.status === "active") keptNames.push(s.student_name);
     else restoredNames.push(s.student_name);
+    if (fillIfEmpty(prev.birth_date, s.birth_date)) birthAutoCount++;
+    if (s.school && prev.school && s.school !== prev.school) schoolKeptCount++;
   }
   // 사라진 대상 = ERP에서 온 활성 수강생 중 파일에 없는 사람.
   //   수동 추가(erp_no null)는 애초에 파일에 있을 수 없으므로 제외한다.
@@ -374,7 +408,14 @@ function diffGroup(
       student_name: e.student_name,
     }))
     .sort((a, b) => a.student_name.localeCompare(b.student_name, "ko"));
-  return { addedNames, keptNames, restoredNames, missing };
+  return {
+    addedNames,
+    keptNames,
+    restoredNames,
+    missing,
+    birthAutoCount,
+    schoolKeptCount,
+  };
 }
 
 async function loadExistingByProgram(
@@ -458,7 +499,14 @@ export async function previewErpUpload(input: {
         : [];
       const diff = d.programId
         ? diffGroup(d.g, existing)
-        : { addedNames: [], keptNames: [], restoredNames: [], missing: [] };
+        : {
+            addedNames: [],
+            keptNames: [],
+            restoredNames: [],
+            missing: [],
+            birthAutoCount: 0,
+            schoolKeptCount: 0,
+          };
       return {
         key: d.g.key,
         rawProgramName: d.g.rawProgramName,
@@ -509,6 +557,7 @@ export type ErpApplyResult =
       inserted: number;
       updated: number;
       cancelled: number;
+      birthFilled: number; // 엑셀에서 생년월일이 채워진 인원
       skippedGroups: string[]; // 배정 안 된 그룹
     }
   | { ok: false; message: string };
@@ -547,6 +596,7 @@ export async function applyErpUpload(input: {
     let inserted = 0;
     let updated = 0;
     let cancelledCount = 0;
+    let birthFilled = 0; // 엑셀에서 생년월일이 채워진 인원(신규 + 빈칸 보충)
     const skippedGroups: string[] = [];
     const touched: string[] = [];
 
@@ -569,23 +619,33 @@ export async function applyErpUpload(input: {
       for (const s of group.students) {
         const prev = byErp.get(s.erp_no);
         if (!prev) {
+          // 신규는 파서가 읽은 값을 그대로 넣는다(birth_date 포함, 없으면 null).
           toInsert.push({ ...s, program_id: a.programId, status: "active" });
+          if (s.birth_date) birthFilled++;
           continue;
         }
         // 재업로드 = 최신 정보로 갱신 + 취소했다가 다시 신청한 경우 활성 복원.
+        //   단 생년월일·학교명은 직원이 손으로 고치는 필드라 빈칸일 때만 채운다
+        //   (fillIfEmpty 주석 참조). prev 는 select("*") 로 읽어 둔 기존 행이다.
+        const patch: Record<string, unknown> = {
+          student_name: s.student_name,
+          grade: s.grade,
+          contact: s.contact,
+          emergency_contact: s.emergency_contact,
+          status: "active",
+        };
+        const birth = fillIfEmpty(prev.birth_date, s.birth_date);
+        if (birth) patch.birth_date = birth;
+        const school = fillIfEmpty(prev.school, s.school);
+        if (school) patch.school = school;
+
         const { error } = await supabaseAdmin
           .from(ENROLL)
-          .update({
-            student_name: s.student_name,
-            school: s.school,
-            grade: s.grade,
-            contact: s.contact,
-            emergency_contact: s.emergency_contact,
-            status: "active",
-          })
+          .update(patch)
           .eq("id", prev.id);
         if (error) throw new Error(describeError(error));
         updated++;
+        if (birth) birthFilled++;
       }
       if (toInsert.length) {
         const { error } = await supabaseAdmin.from(ENROLL).insert(toInsert);
@@ -622,6 +682,7 @@ export async function applyErpUpload(input: {
       inserted,
       updated,
       cancelled: cancelledCount,
+      birthFilled,
       skippedGroups,
     };
   } catch (e) {
@@ -742,6 +803,34 @@ export async function updateEnrollmentBirthDate(
     const { data, error } = await supabaseAdmin
       .from(ENROLL)
       .update({ birth_date: birth })
+      .eq("id", id)
+      .select("id")
+      .maybeSingle();
+    if (error) throw new Error(describeError(error));
+    if (!data) return { ok: false, message: "수강생을 찾을 수 없습니다." };
+
+    revalidatePath("/hr/saems/enrollments");
+    return { ok: true };
+  } catch (e) {
+    return { ok: false, message: describeError(e) };
+  }
+}
+
+// 학교명만 갱신 — 명단에서 행마다 바로 고치는 인라인 입력용.
+//   ERP 표기가 "교동초등학교/교동초/교동"으로 흔들려 직원이 손으로 고친다.
+//   원본을 그대로 저장한다(표시용 정규화는 화면에서만 — normalizeSchoolName).
+//   순번은 이름 기준이라 renumberProgram 을 돌리지 않는다.
+export async function updateEnrollmentSchool(
+  id: string,
+  school: string | null
+): Promise<{ ok: true } | { ok: false; message: string }> {
+  try {
+    await requireSaemAccess();
+    if (!id) return { ok: false, message: "대상이 없습니다." };
+
+    const { data, error } = await supabaseAdmin
+      .from(ENROLL)
+      .update({ school: clean(school) })
       .eq("id", id)
       .select("id")
       .maybeSingle();
