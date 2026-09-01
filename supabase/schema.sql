@@ -1,54 +1,9 @@
--- 동래구청소년센터 출장일지 스키마
--- Supabase SQL Editor에서 실행하세요. (CREATE IF NOT EXISTS 기반이라 재실행 안전)
+-- 동업자씨 초기 스키마 기록
+-- 주의: 현재 운영 DB 전체를 표현하는 기준 스키마가 아닙니다.
+-- 새 환경 구축이나 운영 반영에는 이 파일을 직접 실행하지 말고,
+-- 운영 DB에서 생성한 검증된 마이그레이션을 사용하세요.
 
 create extension if not exists "pgcrypto";
-
--- =========================================================
--- 출장일지 테이블
--- =========================================================
-create table if not exists business_trips (
-  id uuid primary key default gen_random_uuid(),
-  trip_date date not null,
-  destination text not null,
-  author text not null,
-  companion text[] not null default '{}',
-  purpose text not null,
-  transport_type text not null check (transport_type in ('vehicle','public','walk')),
-  transport_cost numeric(10,0),
-  meeting_content text not null default '',
-  main_agenda text not null default '',
-  result text not null default '',
-  photos text[] not null default '{}',
-  receipts text[] not null default '{}',
-  created_at timestamptz not null default now()
-);
-
-create index if not exists business_trips_trip_date_idx on business_trips (trip_date desc);
-create index if not exists business_trips_traveler_idx on business_trips (traveler);
-create index if not exists business_trips_created_at_idx on business_trips (created_at desc);
-
-alter table business_trips enable row level security;
-
-drop policy if exists "anon read business_trips" on business_trips;
-create policy "anon read business_trips"
-  on business_trips for select
-  using (true);
-
-drop policy if exists "anon insert business_trips" on business_trips;
-create policy "anon insert business_trips"
-  on business_trips for insert
-  with check (true);
-
-drop policy if exists "anon update business_trips" on business_trips;
-create policy "anon update business_trips"
-  on business_trips for update
-  using (true)
-  with check (true);
-
-drop policy if exists "anon delete business_trips" on business_trips;
-create policy "anon delete business_trips"
-  on business_trips for delete
-  using (true);
 
 -- =========================================================
 -- 직원 테이블 (drivers; 차량 어플과 공유)
