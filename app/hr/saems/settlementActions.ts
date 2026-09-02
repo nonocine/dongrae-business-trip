@@ -13,6 +13,11 @@ import {
   type SettlementProgramDetail,
 } from "@/lib/settlement";
 import { normalizePayType } from "@/lib/saem";
+import {
+  buildLedgerRows,
+  type LedgerInstructorInput,
+  type PayrollLedgerData,
+} from "@/lib/payrollLedger";
 
 const PROJ = "saem_projects";
 const TERM = "saem_terms";
@@ -1094,41 +1099,12 @@ export async function deleteSettlement(
 //   * 과목은 detail 의 program_id 로 saem_programs.subject 를 읽고, 비어 있으면
 //     program_name 으로 폴백합니다(과거 항목은 program_id 가 없을 수 있음).
 // =====================================================================
-export type PayrollLedgerRow = {
-  seq: number;
-  name: string;
-  subject: string;
-  // 주민번호 평문 13자리에 하이픈을 넣은 표기. 없거나 복호화 실패면 "".
-  rrn: string;
-  calc: string;
-  amount: number;
-  bankName: string;
-  bankAccount: string;
-};
-export type PayrollLedgerData = {
-  title: string;
-  projectName: string;
-  period_start: string | null;
-  period_end: string | null;
-  rows: PayrollLedgerRow[];
-};
-
-// 지급대장 산출내역 — 양식 표기("40,000원*3H*7회"). 화면·강사앱이 쓰는
-//   lib/settlement 의 calcFormula 와 형식이 달라 여기서 따로 조립합니다
-//   (calcFormula 를 고치면 화면·기존 지급조서·강사앱이 함께 바뀝니다).
-//   * hours 는 전체 시간이라 회차로 나눠 1회 시간을 냅니다(calcFormula 와 동일).
-//   * 분배제는 시급 표기가 성립하지 않아 "인원×수강료×비율" 로 적습니다.
-function ledgerCalcText(d: SettlementProgramDetail): string {
-  const krw = (n: number) => Number(n ?? 0).toLocaleString("ko-KR");
-  if (detailMethod(d) === "revenue_share") {
-    return `${d.enrolled ?? 0}명*${krw(d.tuition ?? 0)}원*${d.share_rate ?? 0}%`;
-  }
-  const sessions = d.sessions ?? 0;
-  const hours = d.hours ?? 0;
-  const per = sessions > 0 ? hours / sessions : hours;
-  const perText = Number.isInteger(per) ? String(per) : String(Math.round(per * 100) / 100);
-  return `${krw(d.rate ?? 0)}원*${perText}H*${sessions}회`;
-}
+// 타입·행 만들기는 lib/payrollLedger(순수 함수)에 있습니다 — 라우트와 엑셀
+//   빌더가 그대로 import 할 수 있게 여기서 다시 내보냅니다.
+export type {
+  PayrollLedgerRow,
+  PayrollLedgerData,
+} from "@/lib/payrollLedger";
 
 // 13자리 → "861030-1234567". 자리수가 다르면 그대로 둡니다(방어).
 function hyphenateRrn(digits: string): string {
@@ -1200,9 +1176,9 @@ export async function getPayrollLedgerData(
       (a.info?.name ?? "").localeCompare(b.info?.name ?? "", "ko")
     );
 
-  const rows: PayrollLedgerRow[] = [];
-  for (const item of sorted) {
-    // 주민번호 — 강사 단위로 한 번만 복호화합니다. 실패는 이 강사만 빈칸.
+  // 주민번호 — 강사 단위로 한 번만 복호화합니다. 실패는 이 강사만 빈칸.
+  //   ⚠️ 평문은 여기서 만들어 buildLedgerRows 로 넘기고 끝입니다(로그 없음).
+  const instructors: LedgerInstructorInput[] = sorted.map((item) => {
     let rrn = "";
     const enc = item.info?.rrnEnc ?? null;
     if (enc) {
@@ -1213,48 +1189,21 @@ export async function getPayrollLedgerData(
         rrn = "";
       }
     }
-    const name = item.info?.name ?? "(이름 없음)";
-    const bankName = item.info?.bank_name ?? "";
-    const bankAccount = item.info?.bank_account ?? "";
-
-    // 양식처럼 프로그램별로 행을 나눕니다(김만수 = 비보잉 + 유튜브 2행).
-    if (item.detail.length === 0) {
-      rows.push({
-        seq: rows.length + 1,
-        name,
-        subject: "",
-        rrn,
-        calc: "",
-        amount: item.gross,
-        bankName,
-        bankAccount,
-      });
-      continue;
-    }
-    for (const d of item.detail) {
-      const subject =
-        (d.program_id ? subjectMap.get(d.program_id) : undefined) ??
-        d.program_name ??
-        "";
-      rows.push({
-        seq: rows.length + 1,
-        name,
-        subject,
-        rrn,
-        calc: ledgerCalcText(d),
-        // 프로그램이 1개면 항목 확정값(절사 반영), 여러 개면 프로그램별 금액.
-        amount: item.detail.length === 1 ? item.gross : Number(d.amount ?? 0),
-        bankName,
-        bankAccount,
-      });
-    }
-  }
+    return {
+      name: item.info?.name ?? "(이름 없음)",
+      rrn,
+      bankName: item.info?.bank_name ?? "",
+      bankAccount: item.info?.bank_account ?? "",
+      gross: item.gross,
+      detail: item.detail,
+    };
+  });
 
   return {
     title: String(r.title ?? ""),
     projectName: (proj as { name?: string } | null)?.name ?? "",
     period_start: (r.period_start as string | null) ?? null,
     period_end: (r.period_end as string | null) ?? null,
-    rows,
+    rows: buildLedgerRows(instructors, subjectMap),
   };
 }

@@ -3,6 +3,9 @@
 //   "강사비 지급대장(운영비).xlsx" 양식을 그대로 재현합니다.
 //   * 기존 지급조서(lib/settlementExport.ts)와는 다른 문서입니다 — 그쪽은
 //     내부 확인용, 이쪽은 회계로 나가는 양식이라 따로 둡니다.
+//   * 행은 "강사 + 과목" 단위입니다 — 같은 과목이면 프로그램이 여러 개
+//     (기초반·전문반)라도 한 행으로 합산합니다(getPayrollLedgerData 참고).
+//     산출내역이 여러 줄일 수 있어 그 칸만 wrapText + 행 높이를 늘립니다.
 //   * ⚠️ 공제는 양식 수식을 그대로 넣습니다(값이 아니라 수식):
 //       G(소득세)  = F*0.03
 //       H(주민세)  = ROUNDDOWN(G*0.1, -1)   ← 10원 절사
@@ -17,7 +20,7 @@
 // =====================================================================
 
 import ExcelJS from "exceljs";
-import type { PayrollLedgerData } from "@/app/hr/saems/settlementActions";
+import type { PayrollLedgerData } from "@/lib/payrollLedger";
 
 const NAVY = "FF1F3A5F";
 const MONEY = "#,##0";
@@ -31,6 +34,7 @@ const border = { top: thin, bottom: thin, left: thin, right: thin };
 // 양식 열 순서 — A 연번 / B 이름 / C 과목 / D 주민번호 / E 산출내역 / F 금액 /
 //   G 소득세 / H 주민세 / I 공제합계 / J 실지급액 / K 은행명 / L 계좌번호
 const C_SEQ = 1;
+const C_CALC = 5;
 const C_AMOUNT = 6;
 const C_TAX = 7;
 const C_LOCAL = 8;
@@ -109,8 +113,8 @@ export async function buildPayrollLedgerWorkbook(
   }
 
   // --- 7행부터: 데이터 ---
-  //   강사가 프로그램 여러 개면 양식처럼 프로그램별로 행을 나눕니다.
-  //   연번은 행마다 1씩 올라갑니다(getPayrollLedgerData 가 이미 매겨 둠).
+  //   행은 "강사 + 과목" 단위입니다(같은 과목은 이미 합산돼 옵니다).
+  //   연번은 행마다 1씩 올라갑니다(lib/payrollLedger 가 이미 매겨 둠).
   for (const r of d.rows) {
     const line = ws.rowCount + 1;
     const row = ws.addRow([
@@ -128,7 +132,9 @@ export async function buildPayrollLedgerWorkbook(
       r.bankName,
       r.bankAccount,
     ]);
-    styleDataRow(row);
+    // 산출내역이 여러 줄(과목 안에 시급·시간이 다른 프로그램이 섞인 경우)이면
+    //   줄 수만큼 행 높이를 늘립니다 — 높이를 안 주면 첫 줄만 보입니다.
+    styleDataRow(row, r.calc.split("\n").length);
   }
 
   // --- 합계 행: A:E 병합 "합계", F~J 는 SUM ---
@@ -182,13 +188,23 @@ export async function buildPayrollLedgerWorkbook(
   return (await wb.xlsx.writeBuffer()) as ArrayBuffer;
 }
 
-function styleDataRow(row: ExcelJS.Row) {
-  for (let c = 1; c <= COLS; c++) row.getCell(c).border = border;
+function styleDataRow(row: ExcelJS.Row, calcLines = 1) {
+  for (let c = 1; c <= COLS; c++) {
+    const cell = row.getCell(c);
+    cell.border = border;
+    // 여러 줄 행에서도 다른 칸이 위로 붙지 않게 세로 가운데로 맞춥니다.
+    cell.alignment = { ...(cell.alignment ?? {}), vertical: "middle" };
+  }
   for (const c of [C_AMOUNT, C_TAX, C_LOCAL, C_DED, C_NET])
     row.getCell(c).numFmt = MONEY;
-  row.getCell(C_SEQ).alignment = { horizontal: "center" };
+  row.getCell(C_SEQ).alignment = { horizontal: "center", vertical: "middle" };
   // 주민번호·과목은 가운데, 산출내역은 왼쪽(문장이라 길다).
-  row.getCell(3).alignment = { horizontal: "center" };
-  row.getCell(4).alignment = { horizontal: "center" };
-  row.getCell(5).alignment = { horizontal: "left" };
+  row.getCell(3).alignment = { horizontal: "center", vertical: "middle" };
+  row.getCell(4).alignment = { horizontal: "center", vertical: "middle" };
+  row.getCell(C_CALC).alignment = {
+    horizontal: "left",
+    vertical: "middle",
+    wrapText: true,
+  };
+  if (calcLines > 1) row.height = calcLines * 15;
 }
