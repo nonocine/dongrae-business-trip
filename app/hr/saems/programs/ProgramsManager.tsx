@@ -1110,6 +1110,7 @@ function ProgramModal({
   const setScf = (p: Partial<ScheduleForm>) => setSc((prev) => ({ ...prev, ...p }));
   const [f, setF] = useState({
     name: program?.name ?? "",
+    subject: program?.subject ?? "",
     instructor_id: program?.instructor_id ?? "",
     period_no: program?.period_no != null ? String(program.period_no) : "",
     time_start: program?.time_start ? program.time_start.slice(0, 5) : "",
@@ -1135,6 +1136,7 @@ function ProgramModal({
     setErr(null);
     const input: ProgramInput = {
       name: f.name,
+      subject: f.subject || null,
       instructor_id: f.instructor_id || null,
       period_no: numOrNull(f.period_no),
       time_start: f.time_start || null,
@@ -1194,6 +1196,17 @@ function ProgramModal({
         </FieldP>
         <FieldP label="종료시간">
           <input type="time" value={f.time_end} onChange={(e) => set({ time_end: e.target.value })} className={inCls} />
+        </FieldP>
+        <FieldP label="과목">
+          <input
+            value={f.subject}
+            onChange={(e) => set({ subject: e.target.value })}
+            placeholder="예: 비보잉"
+            className={inCls}
+          />
+          <p className="mt-1 text-[10px] text-ink-hint">
+            강사비 지급대장에 들어갑니다. 비우면 프로그램명이 대신 나갑니다.
+          </p>
         </FieldP>
         <FieldP label="대상">
           <input value={f.target} onChange={(e) => set({ target: e.target.value })} className={inCls} />

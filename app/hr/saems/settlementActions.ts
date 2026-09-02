@@ -3,6 +3,8 @@
 import { revalidatePath } from "next/cache";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
 import { requireSaemAccess } from "@/lib/saemAccess";
+// 주민번호 복호화 — getPayrollLedgerData(서버 전용)에서만 씁니다.
+import { decryptSecret } from "@/lib/credentialCrypto";
 import {
   calcInstructorSettlement,
   detailMethod,
@@ -617,6 +619,10 @@ export type SettlementDetailItem = {
   bank_name: string | null;
   bank_account: string | null;
   account_holder: string | null;
+  // 주민번호 앞 7자리("861030-1") 또는 null. 화면 경고용.
+  //   ⚠️ 암호문(rrn_enc)·평문은 여기 담지 않습니다 — 이 타입은 클라이언트로
+  //   내려갑니다. 지급대장은 서버 전용 getPayrollLedgerData 를 씁니다.
+  rrnMask: string | null;
   detail: SettlementProgramDetail[];
   gross_amount: number;
   deduction_rate: number;
@@ -692,6 +698,7 @@ export async function getSettlement(
       bank_name: info?.bank_name ?? null,
       bank_account: info?.bank_account ?? null,
       account_holder: info?.account_holder ?? null,
+      rrnMask: info?.rrnMask ?? null,
       detail,
       gross_amount: Number(it.gross_amount ?? 0),
       deduction_rate: Number(it.deduction_rate ?? 0),
@@ -738,6 +745,9 @@ type InstructorInfo = {
   bank_name: string | null;
   bank_account: string | null;
   account_holder: string | null;
+  // 마스크는 화면까지, 암호문은 지급대장 생성(서버)에서만 씁니다.
+  rrnMask: string | null;
+  rrnEnc: string | null;
 };
 async function loadInstructorInfo(
   ids: string[]
@@ -746,7 +756,9 @@ async function loadInstructorInfo(
   if (!uniq.length) return new Map();
   const { data } = await supabaseAdmin
     .from(INSTR)
-    .select("id, name, phone, bank_name, bank_account, account_holder")
+    .select(
+      "id, name, phone, bank_name, bank_account, account_holder, rrn_enc, rrn_mask"
+    )
     .in("id", uniq);
   return new Map(
     (data ?? []).map((r) => {
@@ -759,6 +771,10 @@ async function loadInstructorInfo(
           bank_name: (x.bank_name as string | null) ?? null,
           bank_account: (x.bank_account as string | null) ?? null,
           account_holder: (x.account_holder as string | null) ?? null,
+          rrnMask: (x.rrn_mask as string | null) ?? null,
+          // ⚠️ getSettlement 은 이 값을 items 에 담지 않습니다(클라이언트 전송
+          //   금지). 쓰는 곳은 getPayrollLedgerData 하나뿐입니다.
+          rrnEnc: (x.rrn_enc as string | null) ?? null,
         },
       ];
     })
@@ -1065,4 +1081,180 @@ export async function deleteSettlement(
       message: e instanceof Error ? e.message : "삭제 중 오류가 발생했습니다.",
     };
   }
+}
+
+// =====================================================================
+// 강사비 지급대장 데이터 — 회계 제출용 엑셀 전용(서버 한정).
+//   * ⚠️ 반환값에 주민번호 평문(rrn)이 들어 있습니다. 지급대장 라우트가
+//     엑셀로 굽는 데만 쓰고, 클라이언트 컴포넌트로 절대 넘기지 않습니다.
+//     화면에 필요한 것은 getSettlement 의 rrnMask 입니다.
+//   * 복호화는 강사별로 따로 감쌉니다 — 한 명이 실패해도(키 불일치 등) 그
+//     사람만 빈칸으로 나가고 나머지는 정상 출력됩니다.
+//   * 로그를 남기지 않습니다(평문·암호문 모두). 실패는 rrn: "" 로만 표현합니다.
+//   * 과목은 detail 의 program_id 로 saem_programs.subject 를 읽고, 비어 있으면
+//     program_name 으로 폴백합니다(과거 항목은 program_id 가 없을 수 있음).
+// =====================================================================
+export type PayrollLedgerRow = {
+  seq: number;
+  name: string;
+  subject: string;
+  // 주민번호 평문 13자리에 하이픈을 넣은 표기. 없거나 복호화 실패면 "".
+  rrn: string;
+  calc: string;
+  amount: number;
+  bankName: string;
+  bankAccount: string;
+};
+export type PayrollLedgerData = {
+  title: string;
+  projectName: string;
+  period_start: string | null;
+  period_end: string | null;
+  rows: PayrollLedgerRow[];
+};
+
+// 지급대장 산출내역 — 양식 표기("40,000원*3H*7회"). 화면·강사앱이 쓰는
+//   lib/settlement 의 calcFormula 와 형식이 달라 여기서 따로 조립합니다
+//   (calcFormula 를 고치면 화면·기존 지급조서·강사앱이 함께 바뀝니다).
+//   * hours 는 전체 시간이라 회차로 나눠 1회 시간을 냅니다(calcFormula 와 동일).
+//   * 분배제는 시급 표기가 성립하지 않아 "인원×수강료×비율" 로 적습니다.
+function ledgerCalcText(d: SettlementProgramDetail): string {
+  const krw = (n: number) => Number(n ?? 0).toLocaleString("ko-KR");
+  if (detailMethod(d) === "revenue_share") {
+    return `${d.enrolled ?? 0}명*${krw(d.tuition ?? 0)}원*${d.share_rate ?? 0}%`;
+  }
+  const sessions = d.sessions ?? 0;
+  const hours = d.hours ?? 0;
+  const per = sessions > 0 ? hours / sessions : hours;
+  const perText = Number.isInteger(per) ? String(per) : String(Math.round(per * 100) / 100);
+  return `${krw(d.rate ?? 0)}원*${perText}H*${sessions}회`;
+}
+
+// 13자리 → "861030-1234567". 자리수가 다르면 그대로 둡니다(방어).
+function hyphenateRrn(digits: string): string {
+  return digits.length === 13
+    ? `${digits.slice(0, 6)}-${digits.slice(6)}`
+    : digits;
+}
+
+export async function getPayrollLedgerData(
+  id: string
+): Promise<PayrollLedgerData | null> {
+  await requireSaemAccess();
+  if (!id) return null;
+
+  const { data: sett } = await supabaseAdmin
+    .from(SETT)
+    .select("*")
+    .eq("id", id)
+    .maybeSingle();
+  if (!sett) return null;
+  const r = sett as Record<string, unknown>;
+
+  const { data: proj } = await supabaseAdmin
+    .from(PROJ)
+    .select("name")
+    .eq("id", String(r.project_id))
+    .maybeSingle();
+
+  const { data: itemRows } = await supabaseAdmin
+    .from(ITEM)
+    .select("*")
+    .eq("settlement_id", id);
+  const rawItems = (itemRows ?? []) as Record<string, unknown>[];
+  const insMap = await loadInstructorInfo(
+    rawItems.map((it) => String(it.instructor_id))
+  );
+
+  // 과목 — 항목에 담긴 program_id 를 모아 한 번에 읽습니다.
+  const programIds = [
+    ...new Set(
+      rawItems
+        .flatMap((it) => parseDetail(it.detail))
+        .map((d) => d.program_id)
+        .filter((v): v is string => typeof v === "string" && v.length > 0)
+    ),
+  ];
+  const subjectMap = new Map<string, string>();
+  if (programIds.length) {
+    const { data: progs } = await supabaseAdmin
+      .from(PROG)
+      .select("id, subject")
+      .in("id", programIds);
+    for (const p of progs ?? []) {
+      const x = p as { id: string; subject?: string | null };
+      const subject = String(x.subject ?? "").trim();
+      if (subject) subjectMap.set(String(x.id), subject);
+    }
+  }
+
+  // 강사 이름 순으로 맞춰 연번을 매깁니다(화면·지급조서와 같은 정렬).
+  const sorted = rawItems
+    .map((it) => ({
+      instructorId: String(it.instructor_id),
+      info: insMap.get(String(it.instructor_id)),
+      detail: parseDetail(it.detail),
+      gross: Number(it.gross_amount ?? 0),
+    }))
+    .sort((a, b) =>
+      (a.info?.name ?? "").localeCompare(b.info?.name ?? "", "ko")
+    );
+
+  const rows: PayrollLedgerRow[] = [];
+  for (const item of sorted) {
+    // 주민번호 — 강사 단위로 한 번만 복호화합니다. 실패는 이 강사만 빈칸.
+    let rrn = "";
+    const enc = item.info?.rrnEnc ?? null;
+    if (enc) {
+      try {
+        rrn = hyphenateRrn(decryptSecret(enc));
+      } catch {
+        // ⚠️ 원인·값을 로그로 남기지 않습니다. 빈칸으로 두고 계속 진행합니다.
+        rrn = "";
+      }
+    }
+    const name = item.info?.name ?? "(이름 없음)";
+    const bankName = item.info?.bank_name ?? "";
+    const bankAccount = item.info?.bank_account ?? "";
+
+    // 양식처럼 프로그램별로 행을 나눕니다(김만수 = 비보잉 + 유튜브 2행).
+    if (item.detail.length === 0) {
+      rows.push({
+        seq: rows.length + 1,
+        name,
+        subject: "",
+        rrn,
+        calc: "",
+        amount: item.gross,
+        bankName,
+        bankAccount,
+      });
+      continue;
+    }
+    for (const d of item.detail) {
+      const subject =
+        (d.program_id ? subjectMap.get(d.program_id) : undefined) ??
+        d.program_name ??
+        "";
+      rows.push({
+        seq: rows.length + 1,
+        name,
+        subject,
+        rrn,
+        calc: ledgerCalcText(d),
+        // 프로그램이 1개면 항목 확정값(절사 반영), 여러 개면 프로그램별 금액.
+        amount: item.detail.length === 1 ? item.gross : Number(d.amount ?? 0),
+        bankName,
+        bankAccount,
+      });
+    }
+  }
+
+  return {
+    title: String(r.title ?? ""),
+    projectName: (proj as { name?: string } | null)?.name ?? "",
+    period_start: (r.period_start as string | null) ?? null,
+    period_end: (r.period_end as string | null) ?? null,
+    rows,
+  };
 }

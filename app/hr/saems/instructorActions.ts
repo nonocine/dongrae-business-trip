@@ -11,6 +11,7 @@ import {
   removeHrDocuments,
 } from "@/lib/supabase";
 import { requireSaemAccess } from "@/lib/saemAccess";
+import { encryptSecret } from "@/lib/credentialCrypto";
 import {
   normalizePhone,
   saemAppUrl,
@@ -228,6 +229,61 @@ export async function updateInstructor(
     return {
       ok: false,
       message: e instanceof Error ? e.message : "수정 중 오류가 발생했습니다.",
+    };
+  }
+}
+
+// =====================================================================
+// 주민번호 저장 — 강사비 지급대장(회계 제출용)에만 쓰는 값.
+//   * 강사가 직접 넣지 않은 경우 담당자가 채울 수 있게 열어 둡니다.
+//   * 저장 형식: rrn_enc = AES-256-GCM 암호문(lib/credentialCrypto),
+//     rrn_mask = 앞 7자리("861030-1") — 화면에는 마스크만 씁니다.
+//   * ⚠️ 평문은 이 함수의 지역 변수로만 존재하고 즉시 암호화합니다.
+//     console·에러 메시지·revalidate 경로 어디에도 값을 넣지 않습니다
+//     (credentialCrypto 의 로그 금지 규칙과 같은 원칙).
+//   * 마스터키(CREDENTIAL_MASTER_KEY)가 없으면 encryptSecret 이 throw 하고
+//     저장은 일어나지 않습니다 — 평문 저장 폴백은 두지 않습니다.
+// =====================================================================
+export async function saveInstructorRrn(
+  instructorId: string,
+  rrn: string
+): Promise<{ ok: true; mask: string } | { ok: false; message: string }> {
+  try {
+    await requireSaemAccess();
+    if (!instructorId) return { ok: false, message: "대상이 없습니다." };
+
+    // 숫자·하이픈만 받고, 하이픈을 떼어 13자리인지 봅니다.
+    const raw = String(rrn ?? "").trim();
+    if (!raw) return { ok: false, message: "주민등록번호를 입력하세요." };
+    if (!/^[0-9-]+$/.test(raw))
+      return { ok: false, message: "숫자와 하이픈(-)만 입력할 수 있습니다." };
+    const digits = raw.replace(/-/g, "");
+    if (digits.length !== 13)
+      return { ok: false, message: "주민등록번호 13자리를 입력하세요." };
+
+    const mask = `${digits.slice(0, 6)}-${digits.slice(6, 7)}`;
+    // 암호화 실패(마스터키 미설정 등)면 여기서 멈춥니다 — 평문 저장 없음.
+    const rrn_enc = encryptSecret(digits);
+
+    const { error } = await supabaseAdmin
+      .from(INSTR)
+      .update({
+        rrn_enc,
+        rrn_mask: mask,
+        rrn_updated_at: new Date().toISOString(),
+      })
+      .eq("id", instructorId);
+    if (error) throw new Error(error.message);
+
+    revalidatePath(`/hr/saems/instructors/${instructorId}`);
+    revalidatePath("/hr/saems/instructors");
+    return { ok: true, mask };
+  } catch (e) {
+    // 원인 문자열에 값이 섞이지 않는 메시지만 올립니다.
+    return {
+      ok: false,
+      message:
+        e instanceof Error ? e.message : "주민등록번호를 저장하지 못했습니다.",
     };
   }
 }

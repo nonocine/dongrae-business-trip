@@ -34,6 +34,8 @@ const thCls = "px-2 py-2 text-left text-xs font-semibold text-navy whitespace-no
 const tdCls = "px-2 py-2 align-top text-sm text-ink-body";
 // 지급조서 다운로드(라우트) — next 페이지링크 규칙 회피용 상수.
 const EXCEL_HREF = (id: string) => `/hr/saems/settlements/${id}/excel`;
+// 강사비 지급대장(회계 제출용) — 확정본만. 주민번호가 들어간다.
+const LEDGER_HREF = (id: string) => `/hr/saems/settlements/${id}/ledger`;
 
 export default function SettlementDetail({
   detail,
@@ -45,6 +47,10 @@ export default function SettlementDetail({
   const [askRecalc, setAskRecalc] = useState(false);
   const [pending, start] = useTransition();
   const isDraft = detail.status === "draft";
+  // 지급대장 D열(주민번호)이 빌 강사 — 마스크가 없으면 저장된 값이 없다.
+  const missingRrn = detail.items
+    .filter((it) => !it.rrnMask)
+    .map((it) => it.instructorName);
 
   // ST-5. 재계산 — 조정된 항목이 있으면 유지/초기화를 먼저 묻는다.
   function onRecalc() {
@@ -178,6 +184,9 @@ export default function SettlementDetail({
                 <a href={EXCEL_HREF(detail.id)} className={btnPrimary}>
                   엑셀 다운로드
                 </a>
+                <a href={LEDGER_HREF(detail.id)} className={btnSecondary}>
+                  지급대장
+                </a>
                 {detail.isM0 && (
                   <button
                     type="button"
@@ -257,6 +266,15 @@ export default function SettlementDetail({
             근무일지(근무시간)를 고친 뒤 <b>재계산</b>하세요(단일 진실 원칙).
             <b> 수강료 분배제</b> 항목은 아래 [조정]으로 인원·금액을 직접 지정할 수
             있습니다.
+          </p>
+        )}
+
+        {/* 지급대장은 주민번호가 필수 열이라, 빠진 강사를 미리 알려 준다.
+            강사 상세 화면에서 담당자가 채울 수 있다. */}
+        {missingRrn.length > 0 && (
+          <p className={`mt-3 ${noticeWarning}`}>
+            주민번호 미입력 {missingRrn.length}명 — {missingRrn.join(", ")}.
+            지급대장에 빈칸으로 나갑니다. (강사 관리 → 강사 상세에서 입력)
           </p>
         )}
       </section>

@@ -11,6 +11,7 @@ import {
   deleteInstructorDoc,
   checkInstructorDeletable,
   deleteInstructor,
+  saveInstructorRrn,
   type InstructorInput,
   type InstructorDeletability,
 } from "@/app/hr/saems/instructorActions";
@@ -148,6 +149,10 @@ export default function InstructorDetail({
             <input value={f.memo} onChange={(e) => patch({ memo: e.target.value })} className={inCls} />
           </Field>
         </div>
+
+        {/* 주민등록번호 — 인적사항 저장과 따로 움직입니다(암호화 저장이라
+            빈 값 제출로 기존 값이 지워지면 안 됩니다). */}
+        <RrnField instructorId={instructor.id} mask={instructor.rrnMask} />
 
         {msg && (
           <p className={`mt-3 ${msg.ok ? noticeSuccess : noticeError}`}>{msg.text}</p>
@@ -828,6 +833,109 @@ function DocsSection({
         }}
       />
     </section>
+  );
+}
+
+// 주민등록번호 입력 — 강사비 지급대장(회계 제출용)에만 쓰입니다.
+//   * 저장된 값은 되읽지 않습니다(복호화 경로를 화면에 두지 않음). 앞 7자리
+//     마스크만 보여 주고, 바꾸려면 13자리를 다시 칩니다.
+//   * 비밀번호 관리와 같은 규칙 — 빈 값으로 저장을 누르면 기존 값을 그대로 둡니다.
+function RrnField({
+  instructorId,
+  mask,
+}: {
+  instructorId: string;
+  mask: string | null;
+}) {
+  const router = useRouter();
+  const [editing, setEditing] = useState(!mask);
+  const [value, setValue] = useState("");
+  const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
+  const [pending, start] = useTransition();
+
+  function submit() {
+    setMsg(null);
+    if (!value.trim()) {
+      // 빈 값 = 변경 없음. 저장돼 있으면 마스크 표시로 되돌아갑니다.
+      if (mask) {
+        setEditing(false);
+        return;
+      }
+      setMsg({ ok: false, text: "주민등록번호를 입력하세요." });
+      return;
+    }
+    start(async () => {
+      const res = await saveInstructorRrn(instructorId, value);
+      if (!res.ok) {
+        setMsg({ ok: false, text: res.message });
+        return;
+      }
+      // 평문은 화면에도 남기지 않습니다.
+      setValue("");
+      setEditing(false);
+      setMsg({ ok: true, text: "주민등록번호를 저장했습니다." });
+      router.refresh();
+    });
+  }
+
+  return (
+    <div className="mt-3 border-t border-line pt-3">
+      <label className="block text-[11px] font-semibold text-navy">
+        주민등록번호
+      </label>
+      {editing ? (
+        <div className="mt-1 flex flex-wrap items-center gap-2">
+          <input
+            value={value}
+            onChange={(e) => setValue(e.target.value)}
+            placeholder="861030-1234567"
+            autoComplete="off"
+            className={`${inCls} max-w-[200px]`}
+          />
+          <button
+            type="button"
+            onClick={submit}
+            disabled={pending}
+            className={btnPrimary}
+          >
+            {pending ? "저장 중…" : "주민번호 저장"}
+          </button>
+          {mask && (
+            <button
+              type="button"
+              onClick={() => {
+                setValue("");
+                setEditing(false);
+                setMsg(null);
+              }}
+              className={btnSecondary}
+            >
+              취소
+            </button>
+          )}
+        </div>
+      ) : (
+        <div className="mt-1 flex flex-wrap items-center gap-2">
+          <span className="text-sm text-ink-body">{mask}******</span>
+          <button
+            type="button"
+            onClick={() => setEditing(true)}
+            className={btnSecondary}
+          >
+            재입력
+          </button>
+        </div>
+      )}
+      <p className="mt-1 text-[10px] text-ink-hint">
+        강사비 지급대장(회계 제출용)에만 쓰입니다. 암호화해 보관하고 화면에는 앞
+        7자리만 표시합니다.
+      </p>
+      {msg && (
+        <p className={`mt-2 ${msg.ok ? noticeSuccess : noticeError}`}>
+          {msg.text}
+        </p>
+      )}
+    </div>
   );
 }
 

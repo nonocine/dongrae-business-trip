@@ -416,6 +416,8 @@ export async function copyTerm(input: {
 // --- 프로그램 CRUD ---
 export type ProgramInput = {
   name: string;
+  // 과목 — 강사비 지급대장 C열. 비면 지급대장이 name 으로 폴백한다.
+  subject: string | null;
   instructor_id: string | null;
   period_no: number | null;
   time_start: string | null;
@@ -445,6 +447,7 @@ function progPayload(i: ProgramInput) {
   });
   return {
     name: (i.name ?? "").trim(),
+    subject: clean(i.subject),
     instructor_id: i.instructor_id || null,
     period_no: num(i.period_no),
     time_start: clean(i.time_start),

@@ -87,6 +87,12 @@ export type SaemInstructor = {
   invite_expires_at: string | null;
   status: SaemStatus;
   memo: string | null;
+  // 주민번호 앞 7자리(생년월일 6 + 성별 1). 예 "861030-1".
+  //   ⚠️ 암호문(rrn_enc)은 이 타입에 절대 넣지 않습니다 — toInstructor 가
+  //   화이트리스트라, 여기에 없는 컬럼은 select("*") 로 읽어도 클라이언트까지
+  //   가지 않습니다. 평문·암호문이 필요한 곳은 서버에서 직접 조회합니다
+  //   (lib/payrollLedgerExport 를 쓰는 지급대장 라우트 하나뿐).
+  rrnMask: string | null;
 };
 
 export type SaemInstructorDoc = {
@@ -125,6 +131,9 @@ export type SaemProgram = {
   id: string;
   term_id: string;
   name: string;
+  // 과목 — 강사비 지급대장 C열에 그대로 들어갑니다(예 "비보잉").
+  //   비어 있으면 지급대장은 name 으로 폴백합니다.
+  subject: string | null;
   instructor_id: string | null;
   period_no: number | null;
   time_start: string | null;
@@ -173,6 +182,8 @@ export function toInstructor(r: Record<string, unknown>): SaemInstructor {
     invite_expires_at: s(r.invite_expires_at),
     status: r.status === "inactive" ? "inactive" : "active",
     memo: s(r.memo),
+    // rrn_enc 는 의도적으로 빠져 있습니다(위 타입 주석 참조).
+    rrnMask: s(r.rrn_mask),
   };
 }
 
@@ -219,6 +230,7 @@ export function toProgram(r: Record<string, unknown>): SaemProgram {
     id: String(r.id ?? ""),
     term_id: String(r.term_id ?? ""),
     name: String(r.name ?? ""),
+    subject: s(r.subject),
     instructor_id: s(r.instructor_id),
     period_no: nOrNull(r.period_no),
     time_start: s(r.time_start),
