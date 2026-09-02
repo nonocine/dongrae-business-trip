@@ -13,12 +13,11 @@ import {
 import {
   deleteBusinessResult,
   deletePromotion,
+  importBlogPromotions,
   importInstagramPromotions,
-  listInstagramCandidates,
   savePromotion,
   type BusinessResult,
   type BusinessResultsData,
-  type InstagramCandidate,
   type PromotionResult,
 } from "./actions";
 import CoinPayTab from "./CoinPayTab";
@@ -42,11 +41,16 @@ const tabs: { key: Tab; label: string }[] = [
   { key: "trainings", label: "종사자 교육" },
   { key: "report", label: "종합보고서" },
 ];
+// 홍보 채널(구분). 자동 수집(인스타그램="SNS", 블로그="블로그")도 여기 있는
+//   값만 씁니다 — 채널이 늘어도 새 구분값을 만들지 않습니다.
+//   * "카카오"는 카카오톡 채널 발송 건수를 담당자가 수기로 입력하는 칸입니다.
+//     카카오는 발송이력 조회 API 가 없어 자동 연동하지 않기로 확정했습니다.
 const promotionCategories = [
   "홈페이지",
   "밴드",
   "SNS",
   "블로그",
+  "카카오",
   "언론보도",
   "학교연계",
   "지역기관",
@@ -129,10 +133,6 @@ export default function BusinessResultsDashboard({
   const [promoChannelUrls, setPromoChannelUrls] = useState<
     Record<string, string>
   >({});
-  // 인스타그램 가져오기 — 후보 목록(열려 있을 때만 배열)과 체크한 게시물 id.
-  //   자동 등록이 아니라 고른 것만 등록하므로 목록·선택을 화면에서 들고 있습니다.
-  const [igItems, setIgItems] = useState<InstagramCandidate[] | null>(null);
-  const [igPicked, setIgPicked] = useState<string[]>([]);
   // 프로그램 실적 연속 입력 — seq 를 올려 폼을 새로 마운트(= 빈 폼)하고,
   //   월·분야·담당자만 다음 건으로 이어받습니다.
   const [newFormSeq, setNewFormSeq] = useState(0);
@@ -260,10 +260,21 @@ export default function BusinessResultsDashboard({
       `/business-results?year=${nextYear}&period=${nextPeriod}&month=${nextMonth}`,
     );
   }
-  // 관리자이거나 본인이 작성한 건만 수정·삭제할 수 있습니다.
+  // 관리자이거나 본인이 작성한 건만 수정할 수 있습니다.
   //   (서버 액션에서도 같은 규칙으로 한 번 더 막습니다.)
   function canManage(row: { author_name: string }) {
     return data.isAdmin || row.author_name === currentUser;
+  }
+
+  // 홍보 실적 삭제는 여기에 하나가 더 붙습니다 — [가져오기] 로 들어온 행
+  //   (source='auto')은 아무 직원이나 지울 수 있습니다. 자동 수집 행의
+  //   author_name 은 '버튼을 누른 사람'이라 임의에 가까워, 잘못 수집된 게시물을
+  //   그 사람만 치울 수 있으면 막히기 때문입니다.
+  //   * 수정(canManage)은 풀지 않습니다 — savePromotion 은 종전대로 작성자
+  //     본인·관리자만 받으므로, 여기서 열면 눌러도 실패하는 버튼이 생깁니다.
+  //   * 서버(deletePromotion)에서도 같은 규칙으로 한 번 더 막습니다.
+  function canDeletePromotion(row: PromotionResult) {
+    return canManage(row) || row.source === "auto";
   }
 
   // 프로그램 실적 삭제 — 세부 실적·실별 인원 자식 행도 함께 지워집니다(FK cascade).
@@ -299,55 +310,37 @@ export default function BusinessResultsDashboard({
     setPromoChannelUrls({});
   }
 
-  // 가져오기 — 누를 때마다 최신 목록을 다시 읽습니다(캐시 없음).
-  //   토큰 미설정·API 오류는 lib/instagramApi 가 만든 안내 문구가 그대로 옵니다.
-  function loadInstagram() {
+  // 가져오기 — 누를 때마다 최신 목록을 다시 읽어(캐시 없음), 아직 등록 안 된
+  //   게시물을 전부 즉시 등록합니다. 고르는 단계가 없어 누가 눌러도 결과가 같고,
+  //   이미 등록된 것은 서버에서 링크 기준으로 걸러집니다.
+  //   토큰 미설정·API 오류는 lib/instagramApi·lib/naverBlogApi 가 만든 안내
+  //   문구가 그대로 옵니다(다른 화면은 영향 없음).
+  function runImport(
+    channel: string,
+    load: () => Promise<{ saved: number; skipped: number }>,
+  ) {
     setMessage("");
     startTransition(async () => {
       try {
-        const items = await listInstagramCandidates();
-        setIgItems(items);
-        setIgPicked([]);
-        if (items.length === 0) {
-          setMessage("가져올 인스타그램 게시물이 없습니다.");
-        }
-      } catch (e) {
-        setIgItems(null);
+        const res = await load();
         setMessage(
-          e instanceof Error ? e.message : "인스타그램 게시물을 가져오지 못했습니다.",
-        );
-      }
-    });
-  }
-
-  function toggleIgPick(id: string) {
-    setIgPicked((prev) =>
-      prev.includes(id) ? prev.filter((v) => v !== id) : [...prev, id],
-    );
-  }
-
-  function submitInstagram() {
-    if (igPicked.length === 0) return;
-    setMessage("");
-    startTransition(async () => {
-      try {
-        const res = await importInstagramPromotions({ ids: igPicked });
-        setIgItems(null);
-        setIgPicked([]);
-        setMessage(
-          [
-            `인스타그램 ${res.saved}건을 홍보실적에 등록했습니다.`,
-            res.skipped > 0 ? `(이미 등록된 ${res.skipped}건 제외)` : "",
-            // 지금 보는 달이 아니라 게시일이 속한 달로 들어갑니다.
-            res.saved > 0 ? "게시일 기준 월로 분류됩니다." : "",
-          ]
-            .filter(Boolean)
-            .join(" "),
+          res.saved === 0 && res.skipped === 0
+            ? `가져올 ${channel} 게시물이 없습니다.`
+            : [
+                `${channel} ${res.saved}건을 홍보실적에 등록했습니다.`,
+                res.skipped > 0 ? `(이미 등록된 ${res.skipped}건 제외)` : "",
+                // 지금 보는 달이 아니라 게시일이 속한 달로 들어갑니다.
+                res.saved > 0 ? "게시일 기준 월로 분류됩니다." : "",
+              ]
+                .filter(Boolean)
+                .join(" "),
         );
         router.refresh();
       } catch (e) {
         setMessage(
-          e instanceof Error ? e.message : "인스타그램 게시물을 등록하지 못했습니다.",
+          e instanceof Error
+            ? e.message
+            : `${channel} 게시물을 등록하지 못했습니다.`,
         );
       }
     });
@@ -898,17 +891,32 @@ export default function BusinessResultsDashboard({
                 : `${periodLabel} 홍보·대외협력`}
             </h2>
             <div className="flex items-center gap-3">
-              {/* 인스타그램 가져오기 — 토큰이 설정된 경우에만 보입니다.
-                  권한은 수기 입력과 동일(이 화면에 들어온 직원). */}
-              {data.instagramConfigured && !editingPromo && (
-                <button
-                  type="button"
-                  disabled={pending}
-                  className={`${btnSecondary} h-9 px-3 text-xs`}
-                  onClick={() => (igItems ? setIgItems(null) : loadInstagram())}
-                >
-                  {igItems ? "가져오기 닫기" : "📷 인스타그램에서 가져오기"}
-                </button>
+              {/* 가져오기 — 누르면 아직 등록 안 된 게시물이 전부 즉시 등록됩니다
+                  (고르는 단계 없음). 권한은 수기 입력과 동일(이 화면에 들어온 직원).
+                  인스타그램은 토큰이 있어야 보이고, 블로그는 공개 RSS 라 항상 보입니다. */}
+              {!editingPromo && (
+                <>
+                  {data.instagramConfigured && (
+                    <button
+                      type="button"
+                      disabled={pending}
+                      className={`${btnSecondary} h-9 px-3 text-xs`}
+                      onClick={() =>
+                        runImport("인스타그램", importInstagramPromotions)
+                      }
+                    >
+                      📷 인스타그램에서 가져오기
+                    </button>
+                  )}
+                  <button
+                    type="button"
+                    disabled={pending}
+                    className={`${btnSecondary} h-9 px-3 text-xs`}
+                    onClick={() => runImport("블로그", importBlogPromotions)}
+                  >
+                    ✍️ 블로그에서 가져오기
+                  </button>
+                </>
               )}
               {editingPromo && (
                 <button
@@ -925,85 +933,6 @@ export default function BusinessResultsDashboard({
             </div>
           </div>
 
-          {/* 가져온 게시물 후보 — 체크한 것만 등록됩니다(자동 등록 아님). */}
-          {igItems && igItems.length > 0 && (
-            <div className="mt-4 rounded-lg border border-dashed border-line bg-surface p-3">
-              <div className="flex flex-wrap items-center justify-between gap-2">
-                <p className="text-xs text-ink-muted">
-                  최근 게시물 {igItems.length}건 — 등록할 것만 선택하세요. 구분은
-                  SNS, 게시일 기준 월로 저장됩니다.
-                </p>
-                <button
-                  type="button"
-                  disabled={pending || igPicked.length === 0}
-                  className={`${btnPrimary} h-8 px-3 text-xs`}
-                  onClick={submitInstagram}
-                >
-                  선택 항목 등록
-                  {igPicked.length > 0 ? ` (${igPicked.length})` : ""}
-                </button>
-              </div>
-              <ul className="mt-3 space-y-2">
-                {igItems.map((m) => {
-                  const on = igPicked.includes(m.id);
-                  return (
-                    <li
-                      key={m.id}
-                      className={`flex items-start gap-3 rounded-lg border bg-card p-2.5 ${
-                        m.alreadyRegistered ? "border-line opacity-60" : "border-line"
-                      }`}
-                    >
-                      <input
-                        type="checkbox"
-                        className="mt-1"
-                        checked={on}
-                        disabled={m.alreadyRegistered}
-                        onChange={() => toggleIgPick(m.id)}
-                      />
-                      {m.thumbnailUrl ? (
-                        // eslint-disable-next-line @next/next/no-img-element
-                        <img
-                          src={m.thumbnailUrl}
-                          alt=""
-                          className="h-14 w-14 shrink-0 rounded-md border border-line object-cover"
-                        />
-                      ) : (
-                        <div className="flex h-14 w-14 shrink-0 items-center justify-center rounded-md border border-dashed border-line text-lg text-ink-hint">
-                          🖼
-                        </div>
-                      )}
-                      <div className="min-w-0 flex-1">
-                        <p className="truncate text-sm font-semibold text-ink">
-                          {m.title}
-                        </p>
-                        <p className="mt-0.5 text-xs text-ink-muted">
-                          {m.activityDate} · {m.mediaType}
-                          {m.alreadyRegistered && (
-                            <span className={`${badgeNeutral} ml-1.5`}>
-                              이미 등록됨
-                            </span>
-                          )}
-                        </p>
-                        {m.caption && (
-                          <p className="mt-1 line-clamp-2 text-xs text-ink-hint">
-                            {m.caption}
-                          </p>
-                        )}
-                        <a
-                          href={m.permalink}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="mt-1 inline-block text-xs text-navy hover:underline"
-                        >
-                          게시물 열기 ↗
-                        </a>
-                      </div>
-                    </li>
-                  );
-                })}
-              </ul>
-            </div>
-          )}
           <form
             key={editingPromo?.id ?? "new"}
             className="mt-4 grid gap-3 md:grid-cols-3"
@@ -1166,26 +1095,30 @@ export default function BusinessResultsDashboard({
                     {r.author_name}
                   </p>
                 </div>
-                {canManage(r) && (
+                {(canManage(r) || canDeletePromotion(r)) && (
                   <div className="flex shrink-0 gap-1">
-                    <button
-                      type="button"
-                      className="rounded-lg border border-line px-3 py-1.5 text-xs font-bold text-navy hover:bg-navy-soft"
-                      onClick={() => {
-                        setEditingPromo(r);
-                        window.scrollTo({ top: 0, behavior: "smooth" });
-                      }}
-                    >
-                      수정
-                    </button>
-                    <button
-                      type="button"
-                      disabled={pending}
-                      className="rounded-lg border border-line px-3 py-1.5 text-xs font-bold text-ink-muted hover:bg-surface"
-                      onClick={() => removePromotion(r)}
-                    >
-                      삭제
-                    </button>
+                    {canManage(r) && (
+                      <button
+                        type="button"
+                        className="rounded-lg border border-line px-3 py-1.5 text-xs font-bold text-navy hover:bg-navy-soft"
+                        onClick={() => {
+                          setEditingPromo(r);
+                          window.scrollTo({ top: 0, behavior: "smooth" });
+                        }}
+                      >
+                        수정
+                      </button>
+                    )}
+                    {canDeletePromotion(r) && (
+                      <button
+                        type="button"
+                        disabled={pending}
+                        className="rounded-lg border border-line px-3 py-1.5 text-xs font-bold text-ink-muted hover:bg-surface"
+                        onClick={() => removePromotion(r)}
+                      >
+                        삭제
+                      </button>
+                    )}
                   </div>
                 )}
               </div>

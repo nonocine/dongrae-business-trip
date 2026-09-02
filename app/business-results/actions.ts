@@ -6,11 +6,10 @@ import { supabaseAdmin } from "@/lib/supabaseAdmin";
 import { kstTodayYmd } from "@/lib/trainings";
 import {
   fetchRecentInstagramMedia,
-  instagramKstYmd,
-  instagramTitle,
   isInstagramConfigured,
-  type InstagramMedia,
 } from "@/lib/instagramApi";
+import { fetchNaverBlogFeed } from "@/lib/naverBlogApi";
+import { kstYmdFromIso, promotionTitle } from "@/lib/promotionImport";
 
 export type BusinessResult = {
   id: string;
@@ -50,6 +49,9 @@ export type PromotionResult = {
   url: string;
   description: string;
   author_name: string;
+  // 'manual' = 사람이 입력, 'auto' = [가져오기] 로 수집(인스타그램·블로그).
+  //   auto 행은 아무 직원이나 지울 수 있습니다(deletePromotion 참고).
+  source: string;
 };
 
 // 사업명·세부사업명 레지스트리(등록제) — 자유 입력 표기 불일치 방지.
@@ -624,20 +626,38 @@ export async function savePromotion(formData: FormData) {
 }
 
 // 홍보·대외협력 삭제 — 물리 삭제(이 테이블에는 소프트 삭제 컬럼이 없습니다).
-//   권한 규칙은 수정과 동일: 관리자 또는 작성자 본인.
+//   권한: 관리자 / 작성자 본인 / source='auto' 행은 아무 직원이나.
+//   * auto 행을 푸는 이유 — [가져오기] 로 들어온 행의 author_name 은 '버튼을 누른
+//     사람'이라 사실상 임의입니다. 잘못 수집된 게시물을 그 사람만 지울 수 있으면
+//     막힙니다. 사람이 직접 쓴(manual) 행의 규칙은 그대로 둡니다.
+//   * 소유자 확인 후 분기 — saveResultDetails 와 같은 방식입니다(.or() 문자열에
+//     한글 이름을 끼워 넣지 않아도 되고, 어떤 사유로 막혔는지 구분됩니다).
 export async function deletePromotion(id: string): Promise<ActionResult> {
   try {
     const user = await requireUser();
     if (!id) return { ok: false, message: "대상이 없습니다." };
-    let query = supabaseAdmin
+
+    const { data: row, error: rowError } = await supabaseAdmin
+      .from("business_promotions")
+      .select("author_name, source")
+      .eq("id", id)
+      .maybeSingle();
+    if (rowError) throw new Error(rowError.message);
+    if (!row) return { ok: false, message: "대상이 없습니다." };
+
+    const owner = row as { author_name: string; source: string | null };
+    const allowed =
+      user.isAdmin ||
+      owner.source === "auto" ||
+      String(owner.author_name) === user.name;
+    if (!allowed)
+      return { ok: false, message: "본인이 작성한 홍보 실적만 삭제할 수 있습니다." };
+
+    const { error } = await supabaseAdmin
       .from("business_promotions")
       .delete()
       .eq("id", id);
-    if (!user.isAdmin) query = query.eq("author_name", user.name);
-    const { data, error } = await query.select("id").maybeSingle();
     if (error) throw new Error(error.message);
-    if (!data)
-      return { ok: false, message: "본인이 작성한 홍보 실적만 삭제할 수 있습니다." };
     revalidatePath("/business-results");
     return { ok: true };
   } catch (e) {
@@ -976,35 +996,36 @@ export async function updateBusinessProgram(
 }
 
 // =====================================================================
-// 인스타그램 게시물 가져오기 (관장 8/26 요청)
-//   * 센터 계정 게시물을 홍보실적으로 옮겨 적는 수고를 줄입니다. 자동 등록이
-//     아니라 후보를 보여주고 사람이 고른 것만 등록합니다.
+// 홍보실적 자동 수집 — 인스타그램 / 네이버 블로그 (관장 확정)
+//   * [가져오기] 버튼 한 번에 "아직 등록 안 된 게시물 전부"가 즉시 등록됩니다.
+//     사람이 고르지 않으므로 누가 눌러도 결과가 같습니다.
 //   * 권한은 수기 입력과 동일 — requireUser(로그인한 직원). 별도 게이트 없음.
-//   * 구분(category)은 새 값을 만들지 않고 기존 목록의 "SNS" 를 씁니다.
-//   * 중복 방지: 게시물 permalink 가 이미 business_promotions.url 에 있으면
-//     후보 목록에서 '이미 등록됨' 으로 표시하고, 등록 단계에서도 다시 거릅니다
-//     (조회 이후에 다른 사람이 먼저 등록했을 수 있으므로).
-//   * ⚠️ 토큰은 lib/instagramApi 안에서만 다룹니다. 여기서는 값을 만지지 않습니다.
+//   * 구분(category)은 새 값을 만들지 않고 promotionCategories 안의 값만 씁니다
+//     (인스타그램 = "SNS", 블로그 = "블로그").
+//   * 월 배정은 게시일(KST) 기준 — 8월 게시물은 지금 9월을 보고 있어도 8월
+//     실적으로 들어갑니다. 화면에서 그 점을 안내합니다.
+//   * 중복 방지: 게시물 링크가 이미 business_promotions.url 에 있으면 거릅니다.
+//     인스타그램·블로그가 같은 테이블·같은 컬럼을 보므로 자동으로 공유됩니다.
+//   * source 는 'auto' 로 남깁니다 — 잘못 들어온 행을 아무 직원이나 지울 수
+//     있게 하는 근거입니다(deletePromotion 참고).
+//   * ⚠️ 인스타그램 토큰은 lib/instagramApi 안에서만 다룹니다.
 // =====================================================================
 
-// 인스타그램 게시물의 구분값. BusinessResultsDashboard 의 promotionCategories
-//   안에 있는 값이어야 합니다("인스타그램" 같은 새 값을 만들지 않습니다).
+// 채널별 고정값. promotionCategories(BusinessResultsDashboard) 안에 있는 값이어야
+//   합니다 — "인스타그램" 같은 새 구분값을 만들지 않습니다.
 const INSTAGRAM_CATEGORY = "SNS";
+const BLOG_CATEGORY = "블로그";
 
-// 화면 목록 한 줄 — 원본 게시물 + 등록될 값 미리보기.
-export type InstagramCandidate = {
-  id: string;
-  caption: string;
-  mediaType: string;
-  thumbnailUrl: string | null;
-  permalink: string;
-  // 등록 시 들어갈 값(화면에서 그대로 보여줍니다).
-  title: string;
-  activityDate: string;
-  alreadyRegistered: boolean;
+// 가져오기 결과. 화면은 이 숫자로 "N건 등록, M건은 이미 등록됨" 을 만듭니다.
+export type PromotionImportResult = {
+  ok: true;
+  saved: number;
+  skipped: number;
 };
 
-// 이미 등록된 permalink 집합 — 연·월과 무관하게 전체에서 확인합니다.
+// 이미 등록된 링크 집합 — 연·월과 무관하게 전체에서 확인합니다.
+//   인스타그램 permalink 든 블로그 link 든 같은 url 컬럼을 보므로, 채널이
+//   늘어도 이 함수 하나를 그대로 씁니다(밴드 승인 후에도 동일).
 async function registeredPermalinks(links: string[]): Promise<Set<string>> {
   if (links.length === 0) return new Set();
   const { data, error } = await supabaseAdmin
@@ -1020,73 +1041,47 @@ async function registeredPermalinks(links: string[]): Promise<Set<string>> {
   return set;
 }
 
-function toCandidate(m: InstagramMedia, registered: Set<string>) {
-  const activityDate = instagramKstYmd(m.timestamp);
-  return {
-    id: m.id,
-    caption: m.caption,
-    mediaType: m.mediaType,
-    thumbnailUrl: m.thumbnailUrl,
-    permalink: m.permalink,
-    title: instagramTitle(m.caption, activityDate),
-    activityDate,
-    alreadyRegistered: registered.has(m.permalink),
-  };
-}
+// 수집한 게시물 → business_promotions 행. 채널마다 다른 건 앞에서 정규화해
+//   넘기고, 여기서는 공통 규칙(게시일→월, 제목 40자, source='auto')만 적용합니다.
+type ImportSeed = {
+  url: string;
+  // 제목 원문(인스타그램 캡션 / 블로그 RSS 제목).
+  text: string;
+  // 게시일 원문. ISO 8601(인스타그램) 또는 RFC 822(블로그 RSS).
+  publishedAt: string;
+  // 원문이 비었을 때 제목에 쓸 이름.
+  fallbackLabel: string;
+  description: string;
+};
 
-// 최근 게시물 후보 목록. 토큰 미설정·API 오류는 그대로 throw 되어 화면에
-//   "인스타그램 연결에 문제가…" 메시지로 표시됩니다(다른 기능은 영향 없음).
-export async function listInstagramCandidates(): Promise<InstagramCandidate[]> {
-  await requireUser();
-  const media = await fetchRecentInstagramMedia();
-  if (media.length === 0) return [];
-  const registered = await registeredPermalinks(media.map((m) => m.permalink));
-  return media.map((m) => toCandidate(m, registered));
-}
+async function insertAutoPromotions(
+  seeds: ImportSeed[],
+  category: string,
+  authorName: string,
+): Promise<PromotionImportResult> {
+  if (seeds.length === 0) return { ok: true, saved: 0, skipped: 0 };
 
-// 선택한 게시물을 홍보실적으로 등록합니다.
-//   * 값은 클라이언트가 보낸 것을 믿지 않고 인스타그램에서 다시 읽어 씁니다
-//     (id 만 받습니다).
-//   * report_year·report_month 는 게시일(KST) 기준 — 7월 게시물은 7월 실적으로
-//     들어갑니다. 지금 보고 있는 기간과 다르면 화면에서 안내합니다.
-export async function importInstagramPromotions(input: {
-  ids: string[];
-}): Promise<{ ok: true; saved: number; skipped: number }> {
-  const user = await requireUser();
-  const wanted = new Set(
-    (input.ids ?? []).map((v) => String(v).trim()).filter(Boolean),
-  );
-  if (wanted.size === 0) throw new Error("등록할 게시물을 선택해주세요.");
-
-  const media = (await fetchRecentInstagramMedia()).filter((m) =>
-    wanted.has(m.id),
-  );
-  if (media.length === 0) {
-    throw new Error("선택한 게시물을 인스타그램에서 찾을 수 없습니다.");
-  }
-
-  // 조회 시점 이후에 누가 먼저 등록했을 수 있어 여기서 한 번 더 거릅니다.
-  const registered = await registeredPermalinks(media.map((m) => m.permalink));
-  const fresh = media.filter((m) => !registered.has(m.permalink));
-  const skipped = media.length - fresh.length;
+  const registered = await registeredPermalinks(seeds.map((s) => s.url));
+  const fresh = seeds.filter((s) => !registered.has(s.url));
+  const skipped = seeds.length - fresh.length;
   if (fresh.length === 0) return { ok: true, saved: 0, skipped };
 
   const today = kstTodayYmd();
-  const rows = fresh.map((m) => {
+  const rows = fresh.map((s) => {
     // 게시일을 못 읽는 경우(형식 이상)에만 오늘 날짜로 폴백합니다.
-    const activityDate = instagramKstYmd(m.timestamp) || today;
+    const activityDate = kstYmdFromIso(s.publishedAt) || today;
     const [y, mo] = activityDate.split("-");
     return {
       report_year: Number(y),
       report_month: Number(mo),
       activity_date: activityDate,
-      // 새 구분값을 만들지 않고 기존 promotionCategories 의 "SNS" 를 씁니다.
-      category: INSTAGRAM_CATEGORY,
-      title: instagramTitle(m.caption, activityDate),
+      category,
+      title: promotionTitle(s.text, activityDate, s.fallbackLabel),
       count: 1,
-      url: m.permalink,
-      description: m.caption,
-      author_name: user.name,
+      url: s.url,
+      description: s.description,
+      author_name: authorName,
+      source: "auto",
     };
   });
 
@@ -1097,4 +1092,41 @@ export async function importInstagramPromotions(input: {
 
   revalidatePath("/business-results");
   return { ok: true, saved: rows.length, skipped };
+}
+
+// 인스타그램 — 최근 게시물 중 아직 등록 안 된 것을 전부 등록합니다.
+//   토큰 미설정·API 오류는 그대로 throw 되어 화면에 안내 문구로 표시됩니다
+//   (다른 기능은 영향 없음).
+export async function importInstagramPromotions(): Promise<PromotionImportResult> {
+  const user = await requireUser();
+  const media = await fetchRecentInstagramMedia();
+  return insertAutoPromotions(
+    media.map((m) => ({
+      url: m.permalink,
+      text: m.caption,
+      publishedAt: m.timestamp,
+      fallbackLabel: "인스타그램 게시물",
+      description: m.caption,
+    })),
+    INSTAGRAM_CATEGORY,
+    user.name,
+  );
+}
+
+// 네이버 블로그 — 공개 RSS 라 토큰이 없고, 버튼도 항상 보입니다.
+//   RSS 본문(description)은 사진 태그가 섞여 있어 쓰지 않습니다 — 설명은 빈 값.
+export async function importBlogPromotions(): Promise<PromotionImportResult> {
+  const user = await requireUser();
+  const items = await fetchNaverBlogFeed();
+  return insertAutoPromotions(
+    items.map((i) => ({
+      url: i.link,
+      text: i.title,
+      publishedAt: i.pubDate,
+      fallbackLabel: "블로그 게시물",
+      description: "",
+    })),
+    BLOG_CATEGORY,
+    user.name,
+  );
 }

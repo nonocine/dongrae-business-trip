@@ -1,7 +1,9 @@
 // =====================================================================
 // 인스타그램 게시물 가져오기 — Instagram API with Instagram Login
-//   * 센터 계정(@onnainna7942)의 최근 게시물을 읽어 홍보실적 등록 후보로 씁니다.
-//     자동 등록이 아니라 "후보 목록"만 만들고, 무엇을 등록할지는 사람이 고릅니다.
+//   * 센터 계정(@onnainna7942)의 최근 게시물을 읽어 홍보실적으로 등록합니다.
+//     [가져오기] 한 번에 아직 등록 안 된 것이 전부 들어갑니다(사람이 고르지 않음).
+//   * 게시일→월 배정·제목 만들기 규칙은 채널 공용이라 lib/promotionImport.ts 에
+//     있습니다. 이 파일은 인스타그램 API 호출과 토큰 취급만 맡습니다.
 //   * 엔드포인트(Meta 문서 기준):
 //       GET https://graph.instagram.com/{version}/me/media
 //           ?fields=id,caption,media_type,media_url,permalink,thumbnail_url,timestamp
@@ -56,35 +58,6 @@ export function redact(text: string): string {
   const token = process.env.INSTAGRAM_ACCESS_TOKEN?.trim();
   const withoutToken = token ? text.split(token).join("***") : text;
   return withoutToken.replace(/access_token=[^&\s"']+/gi, "access_token=***");
-}
-
-const p2 = (n: number) => String(n).padStart(2, "0");
-
-// ISO 8601(UTC) → KST 기준 "YYYY-MM-DD".
-//   밤 9시 이후(UTC 기준 같은 날 낮)에 올린 글이 전날로 밀리지 않도록 +9h 합니다.
-//   파싱할 수 없으면 빈 문자열(호출부에서 오늘 날짜 등으로 폴백).
-export function instagramKstYmd(timestamp: string): string {
-  const ms = Date.parse(timestamp);
-  if (!Number.isFinite(ms)) return "";
-  const kst = new Date(ms + 9 * 60 * 60 * 1000);
-  return `${kst.getUTCFullYear()}-${p2(kst.getUTCMonth() + 1)}-${p2(
-    kst.getUTCDate(),
-  )}`;
-}
-
-// 캡션 → 홍보실적 제목. 첫 줄(빈 줄 건너뜀)을 40자까지 씁니다.
-//   캡션이 없는 게시물(사진만 올린 경우)은 날짜로 제목을 만듭니다.
-const TITLE_MAX = 40;
-export function instagramTitle(caption: string, dateYmd: string): string {
-  const firstLine =
-    caption
-      .split("\n")
-      .map((line) => line.trim())
-      .find(Boolean) ?? "";
-  if (!firstLine) return `인스타그램 게시물 ${dateYmd || ""}`.trim();
-  return firstLine.length > TITLE_MAX
-    ? `${firstLine.slice(0, TITLE_MAX)}…`
-    : firstLine;
 }
 
 function toMedia(raw: Record<string, unknown>): InstagramMedia {
