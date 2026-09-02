@@ -36,6 +36,16 @@
   --brand-yellow: #f2bc2f;
   --brand-green: #5fad43;
 
+  /* 로고 원색 4색 — 헤더 부제목의 "동업자시" 글자 강조에 씁니다.
+     동아리 결과보고서(lib/clubReportDocx.ts BRAND)와 같은 값이라
+     문서 출력물과 화면이 같은 색을 씁니다.
+     위 --brand-* 는 화면용으로 조금 눌러 놓은 값이라 따로 둡니다
+     (그쪽은 이미 여러 화면이 참조 중이므로 바꾸지 않습니다). */
+  --logo-red: #e84538;
+  --logo-blue: #416cb3;
+  --logo-green: #3fae5e;
+  --logo-yellow: #f3c83e;
+
   /* 하위 호환 — 기존 코드가 참조하는 변수명 유지 */
   --background: var(--canvas);
   --foreground: var(--ink);
@@ -80,6 +90,11 @@
   --color-brand-red: var(--brand-red);
   --color-brand-yellow: var(--brand-yellow);
   --color-brand-green: var(--brand-green);
+
+  --color-logo-red: var(--logo-red);
+  --color-logo-blue: var(--logo-blue);
+  --color-logo-green: var(--logo-green);
+  --color-logo-yellow: var(--logo-yellow);
 
   /* 하위 호환 */
   --color-surface-border: var(--surface-border);

@@ -74,8 +74,18 @@ export default function HeaderClient({
             <span className="text-base font-bold tracking-tight text-ink sm:text-lg">
               동업자씨
             </span>
+            {/* 앱 이름의 유래를 부제목에서 바로 보이게 — 앞글자를 모으면
+                "동업자씨"가 됩니다. 로고 4색으로 그 글자만 강조합니다.
+                ⚠️ "씨스템"은 오타가 아니라 의도한 표기입니다 — 앱 이름이
+                '동업자씨'라서 넷째 글자를 '씨'로 맞춥니다. 메타태그·PDF 등
+                공식 문서 쪽은 '시스템'을 그대로 씁니다(여기 헤더만 예외).
+                줄바꿈이 끼면 유래가 안 읽히므로 span 과 뒤 글자를 같은 줄에
+                붙여 둡니다 — JSX 가 줄 사이에 공백을 넣지 않게. */}
             <span className="hidden text-xs text-ink-hint sm:block">
-              동래구청소년센터 업무 자동화 시스템
+              <span className="font-semibold text-logo-red">동</span>래구청소년센터{" "}
+              <span className="font-semibold text-logo-blue">업</span>무{" "}
+              <span className="font-semibold text-logo-green">자</span>동화{" "}
+              <span className="font-semibold text-logo-yellow">씨</span>스템
             </span>
           </span>
         </Link>

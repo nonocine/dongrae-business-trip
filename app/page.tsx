@@ -97,25 +97,30 @@ export default async function Home({
               />
             </div>
 
-            {/* 브랜드명 — 네 글자를 로고 색감으로 강조 */}
+            {/* 브랜드명 — 네 글자를 로고 색감으로 강조.
+                색 순서는 빨강→파랑→초록→노랑 — 동아리 결과보고서의 브랜드
+                4색 띠(lib/clubReportDocx.ts BRAND)와 같은 순서이고, 헤더
+                부제목(HeaderClient)도 이 순서를 씁니다.
+                값은 어두운 배경용으로 맞춰 둔 것이라 그대로 둡니다. */}
             <h1 className="mt-5 text-4xl font-extrabold tracking-[0.04em] sm:text-5xl">
               <span style={{ color: "#e84040" }}>동</span>
-              <span style={{ color: "#3ab54a" }}>업</span>
-              <span style={{ color: "#2f7be0" }}>자</span>
+              <span style={{ color: "#2f7be0" }}>업</span>
+              <span style={{ color: "#3ab54a" }}>자</span>
               <span style={{ color: "#f0c030" }}>씨</span>
             </h1>
 
-            {/* 풀네임 전개 — 앞글자 4개를 같은 색으로 매칭(= 동업자씨) */}
+            {/* 풀네임 전개 — 앞글자 4개를 위 h1 과 같은 색·같은 순서로 매칭
+                (= 동업자씨). 값만 어두운 배경용으로 밝게 올려 둔 것입니다. */}
             <p className="mt-3 text-[13px] leading-relaxed text-white/65 sm:text-sm">
               <b className="font-bold" style={{ color: "#ff6b66" }}>
                 동
               </b>
               래구청소년센터{" "}
-              <b className="font-bold" style={{ color: "#5fd06a" }}>
+              <b className="font-bold" style={{ color: "#7ab3f5" }}>
                 업
               </b>
               무{" "}
-              <b className="font-bold" style={{ color: "#7ab3f5" }}>
+              <b className="font-bold" style={{ color: "#5fd06a" }}>
                 자
               </b>
               동화{" "}
