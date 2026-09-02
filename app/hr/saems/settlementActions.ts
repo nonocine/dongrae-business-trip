@@ -125,25 +125,56 @@ async function revenueProgramsSettledElsewhere(
   return taken;
 }
 
+// 정산 대상 묶음. sessionIdsByInstructor 가 핵심 — 강사를 골라 정산할 때
+//   '그 강사의 세션에만' settlement_id 를 찍어야 하는데, 예전에는 sessionIds 가
+//   강사 구분 없는 플랫 배열이라 5명만 골라도 11명분 세션이 전부 잠겼다.
+//   sessionIds 는 전체 합(미리보기 요약용)으로 그대로 남긴다.
+type EligibleSet = {
+  byInstructor: Map<string, SettlementSessionInput[]>;
+  revenueByInstructor: Map<string, SettlementRevenueInput[]>;
+  sessionIdsByInstructor: Map<string, string[]>;
+  sessionIds: string[];
+  instructorIds: string[];
+};
+
+// 고른 강사만 남긴다 — 생성·재계산이 쓴다(미리보기는 전체를 그대로 보여 준다).
+//   * selected 가 비었거나 없으면 전체를 그대로 둔다(하위 호환).
+//   * 분배제(revenue_share)는 세션에 settlement_id 를 찍지 않고 items 의
+//     program_id 로 중복을 막으므로, 제외된 강사의 분배제 항목이 items 에
+//     들어가지 않게 하는 것만으로 충분하다 — 그 프로그램은 '아직 정산 안 된'
+//     상태로 남아 다음 정산에서 다시 대상이 된다.
+function narrowToInstructors(g: EligibleSet, selected?: string[]): EligibleSet {
+  const want = new Set((selected ?? []).map((v) => String(v).trim()).filter(Boolean));
+  if (want.size === 0) return g;
+  const keep = g.instructorIds.filter((id) => want.has(id));
+  const pick = <T,>(m: Map<string, T>) =>
+    new Map([...m].filter(([id]) => want.has(id)));
+  const sessionIdsByInstructor = pick(g.sessionIdsByInstructor);
+  return {
+    byInstructor: pick(g.byInstructor),
+    revenueByInstructor: pick(g.revenueByInstructor),
+    sessionIdsByInstructor,
+    sessionIds: [...sessionIdsByInstructor.values()].flat(),
+    instructorIds: keep,
+  };
+}
+
 async function gatherEligible(
   projectId: string,
   periodStart: string,
   periodEnd: string,
   options?: { includeSettlementId?: string; adjustments?: AdjustmentMap }
-): Promise<{
-  byInstructor: Map<string, SettlementSessionInput[]>;
-  revenueByInstructor: Map<string, SettlementRevenueInput[]>;
-  sessionIds: string[];
-  instructorIds: string[];
-}> {
+): Promise<EligibleSet> {
   const includeSettlementId = options?.includeSettlementId;
   const adjustments = options?.adjustments ?? new Map();
   const byInstructor = new Map<string, SettlementSessionInput[]>();
   const revenueByInstructor = new Map<string, SettlementRevenueInput[]>();
+  const sessionIdsByInstructor = new Map<string, string[]>();
   const sessionIds: string[] = [];
   const empty = {
     byInstructor,
     revenueByInstructor,
+    sessionIdsByInstructor,
     sessionIds,
     instructorIds: [] as string[],
   };
@@ -217,6 +248,9 @@ async function gatherEligible(
       work_hours: Number(row.work_hours ?? 0),
     });
     byInstructor.set(prog.instructor_id, list);
+    const ids = sessionIdsByInstructor.get(prog.instructor_id) ?? [];
+    ids.push(String(row.id));
+    sessionIdsByInstructor.set(prog.instructor_id, ids);
     sessionIds.push(String(row.id));
   }
 
@@ -265,7 +299,13 @@ async function gatherEligible(
   const instructorIds = [
     ...new Set([...byInstructor.keys(), ...revenueByInstructor.keys()]),
   ];
-  return { byInstructor, revenueByInstructor, sessionIds, instructorIds };
+  return {
+    byInstructor,
+    revenueByInstructor,
+    sessionIdsByInstructor,
+    sessionIds,
+    instructorIds,
+  };
 }
 
 // 강사별 계산 결과 → items 행. 생성·재계산이 공용으로 쓴다.
@@ -394,6 +434,9 @@ export type SettlementPreviewRow = {
   instructor_id: string;
   instructorName: string;
   detail: SettlementProgramDetail[];
+  // 이 강사의 시급제 대상 세션 수. 화면에서 선택분만 합산해 요약에 쓴다
+  //   (분배제는 세션 단위가 아니라 0 으로 잡힌다).
+  sessionCount: number;
   gross_amount: number;
   deduction_rate: number;
   deduction_amount: number;
@@ -412,7 +455,8 @@ export type SettlementPreview = {
 async function buildRows(
   instructorIds: string[],
   byInstructor: Map<string, SettlementSessionInput[]>,
-  revenueByInstructor: Map<string, SettlementRevenueInput[]>
+  revenueByInstructor: Map<string, SettlementRevenueInput[]>,
+  sessionIdsByInstructor: Map<string, string[]>
 ): Promise<SettlementPreviewRow[]> {
   const names = await instructorNameMap(instructorIds);
   const rows: SettlementPreviewRow[] = [];
@@ -425,6 +469,7 @@ async function buildRows(
       instructor_id: instructorId,
       instructorName: names.get(instructorId) ?? "(이름 없음)",
       detail: c.detail,
+      sessionCount: (sessionIdsByInstructor.get(instructorId) ?? []).length,
       gross_amount: c.gross_amount,
       deduction_rate: c.deduction_rate,
       deduction_amount: c.deduction_amount,
@@ -464,7 +509,8 @@ export async function previewSettlement(input: {
   const rows = await buildRows(
     g.instructorIds,
     g.byInstructor,
-    g.revenueByInstructor
+    g.revenueByInstructor,
+    g.sessionIdsByInstructor
   );
   const revenueProgramCount = [...g.revenueByInstructor.values()].reduce(
     (s, l) => s + l.length,
@@ -488,6 +534,9 @@ export async function createSettlement(input: {
   periodEnd: string;
   // 미리보기에서 조정한 분배제 항목(있으면 그대로 저장).
   adjustments?: SettlementAdjustment[];
+  // 정산에 포함할 강사. 화면에서 체크한 것만 온다.
+  //   없거나 빈 배열이면 종전처럼 대상 전원(하위 호환).
+  instructorIds?: string[];
 }): Promise<{ ok: true; id: string } | { ok: false; message: string }> {
   try {
     await requireSaemAccess();
@@ -498,19 +547,23 @@ export async function createSettlement(input: {
     if (input.periodStart > input.periodEnd)
       return { ok: false, message: "기간이 올바르지 않습니다." };
 
-    const g = await gatherEligible(
+    const all = await gatherEligible(
       input.projectId,
       input.periodStart,
       input.periodEnd,
       { adjustments: toAdjustmentMap(input.adjustments) }
     );
-    const { byInstructor, revenueByInstructor, sessionIds, instructorIds } = g;
-    if (instructorIds.length === 0)
+    if (all.instructorIds.length === 0)
       return {
         ok: false,
         message:
           "대상이 없습니다. (확정된 미정산 근무일지도, 기간 내 분배제 프로그램도 없습니다)",
       };
+    // 고른 강사만 남긴다 — items 도, 세션 귀속도 여기서 좁힌 것만 쓴다.
+    const g = narrowToInstructors(all, input.instructorIds);
+    const { byInstructor, revenueByInstructor, sessionIds, instructorIds } = g;
+    if (instructorIds.length === 0)
+      return { ok: false, message: "정산할 강사를 1명 이상 선택하세요." };
 
     const { data: sett, error: sErr } = await supabaseAdmin
       .from(SETT)
@@ -746,13 +799,23 @@ export async function recalcSettlement(
         detail: parseDetail(it.detail),
       }))
     );
+    // 이 정산이 담고 있던 강사들. 생성 시 일부만 골랐을 수 있으므로 재계산이
+    //   대상 전원으로 넓히지 않게 이 명단으로 다시 좁힌다(넓히면 담당자가
+    //   의도적으로 뺀 강사가 되살아난다). 항목이 없으면 종전처럼 전체.
+    const prevInstructorIds = [
+      ...new Set(
+        ((prevItems ?? []) as Record<string, unknown>[]).map((it) =>
+          String(it.instructor_id)
+        )
+      ),
+    ];
     const keep = options?.keepAdjusted === true;
 
     // 기존 귀속 해제 + 항목 삭제 후 재수집(해제된 세션이 다시 대상에 포함됨).
     await supabaseAdmin.from(SESS).update({ settlement_id: null }).eq("settlement_id", id);
     await supabaseAdmin.from(ITEM).delete().eq("settlement_id", id);
 
-    const g = await gatherEligible(
+    const all = await gatherEligible(
       String(r.project_id),
       String(r.period_start),
       String(r.period_end),
@@ -763,6 +826,7 @@ export async function recalcSettlement(
         adjustments: keep ? prevAdjustments : new Map(),
       }
     );
+    const g = narrowToInstructors(all, prevInstructorIds);
     const itemRows = buildItemRows(
       id,
       g.instructorIds,

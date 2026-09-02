@@ -140,6 +140,9 @@ function CreateModal({
   const [start, setStart] = useState("");
   const [end, setEnd] = useState("");
   const [preview, setPreview] = useState<SettlementPreview | null>(null);
+  // 정산에 포함할 강사. 미리보기 직후에는 전체 선택이고, 담당자가 뺀다.
+  //   요약·합계는 이 선택분만 더해서 보여 준다(보조금 대상 금액을 눌러보며 확인).
+  const [picked, setPicked] = useState<Set<string>>(new Set());
   // 저장 전 조정값 — (강사|프로그램) → 인원/금액. 저장 시 그대로 넘긴다.
   const [adjustments, setAdjustments] = useState<SettlementAdjustment[]>([]);
   const [err, setErr] = useState<string | null>(null);
@@ -148,8 +151,41 @@ function CreateModal({
 
   const canQuery = projectId && start && end;
 
+  // 선택된 강사만의 합계 — 요약·표 하단이 함께 쓴다. 선택을 바꾸면 바로 반응한다.
+  const pickedRows = (preview?.rows ?? []).filter((r) => picked.has(r.instructor_id));
+  const sel = pickedRows.reduce(
+    (acc, r) => ({
+      sessions: acc.sessions + r.sessionCount,
+      gross: acc.gross + r.gross_amount,
+      deduction: acc.deduction + r.deduction_amount,
+      net: acc.net + r.net_amount,
+      revenuePrograms:
+        acc.revenuePrograms +
+        r.detail.filter((d) => detailMethod(d) === "revenue_share").length,
+    }),
+    { sessions: 0, gross: 0, deduction: 0, net: 0, revenuePrograms: 0 }
+  );
+  const allPicked =
+    (preview?.rows.length ?? 0) > 0 && picked.size === preview?.rows.length;
+
+  function toggleOne(instructorId: string) {
+    setPicked((prev) => {
+      const next = new Set(prev);
+      if (next.has(instructorId)) next.delete(instructorId);
+      else next.add(instructorId);
+      return next;
+    });
+  }
+
+  function toggleAll() {
+    setPicked(
+      allPicked ? new Set() : new Set((preview?.rows ?? []).map((r) => r.instructor_id))
+    );
+  }
+
   function reset() {
     setPreview(null);
+    setPicked(new Set());
     setAdjustments([]);
   }
 
@@ -168,6 +204,14 @@ function CreateModal({
           adjustments: next,
         });
         setPreview(p);
+        // 처음 조회하면 전체 선택(지금까지의 동작과 같게). 조정 때문에 다시
+        //   불린 경우에는 담당자가 해둔 선택을 유지하고, 사라진 강사만 뺀다.
+        setPicked((prevPicked) => {
+          const ids = p.rows.map((r) => r.instructor_id);
+          if (prevPicked.size === 0) return new Set(ids);
+          const live = new Set(ids);
+          return new Set([...prevPicked].filter((id) => live.has(id)));
+        });
       } catch (e) {
         setErr(e instanceof Error ? e.message : "미리보기 실패");
       }
@@ -176,6 +220,7 @@ function CreateModal({
 
   function doPreview() {
     setPreview(null);
+    setPicked(new Set());
     load(adjustments);
   }
 
@@ -198,6 +243,7 @@ function CreateModal({
         periodStart: start,
         periodEnd: end,
         adjustments,
+        instructorIds: [...picked],
       });
       if (!res.ok) {
         setErr(res.message);
@@ -293,7 +339,14 @@ function CreateModal({
           <button
             type="button"
             onClick={save}
-            disabled={pendingSave || !preview || preview.rows.length === 0 || !title.trim()}
+            disabled={
+              pendingSave ||
+              !preview ||
+              preview.rows.length === 0 ||
+              // 강사를 전부 빼면 만들 게 없다(서버에서도 같은 규칙으로 막는다).
+              picked.size === 0 ||
+              !title.trim()
+            }
             className={btnPrimary}
           >
             {pendingSave ? "저장 중…" : "저장(작성중)"}
@@ -304,12 +357,18 @@ function CreateModal({
 
         {preview && (
           <div className="mt-4">
+            {/* 요약은 "선택된 강사" 기준이다 — 체크를 바꾸면 지급총액·차인지급·
+                강사수·세션수가 즉시 따라 움직인다(보조금 대상 금액 확인용). */}
             <p className="mb-2 text-xs text-ink-hint">
-              대상 세션 {preview.sessionCount}건
-              {preview.revenueProgramCount > 0 &&
-                ` · 분배제 프로그램 ${preview.revenueProgramCount}개`}{" "}
-              · 강사 {preview.rows.length}명 · 차인지급 합계{" "}
-              <b className="text-navy">{formatKRW(preview.totalNet)}</b>원
+              대상 세션 {sel.sessions}건
+              {sel.revenuePrograms > 0 &&
+                ` · 분배제 프로그램 ${sel.revenuePrograms}개`}{" "}
+              · 강사 {pickedRows.length}명
+              {pickedRows.length < preview.rows.length &&
+                ` (조회 ${preview.rows.length}명 중)`}{" "}
+              · 지급총액 <b className="text-navy">{formatKRW(sel.gross)}</b>원 ·
+              차인지급 합계{" "}
+              <b className="text-navy">{formatKRW(sel.net)}</b>원
               {adjustments.length > 0 && (
                 <span className="ml-1 text-warning">
                   · 조정 {adjustments.length}건 반영
@@ -326,6 +385,15 @@ function CreateModal({
                 <table className="w-full min-w-[640px] border-collapse text-sm">
                   <thead className="bg-surface">
                     <tr>
+                      {/* 전체 선택/해제 — 조회 결과 전원을 한 번에 넣거나 뺀다. */}
+                      <th className={thCls}>
+                        <input
+                          type="checkbox"
+                          checked={allPicked}
+                          onChange={toggleAll}
+                          aria-label="강사 전체 선택"
+                        />
+                      </th>
                       <th className={thCls}>강사</th>
                       <th className={thCls}>프로그램별 내역</th>
                       <th className={`${thCls} text-right`}>지급총액</th>
@@ -334,8 +402,23 @@ function CreateModal({
                     </tr>
                   </thead>
                   <tbody>
-                    {preview.rows.map((row) => (
-                      <tr key={row.instructor_id} className="border-t border-line/60">
+                    {preview.rows.map((row) => {
+                      const on = picked.has(row.instructor_id);
+                      return (
+                      <tr
+                        key={row.instructor_id}
+                        className={`border-t border-line/60 ${
+                          on ? "" : "opacity-50"
+                        }`}
+                      >
+                        <td className={tdCls}>
+                          <input
+                            type="checkbox"
+                            checked={on}
+                            onChange={() => toggleOne(row.instructor_id)}
+                            aria-label={`${row.instructorName} 포함`}
+                          />
+                        </td>
                         <td className={`${tdCls} font-medium text-ink`}>
                           {row.instructorName}
                         </td>
@@ -375,19 +458,21 @@ function CreateModal({
                           {formatKRW(row.net_amount)}
                         </td>
                       </tr>
-                    ))}
+                      );
+                    })}
+                    {/* 합계도 선택분만 — 체크박스 열이 생겨 colSpan 이 3 이 된다. */}
                     <tr className="border-t border-line bg-surface font-semibold">
-                      <td className={tdCls} colSpan={2}>
-                        합계
+                      <td className={tdCls} colSpan={3}>
+                        선택 {pickedRows.length}명 합계
                       </td>
                       <td className={`${tdCls} text-right`}>
-                        {formatKRW(preview.totalGross)}
+                        {formatKRW(sel.gross)}
                       </td>
                       <td className={`${tdCls} text-right text-stamp`}>
-                        -{formatKRW(preview.totalDeduction)}
+                        -{formatKRW(sel.deduction)}
                       </td>
                       <td className={`${tdCls} text-right text-navy`}>
-                        {formatKRW(preview.totalNet)}
+                        {formatKRW(sel.net)}
                       </td>
                     </tr>
                   </tbody>
