@@ -4,7 +4,7 @@ import { randomUUID } from "node:crypto";
 import { revalidatePath } from "next/cache";
 import { requireClubAccess } from "@/lib/clubAccess";
 import { normalizePhone, saemAppUrl } from "@/lib/saem";
-import { getInstructorIdsWithRole, addRole } from "@/lib/saemRoles";
+import { getInstructorIdsWithRole, addRole, removeRole } from "@/lib/saemRoles";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
 import { sendSlack, siteBaseUrl, slackLink } from "@/lib/slack";
 
@@ -588,6 +588,46 @@ export async function addClubRoleToInstructor(input: {
   }
 }
 
+// 동아리샘 제거 = 역할 해제. 계정(saem_instructors)은 절대 건드리지 않는다.
+//   겸직자면 강사 자격·서류가 그대로 남고, 순수 동아리샘도 계정은 남는다.
+//   (계정 완전 삭제는 강사관리의 M0 전용 deleteInstructor 경로)
+export async function removeClubTeacher(input: {
+  instructorId: string;
+}): Promise<ActionResult> {
+  try {
+    await requireClubAccess();
+    const id = input.instructorId?.trim();
+    if (!id) return { ok: false, message: "대상이 없습니다." };
+
+    // 담당 중인 동아리가 있으면 거부 — 동아리가 담당샘 없이 남는 것을 막는다.
+    const { data: assigned, error: assignedError } = await supabaseAdmin
+      .from("saem_programs")
+      .select("name")
+      .eq("program_type", "club")
+      .eq("status", "active")
+      .eq("instructor_id", id)
+      .order("name");
+    if (assignedError) throw new Error(assignedError.message);
+    const names = (assigned ?? []).map((r) => String((r as { name: string }).name));
+    if (names.length) {
+      return {
+        ok: false,
+        message: `담당 중인 동아리(${names.join(", ")})가 있습니다. 먼저 담당을 해제하거나 동아리를 삭제해주세요.`,
+      };
+    }
+
+    await removeRole(id, CLUB_ROLE);
+    revalidatePath("/hr/clubs");
+    return { ok: true };
+  } catch (error) {
+    return {
+      ok: false,
+      message:
+        error instanceof Error ? error.message : "제거하지 못했습니다.",
+    };
+  }
+}
+
 async function ensureClubTerm(year: number): Promise<string> {
   let { data: project } = await supabaseAdmin
     .from("saem_projects")
@@ -709,6 +749,60 @@ async function requireClubProgram(programId: string) {
     .maybeSingle();
   if (!data) throw new Error("동아리를 찾을 수 없습니다.");
   return data as { id: string; capacity: number | null };
+}
+
+// 동아리 삭제 — 실적이 남은 동아리는 데이터 조건으로 막는다(사람 권한이 아니라).
+//   통과하면 saem_programs 한 행만 지우고 활동·예산계획·지출·등록학생·월간보고는
+//   DB의 ON DELETE CASCADE가 정리한다.
+export async function deleteClub(input: {
+  programId: string;
+}): Promise<ActionResult> {
+  try {
+    await requireClubAccess();
+    await requireClubProgram(input.programId); // program_type='club' 게이트
+
+    // 실적 보호 1) 제출된 활동일지.
+    const { count: submitted, error: sessionError } = await supabaseAdmin
+      .from("saem_sessions")
+      .select("id", { count: "exact", head: true })
+      .eq("program_id", input.programId)
+      .not("instructor_submitted_at", "is", null);
+    if (sessionError) throw new Error(sessionError.message);
+    if ((submitted ?? 0) > 0) {
+      return {
+        ok: false,
+        message: `제출된 활동일지가 ${submitted}건 있어 삭제할 수 없습니다.`,
+      };
+    }
+
+    // 실적 보호 2) 확정된 월간보고.
+    const { count: confirmed, error: reportError } = await supabaseAdmin
+      .from("saem_club_monthly_reports")
+      .select("id", { count: "exact", head: true })
+      .eq("program_id", input.programId)
+      .eq("status", "confirmed");
+    if (reportError) throw new Error(reportError.message);
+    if ((confirmed ?? 0) > 0) {
+      return {
+        ok: false,
+        message: "확정된 월간보고가 있어 삭제할 수 없습니다.",
+      };
+    }
+
+    const { error } = await supabaseAdmin
+      .from("saem_programs")
+      .delete()
+      .eq("id", input.programId)
+      .eq("program_type", "club"); // 강사 프로그램 오삭제 2중 방어
+    if (error) throw new Error(error.message);
+    revalidatePath("/hr/clubs");
+    return { ok: true };
+  } catch (error) {
+    return {
+      ok: false,
+      message: error instanceof Error ? error.message : "삭제하지 못했습니다.",
+    };
+  }
 }
 
 export async function addClubSession(input: {

@@ -11,21 +11,26 @@ import {
   confirmClubReport,
   createClub,
   createClubTeacher,
+  deleteClub,
   deleteClubBudgetPlan,
   deleteClubSession,
+  removeClubTeacher,
   updateClubSession,
   syncClubBusinessResult,
   type ClubBudgetPlanRow,
   type ClubDashboardData,
   type ClubMonthRow,
+  type ClubTeacherRow,
   type InstructorPickRow,
 } from "@/app/hr/clubs/actions";
 import {
   cardCls,
   btnPrimary,
   btnSecondary,
+  btnDanger,
   badgeSuccess,
   badgeNeutral,
+  badgeNavy,
   badgeWarning,
   noticeError,
   noticeSuccess,
@@ -174,6 +179,19 @@ export default function ClubDashboard({
         />
       </section>
 
+      <TeacherList
+        teachers={data.teachers}
+        pending={pending}
+        onRemove={(teacher) =>
+          run(
+            () => removeClubTeacher({ instructorId: teacher.id }),
+            teacher.alsoInstructor
+              ? `${teacher.name}님의 동아리샘 역할을 해제했습니다. (강사 자격은 유지)`
+              : `${teacher.name}님을 동아리샘에서 제거했습니다.`
+          )
+        }
+      />
+
       <section className={cardCls}>
         <div className="flex flex-wrap items-center justify-between gap-2">
           <div>
@@ -248,6 +266,70 @@ function Summary({ label, value }: { label: string; value: string }) {
       <p className="text-xs font-semibold text-ink-muted">{label}</p>
       <p className="mt-1 text-xl font-bold text-navy">{value}</p>
     </div>
+  );
+}
+
+// 등록된 동아리샘 목록. 제거는 역할 해제일 뿐 계정 삭제가 아니라서,
+//   겸직 여부에 따라 문구를 다르게 해 오해를 막는다.
+function TeacherList({
+  teachers,
+  pending,
+  onRemove,
+}: {
+  teachers: ClubTeacherRow[];
+  pending: boolean;
+  onRemove: (teacher: ClubTeacherRow) => void;
+}) {
+  return (
+    <section className={cardCls}>
+      <h2 className="text-base font-bold text-ink">동아리샘 목록</h2>
+      <p className="mt-1 text-xs text-ink-muted">
+        제거해도 계정은 남습니다. 동아리 역할만 사라집니다.
+      </p>
+      {teachers.length === 0 ? (
+        <p className="py-8 text-center text-sm text-ink-hint">
+          등록된 동아리샘이 없습니다.
+        </p>
+      ) : (
+        <ul className="mt-3 divide-y divide-line">
+          {teachers.map((teacher) => (
+            <li
+              key={teacher.id}
+              className="flex flex-wrap items-center gap-x-2 gap-y-1 py-2"
+            >
+              <span className="font-semibold text-ink">{teacher.name}</span>
+              {teacher.alsoInstructor && (
+                <span className={badgeNavy}>강사 겸직</span>
+              )}
+              <span
+                className={
+                  teacher.status === "active" ? badgeSuccess : badgeNeutral
+                }
+              >
+                {teacher.status === "active" ? "활성" : teacher.status}
+              </span>
+              <span className="text-xs text-ink-muted">
+                {teacher.phone ?? "연락처 없음"}
+              </span>
+              <button
+                type="button"
+                disabled={pending}
+                onClick={() => {
+                  const ask = teacher.alsoInstructor
+                    ? `${teacher.name}님의 동아리샘 역할만 해제합니다. 강사 자격과 서류는 그대로 유지됩니다. 계속할까요?`
+                    : `${teacher.name}님을 동아리샘에서 제거할까요? 계정은 남고 동아리 역할만 사라집니다.`;
+                  if (!window.confirm(ask)) return;
+                  onRemove(teacher);
+                }}
+                className={`ml-auto shrink-0 ${btnSecondary}`}
+              >
+                {teacher.alsoInstructor ? "동아리샘 역할 해제" : "제거"}
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
+    </section>
   );
 }
 
@@ -516,30 +598,52 @@ function ClubCard({
       : badgeNeutral;
   return (
     <article className="rounded-xl border border-line bg-card p-4">
-      <button
-        type="button"
-        onClick={() => setOpen((v) => !v)}
-        aria-expanded={open}
-        className="flex w-full flex-wrap items-center gap-x-2 gap-y-1 text-left"
-      >
-        <span className="text-xs text-ink-hint">{open ? "▼" : "▶"}</span>
-        <span className="font-bold text-ink">{club.name}</span>
-        <span className="text-xs text-ink-muted">
-          {club.teacherName ? `동아리샘 ${club.teacherName}` : "동아리샘 미지정"}
-          {club.room ? ` · ${club.room}` : ""}
-        </span>
-        <span className="text-xs text-ink-muted">
-          활동 {club.sessionCount}회 · 제출 {club.submittedCount}/
-          {club.sessionCount} · 연인원 {club.attendanceTotal}명
-        </span>
-        <span className={`ml-auto shrink-0 ${statusClass}`}>
-          {club.reportStatus === "confirmed"
-            ? "월간보고 확정"
-            : ready
-            ? "확정 가능"
-            : "작성 중"}
-        </span>
-      </button>
+      {/* 접기 토글과 삭제는 형제 버튼 — 토글 안에 버튼을 넣으면 중첩이 된다. */}
+      <div className="flex items-start gap-2">
+        <button
+          type="button"
+          onClick={() => setOpen((v) => !v)}
+          aria-expanded={open}
+          className="flex min-w-0 flex-1 flex-wrap items-center gap-x-2 gap-y-1 text-left"
+        >
+          <span className="text-xs text-ink-hint">{open ? "▼" : "▶"}</span>
+          <span className="font-bold text-ink">{club.name}</span>
+          <span className="text-xs text-ink-muted">
+            {club.teacherName ? `동아리샘 ${club.teacherName}` : "동아리샘 미지정"}
+            {club.room ? ` · ${club.room}` : ""}
+          </span>
+          <span className="text-xs text-ink-muted">
+            활동 {club.sessionCount}회 · 제출 {club.submittedCount}/
+            {club.sessionCount} · 연인원 {club.attendanceTotal}명
+          </span>
+          <span className={`ml-auto shrink-0 ${statusClass}`}>
+            {club.reportStatus === "confirmed"
+              ? "월간보고 확정"
+              : ready
+              ? "확정 가능"
+              : "작성 중"}
+          </span>
+        </button>
+        <button
+          type="button"
+          disabled={pending}
+          onClick={() => {
+            if (
+              !window.confirm(
+                `'${club.name}' 동아리를 삭제할까요? 활동계획·예산계획·등록학생이 함께 삭제되며 되돌릴 수 없습니다.`
+              )
+            )
+              return;
+            run(
+              () => deleteClub({ programId: club.id }),
+              "동아리를 삭제했습니다. 사업실적에 이미 반영된 수치는 자동으로 지워지지 않습니다. 필요하면 사업실적에서 확인해주세요."
+            );
+          }}
+          className={`${btnDanger} shrink-0`}
+        >
+          삭제
+        </button>
+      </div>
       {open && (
         <>
         <dl className="mt-3 grid grid-cols-2 gap-2 text-sm sm:grid-cols-5">
