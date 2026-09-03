@@ -31,13 +31,17 @@ type Tab =
   | "programs"
   | "promotions"
   | "coinpay"
+  | "onna"
   | "trainings"
   | "report";
+// key 는 저장·집계와 무관한 화면 상태값이라 라벨만 바꿔도 안전하다.
+//   ("사업실적 입력" → "청소년 활동" 은 라벨 변경일 뿐 key 는 programs 그대로)
 const tabs: { key: Tab; label: string }[] = [
   { key: "overview", label: "실적 현황" },
-  { key: "programs", label: "사업실적 입력" },
+  { key: "programs", label: "청소년 활동" },
   { key: "promotions", label: "홍보·대외협력" },
   { key: "coinpay", label: "동전PAY" },
+  { key: "onna", label: "온나" },
   { key: "trainings", label: "종사자 교육" },
   { key: "report", label: "종합보고서" },
 ];
@@ -1135,6 +1139,13 @@ export default function BusinessResultsDashboard({
           rows={data.coinPay}
           cumulative={data.coinPayCumulative}
         />
+      )}
+      {tab === "onna" && (
+        <section className={cardCls}>
+          <p className="text-sm leading-6 text-ink-muted">
+            온나(사직동 자유공간) 실적 화면은 준비 중입니다.
+          </p>
+        </section>
       )}
       {tab === "trainings" && (
         <StaffTrainingTab
