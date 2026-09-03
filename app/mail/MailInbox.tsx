@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import {
+  badgeNavy,
   badgeNeutral,
   badgeWarning,
   btnPrimary,
@@ -13,6 +14,9 @@ import {
   noticeError,
   noticeSuccess,
   noticeWarning,
+  tabBarCls,
+  tabItemCls,
+  tabNavCls,
 } from "@/lib/ui";
 import { fmtKstMonthDayTime } from "@/lib/datetime";
 import {
@@ -22,6 +26,7 @@ import {
   MAIL_STATUS_DOT_HINT,
   MAIL_STATUS_LABEL,
   MAIL_CATEGORY_BADGE,
+  MAIL_CATEGORY_INDEX,
   MAIL_TRASH_FILTER,
   assigneeLabel,
   attachmentSkipNotice,
@@ -88,6 +93,7 @@ export default function MailInbox({
     assignee: string;
     q: string;
     unreadOnly: boolean;
+    category: string; // "" = 전체(분류 필터 해제)
   };
 }) {
   const router = useRouter();
@@ -126,7 +132,7 @@ export default function MailInbox({
   //   옛 페이지가 보이고 렌더가 한 번 더 돕니다.
   const filterKey = `${filters.status}|${filters.assignee}|${filters.q}|${
     filters.unreadOnly ? 1 : 0
-  }`;
+  }|${filters.category}`;
   const [seenFilterKey, setSeenFilterKey] = useState(filterKey);
   if (filterKey !== seenFilterKey) {
     setSeenFilterKey(filterKey);
@@ -247,6 +253,7 @@ export default function MailInbox({
     if (merged.assignee) params.set("assignee", merged.assignee);
     if (merged.q) params.set("q", merged.q);
     if (merged.unreadOnly) params.set("unread", "1");
+    if (merged.category) params.set("category", merged.category);
     const qs = params.toString();
     router.push(qs ? `/mail?${qs}` : "/mail");
   }
@@ -475,6 +482,17 @@ export default function MailInbox({
       </section>
     );
 
+  // 분류 인덱스 항목 — 맨 앞이 "전체"(key "" = 필터 해제), 그다음 표시 순서대로.
+  //   배지 숫자는 "안읽음" 건수이며 서버에서 다른 필터와 무관하게 세어 옵니다.
+  const categoryTabs = [
+    { key: "", label: "전체", count: view.unopenedCount },
+    ...MAIL_CATEGORY_INDEX.map((c) => ({
+      key: c as string,
+      label: c as string,
+      count: view.categoryUnopened[c] ?? 0,
+    })),
+  ];
+
   return (
     <div className="space-y-4">
       <section className={cardCls}>
@@ -577,6 +595,36 @@ export default function MailInbox({
           </div>
         </div>
       </section>
+
+      {/* 분류 인덱스 — ai_category 로 목록을 좁힙니다(1000건이 한 목록에 몰려
+          팀별로 자기 것을 찾기 어려웠던 문제).
+            · 필터는 서버(getMailList)에서 걸리며 상태·담당자·검색과 AND 로 겹칩니다.
+            · 배지는 "안읽음(opened_at IS NULL)" 건수. 다른 필터를 걸어도 바뀌지
+              않습니다 — 그래야 "그 분류에 몇 건 남았나" 로 읽힙니다. 0이면 숨깁니다.
+            · 좁은 화면에서는 tabBarCls 의 overflow-x-auto 로 가로 스크롤됩니다. */}
+      <div className={tabBarCls}>
+        <nav className={tabNavCls} aria-label="분류">
+          {categoryTabs.map((t) => {
+            const active = filters.category === t.key;
+            return (
+              <button
+                key={t.key || "__all__"}
+                type="button"
+                aria-current={active ? "page" : undefined}
+                className={tabItemCls(active)}
+                onClick={() => pushFilters({ category: t.key })}
+              >
+                {t.label}
+                {t.count > 0 && (
+                  <span className={`ml-1.5 ${active ? badgeNavy : badgeNeutral}`}>
+                    {t.count}
+                  </span>
+                )}
+              </button>
+            );
+          })}
+        </nav>
+      </div>
 
       {/* 모달이 열려 있을 때는 모달 안에서 같은 메시지를 보여줍니다(중복 방지). */}
       {msg && !open && (

@@ -19,10 +19,14 @@ import {
 } from "@/lib/mailClassifier";
 import {
   MAIL_BUCKET,
+  MAIL_CATEGORY_ETC,
+  MAIL_CATEGORY_INDEX,
   MAIL_TRASH_FILTER,
+  isMailCategory,
   isMailFetchStale,
   isMailStatus,
   type AttachmentSkipReason,
+  type MailCategory,
   type MailAttachmentMeta,
   type MailDetail,
   type MailListItem,
@@ -117,11 +121,31 @@ async function loadActiveStaff(): Promise<string[]> {
     .sort((a, b) => a.localeCompare(b, "ko"));
 }
 
+// "기타" = 분류가 기타이거나 아직 분류되지 않은(NULL) 메일.
+const ETC_OR_FILTER = `ai_category.is.null,ai_category.eq.${MAIL_CATEGORY_ETC}`;
+
+// 분류 인덱스 배지용 — "안읽음(opened_at IS NULL)" 건수를 세는 쿼리.
+//   ★ 상태·담당자·검색은 일부러 넣지 않습니다. 인덱스 숫자는 어떤 필터를
+//     걸어도 같아야 "그 분류에 몇 건 남았나" 로 읽힙니다.
+//   ★ 삭제된 메일은 목록과 마찬가지로 제외합니다(deleted_at IS NULL).
+//   category 를 주지 않으면 분류 무관 전체("전체" 칸) 건수입니다.
+function unopenedCountQuery(category: MailCategory | null) {
+  const q = supabaseAdmin
+    .from("mail_messages")
+    .select("id", { count: "exact", head: true })
+    .is("deleted_at", null)
+    .is("opened_at", null);
+  if (!category) return q;
+  // 목록 필터와 같은 조건을 써야 배지 숫자와 실제 목록이 어긋나지 않습니다.
+  return category === MAIL_CATEGORY_ETC ? q.or(ETC_OR_FILTER) : q.eq("ai_category", category);
+}
+
 export async function getMailList(filters?: {
   status?: string;
   assignee?: string;
   q?: string;
   unreadOnly?: boolean;
+  category?: string;
 }): Promise<MailListView> {
   await requireMailAccess();
 
@@ -145,6 +169,16 @@ export async function getMailList(filters?: {
   if (assignee === "__none__") query = query.eq("assignee_name", "");
   else if (assignee) query = query.eq("assignee_name", assignee);
 
+  // AI 분류 인덱스 — 다른 필터와 AND 로 겹칩니다(예: 회계 + 안읽음만).
+  //   ※ 검색어도 or() 를 쓰지만 PostgREST 는 or 파라미터를 각각 AND 로 묶으므로
+  //     "기타 + 검색어" 도 교집합으로 동작합니다.
+  const category = (filters?.category ?? "").trim();
+  if (isMailCategory(category))
+    query =
+      category === MAIL_CATEGORY_ETC
+        ? query.or(ETC_OR_FILTER)
+        : query.eq("ai_category", category);
+
   const q = (filters?.q ?? "").trim();
   if (q) {
     // 제목·보낸사람(이름/주소) 부분일치. 쉼표는 or() 문법을 깨뜨리므로 제거합니다.
@@ -155,8 +189,14 @@ export async function getMailList(filters?: {
       );
   }
 
-  const [listQuery, unreadQuery, assignedQuery, lastFetchQuery, staff] =
-    await Promise.all([
+  const [
+    listQuery,
+    unreadQuery,
+    assignedQuery,
+    lastFetchQuery,
+    staff,
+    categoryCounts,
+  ] = await Promise.all([
       query,
       supabaseAdmin
         .from("mail_messages")
@@ -177,6 +217,11 @@ export async function getMailList(filters?: {
         .limit(1)
         .maybeSingle(),
       loadActiveStaff(),
+      // 분류 인덱스 배지 — 각 분류 + 마지막 하나는 "전체"(분류 무관).
+      Promise.all([
+        ...MAIL_CATEGORY_INDEX.map((c) => unopenedCountQuery(c)),
+        unopenedCountQuery(null),
+      ]),
     ]);
 
   if (tableMissing(listQuery.error)) {
@@ -184,6 +229,8 @@ export async function getMailList(filters?: {
       configured: false,
       items: [],
       unreadCount: 0,
+      categoryUnopened: {},
+      unopenedCount: 0,
       assignees: staff,
       usedAssignees: [],
       lastFetchedAt: null,
@@ -202,10 +249,17 @@ export async function getMailList(filters?: {
     ((lastFetchQuery.data as { fetched_at?: string | null } | null)
       ?.fetched_at) ?? null;
 
+  const categoryUnopened: Record<string, number> = {};
+  MAIL_CATEGORY_INDEX.forEach((c, i) => {
+    categoryUnopened[c] = categoryCounts[i]?.count ?? 0;
+  });
+
   return {
     configured: true,
     items: ((listQuery.data ?? []) as Record<string, unknown>[]).map(toListItem),
     unreadCount: unreadQuery.count ?? 0,
+    categoryUnopened,
+    unopenedCount: categoryCounts[MAIL_CATEGORY_INDEX.length]?.count ?? 0,
     assignees: staff,
     usedAssignees: [...used].sort((a, b) => a.localeCompare(b, "ko")),
     lastFetchedAt,

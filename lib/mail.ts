@@ -114,7 +114,13 @@ export type MailReply = {
 export type MailListView = {
   configured: boolean;
   items: MailListItem[];
-  unreadCount: number;
+  unreadCount: number; // 미처리(status=unread) 건수 — 안읽음(opened_at)과 다른 축
+  // 분류 인덱스 배지용 — "안읽음(opened_at IS NULL)" 건수.
+  //   ★ 상태·담당자·검색 필터와 무관하게 항상 같은 값입니다(삭제된 메일만 제외).
+  //     담당자를 걸었다고 인덱스 숫자가 흔들리면 "어디에 몇 건 남았나" 를 볼 수
+  //     없기 때문입니다.
+  categoryUnopened: Record<string, number>; // 키: MAIL_CATEGORY_INDEX 항목
+  unopenedCount: number; // 분류 무관 전체 안읽음(=인덱스의 "전체" 배지)
   assignees: string[]; // 재직자 목록(담당자 셀렉트)
   usedAssignees: string[]; // 실제 배정된 담당자(필터용)
   lastFetchedAt: string | null; // MAX(fetched_at) — 마지막으로 수집이 성공한 시각
@@ -165,6 +171,24 @@ export type MailCategory = (typeof MAIL_CATEGORIES)[number];
 export function isMailCategory(v: unknown): v is MailCategory {
   return (MAIL_CATEGORIES as readonly unknown[]).includes(v);
 }
+
+// 분류 인덱스(목록 위 한 줄)의 표시 순서 — 팀이 자기 것을 찾는 순서라
+//   MAIL_CATEGORIES(분류기 프롬프트용 순서)와 따로 둡니다.
+//   ★ "기타" 는 맨 뒤. AI 가 판단하지 못한 메일이므로 숨기지 않고 남깁니다.
+export const MAIL_CATEGORY_INDEX: readonly MailCategory[] = [
+  "공문",
+  "청소년활동",
+  "방과후",
+  "회계",
+  "시설",
+  "홍보",
+  "기타",
+];
+
+// 인덱스에서 "기타" 를 눌렀을 때 포함할 범위.
+//   ai_category 가 NULL 인 메일(수집만 되고 아직 분석 전이거나 분석 실패)도
+//   여기 넣습니다 — 어느 칸에도 없으면 영영 안 보이기 때문입니다.
+export const MAIL_CATEGORY_ETC: MailCategory = "기타";
 
 export const MAIL_CATEGORY_BADGE: Record<string, string> = {
   공문: "bg-navy-soft text-navy",

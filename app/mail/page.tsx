@@ -15,6 +15,7 @@ export default async function MailPage({
     assignee?: string;
     q?: string;
     unread?: string;
+    category?: string;
   }>;
 }) {
   await enforcePasswordChange();
@@ -27,6 +28,7 @@ export default async function MailPage({
     assignee: query.assignee,
     q: query.q,
     unreadOnly,
+    category: query.category,
   });
 
   return (
@@ -60,6 +62,7 @@ export default async function MailPage({
             assignee: query.assignee ?? "",
             q: query.q ?? "",
             unreadOnly,
+            category: query.category ?? "",
           }}
         />
       </main>
