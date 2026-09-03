@@ -200,6 +200,27 @@ export const MAIL_CATEGORY_BADGE: Record<string, string> = {
   기타: "bg-surface text-ink-muted",
 };
 
+// 분류 인덱스(공용 메일함 목록 위 한 줄)의 로고색 — 배지 숫자와 선택 칸 밑줄에만.
+//   * globals.css 의 로고 4색 토큰(--logo-*)을 그대로 참조합니다. 새 색·새 토큰 없음.
+//   * 7분류를 4색에 배분하다 보니 계열이 같은 칸끼리 색을 공유합니다.
+//       공문 파랑(행정) / 청소년활동·방과후 초록(사업) / 회계 빨강(돈) /
+//       시설·홍보 노랑(관리·대외)
+//   * "기타"·"전체" 는 일부러 넣지 않습니다 — AI가 판단하지 못한 칸이라
+//     강조하지 않고 기존 무채색 그대로 둡니다.
+//   * 클래스(text-logo-blue)가 아니라 CSS 변수 문자열인 이유:
+//     lib/ui 의 tabItemCls·badgeNeutral 이 이미 border-*/text-* 를 갖고 있어
+//     같은 유틸리티를 덧붙이면 어느 쪽이 이길지 클래스 나열 순서가 아니라
+//     생성된 CSS 순서에 달립니다. 인라인 style 은 항상 이기고, 공용 탭 상수를
+//     건드리지 않아 HR·시설·관리자 탭에는 영향이 없습니다.
+export const MAIL_CATEGORY_INDEX_COLOR: Record<string, string> = {
+  공문: "var(--logo-blue)",
+  청소년활동: "var(--logo-green)",
+  방과후: "var(--logo-green)",
+  회계: "var(--logo-red)",
+  시설: "var(--logo-yellow)",
+  홍보: "var(--logo-yellow)",
+};
+
 // 첨부 사본이 없는 이유 안내 문구. 이유를 모르면 원인을 단정하지 않습니다.
 export function attachmentSkipNotice(
   name: string,

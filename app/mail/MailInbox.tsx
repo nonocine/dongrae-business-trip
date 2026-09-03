@@ -27,6 +27,7 @@ import {
   MAIL_STATUS_LABEL,
   MAIL_CATEGORY_BADGE,
   MAIL_CATEGORY_INDEX,
+  MAIL_CATEGORY_INDEX_COLOR,
   MAIL_TRASH_FILTER,
   assigneeLabel,
   attachmentSkipNotice,
@@ -606,17 +607,27 @@ export default function MailInbox({
         <nav className={tabNavCls} aria-label="분류">
           {categoryTabs.map((t) => {
             const active = filters.category === t.key;
+            // 분류별 로고색 — 기타·전체는 색이 없어(undefined) 기존 무채색 그대로.
+            const color = MAIL_CATEGORY_INDEX_COLOR[t.key];
             return (
               <button
                 key={t.key || "__all__"}
                 type="button"
                 aria-current={active ? "page" : undefined}
                 className={tabItemCls(active)}
+                // 선택 칸의 밑줄만 그 분류 색으로 바꿉니다(굵기·글자 강조는 그대로).
+                //   tabItemCls 가 이미 border-navy 를 갖고 있어 클래스로 덮으면
+                //   생성 순서에 따라 이길지가 갈립니다 — 인라인이라야 확실합니다.
+                style={active && color ? { borderColor: color } : undefined}
                 onClick={() => pushFilters({ category: t.key })}
               >
                 {t.label}
                 {t.count > 0 && (
-                  <span className={`ml-1.5 ${active ? badgeNavy : badgeNeutral}`}>
+                  <span
+                    className={`ml-1.5 ${active ? badgeNavy : badgeNeutral}`}
+                    // 배지는 배경을 채우지 않고 숫자(글자)색만 입힙니다.
+                    style={color ? { color } : undefined}
+                  >
                     {t.count}
                   </span>
                 )}
