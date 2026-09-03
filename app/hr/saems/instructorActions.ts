@@ -28,6 +28,7 @@ import {
   type CrimeCheckState,
 } from "@/lib/saemDocExpiry";
 import { kstTodayYmd } from "@/lib/trainings";
+import { addRole } from "@/lib/saemRoles";
 
 const DOC_EXT: Record<string, string> = {
   "application/pdf": "pdf",
@@ -40,6 +41,7 @@ const INSTR = "saem_instructors";
 const DOCS = "saem_instructor_documents";
 const PROG = "saem_programs";
 const SESS = "saem_sessions";
+const ROLES = "saem_member_roles";
 
 function clean(v: string | null | undefined): string | null {
   const s = (v ?? "").trim();
@@ -55,11 +57,13 @@ export type InstructorListRow = SaemInstructor & {
 // --- 목록(서류·프로그램 수 집계) ---
 export async function listInstructors(): Promise<InstructorListRow[]> {
   await requireSaemAccess();
-  const [{ data: ins }, { data: docs }, { data: progs }] = await Promise.all([
-    supabaseAdmin.from(INSTR).select("*"),
-    supabaseAdmin.from(DOCS).select("instructor_id, slot, issued_on"),
-    supabaseAdmin.from(PROG).select("instructor_id"),
-  ]);
+  const [{ data: ins }, { data: docs }, { data: progs }, { data: roleRows }] =
+    await Promise.all([
+      supabaseAdmin.from(INSTR).select("*"),
+      supabaseAdmin.from(DOCS).select("instructor_id, slot, issued_on"),
+      supabaseAdmin.from(PROG).select("instructor_id"),
+      supabaseAdmin.from(ROLES).select("instructor_id, role"),
+    ]);
   const today = kstTodayYmd();
   const slotsByInstr = new Map<string, Set<string>>();
   const crimeIssued = new Map<string, string | null>();
@@ -80,7 +84,22 @@ export async function listInstructors(): Promise<InstructorListRow[]> {
     const id = (p as { instructor_id: string | null }).instructor_id;
     if (id) progCount.set(id, (progCount.get(id) ?? 0) + 1);
   }
+  const rolesByInstr = new Map<string, Set<string>>();
+  for (const r of roleRows ?? []) {
+    const row = r as { instructor_id: string; role: string };
+    const set = rolesByInstr.get(row.instructor_id) ?? new Set<string>();
+    set.add(row.role);
+    rolesByInstr.set(row.instructor_id, set);
+  }
   return (ins ?? [])
+    // 동아리 전용 계정은 동아리관리 소관 — 강사 목록에서 뺀다.
+    //   제외 대상은 'club_teacher 만 가진 계정'으로 좁힌다. 겸직자(instructor 보유)는
+    //   당연히 남고, 역할이 하나도 없는 옛 계정도 사라지지 않게 남긴다(폴백).
+    .filter((r) => {
+      const set = rolesByInstr.get(String((r as { id: string }).id));
+      if (!set || set.size === 0) return true;
+      return set.has("instructor") || !set.has("club_teacher");
+    })
     .map((r) => {
       const i = toInstructor(r as Record<string, unknown>);
       return {
@@ -133,7 +152,7 @@ export async function createInstructor(
   | { ok: false; message: string; duplicate?: { id: string; name: string } }
 > {
   try {
-    await requireSaemAccess();
+    const access = await requireSaemAccess();
     const name = (input.name ?? "").trim();
     if (!name) return { ok: false, message: "이름을 입력하세요." };
     const phone = normalizePhone(input.phone ?? "");
@@ -169,8 +188,12 @@ export async function createInstructor(
       .select("id")
       .single();
     if (error) throw new Error(error.message);
+    const newId = String((data as { id: string }).id);
+    // 역할을 함께 붙인다. 이게 없으면 강사 목록·권한 판별이 계정만 보고 갈린다.
+    //   addRole 은 멱등이라 중복 호출이 안전하다.
+    await addRole(newId, "instructor", access.name);
     revalidatePath("/hr/saems/instructors");
-    return { ok: true, id: String((data as { id: string }).id) };
+    return { ok: true, id: newId };
   } catch (e) {
     return {
       ok: false,
@@ -569,12 +592,15 @@ export async function getInstructorDocUrl(docId: string): Promise<string | null>
 //     1) saem_programs 에 instructor_id 로 배정된 프로그램(과거 차시 포함)
 //     2) saem_instructor_documents 서류 1건 이상
 //     3) 배정 프로그램의 saem_sessions 중 instructor_submitted_at 존재(근무일지 흔적)
+//     4) saem_member_roles 에 club_teacher 역할 — 계정을 지우면 역할이 CASCADE 로
+//        함께 사라져 동아리 담당이 조용히 끊긴다. 역할 해제가 먼저다.
 // =====================================================================
 export type InstructorDeletability = {
   deletable: boolean;
   programs: number;
   docs: number;
   submittedLogs: number;
+  clubTeacher: boolean; // 동아리샘 역할 보유 — 기록과 무관하게 삭제를 막는다
 };
 
 // 삭제 가능 판정(서버 실시간 count). check·delete 양쪽에서 재사용.
@@ -605,13 +631,23 @@ async function judgeInstructorDeletable(
     submittedLogs = count ?? 0;
   }
 
+  // 4) 동아리샘 역할 — 기록이 0건이어도 이것만으로 삭제를 막는다.
+  const { count: clubRoleCount } = await supabaseAdmin
+    .from(ROLES)
+    .select("instructor_id", { count: "exact", head: true })
+    .eq("instructor_id", id)
+    .eq("role", "club_teacher");
+  const clubTeacher = (clubRoleCount ?? 0) > 0;
+
   const programs = programIds.length;
   const docs = docCount ?? 0;
   return {
-    deletable: programs === 0 && docs === 0 && submittedLogs === 0,
+    deletable:
+      programs === 0 && docs === 0 && submittedLogs === 0 && !clubTeacher,
     programs,
     docs,
     submittedLogs,
+    clubTeacher,
   };
 }
 
@@ -654,8 +690,9 @@ export async function deleteInstructor(
     if (!d.deletable) {
       return {
         ok: false,
-        message:
-          "기록이 있어 삭제할 수 없습니다. 비활성 처리로 전환하세요.",
+        message: d.clubTeacher
+          ? "동아리샘 역할이 있습니다. 동아리관리에서 역할을 먼저 해제해주세요."
+          : "기록이 있어 삭제할 수 없습니다. 비활성 처리로 전환하세요.",
         deletability: d,
       };
     }

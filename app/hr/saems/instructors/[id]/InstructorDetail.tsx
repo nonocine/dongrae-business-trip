@@ -293,7 +293,8 @@ function DeleteSection({
       <h3 className="text-base font-bold text-stamp">강사 삭제</h3>
       <p className="mt-1 text-xs text-ink-hint">
         배정 프로그램·서류·제출한 근무일지가 하나도 없는 강사만 완전히 삭제할 수
-        있습니다. 기록이 있으면 삭제 대신 비활성 처리하세요.
+        있습니다. 기록이 있으면 삭제 대신 비활성 처리하세요. 동아리샘 역할이
+        있으면 동아리관리에서 역할을 먼저 해제해야 합니다.
       </p>
       <div className="mt-3">
         <button type="button" onClick={openModal} className={btnDanger}>
@@ -354,10 +355,18 @@ function DeleteSection({
               </>
             ) : (
               <>
-                <p className={noticeError}>
-                  배정 프로그램 {d.programs}건 / 서류 {d.docs}건 / 제출 일지{" "}
-                  {d.submittedLogs}건 이 있어 삭제할 수 없습니다.
-                </p>
+                {(d.programs > 0 || d.docs > 0 || d.submittedLogs > 0) && (
+                  <p className={noticeError}>
+                    배정 프로그램 {d.programs}건 / 서류 {d.docs}건 / 제출 일지{" "}
+                    {d.submittedLogs}건 이 있어 삭제할 수 없습니다.
+                  </p>
+                )}
+                {d.clubTeacher && (
+                  <p className={`mt-2 ${noticeError}`}>
+                    동아리샘 역할이 있습니다. 동아리관리에서 역할을 먼저
+                    해제해주세요.
+                  </p>
+                )}
                 <p className="mt-3 text-sm text-ink-body">
                   기록 보존을 위해 삭제 대신 <b>비활성 처리</b>하세요. 비활성
                   강사는 목록에서 기본 숨김됩니다.

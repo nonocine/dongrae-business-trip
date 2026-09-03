@@ -111,6 +111,7 @@ export default function InstructorsManager({
           <p className="text-xs text-ink-hint">
             {showInactive ? "전체" : "활성"} {filtered.length}명
             {q.trim() ? ` · 검색 결과 표시` : ""}
+            {" · 동아리샘 전용 계정은 동아리관리에서 관리합니다."}
             {isM0 && " · 전체 백업은 파일 수에 따라 수십 초 걸릴 수 있습니다."}
           </p>
           <label className="flex shrink-0 items-center gap-1.5 text-xs text-ink-muted">
