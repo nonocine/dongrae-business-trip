@@ -36,6 +36,7 @@ import {
   runMailClassification,
 } from "../lib/mailClassifier";
 import { classifyByKeyword } from "../lib/mailKeywordRules";
+import { loadSenderLearning } from "../lib/mailSenderLearning";
 
 const CONFIRM = process.argv.includes("--confirm");
 
@@ -47,16 +48,24 @@ const TARGET_CATEGORIES = ["방과후", "기타"];
 //   스크립트가 이 크기로 잘라 여러 번 호출합니다.
 const CHUNK = 30;
 
-type Target = { id: string; subject: string; fromName: string };
+type Target = {
+  id: string;
+  subject: string;
+  fromName: string;
+  fromEmail: string;
+};
 
 async function loadTargets(): Promise<Target[]> {
   const { data, error } = await supabaseAdmin
     .from("mail_messages")
-    // 제목·발신자까지 읽는 이유: 미리보기에서 "키워드로 처리 / AI 필요" 를
-    //   미리 세어 보여주기 위해서입니다(분류 자체는 순수 함수라 무료).
-    .select("id, subject, from_name")
+    // 제목·발신자까지 읽는 이유: 미리보기에서 "키워드 / 발신자 / AI 필요" 를
+    //   미리 세어 보여주기 위해서입니다(둘 다 API 를 부르지 않습니다).
+    .select("id, subject, from_name, from_email")
     .in("ai_category", TARGET_CATEGORIES)
     .is("deleted_at", null)
+    // ★ 사람이 고친 분류는 대상에서 뺍니다 — 분류기도 건너뛰지만, 미리보기
+    //   건수가 실제 처리량과 어긋나지 않도록 여기서도 같은 조건을 겁니다.
+    .or("category_source.is.null,category_source.neq.manual")
     .order("received_at", { ascending: false, nullsFirst: false });
   if (error) throw new Error(error.message);
   const ids = ((data ?? []) as Record<string, unknown>[])
@@ -64,6 +73,7 @@ async function loadTargets(): Promise<Target[]> {
       id: String(r.id ?? ""),
       subject: String(r.subject ?? ""),
       fromName: String(r.from_name ?? ""),
+      fromEmail: String(r.from_email ?? ""),
     }))
     .filter((t) => t.id.length > 0);
   // 대상이 1000건을 넘으면 여기서도 잘립니다(분포 표를 잘랐던 것과 같은 제한).
@@ -121,17 +131,25 @@ async function main() {
   //   있어야 합니다("API 호출 0회" 라고 안내해 놓고 키를 요구하면 안 됩니다).
   const targets = await loadTargets();
 
-  // 키워드로 잡히는 건 AI 를 부르지 않습니다(순수 함수라 세어보는 것도 무료).
-  const needAi = targets.filter(
-    (t) => classifyByKeyword(t.subject, t.fromName) === null,
-  );
-  const byKeyword = targets.length - needAi.length;
+  // 키워드·발신자로 잡히는 건 AI 를 부르지 않습니다.
+  //   분류기와 같은 순서(키워드 → 발신자)로 세어, 미리보기 숫자가 실제
+  //   API 호출 횟수와 어긋나지 않게 합니다.
+  const sender = await loadSenderLearning(targets);
+  let byKeyword = 0;
+  let bySender = 0;
+  const needAi: Target[] = [];
+  for (const t of targets) {
+    if (classifyByKeyword(t.subject, t.fromName)) byKeyword++;
+    else if (sender.predict(t)) bySender++;
+    else needAi.push(t);
+  }
 
   console.log(
     `재분류 대상: ${targets.length}건 (ai_category = ${TARGET_CATEGORIES.join(" 또는 ")})`,
   );
   console.log(
-    `  키워드로 처리 ${byKeyword}건 (AI 호출 없음) / AI 필요 ${needAi.length}건`,
+    `  키워드 ${byKeyword}건 · 발신자 학습 ${bySender}건 (여기까지 AI 호출 없음)` +
+      ` / AI 필요 ${needAi.length}건`,
   );
   await reportDistribution("현재 분포");
 
@@ -160,10 +178,11 @@ async function main() {
 
   console.log(
     `\n재분류를 시작합니다 — API ${needAi.length}회 호출 예정` +
-      ` (나머지 ${byKeyword}건은 키워드로 처리).\n`,
+      ` (나머지 ${byKeyword + bySender}건은 키워드·발신자로 처리).\n`,
   );
   let processed = 0;
   let keywordDone = 0;
+  let senderDone = 0;
   let skipped = 0;
   let done = 0;
 
@@ -178,25 +197,28 @@ async function main() {
     });
     processed += result.processed;
     keywordDone += result.byKeyword;
+    senderDone += result.bySender;
     skipped += result.skipped;
     done += chunk.length;
     console.log(
       `  ${String(done).padStart(4, " ")}/${ids.length} 처리 중 ` +
-        `— 성공 ${result.processed}(키워드 ${result.byKeyword}) · 실패 ${result.skipped}`,
+        `— 성공 ${result.processed}(키워드 ${result.byKeyword} · 발신자 ${result.bySender})` +
+        ` · 실패 ${result.skipped}`,
     );
     // 크레딧이 바닥나면 남은 묶음은 AI 없이 키워드만 처리됩니다.
     //   조용히 계속 돌면 "다 됐다" 고 오해하므로 여기서 알립니다.
     if (result.creditExhausted) {
       console.warn(
-        "\n  ⚠️ Anthropic 크레딧이 부족합니다. 남은 메일은 키워드로 잡히는 것만" +
-          " 처리되고, 나머지는 기존 분류 그대로 남습니다(슬랙으로도 알렸습니다).",
+        "\n  ⚠️ Anthropic 크레딧이 부족합니다. 남은 메일은 키워드·발신자로" +
+          " 잡히는 것만 처리되고, 나머지는 기존 분류 그대로 남습니다" +
+          "(슬랙으로도 알렸습니다).",
       );
     }
   }
 
   console.log(
-    `\n완료 — 성공 ${processed}건(키워드 ${keywordDone} · AI ${processed - keywordDone})` +
-      ` · 미처리 ${skipped}건.`,
+    `\n완료 — 성공 ${processed}건(키워드 ${keywordDone} · 발신자 ${senderDone} · ` +
+      `AI ${processed - keywordDone - senderDone}) · 미처리 ${skipped}건.`,
   );
   if (skipped > 0) {
     console.log(

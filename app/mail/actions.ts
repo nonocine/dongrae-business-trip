@@ -606,6 +606,36 @@ export async function bulkPurgeMail(ids: string[]): Promise<BulkResult> {
   }
 }
 
+// 분류 수동 수정 — 사람이 칸을 직접 고칩니다.
+//   ★ category_source='manual' 을 함께 찍는 것이 핵심입니다. 이 표시가 있으면
+//     자동 분류(키워드·발신자·AI)와 재분류 스크립트가 이 메일을 건너뜁니다.
+//     또 발신자 학습에서 3배 가중치를 받아, 한 통을 고치면 같은 발신자의
+//     다음 메일부터 그 판단이 반영됩니다.
+//   요약(ai_summary)은 건드리지 않습니다 — 분류만 바꾸는 것이므로 AI 가 쓴
+//     요약은 그대로 두는 편이 사람이 판단하기에 낫습니다.
+export async function setMailCategory(
+  id: string,
+  category: string,
+): Promise<ActionResult> {
+  try {
+    await requireMailAccess();
+    if (!id) return { ok: false, message: "대상 메일이 없습니다." };
+    if (!isMailCategory(category))
+      return { ok: false, message: "알 수 없는 분류입니다." };
+
+    const { error } = await supabaseAdmin
+      .from("mail_messages")
+      .update({ ai_category: category, category_source: "manual" })
+      .eq("id", id);
+    if (error) throw new Error(error.message);
+
+    revalidatePath("/mail");
+    return { ok: true };
+  } catch (e) {
+    return actionError(e, "분류를 변경하지 못했습니다.");
+  }
+}
+
 // [AI 분석] — 수집 당시 분석에 실패했거나 키가 없던 메일을 사람이 다시 요청.
 //   * 분류기가 모든 실패를 내부에서 삼키므로, 결과가 비면 "분석하지 못함" 으로
 //     안내만 하고 메일 자체에는 영향이 없습니다.

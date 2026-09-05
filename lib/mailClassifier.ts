@@ -2,6 +2,7 @@ import Anthropic from "@anthropic-ai/sdk";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
 import { MAIL_CATEGORIES, isMailCategory, type MailCategory } from "@/lib/mail";
 import { classifyByKeyword } from "@/lib/mailKeywordRules";
+import { loadSenderLearning } from "@/lib/mailSenderLearning";
 import { markIsStale, writeMark } from "@/lib/settingsMark";
 import { sendSlack, siteBaseUrl, slackLink } from "@/lib/slack";
 
@@ -248,12 +249,38 @@ export type AutoAssigned = {
 };
 
 export type ClassifyRunSummary = {
-  processed: number; // 분류 성공(키워드 + AI 합계)
-  byKeyword: number; // 그중 키워드로 처리한 건 — AI 를 부르지 않았습니다
+  processed: number; // 분류 성공(키워드 + 발신자 + AI 합계)
+  byKeyword: number; // 그중 제목 키워드로 처리한 건 — AI 호출 0회
+  bySender: number; // 그중 발신자 학습으로 처리한 건 — AI 호출 0회
+  manualKept: number; // 사람이 고쳐 둬서 건드리지 않은 건
   skipped: number; // API 실패 등으로 ai_* 를 채우지 못한 건
   creditExhausted: boolean; // 크레딧이 바닥나 AI 호출을 중단했는지
   autoAssigned: AutoAssigned[];
 };
+
+// 키워드·발신자 경로의 저장 — 분류와 출처만 남깁니다.
+//   ai_summary 는 채우지 않습니다(요약은 AI 몫이고, 지어내면 "AI가 요약했다"
+//   는 화면 신호가 거짓이 됩니다). ai_processed_at 은 찍습니다 — 안 찍으면
+//   매 수집마다 같은 메일을 다시 집어 자동 경로가 끝나지 않습니다.
+async function saveCategory(
+  id: string,
+  category: MailCategory,
+  source: "keyword" | "sender",
+): Promise<boolean> {
+  const { error } = await supabaseAdmin
+    .from("mail_messages")
+    .update({
+      ai_category: category,
+      ai_processed_at: new Date().toISOString(),
+      category_source: source,
+    })
+    .eq("id", id);
+  if (error) {
+    console.warn(`[mail-ai] 저장 실패(id=${id}):`, error.message);
+    return false;
+  }
+  return true;
+}
 
 // 미분류 메일 일괄 분류.
 //   * 대상: ai_processed_at IS NULL AND deleted_at IS NULL, 최신순 최대 30건.
@@ -276,6 +303,8 @@ export async function runMailClassification(options?: {
   const summary: ClassifyRunSummary = {
     processed: 0,
     byKeyword: 0,
+    bySender: 0,
+    manualKept: 0,
     skipped: 0,
     creditExhausted: false,
     autoAssigned: [],
@@ -288,8 +317,13 @@ export async function runMailClassification(options?: {
     const limit = Math.max(1, Math.min(options?.limit ?? BATCH_LIMIT, BATCH_LIMIT));
     let query = supabaseAdmin
       .from("mail_messages")
-      .select("id, from_name, from_email, subject, body_text, assignee_name")
+      .select(
+        "id, from_name, from_email, subject, body_text, assignee_name, category_source",
+      )
       .is("deleted_at", null)
+      // ★ 사람이 고친 분류는 자동 경로가 절대 덮어쓰지 않습니다.
+      //   force(재분류)여도 마찬가지입니다 — 사람 판단이 가장 정확합니다.
+      .or("category_source.is.null,category_source.neq.manual")
       .order("received_at", { ascending: false, nullsFirst: false })
       .limit(limit);
     if (!options?.force) query = query.is("ai_processed_at", null);
@@ -303,9 +337,26 @@ export async function runMailClassification(options?: {
       return summary;
     }
 
-    for (const row of (data ?? []) as Record<string, unknown>[]) {
+    const rows = (data ?? []) as Record<string, unknown>[];
+
+    // 발신자 학습 — 이 배치에 등장하는 발신자들의 분포를 한 번에 읽습니다.
+    //   ★ 메일마다 쿼리하면 30건 배치에 30회가 나갑니다. 반드시 배치로.
+    const sender = await loadSenderLearning(
+      rows.map((r) => ({
+        fromEmail: String(r.from_email ?? ""),
+        fromName: String(r.from_name ?? ""),
+      })),
+    );
+
+    for (const row of rows) {
       const id = String(row.id ?? "");
       if (!id) continue;
+      // 사람이 고친 건은 건드리지 않습니다. 쿼리에서도 걸렀지만, ids 를
+      //   직접 넘기는 호출(재분류 스크립트)까지 확실히 막기 위해 한 번 더.
+      if (String(row.category_source ?? "") === "manual") {
+        summary.manualKept++;
+        continue;
+      }
       const fromName = String(row.from_name ?? "").trim();
       const fromEmail = String(row.from_email ?? "").trim();
       const subject = String(row.subject ?? "").trim();
@@ -318,24 +369,30 @@ export async function runMailClassification(options?: {
       //   다시 집어 자동 경로가 영영 끝나지 않습니다.
       const keyword = classifyByKeyword(subject, fromName);
       if (keyword) {
-        const { error: kwError } = await supabaseAdmin
-          .from("mail_messages")
-          .update({
-            ai_category: keyword,
-            ai_processed_at: new Date().toISOString(),
-          })
-          .eq("id", id);
-        if (kwError) {
-          console.warn(`[mail-ai] 저장 실패(id=${id}):`, kwError.message);
-          summary.skipped++;
-          continue;
-        }
-        summary.processed++;
-        summary.byKeyword++;
+        if (await saveCategory(id, keyword, "keyword")) {
+          summary.processed++;
+          summary.byKeyword++;
+        } else summary.skipped++;
         continue;
       }
 
-      // --- 2) 키워드로 안 잡힌 것만 AI ---
+      // --- 2) 발신자 학습 ---
+      //   "이 발신자는 늘 광고였다". 키워드보다 뒤인 이유: 한 발신자가 여러
+      //   사업 메일을 보내므로(양정수련관이 방카 연합회 건과 행사 홍보를 모두
+      //   보냅니다), 제목에 명시적 단서가 있으면 그쪽이 더 정확합니다.
+      const learned = sender.predict({
+        fromEmail: String(row.from_email ?? ""),
+        fromName,
+      });
+      if (learned) {
+        if (await saveCategory(id, learned, "sender")) {
+          summary.processed++;
+          summary.bySender++;
+        } else summary.skipped++;
+        continue;
+      }
+
+      // --- 3) 키워드·발신자로 안 잡힌 것만 AI ---
       //   크레딧이 이미 바닥난 것을 확인했으면 더 부르지 않습니다.
       //   ★ 이 판정이 키워드 블록 "아래" 에 있는 게 중요합니다 — 크레딧이
       //     없어도 키워드로 잡히는 메일은 계속 저장돼야 하기 때문입니다.
@@ -374,6 +431,7 @@ export async function runMailClassification(options?: {
         ai_category: result.category,
         ai_suggested_assignee: result.assignee,
         ai_processed_at: new Date().toISOString(),
+        category_source: "ai",
       };
       if (autoAssign) patch.assignee_name = result.assignee;
 

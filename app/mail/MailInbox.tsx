@@ -25,6 +25,7 @@ import {
   MAIL_STATUS_DOT,
   MAIL_STATUS_DOT_HINT,
   MAIL_STATUS_LABEL,
+  MAIL_CATEGORIES,
   MAIL_CATEGORY_BADGE,
   MAIL_CATEGORY_INDEX,
   MAIL_CATEGORY_INDEX_COLOR,
@@ -54,6 +55,7 @@ import {
   restoreMail,
   saveMailMemo,
   sendMailReply,
+  setMailCategory,
   setMailStatus,
   signMailAttachment,
   trashMail,
@@ -1110,6 +1112,36 @@ export default function MailInbox({
                     {MAIL_STATUSES.map((s) => (
                       <option key={s} value={s}>
                         {MAIL_STATUS_LABEL[s]}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                {/* 분류 — 자동 분류가 틀렸을 때 사람이 고칩니다.
+                    고치면 자동 분류가 다시 덮어쓰지 않고, 같은 발신자의
+                    다음 메일에도 그 판단이 반영됩니다(발신자 학습 가중치). */}
+                <label className={labelCls}>
+                  분류
+                  <select
+                    className={inputCls}
+                    value={detail.ai_category}
+                    disabled={pending}
+                    onChange={(e) =>
+                      runAction(
+                        () => setMailCategory(detail.id, e.target.value),
+                        `'${e.target.value}' 로 분류를 바꿨습니다. 이후 자동 분류가 덮어쓰지 않습니다.`,
+                      )
+                    }
+                  >
+                    {/* 아직 분류가 없는 메일에만 보이는 자리표시 항목.
+                        고르면 안 되므로 disabled 로 둡니다. */}
+                    {!detail.ai_category && (
+                      <option value="" disabled>
+                        미분류
+                      </option>
+                    )}
+                    {MAIL_CATEGORIES.map((c) => (
+                      <option key={c} value={c}>
+                        {c}
                       </option>
                     ))}
                   </select>
