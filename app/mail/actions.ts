@@ -194,6 +194,7 @@ export async function getMailList(filters?: {
     unreadQuery,
     assignedQuery,
     lastFetchQuery,
+    lastMailQuery,
     staff,
     categoryCounts,
   ] = await Promise.all([
@@ -207,8 +208,20 @@ export async function getMailList(filters?: {
         .from("mail_messages")
         .select("assignee_name")
         .is("deleted_at", null),
-      // 마지막 수집 시각 = MAX(fetched_at). 휴지통·삭제 여부와 무관하게 봅니다 —
-      //   이 값은 "수집기가 언제 마지막으로 돌았는가" 이지 목록 상태가 아닙니다.
+      // 마지막 수집 시각 = settings.mail_last_fetch_at.
+      //   ★ 2026-09 이전에는 MAX(mail_messages.fetched_at) 을 썼는데, 그건
+      //     "마지막으로 메일을 저장한 시각" 이라 새 메일이 없는 밤·주말에는
+      //     갱신되지 않았고, Cron 이 10분마다 멀쩡히 돌아도 경고가 떴습니다.
+      //     지금 값은 수집기가 네이버에 접속·인증까지 성공할 때마다 갱신됩니다
+      //     (가져온 메일이 0건이어도 — lib/mailCollector.ts markLastFetch).
+      supabaseAdmin
+        .from("settings")
+        .select("value")
+        .eq("key", "mail_last_fetch_at")
+        .maybeSingle(),
+      // 마지막으로 새 메일이 들어온 시각 = MAX(fetched_at). 표시 전용입니다 —
+      //   지연 판정에 쓰면 위의 오작동이 그대로 재발합니다. 휴지통·삭제 여부와
+      //   무관하게 봅니다(목록 상태가 아니라 수집 이력이므로).
       supabaseAdmin
         .from("mail_messages")
         .select("fetched_at")
@@ -234,6 +247,7 @@ export async function getMailList(filters?: {
       assignees: staff,
       usedAssignees: [],
       lastFetchedAt: null,
+      lastMailAt: null,
       fetchStale: false,
     };
   }
@@ -245,8 +259,12 @@ export async function getMailList(filters?: {
     if (n) used.add(n);
   }
 
+  // settings 행이 없으면 null — 신규 배포 직후 첫 Cron 전까지가 그렇습니다.
+  //   isMailFetchStale 이 null 을 "경고 없음" 으로 보므로 별도 처리가 없습니다.
   const lastFetchedAt =
-    ((lastFetchQuery.data as { fetched_at?: string | null } | null)
+    ((lastFetchQuery.data as { value?: string | null } | null)?.value) ?? null;
+  const lastMailAt =
+    ((lastMailQuery.data as { fetched_at?: string | null } | null)
       ?.fetched_at) ?? null;
 
   const categoryUnopened: Record<string, number> = {};
@@ -263,7 +281,9 @@ export async function getMailList(filters?: {
     assignees: staff,
     usedAssignees: [...used].sort((a, b) => a.localeCompare(b, "ko")),
     lastFetchedAt,
+    lastMailAt,
     // 지연 판정은 서버에서 — 클라이언트에서 계산하면 하이드레이션이 어긋납니다.
+    //   판정 입력은 반드시 lastFetchedAt(접속 시각). lastMailAt 이 아닙니다.
     fetchStale: isMailFetchStale(lastFetchedAt, Date.now()),
   };
 }

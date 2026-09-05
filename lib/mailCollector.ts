@@ -34,6 +34,15 @@ const ATTACHMENT_MAX_BYTES = 10 * 1024 * 1024; // 10MB 초과는 메타데이터
 //   settings 에 남겨 같은 실패는 1시간에 1회만 알립니다.
 const FETCH_ALERT_KEY = "mail_fetch_alert_at";
 const FETCH_ALERT_INTERVAL_MS = 60 * 60 * 1000;
+
+// --- 마지막 수집 시각 ---
+//   ★ 2026-09: 화면 경고가 MAX(mail_messages.fetched_at)("마지막으로 메일을
+//     저장한 시각")으로 지연을 판정해, 새 메일이 없는 밤·주말이면 Cron 이
+//     멀쩡히 돌아도 "가져오지 못했습니다" 가 떴습니다. "수집 실패" 와 "새 메일
+//     없음" 을 구분하지 못한 것이 원인입니다.
+//   그래서 "수집을 시도해 네이버 접속·인증까지 성공한 시각" 을 따로 남기고,
+//   경고는 이 값으로만 판정합니다. 가져온 메일이 0건이어도 갱신됩니다.
+const LAST_FETCH_KEY = "mail_last_fetch_at";
 // 전용 웹훅(SLACK_WEBHOOK_MAIL)은 없으므로 관리자 채널을 씁니다 —
 //   메일 다이제스트(lib/mailDigest.ts)·백업 실패(lib/backupEngine.ts)와 같은 채널.
 const FETCH_ALERT_WEBHOOK = "SLACK_WEBHOOK_ADMIN";
@@ -79,33 +88,37 @@ function popCredentials(): { user: string; password: string } {
 }
 
 // settings 는 프로젝트 공용 Key-Value 테이블입니다(app/actions.ts 와 같은 구조).
-//   알림 억제 상태 하나 때문에 새 테이블을 만들지 않고 여기에 얹습니다.
-async function readAlertMark(): Promise<string | null> {
+//   알림 억제 상태·수집 시각 하나 때문에 새 테이블을 만들지 않고 여기에 얹습니다.
+//   ★ 쓰기는 upsert(onConflict:"key") — key 에 unique 제약이 있어, select 후
+//     insert/update 로 나누면 Cron 과 수동 버튼이 겹칠 때 충돌합니다.
+async function readMark(key: string): Promise<string | null> {
   const { data, error } = await supabaseAdmin
     .from("settings")
     .select("value")
-    .eq("key", FETCH_ALERT_KEY)
+    .eq("key", key)
     .maybeSingle();
   if (error || !data) return null;
   const value = (data as { value: unknown }).value;
   return value == null ? null : String(value);
 }
 
-async function writeAlertMark(value: string): Promise<void> {
-  const { data: existing } = await supabaseAdmin
+async function writeMark(key: string, value: string): Promise<void> {
+  await supabaseAdmin
     .from("settings")
-    .select("id")
-    .eq("key", FETCH_ALERT_KEY)
-    .maybeSingle();
-  if (existing) {
-    await supabaseAdmin
-      .from("settings")
-      .update({ value })
-      .eq("key", FETCH_ALERT_KEY);
-  } else {
-    await supabaseAdmin
-      .from("settings")
-      .insert({ key: FETCH_ALERT_KEY, value });
+    .upsert({ key, value }, { onConflict: "key" });
+}
+
+// 수집 성공 시각을 남깁니다(접속·인증 성공 직후 호출).
+//   ★ 기록 실패는 삼킵니다 — 이건 상태 표시용이므로, 여기서 throw 하면
+//     수집·저장이라는 본 작업이 부가기능 때문에 멈춥니다(프로젝트 원칙).
+async function markLastFetch(at: Date): Promise<void> {
+  try {
+    await writeMark(LAST_FETCH_KEY, at.toISOString());
+  } catch (e) {
+    console.warn(
+      "[mail] 마지막 수집 시각 기록 실패:",
+      e instanceof Error ? e.message : e,
+    );
   }
 }
 
@@ -130,7 +143,7 @@ async function clearAlertMark(): Promise<void> {
 async function notifyFetchFailure(error: unknown): Promise<void> {
   try {
     const now = new Date();
-    const last = await readAlertMark();
+    const last = await readMark(FETCH_ALERT_KEY);
     if (last) {
       const at = Date.parse(last);
       if (!Number.isNaN(at) && now.getTime() - at < FETCH_ALERT_INTERVAL_MS)
@@ -147,7 +160,7 @@ async function notifyFetchFailure(error: unknown): Promise<void> {
       link,
     ];
     const sent = await sendSlack(FETCH_ALERT_WEBHOOK, lines.join("\n"));
-    if (sent) await writeAlertMark(now.toISOString());
+    if (sent) await writeMark(FETCH_ALERT_KEY, now.toISOString());
   } catch (e) {
     console.warn(
       "[mail] 수집 실패 알림 실패:",
@@ -265,8 +278,13 @@ export async function runMailFetch(): Promise<MailFetchSummary> {
       await notifyFetchFailure(e);
       throw e;
     }
-    // 여기까지 왔으면 접속·인증은 성공 — 이전 실패의 알림 억제를 풉니다.
+    // 여기까지 왔으면 접속·인증은 성공 — 이전 실패의 알림 억제를 풀고,
+    //   "수집이 돌았다" 는 사실을 남깁니다.
+    //   ★ 이 자리는 아래 `picks.length === 0` 조기 return 보다 위입니다.
+    //     새 메일이 0건인 밤·주말에도 시각이 갱신돼야 하기 때문입니다.
+    //     아래로 내리면 2026-09 오작동이 그대로 재발합니다.
     await clearAlertMark();
+    await markLastFetch(new Date());
     summary.total = pairs.length;
 
     const { picks, remaining } = selectNewUids(pairs, knownUids, FETCH_LIMIT);

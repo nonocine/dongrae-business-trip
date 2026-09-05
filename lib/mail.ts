@@ -123,18 +123,30 @@ export type MailListView = {
   unopenedCount: number; // 분류 무관 전체 안읽음(=인덱스의 "전체" 배지)
   assignees: string[]; // 재직자 목록(담당자 셀렉트)
   usedAssignees: string[]; // 실제 배정된 담당자(필터용)
-  lastFetchedAt: string | null; // MAX(fetched_at) — 마지막으로 수집이 성공한 시각
-  fetchStale: boolean; // 그 시각이 너무 오래됐는지(서버에서 판정)
+  // ★ 두 시각은 뜻이 다릅니다. 섞으면 2026-09 오작동이 재발합니다.
+  //   lastFetchedAt: 수집기가 네이버에 마지막으로 정상 접속한 시각
+  //     (settings.mail_last_fetch_at). 새 메일이 0건이어도 갱신되므로
+  //     밤·주말에도 흐릅니다. → 경고 판정은 반드시 이 값으로 합니다.
+  //   lastMailAt: MAX(mail_messages.fetched_at) — 마지막으로 새 메일이
+  //     들어온 시각. 표시 전용이며 판정에 쓰지 않습니다.
+  lastFetchedAt: string | null;
+  lastMailAt: string | null;
+  fetchStale: boolean; // lastFetchedAt 이 너무 오래됐는지(서버에서 판정)
 };
 
 // --- 수집 지연 경고 ---
-//   Cron 이 10분 주기이므로 2시간이면 12번 연속으로 못 가져왔다는 뜻입니다.
-export const MAIL_FETCH_STALE_MS = 2 * 60 * 60 * 1000;
+//   Cron 이 10분 주기이므로 1시간이면 6번 연속으로 수집이 돌지 않았다는 뜻입니다.
+//   ★ 2026-09 이전에는 "마지막으로 메일을 저장한 시각" 으로 판정해 새 메일이
+//     없는 밤·주말마다 경고가 떴고, 그래서 임계값을 2시간까지 늘려야 했습니다.
+//     이제 접속 시각으로 판정하므로 그 오탐이 없어져 1시간으로 좁혔습니다.
+//     인증 실패는 슬랙이 즉시 알리고, 이 배너가 실제로 잡는 것은 Cron 자체가
+//     돌지 않는 경우(Vercel Cron 중단·배포 실패·CRON_SECRET 변경)입니다.
+export const MAIL_FETCH_STALE_MS = 60 * 60 * 1000;
 
 // ★ 판정은 반드시 서버(getMailList)에서 합니다. 클라이언트 렌더에서 Date.now()
 //   를 쓰면 SSR 결과와 어긋나 하이드레이션 불일치가 납니다(lib/datetime.ts 주석).
-//   수집 기록이 아예 없으면(신규 설치) 경고하지 않습니다 — 고장이 아니라 아직
-//   한 통도 안 온 상태일 수 있습니다.
+//   기록이 아예 없으면(신규 배포 직후) 경고하지 않습니다 — 첫 Cron 이 돌면서
+//   settings 에 시각을 남길 때까지 최대 10분은 정상 상태입니다.
 export function isMailFetchStale(
   lastFetchedAt: string | null,
   now: number,

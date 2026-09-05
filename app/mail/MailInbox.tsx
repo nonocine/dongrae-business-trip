@@ -546,11 +546,20 @@ export default function MailInbox({
           </div>
           <div className="flex shrink-0 flex-wrap items-center gap-2">
             <span className={badgeNeutral}>미처리 {view.unreadCount}건</span>
-            {/* 수집이 멈춰도 아무도 모르던 문제 — 마지막 수집 시각을 항상 보입니다. */}
+            {/* 수집이 멈춰도 아무도 모르던 문제 — 마지막 수집 시각을 항상 보입니다.
+                두 배지를 나란히 두는 이유: "수집은 도는데 새 메일이 없는 밤" 과
+                "수집이 멈춘 것" 을 한눈에 구분하기 위해서입니다. 왼쪽만 흐르고
+                오른쪽이 멈춰 있으면 정상입니다. */}
             <span className={view.fetchStale ? badgeWarning : badgeNeutral}>
               마지막 수집:{" "}
               {view.lastFetchedAt
                 ? fmtKstMonthDayTime(view.lastFetchedAt)
+                : "기록 없음"}
+            </span>
+            <span className={badgeNeutral}>
+              새 메일:{" "}
+              {view.lastMailAt
+                ? fmtKstMonthDayTime(view.lastMailAt)
                 : "기록 없음"}
             </span>
             <button
@@ -564,11 +573,17 @@ export default function MailInbox({
           </div>
         </div>
 
+        {/* ★ "가져온 메일이 없다" 가 아니라 "수집이 돌지 않았다" 입니다.
+            인증 실패는 슬랙이 즉시 알리므로, 여기서 원인을 단정하지 않습니다. */}
         {view.fetchStale && (
           <p className={`mt-3 ${noticeWarning}`}>
-            ⚠️ 2시간 넘게 메일을 가져오지 못했습니다. 네이버 계정 설정(POP3
-            사용 여부·비밀번호)을 확인해주세요. 원본은 네이버에 그대로 남아
-            있으므로, 설정을 고치면 밀린 메일을 이어서 가져옵니다.
+            ⚠️ 1시간 넘게 메일 수집이 돌지 않았습니다
+            {view.lastFetchedAt
+              ? ` (마지막 수집 ${fmtKstMonthDayTime(view.lastFetchedAt)})`
+              : ""}
+            . 네이버 계정 설정이나 자동 수집 상태를 확인해주세요. 원본은
+            네이버에 그대로 남아 있으므로, 복구되면 밀린 메일을 이어서
+            가져옵니다.
           </p>
         )}
 
