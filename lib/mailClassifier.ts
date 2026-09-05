@@ -1,6 +1,9 @@
 import Anthropic from "@anthropic-ai/sdk";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
 import { MAIL_CATEGORIES, isMailCategory, type MailCategory } from "@/lib/mail";
+import { classifyByKeyword } from "@/lib/mailKeywordRules";
+import { markIsStale, writeMark } from "@/lib/settingsMark";
+import { sendSlack, siteBaseUrl, slackLink } from "@/lib/slack";
 
 // =====================================================================
 // 공용 메일함 2단계 — AI 분류·요약 (ML-5)
@@ -36,6 +39,14 @@ const ASSIGNEE_RULES = [
 
 // 애매하거나 판단 불가일 때의 기본 담당자. ("미지정" 이 아님 — 지시 사항)
 const FALLBACK_ASSIGNEE = "김혜지";
+
+// --- 크레딧 소진 알림 ---
+//   ★ 크레딧이 떨어지면 AI 분류가 조용히 멈추고 새 메일이 "기타" 로 쌓입니다.
+//     2026-09 메일 수집 사고와 똑같은 모양(고장인데 아무도 모름)이라, 반드시
+//     사람에게 닿아야 합니다. 수집 실패 알림과 같은 패턴으로 하루 1회만.
+const CREDIT_ALERT_KEY = "mail_ai_credit_alert_at";
+const CREDIT_ALERT_INTERVAL_MS = 24 * 60 * 60 * 1000;
+const CREDIT_ALERT_WEBHOOK = "SLACK_WEBHOOK_ADMIN";
 
 // 분류 기준 — 이름만으로는 가를 수 없는 칸이 있어 기준을 명시합니다.
 //   ★ 특히 방카/토요늘봄은 둘 다 "방과후" 라 불리지만 사업도 담당자도 다릅니다.
@@ -92,6 +103,52 @@ export function isClassifierConfigured(): boolean {
   return (process.env.ANTHROPIC_API_KEY ?? "").trim().length > 0;
 }
 
+// 크레딧 소진·인증 거부인지 판별합니다.
+//   * 401 인증 거부, 402 결제 필요, 429 한도 초과 — 크레딧이 바닥나면
+//     이 중 하나로 옵니다(SDK 가 status 를 실어 줍니다).
+//   * 문구로도 한 번 더 봅니다 — 같은 상황을 400 + 메시지로 주는 경우가 있어서.
+//   ★ 네트워크 오류·일시적 5xx 와 구분해야 합니다. 그건 크레딧 문제가 아니라
+//     다시 시도하면 되는 것이라, 알림을 보내면 늑대소년이 됩니다.
+export function isCreditError(e: unknown): boolean {
+  const status = (e as { status?: unknown })?.status;
+  if (status === 401 || status === 402 || status === 429) return true;
+  const message = (e instanceof Error ? e.message : String(e)).toLowerCase();
+  return (
+    message.includes("insufficient") ||
+    message.includes("credit balance") ||
+    message.includes("quota") ||
+    message.includes("billing")
+  );
+}
+
+// 크레딧 소진 슬랙 알림 — 하루 1회.
+//   ★ 알림은 부가기능입니다. 여기서 무슨 일이 생겨도 절대 throw 하지 않습니다.
+async function notifyCreditExhausted(error: unknown): Promise<void> {
+  try {
+    const now = Date.now();
+    if (!(await markIsStale(CREDIT_ALERT_KEY, CREDIT_ALERT_INTERVAL_MS, now)))
+      return;
+
+    const base = siteBaseUrl();
+    const link = base ? slackLink(`${base}/mail`, "공용 메일함 열기") : "/mail";
+    const lines = [
+      "⚠️ AI 메일 분류가 크레딧 부족으로 중단됐습니다. 키워드로 분류되는 메일은 계속 정리되지만, 나머지는 '기타'로 쌓입니다.",
+      `오류: ${error instanceof Error ? error.message : String(error)}`,
+      "※ 이 알림은 하루에 1회만 보냅니다.",
+      link,
+    ];
+    const sent = await sendSlack(CREDIT_ALERT_WEBHOOK, lines.join("\n"));
+    // 실제로 보낸 경우에만 억제합니다 — 웹훅이 미설정이면 기록하지 않아,
+    //   나중에 웹훅을 넣는 즉시 알림이 나갑니다.
+    if (sent) await writeMark(CREDIT_ALERT_KEY, new Date(now).toISOString());
+  } catch (e) {
+    console.warn(
+      "[mail-ai] 크레딧 알림 실패:",
+      e instanceof Error ? e.message : e,
+    );
+  }
+}
+
 let _client: Anthropic | null = null;
 function client(): Anthropic {
   if (!_client) _client = new Anthropic();
@@ -131,15 +188,22 @@ export function parseClassification(raw: string): MailClassification | null {
   return { summary: summary.slice(0, 200), category, assignee, confidence };
 }
 
-// 메일 한 통 분류 — 실패하면 null(절대 throw 하지 않음).
+// 분류 결과 — 실패 사유를 호출부가 구분할 수 있어야 합니다.
+//   크레딧 소진이면 남은 메일에 AI 를 더 부르지 않고(어차피 다 실패합니다)
+//   슬랙으로 한 번 알려야 하기 때문입니다.
+export type ClassifyOutcome =
+  | { ok: true; value: MailClassification }
+  | { ok: false; credit: boolean; error?: unknown };
+
+// 메일 한 통 분류 — 실패해도 절대 throw 하지 않습니다.
 export async function classifyMail(input: {
   from: string;
   subject: string;
   body: string;
-}): Promise<MailClassification | null> {
+}): Promise<ClassifyOutcome> {
   if (!isClassifierConfigured()) {
     console.warn("[mail-ai] ANTHROPIC_API_KEY 미설정 — 분류 skip");
-    return null;
+    return { ok: false, credit: false };
   }
   try {
     const userText = [
@@ -162,12 +226,15 @@ export async function classifyMail(input: {
       .map((b) => b.text)
       .join("");
     const result = parseClassification(text);
-    if (!result) console.warn("[mail-ai] 응답 형식이 올바르지 않아 건너뜁니다.");
-    return result;
+    if (!result) {
+      console.warn("[mail-ai] 응답 형식이 올바르지 않아 건너뜁니다.");
+      return { ok: false, credit: false };
+    }
+    return { ok: true, value: result };
   } catch (e) {
     // 키 값이 섞이지 않도록 message 만 남깁니다.
     console.warn("[mail-ai] 분류 실패:", e instanceof Error ? e.message : e);
-    return null;
+    return { ok: false, credit: isCreditError(e), error: e };
   }
 }
 
@@ -181,8 +248,10 @@ export type AutoAssigned = {
 };
 
 export type ClassifyRunSummary = {
-  processed: number; // 분류 성공
+  processed: number; // 분류 성공(키워드 + AI 합계)
+  byKeyword: number; // 그중 키워드로 처리한 건 — AI 를 부르지 않았습니다
   skipped: number; // API 실패 등으로 ai_* 를 채우지 못한 건
+  creditExhausted: boolean; // 크레딧이 바닥나 AI 호출을 중단했는지
   autoAssigned: AutoAssigned[];
 };
 
@@ -206,10 +275,14 @@ export async function runMailClassification(options?: {
 }): Promise<ClassifyRunSummary> {
   const summary: ClassifyRunSummary = {
     processed: 0,
+    byKeyword: 0,
     skipped: 0,
+    creditExhausted: false,
     autoAssigned: [],
   };
-  if (!isClassifierConfigured()) return summary;
+  // ★ 키가 없어도 키워드 분류는 돌아야 합니다 — 크레딧이 떨어졌을 때 최소한
+  //   확실한 메일은 계속 정리되게 하는 것이 이 하이브리드의 목적입니다.
+  //   (예전에는 여기서 바로 return 이라 아무것도 분류되지 않았습니다.)
 
   try {
     const limit = Math.max(1, Math.min(options?.limit ?? BATCH_LIMIT, BATCH_LIMIT));
@@ -237,15 +310,56 @@ export async function runMailClassification(options?: {
       const fromEmail = String(row.from_email ?? "").trim();
       const subject = String(row.subject ?? "").trim();
 
-      const result = await classifyMail({
+      // --- 1) 키워드 우선 ---
+      //   확실한 것은 여기서 끝냅니다(AI 호출 0회 = 비용 0).
+      //   ai_summary 는 채우지 않습니다 — 요약은 AI 몫이고, 빈 요약을 지어내면
+      //   화면에서 "AI가 요약했다" 는 신호가 거짓이 됩니다.
+      //   ai_processed_at 은 찍습니다 — 안 찍으면 매 수집마다 같은 메일을
+      //   다시 집어 자동 경로가 영영 끝나지 않습니다.
+      const keyword = classifyByKeyword(subject, fromName);
+      if (keyword) {
+        const { error: kwError } = await supabaseAdmin
+          .from("mail_messages")
+          .update({
+            ai_category: keyword,
+            ai_processed_at: new Date().toISOString(),
+          })
+          .eq("id", id);
+        if (kwError) {
+          console.warn(`[mail-ai] 저장 실패(id=${id}):`, kwError.message);
+          summary.skipped++;
+          continue;
+        }
+        summary.processed++;
+        summary.byKeyword++;
+        continue;
+      }
+
+      // --- 2) 키워드로 안 잡힌 것만 AI ---
+      //   크레딧이 이미 바닥난 것을 확인했으면 더 부르지 않습니다.
+      //   ★ 이 판정이 키워드 블록 "아래" 에 있는 게 중요합니다 — 크레딧이
+      //     없어도 키워드로 잡히는 메일은 계속 저장돼야 하기 때문입니다.
+      if (summary.creditExhausted) {
+        summary.skipped++;
+        continue;
+      }
+
+      const outcome = await classifyMail({
         from: fromName ? `${fromName} <${fromEmail}>` : fromEmail,
         subject,
         body: String(row.body_text ?? ""),
       });
-      if (!result) {
+      if (!outcome.ok) {
+        // 크레딧 소진이면 ai_category 를 건드리지 않고 넘어갑니다 — "기타" 로
+        //   강제하면 나중에 재분류 대상으로 찾을 수 없습니다.
+        if (outcome.credit) {
+          summary.creditExhausted = true;
+          await notifyCreditExhausted(outcome.error);
+        }
         summary.skipped++;
         continue;
       }
+      const result = outcome.value;
 
       // confidence 가 임계값 이상이고 아직 담당자가 없을 때만 자동 지정합니다.
       // (사람이 이미 지정해 둔 담당자를 AI 가 덮어쓰지 않도록)

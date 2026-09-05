@@ -29,6 +29,7 @@
     "test:credential": "node --import tsx scripts/test-credential-crypto.ts",
     "test:instagram": "node --import tsx scripts/test-instagram-import.ts",
     "test:ledger": "node --import tsx scripts/test-payroll-ledger.ts",
+    "test:keyword": "node --import tsx scripts/test-mail-keyword.ts",
     "reclassify:mail": "node --import tsx scripts/reclassify-mail.ts"
   },
   "dependencies": {
