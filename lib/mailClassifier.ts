@@ -1,6 +1,6 @@
 import Anthropic from "@anthropic-ai/sdk";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
-import { isMailCategory, type MailCategory } from "@/lib/mail";
+import { MAIL_CATEGORIES, isMailCategory, type MailCategory } from "@/lib/mail";
 
 // =====================================================================
 // 공용 메일함 2단계 — AI 분류·요약 (ML-5)
@@ -27,7 +27,8 @@ export const AUTO_ASSIGN_CONFIDENCE = 0.7;
 
 // 배정 규칙 — 프롬프트에 그대로 넣습니다. 담당자가 바뀌면 여기만 고치면 됩니다.
 const ASSIGNEE_RULES = [
-  "방과후·아카데미·강사·수강생·출석 관련 → 권수현",
+  "방카·아카데미·강사·수강생·출석 관련 → 권수현",
+  "토요늘봄·토요일 방과후·늘봄·통합방과후 관련 → 이민정",
   "공문·회계·세금·급여·계약·물품·정산 관련 → 김혜지",
   "청소년활동·행사·동아리·체험·참여기구 관련 → 박준우",
   "시설·안전점검·수리·대관·설비 관련 → 한지형",
@@ -36,18 +37,47 @@ const ASSIGNEE_RULES = [
 // 애매하거나 판단 불가일 때의 기본 담당자. ("미지정" 이 아님 — 지시 사항)
 const FALLBACK_ASSIGNEE = "김혜지";
 
+// 분류 기준 — 이름만으로는 가를 수 없는 칸이 있어 기준을 명시합니다.
+//   ★ 특히 방카/토요늘봄은 둘 다 "방과후" 라 불리지만 사업도 담당자도 다릅니다.
+//     기준 없이 이름만 주면 모델이 둘을 섞습니다(2026-09 개편 이전 상태).
+//   ★ 홍보/광고도 마찬가지 — 방향이 반대입니다(우리가 하는 홍보 vs 외부가
+//     보내온 광고). 이 구분이 없어 광고가 전부 "기타" 로 쌓였습니다.
+const CATEGORY_RULES = `공문 = 관공서·상급기관의 공문, 지침, 협조 요청
+회계 = 세금·급여·계약·정산·물품 구매 등 돈이 오가는 건
+방카 = 청소년방과후아카데미. "방카", "방과후아카데미",
+  부산청소년방과후아카데미연합회, 아카데미 운영지도안·운영계획서 등
+토요늘봄 = 토요일 방과후·통합방과후·늘봄. "토요일", "늘봄", "통합방과후",
+  "동래미래 아카데미", 그리고 과목별 강의계획서
+  (댄스·미술·디지털드로잉·바이올린·오케스트라·통기타·비보이 등)
+청소년활동 = 행사·동아리·체험·참여기구 등 센터 청소년활동 사업
+시설 = 시설·안전점검·수리·대관·설비
+홍보 = 우리 센터가 하는 홍보·보도자료·대외협력
+광고 = 외부에서 보내온 광고·판촉·영업 메일
+  (업체 홍보, 상품 안내, 유료 세미나 판매 등). 우리가 하는 홍보와 구분합니다
+기타 = 위 어디에도 해당하지 않는 것
+
+[분류 예시]
+"26방카 수학운영계획서" → 방카
+"부산청소년방과후아카데미연합회 정기회의" → 방카
+"토요일 통기타 대체강사입니다!" → 토요늘봄
+"늘봄 9월 10월 비보이, 유튜브 강의 계획서" → 토요늘봄
+"슥샥 디지털 드로잉 : 26년 4차시 강의 계획서" → 토요늘봄`;
+
 const SYSTEM_PROMPT = `당신은 동래구청소년센터 공용 메일함의 분류 담당자입니다.
 받은 메일 한 통을 읽고 요약·분류·담당자 배정을 합니다.
+
+[분류 기준]
+${CATEGORY_RULES}
 
 [배정 규칙]
 ${ASSIGNEE_RULES}
 애매하거나 판단이 어려우면 → ${FALLBACK_ASSIGNEE}
-(어떤 경우에도 "미지정" 으로 두지 마세요. 항상 위 4명 중 한 명을 고릅니다.)
+(어떤 경우에도 "미지정" 으로 두지 마세요. 항상 위 5명 중 한 명을 고릅니다.)
 
 [출력 형식]
 반드시 아래 형태의 JSON 객체 **하나만** 출력하세요.
 설명·인사말·마크다운 코드펜스(백틱)를 절대 붙이지 마세요.
-{"summary": "한 줄 요약(40자 내외)", "category": "공문|회계|방과후|청소년활동|시설|홍보|기타", "assignee": "직원 이름", "confidence": 0~1 사이 숫자}
+{"summary": "한 줄 요약(40자 내외)", "category": "${MAIL_CATEGORIES.join("|")}", "assignee": "직원 이름", "confidence": 0~1 사이 숫자}
 
 confidence 는 배정 확신도입니다. 근거가 뚜렷하면 높게, 추측이면 낮게 매기세요.`;
 
@@ -162,11 +192,17 @@ export type ClassifyRunSummary = {
 //   * force 면 ai_processed_at 조건을 빼고 재분석합니다 — 화면의 [AI 분석]
 //     버튼처럼 사람이 명시적으로 요청한 경우에만 씁니다(자동 경로는 항상
 //     미분류만 처리해 중복 과금을 막습니다).
+//   * keepAssignee 면 담당자를 일절 건드리지 않습니다 — 분류 기준이 바뀌어
+//     기존 메일을 일괄 재분류할 때(scripts/reclassify-mail.ts) 씁니다.
+//     ★ 이게 없으면 담당자가 비어 있던 메일 수백 통이 한꺼번에 자동 배정되고,
+//       호출부에 따라 슬랙 DM 까지 쏟아집니다. autoAssigned 를 비워 두므로
+//       DM 경로도 함께 막힙니다.
 //   * 어떤 실패도 밖으로 던지지 않습니다.
 export async function runMailClassification(options?: {
   ids?: string[];
   limit?: number;
   force?: boolean;
+  keepAssignee?: boolean;
 }): Promise<ClassifyRunSummary> {
   const summary: ClassifyRunSummary = {
     processed: 0,
@@ -215,7 +251,9 @@ export async function runMailClassification(options?: {
       // (사람이 이미 지정해 둔 담당자를 AI 가 덮어쓰지 않도록)
       const current = String(row.assignee_name ?? "").trim();
       const autoAssign =
-        result.confidence >= AUTO_ASSIGN_CONFIDENCE && current.length === 0;
+        !options?.keepAssignee &&
+        result.confidence >= AUTO_ASSIGN_CONFIDENCE &&
+        current.length === 0;
 
       const patch: Record<string, unknown> = {
         ai_summary: result.summary,

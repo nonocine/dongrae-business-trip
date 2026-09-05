@@ -169,13 +169,22 @@ export const MAIL_TRASH_FILTER = "trash";
 //   있지만, 목록 뱃지는 클라이언트 컴포넌트가 그려야 하므로 상수만 여기에
 //   둡니다. (클라이언트가 mailClassifier 를 import 하면 service_role 클라이언트가
 //   브라우저 번들에 끌려 들어갑니다.)
+//   ★ 2026-09 개편(7→9): '방과후' 한 칸에 사업 둘이 섞여 있었습니다.
+//     방과후아카데미(권수현)와 토요일 방과후(이민정)는 담당자가 다른 별개
+//     사업이라 '방카'·'토요늘봄' 으로 나눴습니다. 또 '기타' 에 몰려 있던
+//     외부 광고·판촉 메일을 '광고' 로 뺐습니다.
+//   ★ 이 배열이 분류기 프롬프트의 category 선택지로 그대로 들어갑니다
+//     (lib/mailClassifier.ts 가 join("|") 로 씁니다). 여기에 없는 값을 AI 가
+//     답하면 isMailCategory 를 통과하지 못해 "기타" 로 떨어집니다.
 export const MAIL_CATEGORIES = [
   "공문",
   "회계",
-  "방과후",
+  "방카",
+  "토요늘봄",
   "청소년활동",
   "시설",
   "홍보",
+  "광고",
   "기타",
 ] as const;
 export type MailCategory = (typeof MAIL_CATEGORIES)[number];
@@ -190,10 +199,12 @@ export function isMailCategory(v: unknown): v is MailCategory {
 export const MAIL_CATEGORY_INDEX: readonly MailCategory[] = [
   "공문",
   "청소년활동",
-  "방과후",
+  "방카",
+  "토요늘봄",
   "회계",
   "시설",
   "홍보",
+  "광고",
   "기타",
 ];
 
@@ -202,23 +213,30 @@ export const MAIL_CATEGORY_INDEX: readonly MailCategory[] = [
 //   여기 넣습니다 — 어느 칸에도 없으면 영영 안 보이기 때문입니다.
 export const MAIL_CATEGORY_ETC: MailCategory = "기타";
 
+//   방카·토요늘봄은 같은 방과후 계열이라 같은 파랑 배경을 쓰고 글자 농도로
+//   나눕니다(기존 --brand-blue / --brand-blue-strong 토큰 그대로 — 새 색 없음).
+//   광고는 기타와 같은 무채색이되 한 단계 옅게 — 급히 볼 메일이 아닙니다.
 export const MAIL_CATEGORY_BADGE: Record<string, string> = {
   공문: "bg-navy-soft text-navy",
   회계: "bg-brand-green/15 text-brand-green",
-  방과후: "bg-brand-blue-soft text-brand-blue",
+  방카: "bg-brand-blue-soft text-brand-blue",
+  토요늘봄: "bg-brand-blue-soft text-brand-blue-strong",
   청소년활동: "bg-brand-yellow/25 text-amber-800",
   시설: "bg-warning-soft text-warning",
   홍보: "bg-stamp-soft text-stamp",
+  광고: "bg-surface text-ink-hint",
   기타: "bg-surface text-ink-muted",
 };
 
 // 분류 인덱스(공용 메일함 목록 위 한 줄)의 로고색 — 배지 숫자와 선택 칸 밑줄에만.
 //   * globals.css 의 로고 4색 토큰(--logo-*)을 그대로 참조합니다. 새 색·새 토큰 없음.
-//   * 7분류를 4색에 배분하다 보니 계열이 같은 칸끼리 색을 공유합니다.
-//       공문 파랑(행정) / 청소년활동·방과후 초록(사업) / 회계 빨강(돈) /
-//       시설·홍보 노랑(관리·대외)
-//   * "기타"·"전체" 는 일부러 넣지 않습니다 — AI가 판단하지 못한 칸이라
-//     강조하지 않고 기존 무채색 그대로 둡니다.
+//   * 9분류를 4색에 배분하다 보니 계열이 같은 칸끼리 색을 공유합니다.
+//       공문 파랑(행정) / 청소년활동·방카·토요늘봄 초록(사업) /
+//       회계 빨강(돈) / 시설·홍보 노랑(관리·대외)
+//     사업 3칸이 나란히 초록이지만, 색은 "어느 계열인가" 를 알리는 신호이고
+//     칸을 가르는 것은 이름입니다 — 4색 밖으로 나가지 않는 쪽을 택했습니다.
+//   * "광고"·"기타"·"전체" 는 일부러 넣지 않습니다 — 급히 볼 칸이 아니거나
+//     AI가 판단하지 못한 칸이라 강조하지 않고 기존 무채색 그대로 둡니다.
 //   * 클래스(text-logo-blue)가 아니라 CSS 변수 문자열인 이유:
 //     lib/ui 의 tabItemCls·badgeNeutral 이 이미 border-*/text-* 를 갖고 있어
 //     같은 유틸리티를 덧붙이면 어느 쪽이 이길지 클래스 나열 순서가 아니라
@@ -227,7 +245,8 @@ export const MAIL_CATEGORY_BADGE: Record<string, string> = {
 export const MAIL_CATEGORY_INDEX_COLOR: Record<string, string> = {
   공문: "var(--logo-blue)",
   청소년활동: "var(--logo-green)",
-  방과후: "var(--logo-green)",
+  방카: "var(--logo-green)",
+  토요늘봄: "var(--logo-green)",
   회계: "var(--logo-red)",
   시설: "var(--logo-yellow)",
   홍보: "var(--logo-yellow)",

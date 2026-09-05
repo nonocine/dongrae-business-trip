@@ -28,7 +28,8 @@
     "test:lecture-cert": "node --import tsx scripts/test-lecture-cert-pdf.ts",
     "test:credential": "node --import tsx scripts/test-credential-crypto.ts",
     "test:instagram": "node --import tsx scripts/test-instagram-import.ts",
-    "test:ledger": "node --import tsx scripts/test-payroll-ledger.ts"
+    "test:ledger": "node --import tsx scripts/test-payroll-ledger.ts",
+    "reclassify:mail": "node --import tsx scripts/reclassify-mail.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.116.0",
