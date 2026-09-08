@@ -662,6 +662,12 @@ export default async function EmployeeDashboard({
                     title="안전점검"
                     desc="월별 안전점검표·PDF 출력"
                   />
+                  <MenuCard
+                    href="/hr/facility/driving"
+                    icon="🚗"
+                    title="운행기록"
+                    desc="차량 운행일지 조회·월별 운행대장"
+                  />
                   {/* 거래처관리는 여기 있었지만(시설 담당에게는 "시설 거래처"가
                       곧 담당 업무라서), 시설 직무가 없는 직원에게 진입점이 안
                       보인다는 관장 지적으로 8/25 공통 영역으로 옮겼습니다.
