@@ -733,10 +733,11 @@ export async function saveCoinPay(
       //     고치면 오류 없이 0행이 갱신되고 "저장했습니다"가 떴습니다.
       //   ⚠️ author_name 은 빼고 갱신합니다 — 남의 기록을 고칠 때 작성자가
       //     수정자로 바뀌면 삭제 권한이 원 작성자에서 옮겨갑니다
-      //     (saveBusinessResult 와 같은 처리).
-      //     ※ 이 테이블에는 updated_by 컬럼이 없어 "누가 고쳤는지"는 남지
-      //       않습니다. 시각만 updated_at 에 남습니다.
-      const patch: Record<string, unknown> = { ...payload };
+      //     (saveBusinessResult 와 같은 처리). 수정 이력은 updated_by 에 남깁니다.
+      const patch: Record<string, unknown> = {
+        ...payload,
+        updated_by: user.name,
+      };
       delete patch.author_name;
       const { data, error } = await supabaseAdmin
         .from("coin_pay_results")
@@ -765,14 +766,23 @@ export async function saveCoinPay(
   }
 }
 
+// 동전PAY 삭제 — 권한은 종전대로 작성자 본인·관리자입니다(수정만 개방).
+//   * 종전에는 결과를 확인하지 않아, 권한이 없으면 0행이 지워지고도
+//     "삭제했습니다"가 떴습니다. 정책은 그대로 두고 실패만 알립니다
+//     (deleteBusinessResult·deletePromotion 과 같은 방식).
 export async function deleteCoinPay(id: string): Promise<ActionResult> {
   try {
     const user = await requireUser();
     if (!id) return { ok: false, message: "대상이 없습니다." };
     let query = supabaseAdmin.from("coin_pay_results").delete().eq("id", id);
     if (!user.isAdmin) query = query.eq("author_name", user.name);
-    const { error } = await query;
+    const { data, error } = await query.select("id").maybeSingle();
     if (error) throw new Error(error.message);
+    if (!data)
+      return {
+        ok: false,
+        message: "본인이 작성한 기록만 삭제할 수 있습니다.",
+      };
     revalidatePath("/business-results");
     return { ok: true };
   } catch (e) {
@@ -805,16 +815,36 @@ export async function saveStaffTraining(
     if (!payload.training_date || !payload.staff_name || !payload.training_name) {
       return { ok: false, message: "일자·성명·교육명을 입력해주세요." };
     }
-    const { error } = id
-      ? // 반입 행(source='mandatory')도 장소·주최·수료시간을 고쳐 쓸 수 있게 둡니다.
-        await supabaseAdmin
-          .from("staff_training_results")
-          .update(payload)
-          .eq("id", id)
-      : await supabaseAdmin
-          .from("staff_training_results")
-          .insert({ ...payload, source: "manual" });
-    if (error) throw new Error(error.message);
+    if (id) {
+      // 반입 행(source='mandatory')도 장소·주최·수료시간을 고쳐 쓸 수 있게 둡니다.
+      //   ⚠️ author_name 은 빼고 갱신합니다 — 이 액션은 작성자 조건이 없어
+      //     누구나 수정하므로, 그대로 두면 남의 기록을 고칠 때 작성자가
+      //     수정자로 바뀝니다(saveBusinessResult·saveCoinPay 와 같은 처리).
+      //     수정 이력은 updated_by 에 남깁니다.
+      const patch: Record<string, unknown> = {
+        ...payload,
+        updated_by: user.name,
+      };
+      delete patch.author_name;
+      const { data, error } = await supabaseAdmin
+        .from("staff_training_results")
+        .update(patch)
+        .eq("id", id)
+        .select("id")
+        .maybeSingle();
+      if (error) throw new Error(error.message);
+      if (!data)
+        return {
+          ok: false,
+          message:
+            "기록을 찾을 수 없습니다. 목록을 새로 고친 뒤 다시 시도해주세요.",
+        };
+    } else {
+      const { error } = await supabaseAdmin
+        .from("staff_training_results")
+        .insert({ ...payload, source: "manual" });
+      if (error) throw new Error(error.message);
+    }
     revalidatePath("/business-results");
     return { ok: true };
   } catch (e) {
@@ -826,11 +856,16 @@ export async function deleteStaffTraining(id: string): Promise<ActionResult> {
   try {
     await requireUser();
     if (!id) return { ok: false, message: "대상이 없습니다." };
-    const { error } = await supabaseAdmin
+    const { data, error } = await supabaseAdmin
       .from("staff_training_results")
       .delete()
-      .eq("id", id);
+      .eq("id", id)
+      .select("id")
+      .maybeSingle();
     if (error) throw new Error(error.message);
+    // 0행이면 이미 지워진 기록입니다 — 성공으로 보이지 않게 알립니다.
+    if (!data)
+      return { ok: false, message: "이미 삭제된 기록입니다. 목록을 새로 고쳐주세요." };
     revalidatePath("/business-results");
     return { ok: true };
   } catch (e) {
@@ -1085,11 +1120,15 @@ export async function updateBusinessCategory(
     }
     if (patch.sort_order !== undefined) row.sort_order = patch.sort_order;
     if (patch.is_active !== undefined) row.is_active = patch.is_active;
-    const { error } = await supabaseAdmin
+    const { data, error } = await supabaseAdmin
       .from("business_categories")
       .update(row)
-      .eq("id", id);
+      .eq("id", id)
+      .select("id")
+      .maybeSingle();
     if (error) throw new Error(error.message);
+    if (!data)
+      return { ok: false, message: "분야를 찾을 수 없습니다. 화면을 새로 고쳐주세요." };
     revalidatePath("/business-results");
     return { ok: true };
   } catch (e) {
@@ -1140,11 +1179,15 @@ export async function updateBusinessProgram(
     }
     if (patch.sort_order !== undefined) row.sort_order = patch.sort_order;
     if (patch.is_active !== undefined) row.is_active = patch.is_active;
-    const { error } = await supabaseAdmin
+    const { data, error } = await supabaseAdmin
       .from("business_programs")
       .update(row)
-      .eq("id", id);
+      .eq("id", id)
+      .select("id")
+      .maybeSingle();
     if (error) throw new Error(error.message);
+    if (!data)
+      return { ok: false, message: "사업을 찾을 수 없습니다. 화면을 새로 고쳐주세요." };
     revalidatePath("/business-results");
     return { ok: true };
   } catch (e) {
