@@ -145,6 +145,14 @@ function isReminderDue(emp: Emp, t: { due_date: string | null }): boolean {
   return t.due_date >= emp.joinDate;
 }
 
+// DM 이 가지 않는 이유 — 관리자 요약에만 덧붙입니다. 요약에는 미이수 전부가
+//   실리므로, 표시가 없으면 관리자가 "왜 DM 은 안 갔지" 하고 헷갈립니다.
+function reminderSkipNote(emp: Emp, t: { due_date: string | null }): string {
+  if (!emp.joinDate) return "입사일 미기재 · DM 미발송";
+  if (t.due_date && t.due_date < emp.joinDate) return "입사 전 교육 · DM 미발송";
+  return "DM 미발송";
+}
+
 // 성범죄경력조회 경고 — 교육 요약과 별개 메시지로 관리자 채널에 1건.
 //   대상 0명이면 아무것도 보내지 않는다(빈 알림 금지).
 async function sendCrimeCheckAlert(
@@ -332,20 +340,30 @@ export async function runTrainingReminder(): Promise<TrainingReminderSummary> {
       // 퇴사 후에 실시된 교육은 대상이 아닙니다.
       //   → DM·관리자 요약 어느 쪽에도 넣지 않습니다.
       if (!isTargetOn(emp, trainingBaseYmd(t))) continue;
-      // 입사 전에 기한이 끝난 교육은 독촉하지 않습니다(isReminderDue 주석 참고).
-      //   현황판에는 그대로 미이수로 남습니다 — 독촉만 제한합니다.
-      if (!isReminderDue(emp, t)) continue;
       if (done.has(cellKey(t.id, emp.driver_id))) continue;
+
+      // 관리자 요약과 DM 을 분리합니다 — 목적이 다릅니다.
+      //   * 요약("누가 무엇을 안 들었나")은 미이수 전부를 싣습니다. 여기서
+      //     빠지면 담당 팀장이 신규 입사자의 미이수를 놓칩니다.
+      //   * DM("당사자에게 재촉")은 입사일 이후에 도래하는 기한만 보냅니다
+      //     (isReminderDue 주석 참고).
+      const dmTarget = isReminderDue(emp, t);
+      const note = dmTarget ? "" : `, ${reminderSkipNote(emp, t)}`;
+      adminLines.push(`• ${emp.name} — ${t.name} (${ddayPhrase(dday)}${note})`);
+      if (!dmTarget) continue;
+
       const url = t.site_url || (base ? `${base}/profile/hr` : "/profile/hr");
       const bucket = perEmp.get(emp.driver_id) ?? { emp, items: [] };
       bucket.items.push({ name: t.name, dday, url });
       perEmp.set(emp.driver_id, bucket);
-      adminLines.push(`• ${emp.name} — ${t.name} (${ddayPhrase(dday)})`);
     }
   }
 
   const targets = [...perEmp.values()];
-  if (targets.length === 0) return crimeOnly();
+  // 요약 기준으로 판단합니다 — DM 대상이 0명이어도(전부 입사 전 교육 등)
+  //   미이수가 있으면 관리자 요약은 보내야 합니다. targets 로 판단하면 그
+  //   경우 요약이 통째로 빠져 분리한 의미가 없어집니다.
+  if (adminLines.length === 0) return crimeOnly();
 
   // 4) 개인 DM.
   let dmSent = 0;
@@ -370,7 +388,7 @@ export async function runTrainingReminder(): Promise<TrainingReminderSummary> {
     }
   }
 
-  // 5) 관리자 요약(대상 있을 때만).
+  // 5) 관리자 요약 — 미이수가 있으면 DM 대상이 없어도 보냅니다.
   const summaryLines = [`📋 의무교육 미이수 현황 (${today})`, ...adminLines];
   if (unreachable.length > 0) {
     summaryLines.push(`⚠️ 슬랙 미연결(DM 실패): ${unreachable.join(", ")}`);
