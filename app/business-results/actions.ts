@@ -725,12 +725,39 @@ export async function saveCoinPay(
     };
     if (!payload.place) return { ok: false, message: "사용처를 입력해주세요." };
 
-    let query = id
-      ? supabaseAdmin.from("coin_pay_results").update(payload).eq("id", id)
-      : supabaseAdmin.from("coin_pay_results").insert(payload);
-    if (id && !user.isAdmin) query = query.eq("author_name", user.name);
-    const { error } = await query;
-    if (error) throw new Error(error.message);
+    if (id) {
+      // 수정 — 작성자 조건 없이 id 로만 갱신합니다. 사업실적과 같은 정책으로
+      //   통일했습니다(로그인 직원 누구나). 같은 화면·같은 성격의 데이터인데
+      //   정책이 갈리면 담당자가 예측할 수 없습니다.
+      //   * 종전에는 작성자 조건을 걸고도 결과를 확인하지 않아, 남의 기록을
+      //     고치면 오류 없이 0행이 갱신되고 "저장했습니다"가 떴습니다.
+      //   ⚠️ author_name 은 빼고 갱신합니다 — 남의 기록을 고칠 때 작성자가
+      //     수정자로 바뀌면 삭제 권한이 원 작성자에서 옮겨갑니다
+      //     (saveBusinessResult 와 같은 처리).
+      //     ※ 이 테이블에는 updated_by 컬럼이 없어 "누가 고쳤는지"는 남지
+      //       않습니다. 시각만 updated_at 에 남습니다.
+      const patch: Record<string, unknown> = { ...payload };
+      delete patch.author_name;
+      const { data, error } = await supabaseAdmin
+        .from("coin_pay_results")
+        .update(patch)
+        .eq("id", id)
+        .select("id")
+        .maybeSingle();
+      if (error) throw new Error(error.message);
+      // 권한을 열어도 행이 사라진 경우는 남습니다 — 0행이면 실패로 알립니다.
+      if (!data)
+        return {
+          ok: false,
+          message:
+            "기록을 찾을 수 없습니다. 목록을 새로 고친 뒤 다시 시도해주세요.",
+        };
+    } else {
+      const { error } = await supabaseAdmin
+        .from("coin_pay_results")
+        .insert(payload);
+      if (error) throw new Error(error.message);
+    }
     revalidatePath("/business-results");
     return { ok: true };
   } catch (e) {
