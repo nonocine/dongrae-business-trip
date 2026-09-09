@@ -68,7 +68,11 @@ export default function StaffTrainingTab({
     setMsg(null);
     start(async () => {
       try {
-        await saveStaffTraining(new FormData(form));
+        const res = await saveStaffTraining(new FormData(form));
+        if (!res.ok) {
+          setMsg({ ok: false, text: res.message });
+          return;
+        }
         form.reset();
         setEditing(null);
         setMsg({ ok: true, text: "저장했습니다." });

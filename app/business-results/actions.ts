@@ -388,75 +388,101 @@ export async function getBusinessResultsData(
   };
 }
 
-export async function saveBusinessResult(formData: FormData) {
-  const user = await requireUser();
-  const id = String(formData.get("id") ?? "").trim();
+// 프로그램 실적 저장(등록·수정).
+//   * 수정 권한 — 로그인 직원이면 누구나. 사업실적은 센터 전체의 협업 자산이고
+//     담당자가 수시로 바뀌어, 작성자만 고칠 수 있으면 담당 교체·인수인계 때마다
+//     막힙니다(관장 확정 2026-09). 삭제는 종전대로 작성자 본인·관리자만입니다.
+//   * 오류는 throw 하지 않고 { ok:false, message } 로 돌려줍니다 — 서버 액션에서
+//     throw 하면 프로덕션 Next.js 가 메시지를 감춰(“An error occurred in the
+//     Server Components render…”) 사용자가 사유를 알 수 없습니다.
+export async function saveBusinessResult(
+  formData: FormData,
+): Promise<ActionResult> {
+  try {
+    const user = await requireUser();
+    const id = String(formData.get("id") ?? "").trim();
 
-  // 드롭다운 선택이면 등록된 이름을 정본으로 사용하고, 직접 입력이면 program_id = null.
-  const programId = String(formData.get("program_id") ?? "").trim();
-  let programName = String(formData.get("program_name") ?? "").trim();
-  if (programId) {
-    const { data, error } = await supabaseAdmin
-      .from("business_programs")
-      .select("name")
-      .eq("id", programId)
-      .maybeSingle();
-    if (!error && data) programName = String((data as { name: string }).name);
+    // 드롭다운 선택이면 등록된 이름을 정본으로 사용하고, 직접 입력이면 program_id = null.
+    const programId = String(formData.get("program_id") ?? "").trim();
+    let programName = String(formData.get("program_name") ?? "").trim();
+    if (programId) {
+      const { data, error } = await supabaseAdmin
+        .from("business_programs")
+        .select("name")
+        .eq("id", programId)
+        .maybeSingle();
+      if (!error && data) programName = String((data as { name: string }).name);
+    }
+    if (!programName) return { ok: false, message: "사업명을 입력해주세요." };
+
+    const participantsYouth = asInt(formData.get("participants_youth"));
+    const participantsOther = asInt(formData.get("participants_other"));
+    const attendanceYouth = asInt(formData.get("attendance_youth"));
+    const attendanceOther = asInt(formData.get("attendance_other"));
+
+    const payload = {
+      report_year: asInt(formData.get("year"), 2020),
+      report_month: Math.min(12, asInt(formData.get("month"), 1)),
+      category: String(formData.get("category") ?? "기타").trim() || "기타",
+      program_id: programId || null,
+      program_name: programName,
+      manager_name: String(formData.get("manager_name") ?? "").trim(),
+      sessions: asInt(formData.get("sessions")),
+      operating_days: asInt(formData.get("operating_days")),
+      participants_youth: participantsYouth,
+      participants_other: participantsOther,
+      // 합계 컬럼은 유지하고 항상 청+기 로 동기화 — 기존 집계·내보내기 코드 호환.
+      participants: participantsYouth + participantsOther,
+      attendance_youth: attendanceYouth,
+      attendance_other: attendanceOther,
+      attendance: attendanceYouth + attendanceOther,
+      // 실인원 — 수기 입력값 그대로(자동계산 제거).
+      youth_uses: asInt(formData.get("youth_uses")),
+      other_uses: asInt(formData.get("other_uses")),
+      // 주요 내용(summary)·평가(evaluation)는 입력란을 없앴습니다(evaluation 김혜지 8/18,
+      //   summary 이민정 8/25). 컬럼은 남겨 과거 값을 보존하고 저장 시에는 건드리지 않습니다.
+      status: formData.get("submit") === "true" ? "submitted" : "draft",
+      author_name: user.name,
+      updated_by: user.name,
+    };
+
+    if (id) {
+      // 수정 — 작성자 조건 없이 id 로만 갱신합니다(누구나 수정).
+      //   ⚠️ author_name 은 빼고 갱신합니다. 남의 실적을 고칠 때 작성자가
+      //     수정한 사람으로 바뀌면 목록의 '작성' 표기가 뒤집히고, 삭제 권한이
+      //     원 작성자에서 수정자에게 옮겨갑니다. 변경 이력은 updated_by 로
+      //     남깁니다(savePromotion 과 같은 방식).
+      const patch: Record<string, unknown> = { ...payload };
+      delete patch.author_name;
+      const { data, error } = await supabaseAdmin
+        .from("business_results")
+        .update(patch)
+        .eq("id", id)
+        .select("id")
+        .maybeSingle();
+      if (error) throw new Error(error.message);
+      if (!data)
+        return {
+          ok: false,
+          message:
+            "실적을 찾을 수 없습니다. 목록을 새로 고친 뒤 다시 시도해주세요.",
+        };
+    } else {
+      const { error } = await supabaseAdmin
+        .from("business_results")
+        .insert(payload);
+      if (error) throw new Error(error.message);
+    }
+
+    revalidatePath("/business-results");
+    return { ok: true };
+  } catch (e) {
+    return actionError(e, "실적을 저장하지 못했습니다.");
   }
-  if (!programName) throw new Error("사업명을 입력해주세요.");
-
-  const participantsYouth = asInt(formData.get("participants_youth"));
-  const participantsOther = asInt(formData.get("participants_other"));
-  const attendanceYouth = asInt(formData.get("attendance_youth"));
-  const attendanceOther = asInt(formData.get("attendance_other"));
-
-  const payload = {
-    report_year: asInt(formData.get("year"), 2020),
-    report_month: Math.min(12, asInt(formData.get("month"), 1)),
-    category: String(formData.get("category") ?? "기타").trim() || "기타",
-    program_id: programId || null,
-    program_name: programName,
-    manager_name: String(formData.get("manager_name") ?? "").trim(),
-    sessions: asInt(formData.get("sessions")),
-    operating_days: asInt(formData.get("operating_days")),
-    participants_youth: participantsYouth,
-    participants_other: participantsOther,
-    // 합계 컬럼은 유지하고 항상 청+기 로 동기화 — 기존 집계·내보내기 코드 호환.
-    participants: participantsYouth + participantsOther,
-    attendance_youth: attendanceYouth,
-    attendance_other: attendanceOther,
-    attendance: attendanceYouth + attendanceOther,
-    // 실인원 — 수기 입력값 그대로(자동계산 제거).
-    youth_uses: asInt(formData.get("youth_uses")),
-    other_uses: asInt(formData.get("other_uses")),
-    // 주요 내용(summary)·평가(evaluation)는 입력란을 없앴습니다(evaluation 김혜지 8/18,
-    //   summary 이민정 8/25). 컬럼은 남겨 과거 값을 보존하고 저장 시에는 건드리지 않습니다.
-    status: formData.get("submit") === "true" ? "submitted" : "draft",
-    author_name: user.name,
-    updated_by: user.name,
-  };
-
-  if (id) {
-    let query = supabaseAdmin
-      .from("business_results")
-      .update(payload)
-      .eq("id", id);
-    if (!user.isAdmin) query = query.eq("author_name", user.name);
-    const { data, error } = await query.select("id").maybeSingle();
-    if (error) throw new Error(error.message);
-    if (!data) throw new Error("본인이 작성한 실적만 수정할 수 있습니다.");
-  } else {
-    const { error } = await supabaseAdmin
-      .from("business_results")
-      .insert(payload);
-    if (error) throw new Error(error.message);
-  }
-
-  revalidatePath("/business-results");
-  return { ok: true };
 }
 
-// 프로그램 실적 삭제 — 물리 삭제. 권한 규칙은 수정과 동일(관리자 또는 작성자 본인).
+// 프로그램 실적 삭제 — 물리 삭제. 수정과 달리 작성자 본인·관리자만 할 수
+//   있습니다(되돌릴 수 없고 자식 행까지 지워지므로 개방하지 않았습니다).
 //   세부 실적·실별 인원 자식 행은 FK on delete cascade 로 함께 지워집니다.
 export async function deleteBusinessResult(id: string): Promise<ActionResult> {
   try {
@@ -480,7 +506,7 @@ export async function deleteBusinessResult(id: string): Promise<ActionResult> {
 
 // =====================================================================
 // 작업 5. 사업별 세부입력 — 저장은 delete-then-insert 로 행 전체를 교체합니다.
-//   권한 규칙은 saveBusinessResult 와 동일: 비관리자는 본인 작성 행만.
+//   권한 규칙은 saveBusinessResult 와 동일: 로그인 직원이면 누구나 수정.
 // =====================================================================
 export type ResultDetailInput = {
   entry_type: "date" | "session";
@@ -499,21 +525,18 @@ export async function saveResultDetails(
   rows: ResultDetailInput[],
 ): Promise<ActionResult> {
   try {
-    const user = await requireUser();
+    await requireUser();
     if (!resultId) return { ok: false, message: "대상 실적이 없습니다." };
 
+    // 대상 실적이 실제로 있는지만 확인합니다 — 작성자 조건은 없습니다
+    //   (수정은 로그인 직원이면 누구나. saveBusinessResult 주석 참고).
     const { data: owner, error: ownerError } = await supabaseAdmin
       .from("business_results")
-      .select("author_name")
+      .select("id")
       .eq("id", resultId)
       .maybeSingle();
     if (ownerError) throw new Error(ownerError.message);
     if (!owner) return { ok: false, message: "실적을 찾을 수 없습니다." };
-    if (
-      !user.isAdmin &&
-      String((owner as { author_name: string }).author_name) !== user.name
-    )
-      return { ok: false, message: "본인이 작성한 실적만 수정할 수 있습니다." };
 
     const del = await supabaseAdmin
       .from("business_result_details")
@@ -567,62 +590,75 @@ function pickPromotionChannels(formData: FormData): string[] {
   return [...new Set(list)];
 }
 
-export async function savePromotion(formData: FormData) {
-  const user = await requireUser();
-  const id = String(formData.get("id") ?? "").trim();
-  const commonUrl = String(formData.get("url") ?? "").trim();
-  const payload = {
-    report_year: asInt(formData.get("year"), 2020),
-    report_month: Math.min(12, asInt(formData.get("month"), 1)),
-    activity_date: String(formData.get("activity_date") ?? ""),
-    category: String(formData.get("category") ?? "기타").trim() || "기타",
-    title: String(formData.get("title") ?? "").trim(),
-    count: asInt(formData.get("count"), 1),
-    url: commonUrl,
-    description: String(formData.get("description") ?? "").trim(),
-    author_name: user.name,
-  };
-  if (!payload.activity_date || !payload.title) {
-    throw new Error("날짜와 제목을 입력해주세요.");
-  }
-  if (id) {
-    // 수정 — 관리자가 아니면 본인이 작성한 행만. author_name 은 원 작성자를 유지합니다.
-    const patch: Record<string, unknown> = {
-      ...payload,
-      updated_at: new Date().toISOString(),
+// 홍보·대외협력 저장. 수정 권한은 종전대로 작성자 본인·관리자입니다
+//   (프로그램 실적만 개방했습니다 — 관장 확정 범위).
+//   오류는 throw 하지 않고 { ok:false, message } 로 돌려줍니다.
+export async function savePromotion(
+  formData: FormData,
+): Promise<{ ok: true; saved: number } | { ok: false; message: string }> {
+  try {
+    const user = await requireUser();
+    const id = String(formData.get("id") ?? "").trim();
+    const commonUrl = String(formData.get("url") ?? "").trim();
+    const payload = {
+      report_year: asInt(formData.get("year"), 2020),
+      report_month: Math.min(12, asInt(formData.get("month"), 1)),
+      activity_date: String(formData.get("activity_date") ?? ""),
+      category: String(formData.get("category") ?? "기타").trim() || "기타",
+      title: String(formData.get("title") ?? "").trim(),
+      count: asInt(formData.get("count"), 1),
+      url: commonUrl,
+      description: String(formData.get("description") ?? "").trim(),
+      author_name: user.name,
     };
-    delete patch.author_name;
-    let query = supabaseAdmin
+    if (!payload.activity_date || !payload.title) {
+      return { ok: false, message: "날짜와 제목을 입력해주세요." };
+    }
+    if (id) {
+      // 수정 — 관리자가 아니면 본인이 작성한 행만. author_name 은 원 작성자를 유지합니다.
+      const patch: Record<string, unknown> = {
+        ...payload,
+        updated_at: new Date().toISOString(),
+      };
+      delete patch.author_name;
+      let query = supabaseAdmin
+        .from("business_promotions")
+        .update(patch)
+        .eq("id", id);
+      if (!user.isAdmin) query = query.eq("author_name", user.name);
+      const { data, error } = await query.select("id").maybeSingle();
+      if (error) throw new Error(error.message);
+      if (!data)
+        return {
+          ok: false,
+          message: "본인이 작성한 홍보 실적만 수정할 수 있습니다.",
+        };
+
+      revalidatePath("/business-results");
+      return { ok: true, saved: 1 };
+    }
+
+    // 등록 — 선택한 채널 수만큼 행을 만듭니다(1개만 고르면 기존과 똑같이 1건).
+    const channels = pickPromotionChannels(formData);
+    if (channels.length === 0) {
+      return { ok: false, message: "채널(구분)을 1개 이상 선택해주세요." };
+    }
+    const rows = channels.map((category) => ({
+      ...payload,
+      category,
+      // 채널별 링크가 있으면 그것을, 없으면 공통 링크를 씁니다.
+      url: String(formData.get(`url_${category}`) ?? "").trim() || commonUrl,
+    }));
+    const { error } = await supabaseAdmin
       .from("business_promotions")
-      .update(patch)
-      .eq("id", id);
-    if (!user.isAdmin) query = query.eq("author_name", user.name);
-    const { data, error } = await query.select("id").maybeSingle();
+      .insert(rows);
     if (error) throw new Error(error.message);
-    if (!data) throw new Error("본인이 작성한 홍보 실적만 수정할 수 있습니다.");
 
     revalidatePath("/business-results");
-    return { ok: true, saved: 1 };
+    return { ok: true, saved: rows.length };
+  } catch (e) {
+    return actionError(e, "홍보 실적을 저장하지 못했습니다.");
   }
-
-  // 등록 — 선택한 채널 수만큼 행을 만듭니다(1개만 고르면 기존과 똑같이 1건).
-  const channels = pickPromotionChannels(formData);
-  if (channels.length === 0) {
-    throw new Error("채널(구분)을 1개 이상 선택해주세요.");
-  }
-  const rows = channels.map((category) => ({
-    ...payload,
-    category,
-    // 채널별 링크가 있으면 그것을, 없으면 공통 링크를 씁니다.
-    url: String(formData.get(`url_${category}`) ?? "").trim() || commonUrl,
-  }));
-  const { error } = await supabaseAdmin
-    .from("business_promotions")
-    .insert(rows);
-  if (error) throw new Error(error.message);
-
-  revalidatePath("/business-results");
-  return { ok: true, saved: rows.length };
 }
 
 // 홍보·대외협력 삭제 — 물리 삭제(이 테이블에는 소프트 삭제 컬럼이 없습니다).
@@ -668,31 +704,38 @@ export async function deletePromotion(id: string): Promise<ActionResult> {
 // =====================================================================
 // 작업 6. 동전PAY — 월 합계 행 저장/삭제.
 // =====================================================================
-export async function saveCoinPay(formData: FormData) {
-  const user = await requireUser();
-  const id = String(formData.get("id") ?? "").trim();
-  const entryType = String(formData.get("entry_type") ?? "적립").trim();
-  const payload = {
-    report_year: asInt(formData.get("year"), 2020),
-    report_month: Math.min(12, asInt(formData.get("month"), 1)),
-    entry_type: entryType === "차감" ? "차감" : "적립",
-    place: String(formData.get("place") ?? "").trim(),
-    headcount: asInt(formData.get("headcount")),
-    amount: asInt(formData.get("amount")),
-    note: String(formData.get("note") ?? "").trim(),
-    author_name: user.name,
-    updated_at: new Date().toISOString(),
-  };
-  if (!payload.place) throw new Error("사용처를 입력해주세요.");
+// 오류는 throw 하지 않고 { ok:false, message } 로 돌려줍니다.
+export async function saveCoinPay(
+  formData: FormData,
+): Promise<ActionResult> {
+  try {
+    const user = await requireUser();
+    const id = String(formData.get("id") ?? "").trim();
+    const entryType = String(formData.get("entry_type") ?? "적립").trim();
+    const payload = {
+      report_year: asInt(formData.get("year"), 2020),
+      report_month: Math.min(12, asInt(formData.get("month"), 1)),
+      entry_type: entryType === "차감" ? "차감" : "적립",
+      place: String(formData.get("place") ?? "").trim(),
+      headcount: asInt(formData.get("headcount")),
+      amount: asInt(formData.get("amount")),
+      note: String(formData.get("note") ?? "").trim(),
+      author_name: user.name,
+      updated_at: new Date().toISOString(),
+    };
+    if (!payload.place) return { ok: false, message: "사용처를 입력해주세요." };
 
-  let query = id
-    ? supabaseAdmin.from("coin_pay_results").update(payload).eq("id", id)
-    : supabaseAdmin.from("coin_pay_results").insert(payload);
-  if (id && !user.isAdmin) query = query.eq("author_name", user.name);
-  const { error } = await query;
-  if (error) throw new Error(error.message);
-  revalidatePath("/business-results");
-  return { ok: true };
+    let query = id
+      ? supabaseAdmin.from("coin_pay_results").update(payload).eq("id", id)
+      : supabaseAdmin.from("coin_pay_results").insert(payload);
+    if (id && !user.isAdmin) query = query.eq("author_name", user.name);
+    const { error } = await query;
+    if (error) throw new Error(error.message);
+    revalidatePath("/business-results");
+    return { ok: true };
+  } catch (e) {
+    return actionError(e, "동전PAY 기록을 저장하지 못했습니다.");
+  }
 }
 
 export async function deleteCoinPay(id: string): Promise<ActionResult> {
@@ -713,36 +756,43 @@ export async function deleteCoinPay(id: string): Promise<ActionResult> {
 // =====================================================================
 // 작업 7. 종사자 교육 — 수동 행 저장/삭제 + 의무교육 반입.
 // =====================================================================
-export async function saveStaffTraining(formData: FormData) {
-  const user = await requireUser();
-  const id = String(formData.get("id") ?? "").trim();
-  const payload = {
-    report_year: asInt(formData.get("year"), 2020),
-    report_month: Math.min(12, asInt(formData.get("month"), 1)),
-    training_date: String(formData.get("training_date") ?? "").trim(),
-    staff_name: String(formData.get("staff_name") ?? "").trim(),
-    training_name: String(formData.get("training_name") ?? "").trim(),
-    location: String(formData.get("location") ?? "").trim(),
-    organizer: String(formData.get("organizer") ?? "").trim(),
-    hours: String(formData.get("hours") ?? "").trim(),
-    author_name: user.name,
-    updated_at: new Date().toISOString(),
-  };
-  if (!payload.training_date || !payload.staff_name || !payload.training_name) {
-    throw new Error("일자·성명·교육명을 입력해주세요.");
+// 오류는 throw 하지 않고 { ok:false, message } 로 돌려줍니다.
+export async function saveStaffTraining(
+  formData: FormData,
+): Promise<ActionResult> {
+  try {
+    const user = await requireUser();
+    const id = String(formData.get("id") ?? "").trim();
+    const payload = {
+      report_year: asInt(formData.get("year"), 2020),
+      report_month: Math.min(12, asInt(formData.get("month"), 1)),
+      training_date: String(formData.get("training_date") ?? "").trim(),
+      staff_name: String(formData.get("staff_name") ?? "").trim(),
+      training_name: String(formData.get("training_name") ?? "").trim(),
+      location: String(formData.get("location") ?? "").trim(),
+      organizer: String(formData.get("organizer") ?? "").trim(),
+      hours: String(formData.get("hours") ?? "").trim(),
+      author_name: user.name,
+      updated_at: new Date().toISOString(),
+    };
+    if (!payload.training_date || !payload.staff_name || !payload.training_name) {
+      return { ok: false, message: "일자·성명·교육명을 입력해주세요." };
+    }
+    const { error } = id
+      ? // 반입 행(source='mandatory')도 장소·주최·수료시간을 고쳐 쓸 수 있게 둡니다.
+        await supabaseAdmin
+          .from("staff_training_results")
+          .update(payload)
+          .eq("id", id)
+      : await supabaseAdmin
+          .from("staff_training_results")
+          .insert({ ...payload, source: "manual" });
+    if (error) throw new Error(error.message);
+    revalidatePath("/business-results");
+    return { ok: true };
+  } catch (e) {
+    return actionError(e, "교육 기록을 저장하지 못했습니다.");
   }
-  const { error } = id
-    ? // 반입 행(source='mandatory')도 장소·주최·수료시간을 고쳐 쓸 수 있게 둡니다.
-      await supabaseAdmin
-        .from("staff_training_results")
-        .update(payload)
-        .eq("id", id)
-    : await supabaseAdmin
-        .from("staff_training_results")
-        .insert({ ...payload, source: "manual" });
-  if (error) throw new Error(error.message);
-  revalidatePath("/business-results");
-  return { ok: true };
 }
 
 export async function deleteStaffTraining(id: string): Promise<ActionResult> {
@@ -958,7 +1008,13 @@ export async function importMandatoryTrainings(
 // =====================================================================
 type ActionResult = { ok: true } | { ok: false; message: string };
 
-function actionError(e: unknown, fallback: string): ActionResult {
+// 실패만 만들므로 반환형을 실패 쪽으로 좁힙니다 — ActionResult 로 두면
+//   { ok:true, saved } 처럼 성공에 값이 붙는 액션(savePromotion)에서 타입이
+//   맞지 않습니다.
+function actionError(
+  e: unknown,
+  fallback: string,
+): { ok: false; message: string } {
   return { ok: false, message: e instanceof Error ? e.message : fallback };
 }
 

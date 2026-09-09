@@ -160,7 +160,14 @@ export default function ProgramResultForm({
     setError("");
     start(async () => {
       try {
-        await saveBusinessResult(fd);
+        // 서버는 실패를 throw 하지 않고 { ok:false, message } 로 돌려줍니다
+        //   (프로덕션에서 throw 메시지가 감춰지기 때문). catch 는 네트워크
+        //   오류 등 예상 못 한 경우만 받습니다.
+        const res = await saveBusinessResult(fd);
+        if (!res.ok) {
+          setError(res.message);
+          return;
+        }
         if (keepGoing) {
           onSavedAndNext({
             month: Number(fd.get("month")) || month,

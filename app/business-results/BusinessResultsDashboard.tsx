@@ -9,6 +9,8 @@ import {
   cardCls,
   inputCls,
   labelCls,
+  noticeError,
+  noticeSuccess,
 } from "@/lib/ui";
 import {
   deleteBusinessResult,
@@ -124,7 +126,9 @@ export default function BusinessResultsDashboard({
 }) {
   const router = useRouter();
   const [tab, setTab] = useState<Tab>("overview");
-  const [message, setMessage] = useState("");
+  const [notice, setNotice] = useState<{ ok: boolean; text: string } | null>(
+    null,
+  );
   const [editing, setEditing] = useState<BusinessResult | null>(null);
   // 홍보·대외협력 수정 대상(폼 프리필). 저장·취소 시 null 로 되돌립니다.
   const [editingPromo, setEditingPromo] = useState<PromotionResult | null>(null);
@@ -289,15 +293,15 @@ export default function BusinessResultsDashboard({
       )
     )
       return;
-    setMessage("");
+    setNotice(null);
     startTransition(async () => {
       const res = await deleteBusinessResult(row.id);
       if (!res.ok) {
-        setMessage(res.message);
+        setNotice({ ok: false, text: res.message });
         return;
       }
       if (editing?.id === row.id) setEditing(null);
-      setMessage("삭제했습니다.");
+      setNotice({ ok: true, text: "삭제했습니다." });
       router.refresh();
     });
   }
@@ -323,49 +327,62 @@ export default function BusinessResultsDashboard({
     channel: string,
     load: () => Promise<{ saved: number; skipped: number }>,
   ) {
-    setMessage("");
+    setNotice(null);
     startTransition(async () => {
       try {
         const res = await load();
-        setMessage(
-          res.saved === 0 && res.skipped === 0
-            ? `가져올 ${channel} 게시물이 없습니다.`
-            : [
-                `${channel} ${res.saved}건을 홍보실적에 등록했습니다.`,
-                res.skipped > 0 ? `(이미 등록된 ${res.skipped}건 제외)` : "",
-                // 지금 보는 달이 아니라 게시일이 속한 달로 들어갑니다.
-                res.saved > 0 ? "게시일 기준 월로 분류됩니다." : "",
-              ]
-                .filter(Boolean)
-                .join(" "),
-        );
+        setNotice({
+          ok: true,
+          text:
+            res.saved === 0 && res.skipped === 0
+              ? `가져올 ${channel} 게시물이 없습니다.`
+              : [
+                  `${channel} ${res.saved}건을 홍보실적에 등록했습니다.`,
+                  res.skipped > 0 ? `(이미 등록된 ${res.skipped}건 제외)` : "",
+                  // 지금 보는 달이 아니라 게시일이 속한 달로 들어갑니다.
+                  res.saved > 0 ? "게시일 기준 월로 분류됩니다." : "",
+                ]
+                  .filter(Boolean)
+                  .join(" "),
+        });
         router.refresh();
       } catch (e) {
-        setMessage(
-          e instanceof Error
-            ? e.message
-            : `${channel} 게시물을 등록하지 못했습니다.`,
-        );
+        setNotice({
+          ok: false,
+          text:
+            e instanceof Error
+              ? e.message
+              : `${channel} 게시물을 등록하지 못했습니다.`,
+        });
       }
     });
   }
 
   function submitPromotion(form: HTMLFormElement) {
-    setMessage("");
+    setNotice(null);
     startTransition(async () => {
       try {
         const res = await savePromotion(new FormData(form));
+        if (!res.ok) {
+          setNotice({ ok: false, text: res.message });
+          return;
+        }
         form.reset();
         resetPromoChannels();
         setEditingPromo(null);
-        setMessage(
-          res.saved > 1
-            ? `${res.saved}개 채널에 저장했습니다.`
-            : "저장했습니다.",
-        );
+        setNotice({
+          ok: true,
+          text:
+            res.saved > 1
+              ? `${res.saved}개 채널에 저장했습니다.`
+              : "저장했습니다.",
+        });
         router.refresh();
       } catch (e) {
-        setMessage(e instanceof Error ? e.message : "저장하지 못했습니다.");
+        setNotice({
+          ok: false,
+          text: e instanceof Error ? e.message : "저장하지 못했습니다.",
+        });
       }
     });
   }
@@ -373,15 +390,15 @@ export default function BusinessResultsDashboard({
   function removePromotion(row: PromotionResult) {
     if (!confirm(`'${row.title}' 홍보 실적을 삭제할까요? 되돌릴 수 없습니다.`))
       return;
-    setMessage("");
+    setNotice(null);
     startTransition(async () => {
       const res = await deletePromotion(row.id);
       if (!res.ok) {
-        setMessage(res.message);
+        setNotice({ ok: false, text: res.message });
         return;
       }
       if (editingPromo?.id === row.id) setEditingPromo(null);
-      setMessage("삭제했습니다.");
+      setNotice({ ok: true, text: "삭제했습니다." });
       router.refresh();
     });
   }
@@ -469,9 +486,9 @@ export default function BusinessResultsDashboard({
           ))}
         </div>
       </nav>
-      {message && (
-        <p className="rounded-lg bg-surface px-4 py-3 text-sm text-ink">
-          {message}
+      {notice && (
+        <p className={notice.ok ? noticeSuccess : noticeError}>
+          {notice.text}
         </p>
       )}
       {tab === "overview" && (
@@ -816,15 +833,16 @@ export default function BusinessResultsDashboard({
               onCancel={() => setEditing(null)}
               onSaved={(text) => {
                 setEditing(null);
-                setMessage(text);
+                setNotice({ ok: true, text });
               }}
               onSavedAndNext={(carry) => {
                 setEditing(null);
                 setCarryOver(carry);
                 setNewFormSeq((n) => n + 1);
-                setMessage(
-                  "저장했습니다. 이어서 다음 실적을 입력하세요(월·분야·담당자는 그대로 두었습니다).",
-                );
+                setNotice({
+                  ok: true,
+                  text: "저장했습니다. 이어서 다음 실적을 입력하세요(월·분야·담당자는 그대로 두었습니다).",
+                });
                 window.scrollTo({ top: 0, behavior: "smooth" });
               }}
             />
