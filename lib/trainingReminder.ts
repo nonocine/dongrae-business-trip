@@ -309,8 +309,9 @@ export async function runTrainingReminder(): Promise<TrainingReminderSummary> {
   const adminLines: string[] = [];
   for (const emp of roster) {
     for (const { t, dday } of dueTrainings) {
-      // 실시일에 재직 중이 아니었으면 그 교육의 대상이 아닙니다(입사 전 교육 등).
+      // 퇴사 후에 실시된 교육은 대상이 아닙니다.
       //   → DM·관리자 요약 어느 쪽에도 넣지 않습니다.
+      //   입사 전 교육은 대상이므로 신규 입사자에게도 독촉이 갑니다(의도).
       if (!isTargetOn(emp, trainingBaseYmd(t))) continue;
       if (done.has(cellKey(t.id, emp.driver_id))) continue;
       const url = t.site_url || (base ? `${base}/profile/hr` : "/profile/hr");

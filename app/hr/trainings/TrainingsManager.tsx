@@ -485,7 +485,7 @@ export default function TrainingsManager({
               className={`${inCls} mt-1`}
               value={addHeld}
               onChange={(e) => setAddHeld(e.target.value)}
-              title="대상자 판정 기준일. 비우면 이수기한을 기준으로 씁니다."
+              title="교육을 실시한 날. 종사자 교육 실적의 연계 기준일이라 비우면 실적 월이 부정확해집니다. 비우면 이수기한을 기준으로 씁니다."
             />
           </div>
           <div className="sm:col-span-2">
@@ -520,9 +520,14 @@ export default function TrainingsManager({
             />
           </div>
           <p className="text-[11px] leading-5 text-ink-hint sm:col-span-12">
-            <b>실시일</b>은 대상자 자동 판정 기준입니다 — 실시일에 재직 중이던
-            직원만 그 교육의 대상이 됩니다(입사 전 교육은 미이수로 잡히지
-            않습니다). 비워두면 <b>이수기한</b>을 기준일로 씁니다.
+            <b>실시일</b>은 재직 직원 전원이 대상입니다 — 입사일과 무관하게 그
+            교육의 대상이 되고, 퇴사 후에 실시된 교육만 제외됩니다. 비워두면{" "}
+            <b>이수기한</b>을 기준일로 씁니다.{" "}
+            <b className="text-warning">
+              실시일을 비우면 사업실적 「종사자 교육」 연계가 부정확해집니다
+            </b>{" "}
+            — 실적 월이 실시일 대신 수료증 업로드 시점으로 잡히므로 되도록
+            채워주세요.
           </p>
           {/* 종사자 교육 실적 반입용 — 채워두면 반입 행에 자동으로 들어갑니다. */}
           <div className="sm:col-span-4">
@@ -610,7 +615,7 @@ export default function TrainingsManager({
                         onChange={(e) =>
                           setEdit({ ...edit, held_on: e.target.value })
                         }
-                        title="대상자 판정 기준일. 비우면 이수기한을 기준으로 씁니다."
+                        title="교육을 실시한 날. 종사자 교육 실적의 연계 기준일이라 비우면 실적 월이 부정확해집니다. 비우면 이수기한을 기준으로 씁니다."
                       />
                     </td>
                     <td className="px-2 py-2 align-top">
@@ -724,7 +729,7 @@ export default function TrainingsManager({
                       ) : (
                         <span
                           className="text-ink-hint"
-                          title="실시일 미입력 — 이수기한을 대상 판정 기준일로 씁니다."
+                          title="실시일 미입력 — 이수기한을 기준일로 씁니다. 종사자 교육 실적은 수료증 업로드 시점으로 잡혀 부정확해집니다."
                         >
                           기한 기준
                         </span>
@@ -963,9 +968,10 @@ export default function TrainingsManager({
             </div>
             <p className="mt-2 text-[11px] text-ink-hint">
               ✓ 클릭 → 상세(수료증 열람/재업로드/취소), 빈 칸 클릭 → 대리 업로드.
-              붉은 칸은 기한이 지난 미이수입니다. <b>—</b> 는 교육 실시일에 재직
-              중이 아니어서 <b>대상이 아닌</b> 칸입니다(입사 전·퇴사 후 — 미이수로
-              세지 않고 업로드도 막습니다).
+              붉은 칸은 기한이 지난 미이수입니다. <b>—</b> 는 퇴사 후에 실시된
+              교육이어서 <b>대상이 아닌</b> 칸입니다(미이수로 세지 않고 업로드도
+              막습니다). 입사 전에 실시된 교육도 대상이므로 수료증을 올릴 수
+              있습니다.
             </p>
             {missingJoinDate.length > 0 && (
               <p className="mt-1 text-[11px] text-warning">

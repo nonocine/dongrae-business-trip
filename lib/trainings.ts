@@ -81,13 +81,21 @@ export function isDueSoon(dday: number | null): boolean {
 }
 
 // =====================================================================
-// 대상자 자동 판정 — "교육 실시일에 재직 중이던 직원만 그 교육의 대상"
+// 대상자 자동 판정 — "재직 직원은 입사일과 무관하게 모든 교육의 대상"
 //   * 기준일 = held_on(실시일) ?? due_date(이수기한). 둘 다 없으면 판정 불가.
 //   * 판정 규칙은 이 파일 한 곳에만 둡니다. 현황판·대시보드 카드·D-7 독촉·
 //     마이페이지가 모두 이 함수를 호출해야 숫자가 어긋나지 않습니다.
 //   * 날짜는 전부 "YYYY-MM-DD"(KST 기준 date 컬럼)라 문자열 비교로 충분합니다.
 //   * 판정에 필요한 값이 없으면 "대상 유지"(안전측) — 누락 때문에 의무가 조용히
 //     사라지지 않게 하고, 화면에서 사유를 표시합니다.
+//
+//   ⚠️ 과거에는 "실시일에 재직 중이던 직원만 대상"이라 입사 전 교육을
+//     'before-join' 으로 제외했습니다. 법정의무교육은 입사일과 무관하게
+//     기관의 교육대상자면 이수 여부를 관리해야 하므로(김혜지 팀장 요청)
+//     그 분기를 제거했습니다. 입사 전에 실시된 교육도 대상이 되고, 안 들은
+//     교육은 그대로 미이수로 남습니다.
+//     퇴사 후 교육(after-resign)은 계속 제외합니다 — 퇴사자까지 대상이 되면
+//     D-7 독촉 범위가 불필요하게 늘어납니다.
 // =====================================================================
 
 // 직원의 재직 구간. 입·퇴사 반복은 지금 한 구간만 표현합니다(join/resignation).
@@ -96,11 +104,11 @@ export type EmploymentSpan = {
   resignationDate: string | null;
 };
 
+// 'before-join'(입사 전 교육 → 대상 아님)은 제거했습니다. 위 주석 참고.
 export type TargetReason =
-  | "target" // 실시일에 재직 중 → 대상
-  | "before-join" // 입사 전 교육 → 대상 아님
+  | "target" // 대상
   | "after-resign" // 퇴사 후 교육 → 대상 아님
-  | "no-join-date" // 입사일 미기재 → 대상 유지(안전측)
+  | "no-join-date" // 입사일 미기재 → 대상(판정에는 영향 없음, 인사기록 보완 안내용)
   | "no-base-date"; // 실시일·이수기한 둘 다 없음 → 대상 유지(안전측)
 
 // 교육의 판정 기준일 — 실시일 우선, 없으면 이수기한.
@@ -117,10 +125,14 @@ export function targetStateOn(
   baseYmd: string | null,
 ): { isTarget: boolean; reason: TargetReason } {
   if (!baseYmd) return { isTarget: true, reason: "no-base-date" };
-  if (!span.joinDate) return { isTarget: true, reason: "no-join-date" };
-  if (span.joinDate > baseYmd) return { isTarget: false, reason: "before-join" };
+  // 퇴사 후 교육 판정을 입사일 확인보다 먼저 합니다 — 입사일이 비어 있어도
+  //   퇴사일이 있으면 퇴사 후 교육은 제외되어야 하므로, 아래 no-join-date
+  //   조기 반환에 가려지지 않게 순서를 둡니다.
   if (span.resignationDate && baseYmd > span.resignationDate)
     return { isTarget: false, reason: "after-resign" };
+  // 입사일은 이제 대상 판정에 쓰지 않습니다(입사 전 교육도 대상).
+  //   값이 없다는 사실만 사유로 남겨 인사기록 보완을 유도합니다.
+  if (!span.joinDate) return { isTarget: true, reason: "no-join-date" };
   return { isTarget: true, reason: "target" };
 }
 
@@ -139,12 +151,10 @@ export function targetReasonLabel(
 ): string {
   const on = baseYmd ? `${baseYmd} 기준` : "기준일 없음";
   switch (reason) {
-    case "before-join":
-      return `대상 아님 — 입사 전 교육(${on})`;
     case "after-resign":
       return `대상 아님 — 퇴사 후 교육(${on})`;
     case "no-join-date":
-      return "입사일 미기재 — 대상으로 둡니다(인사기록 확인 필요)";
+      return "입사일 미기재 — 대상입니다(인사기록 확인 필요)";
     case "no-base-date":
       return "실시일·이수기한 미입력 — 대상으로 둡니다(실시일 입력 권장)";
     default:

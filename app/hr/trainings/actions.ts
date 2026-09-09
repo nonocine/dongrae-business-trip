@@ -354,8 +354,8 @@ export async function getTrainingMatrix(year: number): Promise<TrainingMatrix> {
 }
 
 // 대시보드 관리 카드용 요약 — 올해 활성 교육 중 "대상"인 (교육×직원) 셀만 집계.
-//   * 대상 = 교육 실시일(held_on ?? due_date)에 재직 중이던 직원(lib/trainings).
-//     입사 전 교육은 분모에서 빠지므로 신규 입사자의 유령 미이수가 사라집니다.
+//   * 대상 = 재직 직원 전원(lib/trainings). 입사일과 무관하며, 퇴사 후에
+//     실시된 교육만 분모에서 빠집니다.
 //   * 접근 없으면 null(카드 미노출).
 export async function getTrainingsAdminSummary(): Promise<
   { year: number; totalNotMet: number } | null
@@ -453,7 +453,8 @@ export async function adminUploadCertificate(
     if (!tr) return { ok: false, message: "존재하지 않는 교육입니다." };
     if (!drv) return { ok: false, message: "존재하지 않는 직원입니다." };
 
-    // 대상자 판정 — 실시일에 재직 중이 아니면 "새" 이수 처리를 막습니다.
+    // 대상자 판정 — 퇴사 후 실시된 교육만 "새" 이수 처리를 막습니다.
+    //   입사 전 교육은 이제 대상이므로 거부하지 않습니다(before-join 제거).
     //   이미 기록이 있는 셀(과거에 올린 수료증)의 재업로드는 그대로 허용합니다.
     const p = (prof ?? {}) as Record<string, unknown>;
     const baseYmd = trainingBaseYmd(tr as Record<string, string | null>);
@@ -470,7 +471,7 @@ export async function adminUploadCertificate(
       return {
         ok: false,
         message:
-          "교육 실시일 기준 재직자가 아니라 이수 처리할 수 없습니다. (입사 전·퇴사 후 교육)",
+          "퇴사 후에 실시된 교육이라 이수 처리할 수 없습니다. (퇴사 후 교육)",
       };
     }
 

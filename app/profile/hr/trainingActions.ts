@@ -173,7 +173,8 @@ export async function uploadMyCertificate(
         .maybeSingle(),
     ]);
     if (!tr) return { ok: false, message: "존재하지 않는 교육입니다." };
-    // 이미 올린 기록이 있으면 재업로드는 허용하고, 새 이수 처리만 막습니다.
+    // 퇴사 후 실시된 교육만 막습니다(입사 전 교육은 대상 — before-join 제거).
+    //   이미 올린 기록이 있으면 재업로드는 허용하고, 새 이수 처리만 막습니다.
     const p = (prof ?? {}) as Record<string, unknown>;
     if (
       !prev &&
@@ -187,7 +188,7 @@ export async function uploadMyCertificate(
     ) {
       return {
         ok: false,
-        message: "교육 실시일 기준 재직 기간이 아니어서 이수 대상이 아닙니다.",
+        message: "퇴사 후에 실시된 교육이라 이수 대상이 아닙니다. (퇴사 후 교육)",
       };
     }
 

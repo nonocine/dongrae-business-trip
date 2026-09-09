@@ -779,6 +779,15 @@ function kstDateOf(iso: string): string {
 
 // 의무교육 수료기록을 종사자 교육 실적으로 반입합니다.
 //   source_completion_id unique + ignoreDuplicates 로 재클릭 시 중복이 생기지 않습니다.
+//
+// ■ 기준 날짜 = 교육 실시일(mandatory_trainings.held_on)
+//   교육 실시월과 이수(수료증 업로드) 시점은 별개입니다. 3월에 실시한 교육을
+//   8월에 올렸어도 그것은 3월 실적입니다. 예전에는 completed_at(업로드 시각)
+//   으로 월을 판정해, 늦게 올린 수료증이 전부 업로드한 달의 실적으로 잡혔습니다.
+//   → 대상 선정은 "held_on 이 조회 월에 속하는 교육"으로 하고, training_date
+//     와 report_year/month 를 모두 그 날짜에서 파생합니다.
+//   * held_on 이 비어 있는 교육만 completed_at 으로 폴백합니다(그 경우 실적
+//     월이 부정확할 수 있어 교육 등록 화면에서 실시일 입력을 안내합니다).
 export async function importMandatoryTrainings(
   year: number,
   month: number,
@@ -788,49 +797,112 @@ export async function importMandatoryTrainings(
   try {
     const user = await requireUser();
     const range = kstMonthRangeUtc(year, month);
-    const { data: comps, error: compError } = await supabaseAdmin
-      .from("training_completions")
-      .select("id, training_id, driver_id, completed_at")
-      .gte("completed_at", range.start)
-      .lt("completed_at", range.end);
-    if (compError) {
-      if (tableMissing(compError))
+    const monthStart = `${year}-${String(month).padStart(2, "0")}-01`;
+    const monthEnd = new Date(Date.UTC(year, month, 1))
+      .toISOString()
+      .slice(0, 10);
+
+    // 1) 이 달에 실시된 교육(held_on 기준) + 실시일 미입력 교육(폴백 대상).
+    //    두 그룹의 수료기록 선정 방식이 다르므로 교육 목록부터 나눠 읽습니다.
+    const TRAINING_COLS = "id, name, location, organizer, hours, held_on";
+    const [{ data: heldTrs, error: heldErr }, { data: noDateTrs }] =
+      await Promise.all([
+        supabaseAdmin
+          .from("mandatory_trainings")
+          .select(TRAINING_COLS)
+          .gte("held_on", monthStart)
+          .lt("held_on", monthEnd),
+        supabaseAdmin
+          .from("mandatory_trainings")
+          .select(TRAINING_COLS)
+          .is("held_on", null),
+      ]);
+    if (heldErr) {
+      if (tableMissing(heldErr))
         return { ok: false, message: "의무교육 테이블을 찾을 수 없습니다." };
-      throw new Error(compError.message);
+      throw new Error(heldErr.message);
     }
-    const rows = (comps ?? []) as {
+
+    type TrainingInfo = {
+      name: string;
+      location: string;
+      organizer: string;
+      hours: string;
+      held_on: string | null;
+    };
+    const trainingById = new Map<string, TrainingInfo>();
+    for (const t of [...(heldTrs ?? []), ...(noDateTrs ?? [])]) {
+      const r = t as Record<string, unknown>;
+      trainingById.set(String(r.id), {
+        name: String(r.name ?? ""),
+        location: String(r.location ?? ""),
+        organizer: String(r.organizer ?? ""),
+        hours: String(r.hours ?? ""),
+        held_on: (r.held_on as string | null) ?? null,
+      });
+    }
+
+    const heldIds = (heldTrs ?? []).map((t) => String((t as { id: unknown }).id));
+    const noDateIds = (noDateTrs ?? []).map((t) =>
+      String((t as { id: unknown }).id),
+    );
+    if (heldIds.length === 0 && noDateIds.length === 0)
+      return { ok: true, inserted: 0, skipped: 0 };
+
+    // 2) 수료기록.
+    //    - 실시일이 있는 교육: 이수 시점과 무관하게 그 교육의 기록 전부.
+    //      (늦게 올린 수료증도 교육이 실시된 달의 실적입니다.)
+    //    - 실시일이 없는 교육: 업로드 시각(completed_at)이 조회 월인 기록만.
+    const COMP_COLS = "id, training_id, driver_id, completed_at";
+    const [held, fallback] = await Promise.all([
+      heldIds.length > 0
+        ? supabaseAdmin
+            .from("training_completions")
+            .select(COMP_COLS)
+            .in("training_id", heldIds)
+        : Promise.resolve({ data: [], error: null }),
+      noDateIds.length > 0
+        ? supabaseAdmin
+            .from("training_completions")
+            .select(COMP_COLS)
+            .in("training_id", noDateIds)
+            .gte("completed_at", range.start)
+            .lt("completed_at", range.end)
+        : Promise.resolve({ data: [], error: null }),
+    ]);
+    if (held.error) {
+      if (tableMissing(held.error))
+        return { ok: false, message: "의무교육 테이블을 찾을 수 없습니다." };
+      throw new Error(held.error.message);
+    }
+    if (fallback.error) throw new Error(fallback.error.message);
+
+    type CompRow = {
       id: string;
       training_id: string;
       driver_id: string;
       completed_at: string | null;
-    }[];
-    const usable = rows.filter((r) => r.completed_at);
+    };
+    const rows = [
+      ...((held.data ?? []) as CompRow[]),
+      ...((fallback.data ?? []) as CompRow[]),
+    ];
+
+    // 실적 일자 = 실시일 우선, 없으면 업로드 시각(KST). 둘 다 없으면 건너뜁니다.
+    const dated = rows
+      .map((r) => {
+        const held_on = trainingById.get(r.training_id)?.held_on ?? null;
+        const date = held_on || (r.completed_at ? kstDateOf(r.completed_at) : null);
+        return { r, date };
+      })
+      .filter((x): x is { r: CompRow; date: string } => x.date != null);
+    const usable = dated.map((x) => x.r);
     if (usable.length === 0) return { ok: true, inserted: 0, skipped: 0 };
 
-    const [{ data: trainings }, { data: drivers }] = await Promise.all([
-      supabaseAdmin
-        .from("mandatory_trainings")
-        .select("id, name, location, organizer, hours")
-        .in("id", [...new Set(usable.map((r) => r.training_id))]),
-      supabaseAdmin
-        .from("drivers")
-        .select("id, name")
-        .in("id", [...new Set(usable.map((r) => r.driver_id))]),
-    ]);
-    const trainingById = new Map(
-      (trainings ?? []).map((t) => {
-        const r = t as Record<string, unknown>;
-        return [
-          String(r.id),
-          {
-            name: String(r.name ?? ""),
-            location: String(r.location ?? ""),
-            organizer: String(r.organizer ?? ""),
-            hours: String(r.hours ?? ""),
-          },
-        ];
-      }),
-    );
+    const { data: drivers } = await supabaseAdmin
+      .from("drivers")
+      .select("id, name")
+      .in("id", [...new Set(usable.map((r) => r.driver_id))]);
     const nameById = new Map(
       (drivers ?? []).map((d) => {
         const r = d as Record<string, unknown>;
@@ -838,12 +910,14 @@ export async function importMandatoryTrainings(
       }),
     );
 
-    const payload = usable.map((r) => {
+    const payload = dated.map(({ r, date }) => {
       const t = trainingById.get(r.training_id);
+      // 실적 월도 같은 날짜에서 파생합니다 — 사용자가 고른 조회 월을 그대로
+      //   쓰면 3월 교육을 8월에 가져왔을 때 8월 실적이 되어버립니다.
       return {
-        report_year: year,
-        report_month: month,
-        training_date: kstDateOf(r.completed_at as string),
+        report_year: Number(date.slice(0, 4)),
+        report_month: Number(date.slice(5, 7)),
+        training_date: date,
         staff_name: nameById.get(r.driver_id) ?? "(이름 없음)",
         training_name: t?.name ?? "(교육명 없음)",
         location: t?.location ?? "",
