@@ -125,6 +125,26 @@ function ddayPhrase(dday: number): string {
   return `${-dday}일 초과`;
 }
 
+// =====================================================================
+// 독촉 대상 여부 — "입사일 이후에 도래하는 기한"만 독촉합니다.
+//   * 대상 판정(lib/trainings.targetStateOn)과는 별개입니다. 대상 판정에서
+//     before-join 을 제거해 재직 전원이 모든 교육의 대상이 되었지만, 독촉
+//     필터는 dday <= 7 로 하한이 없어(기한이 한참 지난 교육도 상시 포함)
+//     그대로 두면 신규 입사자에게 입사 전 교육이 DM 한 통에 몰립니다.
+//   * 현황판·마이페이지의 미이수 집계는 건드리지 않습니다 — 법적 관리
+//     의무(미이수를 보이는 것)와 독촉(DM 을 보내는 것)은 성격이 다릅니다.
+//   * 입사일이 없으면 독촉하지 않습니다. 비교 기준이 없어 과거 교육을 전부
+//     보내게 되고, 그 직원은 애초에 인사기록 보완 안내 대상입니다
+//     (targetStateOn 의 'no-join-date'). 현황판에는 그대로 미이수로 남습니다.
+//   * due_date 가 없는 교육은 애초에 dueTrainings 에 들어오지 않지만
+//     (daysUntil 이 null → 필터에서 제외), 방어적으로 함께 막습니다.
+// =====================================================================
+function isReminderDue(emp: Emp, t: { due_date: string | null }): boolean {
+  if (!emp.joinDate) return false;
+  if (!t.due_date) return false;
+  return t.due_date >= emp.joinDate;
+}
+
 // 성범죄경력조회 경고 — 교육 요약과 별개 메시지로 관리자 채널에 1건.
 //   대상 0명이면 아무것도 보내지 않는다(빈 알림 금지).
 async function sendCrimeCheckAlert(
@@ -311,8 +331,10 @@ export async function runTrainingReminder(): Promise<TrainingReminderSummary> {
     for (const { t, dday } of dueTrainings) {
       // 퇴사 후에 실시된 교육은 대상이 아닙니다.
       //   → DM·관리자 요약 어느 쪽에도 넣지 않습니다.
-      //   입사 전 교육은 대상이므로 신규 입사자에게도 독촉이 갑니다(의도).
       if (!isTargetOn(emp, trainingBaseYmd(t))) continue;
+      // 입사 전에 기한이 끝난 교육은 독촉하지 않습니다(isReminderDue 주석 참고).
+      //   현황판에는 그대로 미이수로 남습니다 — 독촉만 제한합니다.
+      if (!isReminderDue(emp, t)) continue;
       if (done.has(cellKey(t.id, emp.driver_id))) continue;
       const url = t.site_url || (base ? `${base}/profile/hr` : "/profile/hr");
       const bucket = perEmp.get(emp.driver_id) ?? { emp, items: [] };
