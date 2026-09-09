@@ -15,6 +15,7 @@ import {
   TextRun,
   WidthType,
 } from "docx";
+import { formatTrainingPeriod } from "@/lib/staffTraining";
 
 // 사업별 세부표(일자형/회차형) 한 행 — 구청 서식의 사업별 세부표에 대응합니다.
 export type BusinessDetailExportRow = {
@@ -59,7 +60,10 @@ export type CoinPayExportRow = {
 };
 
 export type StaffTrainingExportRow = {
+  // 교육 기간 — 하루 교육은 두 값이 같습니다. 서식의 '일자' 칸에는
+  //   formatTrainingPeriod 로 만든 기간 문자열을 찍습니다.
   training_date: string;
+  training_end_date: string;
   staff_name: string;
   training_name: string;
   location: string;
@@ -622,10 +626,12 @@ export async function buildBusinessReportDocx(
       ? [
           docTable(
             ["연번", "일자", "성명", "교육명", "장소", "주최", "수료시간"],
-            [600, 1300, 1000, 2800, 1300, 1400, 1100],
+            // 일자 칸은 기간 문자열("2026-08-03 ~ 2026-08-05")이 들어가도
+            //   줄바꿈되지 않도록 넓혔습니다(1300 → 2100). 열 구성은 그대로.
+            [600, 2100, 1000, 2800, 1300, 1400, 1100],
             staffRows.map((r, index) => [
               String(index + 1),
-              r.training_date,
+              formatTrainingPeriod(r.training_date, r.training_end_date),
               r.staff_name,
               r.training_name,
               r.location,
@@ -1039,10 +1045,11 @@ export async function buildBusinessReportWorkbook(
     "종사자교육",
     `${input.year}년 ${period.label} 종사자 교육`,
     ["연번", "일자", "성명", "교육명", "장소", "주최", "수료시간"],
-    [8, 14, 12, 34, 16, 18, 12],
+    // 일자 열 너비도 기간 문자열에 맞춰 넓혔습니다(14 → 26).
+    [8, 26, 12, 34, 16, 18, 12],
     staffRows.map((r, index) => [
       index + 1,
-      r.training_date,
+      formatTrainingPeriod(r.training_date, r.training_end_date),
       r.staff_name,
       r.training_name,
       r.location,

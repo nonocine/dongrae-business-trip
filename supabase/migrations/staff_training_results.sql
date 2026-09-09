@@ -28,6 +28,53 @@ create table if not exists staff_training_results (
   updated_at timestamptz not null default now()
 );
 
+-- =========================================================
+-- 이미 만들어진 테이블에 나중에 추가된 컬럼 (재실행 안전)
+--   ⚠️ 이 블록이 없어서 운영 DB 에 updated_at 이 반영되지 않은 채로
+--     코드가 그 컬럼을 보내, 종사자 교육 수동 입력이 PGRST204 로 통째로
+--     막혀 있었습니다(수동 0건·반입 183건). 파일과 운영 스키마를 반드시
+--     일치시켜 주세요.
+-- =========================================================
+alter table staff_training_results
+  add column if not exists updated_at timestamptz not null default now(),
+  -- 수정한 사람(등록자는 author_name). 수정 시에만 채워지므로 nullable.
+  add column if not exists updated_by text,
+  -- 교육 기간 종료일. 하루 교육은 training_date 와 같은 값입니다
+  --   (activities 의 start_date/end_date 패턴, is_multi_day 플래그 없음).
+  add column if not exists training_end_date date;
+
+-- 기존 행은 하루 교육이므로 종료일 = 시작일 로 채운 뒤 NOT NULL 로 만듭니다.
+update staff_training_results
+  set training_end_date = training_date
+  where training_end_date is null;
+
+do $$
+begin
+  if exists (
+    select 1 from information_schema.columns
+    where table_schema = 'public'
+      and table_name = 'staff_training_results'
+      and column_name = 'training_end_date'
+      and is_nullable = 'YES'
+  ) then
+    alter table staff_training_results
+      alter column training_end_date set not null;
+  end if;
+end $$;
+
+-- 종료일이 시작일보다 앞서는 값 차단.
+do $$
+begin
+  if not exists (
+    select 1 from pg_constraint
+    where conname = 'staff_training_results_period_check'
+  ) then
+    alter table staff_training_results
+      add constraint staff_training_results_period_check
+      check (training_end_date >= training_date);
+  end if;
+end $$;
+
 create index if not exists staff_training_results_month_idx
   on staff_training_results (report_year, report_month);
 

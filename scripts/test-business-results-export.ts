@@ -31,8 +31,10 @@ const input: BusinessReportInput = {
   ],
   coinPayCumulative: 1800,
   staffTrainings: [
-    { training_date: "2099-01-09", staff_name: "사용자 A", training_name: "합성 교육 1", location: "온라인", organizer: "합성 주최", hours: "1시간" },
-    { training_date: "2099-01-15", staff_name: "사용자 B", training_name: "합성 교육 2", location: "", organizer: "", hours: "" },
+    // 하루 교육 — 종료일이 시작일과 같으면 '일자' 칸에 날짜 하나만 찍힙니다.
+    { training_date: "2099-01-09", training_end_date: "2099-01-09", staff_name: "사용자 A", training_name: "합성 교육 1", location: "온라인", organizer: "합성 주최", hours: "1시간" },
+    // 여러 날 교육 — "시작 ~ 종료" 로 찍힙니다.
+    { training_date: "2099-01-15", training_end_date: "2099-01-17", staff_name: "사용자 B", training_name: "합성 교육 2", location: "", organizer: "", hours: "" },
   ],
 };
 

@@ -10,6 +10,10 @@ import {
 } from "@/lib/instagramApi";
 import { fetchNaverBlogFeed } from "@/lib/naverBlogApi";
 import { kstYmdFromIso, promotionTitle } from "@/lib/promotionImport";
+import {
+  isTrainingPeriodValid,
+  resolveTrainingEnd,
+} from "@/lib/staffTraining";
 
 export type BusinessResult = {
   id: string;
@@ -110,7 +114,10 @@ export type StaffTrainingResult = {
   id: string;
   report_year: number;
   report_month: number;
+  // 교육 기간 — training_date 가 시작일, training_end_date 가 종료일입니다.
+  //   하루 교육은 두 값이 같습니다(activities 패턴, 플래그 없음).
   training_date: string;
+  training_end_date: string;
   staff_name: string;
   training_name: string;
   location: string;
@@ -800,10 +807,17 @@ export async function saveStaffTraining(
   try {
     const user = await requireUser();
     const id = String(formData.get("id") ?? "").trim();
+    const startDate = String(formData.get("training_date") ?? "").trim();
+    // 종료일을 비워 보내면 하루 교육 — 시작일과 같은 값으로 저장합니다.
+    const endDate = resolveTrainingEnd(
+      startDate,
+      String(formData.get("training_end_date") ?? ""),
+    );
     const payload = {
       report_year: asInt(formData.get("year"), 2020),
       report_month: Math.min(12, asInt(formData.get("month"), 1)),
-      training_date: String(formData.get("training_date") ?? "").trim(),
+      training_date: startDate,
+      training_end_date: endDate,
       staff_name: String(formData.get("staff_name") ?? "").trim(),
       training_name: String(formData.get("training_name") ?? "").trim(),
       location: String(formData.get("location") ?? "").trim(),
@@ -814,6 +828,14 @@ export async function saveStaffTraining(
     };
     if (!payload.training_date || !payload.staff_name || !payload.training_name) {
       return { ok: false, message: "일자·성명·교육명을 입력해주세요." };
+    }
+    // DB 의 period_check 제약에 맡기지 않고 여기서 먼저 걸러, 담당자가 읽을 수
+    //   있는 문구를 돌려줍니다(제약 위반 메시지는 사람이 읽을 수 없습니다).
+    if (!isTrainingPeriodValid(payload.training_date, payload.training_end_date)) {
+      return {
+        ok: false,
+        message: `종료일(${payload.training_end_date})이 시작일(${payload.training_date})보다 빠를 수 없습니다.`,
+      };
     }
     if (id) {
       // 반입 행(source='mandatory')도 장소·주최·수료시간을 고쳐 쓸 수 있게 둡니다.
@@ -1030,6 +1052,11 @@ export async function importMandatoryTrainings(
         report_year: Number(date.slice(0, 4)),
         report_month: Number(date.slice(5, 7)),
         training_date: date,
+        // training_end_date 는 NOT NULL(기본값 없음)이라 반드시 넣어야 합니다.
+        //   의무교육은 held_on 하루 기준이므로 시작일과 같은 값입니다.
+        //   ⚠️ 의무교육 자체의 기간(종료일) 지원은 이번 범위가 아닙니다
+        //     (mandatory_trainings 에 종료일 컬럼이 없음 — 별건).
+        training_end_date: date,
         staff_name: nameById.get(r.driver_id) ?? "(이름 없음)",
         training_name: t?.name ?? "(교육명 없음)",
         location: t?.location ?? "",

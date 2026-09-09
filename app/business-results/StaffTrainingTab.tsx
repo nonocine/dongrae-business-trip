@@ -12,6 +12,7 @@ import {
   labelCls,
   noticeError,
   noticeSuccess,
+  noticeWarning,
 } from "@/lib/ui";
 import {
   deleteStaffTraining,
@@ -19,6 +20,12 @@ import {
   saveStaffTraining,
   type StaffTrainingResult,
 } from "./actions";
+import {
+  formatTrainingPeriod,
+  isTrainingPeriodValid,
+  periodOverlapsMonth,
+  resolveTrainingEnd,
+} from "@/lib/staffTraining";
 
 // 종사자 교육 — 의무교육 자동 반입 + 외부 연수·기타 교육 수동 추가.
 //   연번은 저장하지 않고 일자 오름차순 정렬 후 화면에서 행 번호로 부여합니다.
@@ -39,6 +46,35 @@ export default function StaffTrainingTab({
   const [editing, setEditing] = useState<StaffTrainingResult | null>(null);
   const [pending, start] = useTransition();
   const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
+  // 기간 관련 실시간 안내(저장을 막지 않는 경고). 폼 입력이 바뀔 때 갱신합니다.
+  const [periodHint, setPeriodHint] = useState<string | null>(null);
+
+  // 폼은 비제어(defaultValue) 상태를 유지하고, 변경 이벤트에서 현재 값만 읽어
+  //   안내 문구를 만듭니다 — 입력칸을 제어형으로 바꾸지 않아도 됩니다.
+  function checkPeriod(form: HTMLFormElement) {
+    const fd = new FormData(form);
+    const startDate = String(fd.get("training_date") ?? "").trim();
+    if (!startDate) {
+      setPeriodHint(null);
+      return;
+    }
+    const endDate = resolveTrainingEnd(
+      startDate,
+      String(fd.get("training_end_date") ?? ""),
+    );
+    if (!isTrainingPeriodValid(startDate, endDate)) {
+      setPeriodHint(`종료일이 시작일(${startDate})보다 빠릅니다.`);
+      return;
+    }
+    const m = Number(fd.get("month"));
+    if (Number.isFinite(m) && !periodOverlapsMonth(startDate, endDate, year, m)) {
+      setPeriodHint(
+        `교육 기간(${formatTrainingPeriod(startDate, endDate)})이 실적 월(${m}월)과 겹치지 않습니다. 의도한 것이면 그대로 저장하세요.`,
+      );
+      return;
+    }
+    setPeriodHint(null);
+  }
 
   const sorted = useMemo(
     () =>
@@ -75,6 +111,7 @@ export default function StaffTrainingTab({
         }
         form.reset();
         setEditing(null);
+        setPeriodHint(null);
         setMsg({ ok: true, text: "저장했습니다." });
         router.refresh();
       } catch (err) {
@@ -180,8 +217,9 @@ export default function StaffTrainingTab({
                   <td className="border-r border-t border-line px-3 py-2.5 text-center text-ink-muted">
                     {index + 1}
                   </td>
-                  <td className="border-r border-t border-line px-3 py-2.5 text-center text-ink-body">
-                    {row.training_date}
+                  {/* 하루면 날짜 하나, 여러 날이면 "시작 ~ 종료" (activities 규칙) */}
+                  <td className="border-r border-t border-line px-3 py-2.5 text-center text-ink-body whitespace-nowrap">
+                    {formatTrainingPeriod(row.training_date, row.training_end_date)}
                   </td>
                   <td className="border-r border-t border-line px-3 py-2.5 font-semibold text-ink">
                     {row.staff_name}
@@ -269,6 +307,7 @@ export default function StaffTrainingTab({
           key={editing?.id ?? "new"}
           className="mt-4 grid gap-3 md:grid-cols-3"
           onSubmit={submit}
+          onChange={(e) => checkPeriod(e.currentTarget)}
         >
           <input type="hidden" name="id" value={editing?.id ?? ""} />
           <input type="hidden" name="year" value={year} />
@@ -287,7 +326,7 @@ export default function StaffTrainingTab({
             </select>
           </label>
           <label className={labelCls}>
-            일자
+            일자 (시작)
             <input
               name="training_date"
               type="date"
@@ -295,6 +334,24 @@ export default function StaffTrainingTab({
               className={inputCls}
               defaultValue={editing?.training_date ?? ""}
             />
+          </label>
+          <label className={labelCls}>
+            종료일
+            <input
+              name="training_end_date"
+              type="date"
+              className={inputCls}
+              // 하루 교육은 비워 둡니다 — 서버가 시작일과 같은 값으로 저장합니다.
+              //   기존 행은 종료일=시작일 이라 하루 교육이면 칸이 비어 보입니다.
+              defaultValue={
+                editing && editing.training_end_date !== editing.training_date
+                  ? editing.training_end_date
+                  : ""
+              }
+            />
+            <span className="mt-1 block text-[11px] font-normal text-ink-hint">
+              여러 날에 걸친 교육만 입력하세요. 비우면 하루 교육입니다.
+            </span>
           </label>
           <label className={labelCls}>
             성명
@@ -340,6 +397,11 @@ export default function StaffTrainingTab({
               placeholder="예: 1시간"
             />
           </label>
+          {/* 기간 안내 — 저장을 막지 않습니다(회계상 의도적으로 다른 달에
+              넣는 경우가 있어 경고만 합니다). */}
+          {periodHint && (
+            <p className={`md:col-span-3 ${noticeWarning}`}>{periodHint}</p>
+          )}
           <div className="md:col-span-3">
             <button disabled={pending} className={btnPrimary}>
               {editing ? "수정 저장" : "추가"}
