@@ -215,14 +215,20 @@ function RequestModal({
   onRequested: (text: string) => void;
 }) {
   const [purpose, setPurpose] = useState("서류제출용");
+  const [submitTo, setSubmitTo] = useState("");
   const [duty, setDuty] = useState(defaultDuty);
   const [pending, start] = useTransition();
   const [err, setErr] = useState<string | null>(null);
 
   function submit() {
     setErr(null);
+    // 제출처는 필수 — 서버(requestMyCertificate)에서도 같은 검증을 합니다.
+    if (!submitTo.trim()) {
+      setErr("제출처를 입력하세요. (예: ○○은행, 부산시청)");
+      return;
+    }
     start(async () => {
-      const res = await requestMyCertificate({ purpose, duty });
+      const res = await requestMyCertificate({ purpose, duty, submitTo });
       if (!res.ok) {
         setErr(res.message);
         return;
@@ -247,7 +253,7 @@ function RequestModal({
 
         <p className="mb-3 text-xs text-ink-muted">
           성명·생년월일·주소·근무부서·재직기간은 인사기록에서 자동으로 채워집니다.
-          용도와 직위·담당업무만 확인하세요. 신청 후 승인되면 발급됩니다.
+          용도·제출처와 직위·담당업무만 확인하세요. 신청 후 승인되면 발급됩니다.
         </p>
 
         <label className="block text-[11px] font-semibold text-navy">용도</label>
@@ -257,6 +263,19 @@ function RequestModal({
           className={`${inCls} mt-1`}
           placeholder="서류제출용"
         />
+
+        <label className="mt-3 block text-[11px] font-semibold text-navy">
+          제출처
+        </label>
+        <input
+          value={submitTo}
+          onChange={(e) => setSubmitTo(e.target.value)}
+          className={`${inCls} mt-1`}
+          placeholder="예: ○○은행, 부산시청, 어린이집"
+        />
+        <p className="mt-1 text-[11px] text-ink-hint">
+          증명서에는 표시되지 않으며 승인 확인용입니다.
+        </p>
 
         <label className="mt-3 block text-[11px] font-semibold text-navy">
           직위 및 담당업무

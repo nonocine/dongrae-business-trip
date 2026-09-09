@@ -131,11 +131,13 @@ export default function CertificateLedger({
           </p>
         ) : (
           <div className="overflow-x-auto">
-            <table className="w-full min-w-[560px] border-collapse">
+            <table className="w-full min-w-[660px] border-collapse">
               <thead>
                 <tr className="border-b border-line">
                   <th className={thCls}>신청자</th>
                   <th className={thCls}>용도</th>
+                  {/* 제출처 — 승인 판단용(증명서·발급대장에는 표기하지 않음). */}
+                  <th className={thCls}>제출처</th>
                   <th className={thCls}>직위·담당업무</th>
                   <th className={thCls}>신청일</th>
                   <th className={`${thCls} text-right`}>처리</th>
@@ -148,6 +150,7 @@ export default function CertificateLedger({
                       {r.employee_name}
                     </td>
                     <td className={tdCls}>{r.purpose}</td>
+                    <td className={tdCls}>{r.submit_to ?? "—"}</td>
                     <td className={tdCls}>{r.duty ?? "-"}</td>
                     <td className={`${tdCls} font-mono text-xs`}>
                       {r.requested_at ? r.requested_at.slice(0, 10) : "-"}
@@ -350,6 +353,17 @@ function RejectModal({
           <b className="text-ink">{req.employee_name}</b>님의 재직증명서 신청을
           반려합니다. 사유는 신청자에게 표시됩니다.
         </p>
+        {/* 신청 내용 확인용 — 제출처는 여기(관리자 화면)에만 표시됩니다. */}
+        <dl className="mb-3 rounded-lg border border-line bg-surface/50 p-2.5 text-xs">
+          <div className="flex gap-2">
+            <dt className="w-14 shrink-0 font-semibold text-navy">용도</dt>
+            <dd className="text-ink-body">{req.purpose}</dd>
+          </div>
+          <div className="mt-1 flex gap-2">
+            <dt className="w-14 shrink-0 font-semibold text-navy">제출처</dt>
+            <dd className="text-ink-body">{req.submit_to ?? "—"}</dd>
+          </div>
+        </dl>
         <label className="block text-[11px] font-semibold text-navy">반려 사유</label>
         <input
           value={reason}

@@ -493,9 +493,12 @@ export async function getMyCertificatePrefill(): Promise<{
 const REQ_TABLE = "certificate_requests";
 
 // 본인 재직증명서 신청(pending). 재직자만, 중복 pending 차단.
+//   * submitTo(제출처)는 필수 — 관리자가 승인 여부를 판단하는 근거입니다.
+//     클라이언트 검증만 믿지 않고 여기서 한 번 더 막습니다.
 export async function requestMyCertificate(input: {
   purpose: string;
   duty: string;
+  submitTo: string;
 }): Promise<{ ok: true; message: string } | { ok: false; message: string }> {
   try {
     const me = await getSession();
@@ -522,6 +525,14 @@ export async function requestMyCertificate(input: {
         message: "이미 승인 대기 중인 신청이 있습니다. 승인 후 다시 신청하세요.",
       };
 
+    const submitTo = cleanStr(input.submitTo);
+    if (!submitTo)
+      return {
+        ok: false,
+        message:
+          "제출처를 입력하세요. (증명서를 어디에 내는지 — 예: ○○은행, 부산시청)",
+      };
+
     const purpose = cleanStr(input.purpose) ?? "서류제출용";
     const duty = cleanStr(input.duty) ?? prof.duty;
     const { error } = await supabaseAdmin.from(REQ_TABLE).insert({
@@ -529,6 +540,8 @@ export async function requestMyCertificate(input: {
       employee_name: prof.name,
       cert_type: "employment",
       purpose,
+      // 제출처 — 신청 행에만 저장. 승인 시 발급대장·snapshot 으로 복사하지 않음.
+      submit_to: submitTo,
       duty,
       status: "pending",
       requested_at: new Date().toISOString(),
@@ -536,9 +549,12 @@ export async function requestMyCertificate(input: {
     if (error) throw new Error(error.message);
 
     // 관리자 채널 알림(부가기능 — sendSlack 은 실패해도 throw 안 함).
+    //   * 제출처는 관장·부장 비공개 채널에만 — 신청자 본인 DM 에는 넣지 않습니다.
     await sendSlack(
       SLACK_ADMIN,
-      `📄 ${prof.name}님 재직증명서 신청 (용도: ${purpose}) — 승인 대기`
+      `📄 ${prof.name}님 재직증명서 신청 (용도: ${purpose}) — 승인 대기
+` +
+        `제출처: ${submitTo}`
     );
 
     revalidatePath("/profile/hr");
@@ -614,6 +630,11 @@ export async function approveRequest(
     const prof = await loadProfile(req.driver_id);
     if (!prof) return { ok: false, message: "신청자 인사기록을 찾을 수 없습니다." };
 
+    // ★신청(request) → 발급(issue) 값 복사는 여기가 유일한 지점입니다.
+    //   purpose·duty 만 넘깁니다. req.submit_to(제출처)는 의도적으로 제외 —
+    //   제출처는 관리자 승인 확인용이며, 증명서 PDF 와 발급대장
+    //   (certificate_issues·snapshot)에는 절대 들어가지 않아야 합니다(관장 지시).
+    //   제출처를 이 함수로 넘기는 인자를 추가하지 마세요.
     const { id: issueId, snapshot } = await issueEmployment(
       req.driver_id,
       prof,

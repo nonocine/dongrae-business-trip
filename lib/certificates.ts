@@ -32,6 +32,9 @@ export const CERT_ORG = {
 export const CERT_SEAL_PATH = "org/center_seal.png";
 
 // 발급 시점 스냅샷 — 이 값만으로 동일 PDF 재생성 가능해야 함.
+//   * ⚠️ 신청서의 '제출처(submit_to)' 는 여기에 넣지 않습니다. 제출처는 관리자
+//     승인 판단용 정보이고 증명서 PDF·발급대장에는 표시되지 않아야 합니다
+//     (관장 지시). 이 타입에 필드를 추가하면 곧 PDF·대장으로 새어 나갑니다.
 export type CertSnapshot = {
   certType: CertType;
   issueLabel: string; // 제2026년-10호
@@ -77,6 +80,9 @@ export type CertRequest = {
   employee_name: string;
   cert_type: CertType;
   purpose: string;
+  // 제출처 — 관리자 승인 확인용. 증명서 PDF·발급대장(CertSnapshot)에는 넣지 않음.
+  //   * 컬럼 추가 전 신청 건은 NULL → 화면에서 '—' 로 표시.
+  submit_to: string | null;
   duty: string | null;
   status: CertRequestStatus;
   reject_reason: string | null;
@@ -96,6 +102,7 @@ export function toCertRequest(raw: Record<string, unknown>): CertRequest {
     employee_name: String(raw.employee_name ?? ""),
     cert_type: raw.cert_type === "career" ? "career" : "employment",
     purpose: String(raw.purpose ?? ""),
+    submit_to: (raw.submit_to as string | null) ?? null,
     duty: (raw.duty as string | null) ?? null,
     status,
     reject_reason: (raw.reject_reason as string | null) ?? null,
