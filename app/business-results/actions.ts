@@ -9,6 +9,7 @@ import {
   isInstagramConfigured,
 } from "@/lib/instagramApi";
 import { fetchNaverBlogFeed } from "@/lib/naverBlogApi";
+import { fetchHomepageNewsFeed } from "@/lib/homepageNewsApi";
 import { kstYmdFromIso, promotionTitle } from "@/lib/promotionImport";
 import {
   isTrainingPeriodValid,
@@ -1223,12 +1224,12 @@ export async function updateBusinessProgram(
 }
 
 // =====================================================================
-// 홍보실적 자동 수집 — 인스타그램 / 네이버 블로그 (관장 확정)
+// 홍보실적 자동 수집 — 인스타그램 / 네이버 블로그 / 홈페이지 보도자료 (관장 확정)
 //   * [가져오기] 버튼 한 번에 "아직 등록 안 된 게시물 전부"가 즉시 등록됩니다.
 //     사람이 고르지 않으므로 누가 눌러도 결과가 같습니다.
 //   * 권한은 수기 입력과 동일 — requireUser(로그인한 직원). 별도 게이트 없음.
 //   * 구분(category)은 새 값을 만들지 않고 promotionCategories 안의 값만 씁니다
-//     (인스타그램 = "SNS", 블로그 = "블로그").
+//     (인스타그램 = "SNS", 블로그 = "블로그", 홈페이지 보도자료 = "홈페이지").
 //   * 월 배정은 게시일(KST) 기준 — 8월 게시물은 지금 9월을 보고 있어도 8월
 //     실적으로 들어갑니다. 화면에서 그 점을 안내합니다.
 //   * 중복 방지: 게시물 링크가 이미 business_promotions.url 에 있으면 거릅니다.
@@ -1242,6 +1243,12 @@ export async function updateBusinessProgram(
 //   합니다 — "인스타그램" 같은 새 구분값을 만들지 않습니다.
 const INSTAGRAM_CATEGORY = "SNS";
 const BLOG_CATEGORY = "블로그";
+// 홈페이지 보도자료 게시판 = 채널 "홈페이지".
+//   * 채널→구분 매핑 관례를 그대로 따릅니다(인스타그램→SNS, 블로그→블로그).
+//   * 직원들이 이 게시판 글을 이미 "홈페이지" 로 수기 등록해 왔습니다
+//     (news_board_view?no=186 등). 새 구분값('보도자료')을 만들면 같은
+//     게시판이 두 구분으로 갈라져 월별 집계가 어긋납니다.
+const HOMEPAGE_NEWS_CATEGORY = "홈페이지";
 
 // 가져오기 결과. 화면은 이 숫자로 "N건 등록, M건은 이미 등록됨" 을 만듭니다.
 export type PromotionImportResult = {
@@ -1354,6 +1361,29 @@ export async function importBlogPromotions(): Promise<PromotionImportResult> {
       description: "",
     })),
     BLOG_CATEGORY,
+    user.name,
+  );
+}
+
+// 홈페이지 보도자료 — 블로그와 같은 공개 RSS 라 토큰이 없고 버튼도 항상 보입니다.
+//   * 중복 판정 키는 guid(= 글 주소 .../news_board_view?no=187)입니다.
+//     ⚠️ 이 주소의 쿼리(?no=)를 떼면 모든 글이 같은 주소로 접힙니다 —
+//     lib/homepageNewsApi.ts normalizeLink 주석 참고.
+//   * RSS 본문(description)은 지금 빈 값으로 와서 설명도 빈 값으로 둡니다.
+//   * ★ 이 피드는 최근 20건만 내려줍니다. 게시판 전체(180건 이상)보다 적게
+//     들어오는 것이 정상이고, 과거분 소급은 이번 범위가 아닙니다.
+export async function importHomepageNewsPromotions(): Promise<PromotionImportResult> {
+  const user = await requireUser();
+  const items = await fetchHomepageNewsFeed();
+  return insertAutoPromotions(
+    items.map((i) => ({
+      url: i.link,
+      text: i.title,
+      publishedAt: i.pubDate,
+      fallbackLabel: "보도자료",
+      description: "",
+    })),
+    HOMEPAGE_NEWS_CATEGORY,
     user.name,
   );
 }

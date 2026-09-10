@@ -16,6 +16,7 @@ import {
   deleteBusinessResult,
   deletePromotion,
   importBlogPromotions,
+  importHomepageNewsPromotions,
   importInstagramPromotions,
   savePromotion,
   type BusinessResult,
@@ -915,7 +916,8 @@ export default function BusinessResultsDashboard({
             <div className="flex items-center gap-3">
               {/* 가져오기 — 누르면 아직 등록 안 된 게시물이 전부 즉시 등록됩니다
                   (고르는 단계 없음). 권한은 수기 입력과 동일(이 화면에 들어온 직원).
-                  인스타그램은 토큰이 있어야 보이고, 블로그는 공개 RSS 라 항상 보입니다. */}
+                  인스타그램은 토큰이 있어야 보이고, 블로그·보도자료는 공개 RSS 라
+                  항상 보입니다. */}
               {!editingPromo && (
                 <>
                   {data.instagramConfigured && (
@@ -938,6 +940,20 @@ export default function BusinessResultsDashboard({
                   >
                     ✍️ 블로그에서 가져오기
                   </button>
+                  {/* 보도자료 — 홈페이지 게시판 RSS. 구분은 "홈페이지" 로
+                      들어갑니다(직원들이 수기로 쓰던 값과 같음).
+                      ★ RSS 가 최근 20건만 내려줘서 게시판 전체보다 적게
+                        들어오는 것이 정상입니다. 과거분 소급은 범위 밖. */}
+                  <button
+                    type="button"
+                    disabled={pending}
+                    className={`${btnSecondary} h-9 px-3 text-xs`}
+                    onClick={() =>
+                      runImport("보도자료", importHomepageNewsPromotions)
+                    }
+                  >
+                    📰 보도자료에서 가져오기
+                  </button>
                 </>
               )}
               {editingPromo && (
@@ -954,6 +970,17 @@ export default function BusinessResultsDashboard({
               )}
             </div>
           </div>
+
+          {/* ④ RSS 는 최근 글만 내려줍니다 — 게시판 전체가 다 들어오지
+              않는 것이 정상이라는 점을 화면에도 남겨, "왜 다 안 들어오지" 로
+              읽히지 않게 합니다. 과거분 소급은 이번 범위가 아닙니다. */}
+          {!editingPromo && (
+            <p className="mt-2 text-[11px] text-ink-hint">
+              가져오기는 각 채널 RSS·API 가 내려주는 최근 글만 대상입니다(보도자료는
+              최근 20건). 게시판·블로그의 과거 글은 들어오지 않으니 필요하면 수기로
+              등록해 주세요.
+            </p>
+          )}
 
           <form
             key={editingPromo?.id ?? "new"}

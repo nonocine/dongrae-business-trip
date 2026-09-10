@@ -5,11 +5,13 @@ import {
 } from "../lib/instagramApi";
 import { kstYmdFromIso, promotionTitle } from "../lib/promotionImport";
 import { parseNaverBlogFeed } from "../lib/naverBlogApi";
+import { parseHomepageNewsFeed } from "../lib/homepageNewsApi";
 
 // 홍보실적 자동 수집 — 토큰·네트워크 없이 확인할 수 있는 부분만 봅니다.
 //   * 실제 API 호출은 INSTAGRAM_ACCESS_TOKEN 이 있어야 하므로, 여기서는
 //     ①게시일(→KST) 변환 ②원문→제목 ③토큰 가림(redact) ④토큰 없을 때의 동작
-//     ⑤블로그 RSS 파싱을 검증합니다. 합성 데이터만 씁니다.
+//     ⑤블로그 RSS 파싱 ⑥홈페이지 보도자료 RSS 파싱을 검증합니다.
+//     합성 데이터만 씁니다.
 //   * ①② 는 인스타그램·블로그(·밴드) 공용 규칙(lib/promotionImport)이라 두
 //     채널의 입력 형식을 함께 넣어 봅니다.
 function eq(actual: unknown, expected: unknown, what: string) {
@@ -136,7 +138,75 @@ async function main() {
   eq(items[0].pubDate, "", "pubDate 없음");
   eq(parseNaverBlogFeed("<rss><channel></channel></rss>").length, 0, "빈 피드");
 
-  console.log(JSON.stringify({ ok: true, checks: 25 }));
+  // ⑥ 홈페이지 보도자료 RSS 파싱. 실제 피드(2026-09-10 수신)를 줄여 만든
+  //    합성 XML — enclosure·media:* 자기완결 태그와 <guid isPermaLink> 포함.
+  //    ★ 블로그와 결정적으로 다른 점: 글 번호가 쿼리(?no=)에 있어 쿼리를
+  //      떼면 모든 글이 같은 주소로 접힙니다. 그 회귀를 여기서 잡습니다.
+  const newsXml = `<?xml version="1.0" encoding="utf-8"?>
+<rss version="2.0" xmlns:media="http://search.yahoo.com/mrss/" xmlns:atom="http://www.w3.org/2005/Atom">
+<channel>
+  <title>동래구청소년센터 공지사항</title>
+  <link>https://www.onnainna.kr/community/news_board</link>
+  <atom:link href="https://www.onnainna.kr/community/news_rss" rel="self" type="application/rss+xml" />
+  <pubDate>Thu, 10 Sep 2026 17:51:25 +0900</pubDate>
+  <item>
+    <title>부산 청소년들의 쉼터! 부산 동래구 청소년 센터</title>
+    <link>https://www.onnainna.kr/community/news_board_view?no=187</link>
+    <guid isPermaLink="true">https://www.onnainna.kr/community/news_board_view?no=187</guid>
+    <pubDate>Fri, 04 Sep 2026 17:40:30 +0900</pubDate>
+    <description></description>
+    <enclosure url="https://www.onnainna.kr/user_file/news/260904/a.png" type="image/png" length="0" />
+    <media:content url="https://www.onnainna.kr/user_file/news/260904/a.png" medium="image" type="image/png" />
+    <media:thumbnail url="https://www.onnainna.kr/user_file/news/260904/a.png" />
+  </item>
+  <item>
+    <title>[국제신문] 동래구청소년센터, 고창군 청소년 기관과 교류</title>
+    <link>https://www.onnainna.kr/community/news_board_view?no=186#top</link>
+    <guid isPermaLink="true">https://www.onnainna.kr/community/news_board_view?no=186</guid>
+    <pubDate>Wed, 08 Jul 2026 11:29:34 +0900</pubDate>
+  </item>
+  <item>
+    <title>guid 없이 link 만 있는 글</title>
+    <link>https://www.onnainna.kr/community/news_board_view?no=185</link>
+    <pubDate>Sat, 20 Jun 2026 15:39:41 +0900</pubDate>
+  </item>
+</channel></rss>`;
+  const news = parseHomepageNewsFeed(newsXml);
+  eq(news.length, 3, "보도자료 item 개수(channel 은 제외)");
+  eq(
+    news[0].link,
+    "https://www.onnainna.kr/community/news_board_view?no=187",
+    "글 번호 쿼리(?no=)가 보존됨",
+  );
+  // 20건이 같은 주소로 접히는 사고를 막는 회귀 검사 — 링크가 서로 달라야 합니다.
+  eq(new Set(news.map((n) => n.link)).size, 3, "글마다 주소가 다름");
+  eq(news[0].guid, news[0].link, "guid = 저장 주소");
+  eq(
+    news[0].title,
+    "부산 청소년들의 쉼터! 부산 동래구 청소년 센터",
+    "보도자료 제목",
+  );
+  eq(news[1].link, news[1].guid, "해시(#top)는 떼고 guid 를 씁니다");
+  eq(
+    news[1].link,
+    "https://www.onnainna.kr/community/news_board_view?no=186",
+    "해시 제거 후 주소",
+  );
+  // guid 가 없으면 link 로 물러납니다(지시문 ② 규칙).
+  eq(
+    news[2].guid,
+    "https://www.onnainna.kr/community/news_board_view?no=185",
+    "guid 없으면 link 를 키로",
+  );
+  eq(kstYmdFromIso(news[0].pubDate), "2026-09-04", "보도자료 게시일 → 활동일");
+  eq(
+    promotionTitle(news[1].title, "2026-07-08", "보도자료"),
+    "[국제신문] 동래구청소년센터, 고창군 청소년 기관과 교류",
+    "보도자료 제목 40자 규칙",
+  );
+  eq(parseHomepageNewsFeed("<rss><channel></channel></rss>").length, 0, "빈 보도자료 피드");
+
+  console.log(JSON.stringify({ ok: true, checks: 36 }));
 }
 
 main().catch((error) => {
