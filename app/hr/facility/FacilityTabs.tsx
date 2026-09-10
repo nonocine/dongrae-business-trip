@@ -10,6 +10,8 @@ const TABS = [
   { href: "/hr/facility/safety", label: "안전점검" },
   // 운행기록은 읽기 전용 — 작성·수정은 동래카 앱에서 합니다.
   { href: "/hr/facility/driving", label: "운행기록" },
+  // 대관예약도 읽기 전용 — 작성·수정은 홈페이지에서 합니다.
+  { href: "/hr/facility/rentals", label: "대관예약" },
 ];
 
 export default function FacilityTabs() {

@@ -15,6 +15,10 @@
     {
       "path": "/api/cron/mail-digest",
       "schedule": "0 0 * * *"
+    },
+    {
+      "path": "/api/cron/rental-sync",
+      "schedule": "30 19 * * *"
     }
   ]
 }

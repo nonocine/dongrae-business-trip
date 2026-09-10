@@ -668,6 +668,12 @@ export default async function EmployeeDashboard({
                     title="운행기록"
                     desc="차량 운행일지 조회·월별 운행대장"
                   />
+                  <MenuCard
+                    href="/hr/facility/rentals"
+                    icon="🏛️"
+                    title="대관예약"
+                    desc="홈페이지 대관·청소년 공간 예약 조회 (조회 전용)"
+                  />
                   {/* 거래처관리는 여기 있었지만(시설 담당에게는 "시설 거래처"가
                       곧 담당 업무라서), 시설 직무가 없는 직원에게 진입점이 안
                       보인다는 관장 지적으로 8/25 공통 영역으로 옮겼습니다.
