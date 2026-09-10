@@ -302,23 +302,6 @@ export function normalizeActivity(raw: Record<string, unknown>): Activity {
   };
 }
 
-export type BusinessTrip = {
-  id: string;
-  trip_date: string;
-  destination: string;
-  traveler: string;
-  companion: string[];
-  purpose: string;
-  transport_type: TransportType;
-  transport_cost: number | null;
-  meeting_content: string;
-  main_agenda: string;
-  result: string;
-  photos: string[];
-  receipts: string[];
-  created_at: string;
-};
-
 export const EMPLOYEE_RANKS = ["관장", "부장", "팀장", "팀원"] as const;
 export type EmployeeRank = (typeof EMPLOYEE_RANKS)[number];
 
@@ -376,26 +359,6 @@ export function toStringArray(v: unknown): string[] {
       .filter((t) => t.length > 0);
   }
   return [];
-}
-
-export function normalizeBusinessTrip(raw: Record<string, unknown>): BusinessTrip {
-  return {
-    id: String(raw.id ?? ""),
-    trip_date: String(raw.trip_date ?? ""),
-    destination: String(raw.destination ?? ""),
-    traveler: String(raw.traveler ?? ""),
-    companion: toStringArray(raw.companion),
-    purpose: String(raw.purpose ?? ""),
-    transport_type: (raw.transport_type as TransportType) ?? "vehicle",
-    transport_cost:
-      raw.transport_cost == null ? null : Number(raw.transport_cost),
-    meeting_content: String(raw.meeting_content ?? ""),
-    main_agenda: String(raw.main_agenda ?? ""),
-    result: String(raw.result ?? ""),
-    photos: toStringArray(raw.photos),
-    receipts: toStringArray(raw.receipts),
-    created_at: String(raw.created_at ?? ""),
-  };
 }
 
 // =====================================================================
