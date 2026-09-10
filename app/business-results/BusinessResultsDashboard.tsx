@@ -1185,6 +1185,13 @@ export default function BusinessResultsDashboard({
           cumulative={data.coinPayCumulative}
         />
       )}
+      {/* 온나 탭은 아직 플레이스홀더입니다(이번 범위 아님).
+          ※ 나중에 여기에 실적을 붙일 때, 시설(온나/센터) 판정은 새로 만들지
+            말고 lib/rental.ts 의 rentalFacility() 를 쓰세요 — 대관예약 조회
+            화면(/hr/facility/rentals)이 쓰는 것과 같은 순수 함수입니다.
+            판정 규칙은 space_name 의 '온나' 접두사이고, DB 컬럼이 아니라
+            파생값입니다. 규칙이 갈라지면 같은 달 온나 건수가 두 화면에서
+            다르게 나옵니다. */}
       {tab === "onna" && (
         <section className={cardCls}>
           <p className="text-sm leading-6 text-ink-muted">

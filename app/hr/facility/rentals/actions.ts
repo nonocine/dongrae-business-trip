@@ -9,12 +9,15 @@ import {
   rentalMonthRange,
   isConfirmed,
   isCancelled,
+  rentalFacility,
   RENTAL_PAGE_SIZE,
   type RentalPageData,
   type RentalRow,
   type RentalSummary,
+  type RentalSummaryBreakdown,
   type RentalTypeFilter,
   type RentalStatusFilter,
+  type RentalFacilityFilter,
 } from "@/lib/rental";
 
 // =====================================================================
@@ -110,8 +113,12 @@ function summarize(rows: RentalRow[]): RentalSummary {
 //   ★ 요약은 상태 필터와 무관하게 "그 달 전체" 로 계산합니다. '확정만' 을
 //     보고 있어도 신청 중·취소가 몇 건인지는 알아야 하고, 필터를 바꿀 때마다
 //     합계가 흔들리면 숫자를 믿을 수 없게 됩니다.
+//   ★ 시설(센터/온나)은 space_name 에서 파생되는 값이라 DB 조건으로 걸 수
+//     없습니다 — 월+구분으로 받아온 뒤 JS 에서 나눕니다. 요약은 선택한 시설
+//     기준(selected)이고, 센터/온나 소계도 함께 내어 '전체' 탭에서 병기합니다.
 export async function loadRentalPage(params: {
   month: string;
+  facility: RentalFacilityFilter;
   type: RentalTypeFilter;
   status: RentalStatusFilter;
   page: number;
@@ -119,10 +126,31 @@ export async function loadRentalPage(params: {
   await requireFacilityAccess();
 
   const all = await fetchAllInMonth(params.month, params.type);
-  const summary = summarize(all);
+
+  // 시설별로 한 번 갈라 요약 세 개를 만듭니다(행을 이미 다 받아놨으므로 추가
+  //   조회 없음). '전체' 탭의 selected 는 센터+온나 합이라 all 로 계산합니다.
+  const centerRows: RentalRow[] = [];
+  const onnaRows: RentalRow[] = [];
+  for (const r of all) {
+    (rentalFacility(r) === "onna" ? onnaRows : centerRows).push(r);
+  }
+  const inFacility =
+    params.facility === "center"
+      ? centerRows
+      : params.facility === "onna"
+        ? onnaRows
+        : all;
+
+  const summary: RentalSummaryBreakdown = {
+    selected: summarize(inFacility),
+    center: summarize(centerRows),
+    onna: summarize(onnaRows),
+  };
 
   const visible =
-    params.status === "confirmed" ? all.filter((r) => isConfirmed(r)) : all;
+    params.status === "confirmed"
+      ? inFacility.filter((r) => isConfirmed(r))
+      : inFacility;
 
   const totalPages = Math.max(1, Math.ceil(visible.length / RENTAL_PAGE_SIZE));
   const page = Math.min(Math.max(1, params.page), totalPages);

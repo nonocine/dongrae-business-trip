@@ -31,7 +31,8 @@
     "test:ledger": "node --import tsx scripts/test-payroll-ledger.ts",
     "test:keyword": "node --import tsx scripts/test-mail-keyword.ts",
     "reclassify:mail": "node --import tsx scripts/reclassify-mail.ts",
-    "test:rental": "node --import tsx scripts/test-rental-sync.ts"
+    "test:rental": "node --import tsx scripts/test-rental-sync.ts",
+    "test:rental-view": "node --import tsx scripts/test-rental-view.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.116.0",

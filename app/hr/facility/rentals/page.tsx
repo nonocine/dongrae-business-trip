@@ -4,8 +4,10 @@ import { kstTodayYmd } from "@/lib/trainings";
 import {
   isRentalTypeFilter,
   isRentalStatusFilter,
+  isRentalFacilityFilter,
   type RentalTypeFilter,
   type RentalStatusFilter,
+  type RentalFacilityFilter,
 } from "@/lib/rental";
 import { loadRentalPage } from "@/app/hr/facility/rentals/actions";
 import RentalReservationsView from "@/app/hr/facility/rentals/RentalReservationsView";
@@ -21,6 +23,7 @@ export default async function FacilityRentalsPage({
 }: {
   searchParams: Promise<{
     month?: string;
+    facility?: string;
     type?: string;
     status?: string;
     page?: string;
@@ -40,6 +43,10 @@ export default async function FacilityRentalsPage({
         ? sp.month
         : "";
 
+  // 1차 축은 시설(센터/온나) — 기본은 전체.
+  const facility: RentalFacilityFilter = isRentalFacilityFilter(sp.facility)
+    ? sp.facility
+    : "all";
   const type: RentalTypeFilter = isRentalTypeFilter(sp.type) ? sp.type : "all";
   // 기본은 '확정만' — 취소된 건이 섞이면 대관 건수를 잘못 읽습니다.
   const status: RentalStatusFilter = isRentalStatusFilter(sp.status)
@@ -47,7 +54,7 @@ export default async function FacilityRentalsPage({
     : "confirmed";
   const page = Math.max(1, Number(sp.page) || 1);
 
-  const data = await loadRentalPage({ month, type, status, page });
+  const data = await loadRentalPage({ month, facility, type, status, page });
 
   return (
     <div className="space-y-4">
@@ -62,6 +69,7 @@ export default async function FacilityRentalsPage({
       <RentalReservationsView
         data={data}
         month={month}
+        facility={facility}
         type={type}
         status={status}
       />
