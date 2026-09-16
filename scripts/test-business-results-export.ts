@@ -22,8 +22,10 @@ const input: BusinessReportInput = {
       ] },
   ],
   promotions: [
-    { activity_date: "2099-01-12", category: "채널A", title: "가상 홍보 A", count: 2, url: "https://example.com/a", description: "합성 설명 A", author_name: "사용자 A" },
-    { activity_date: "2099-01-20", category: "채널B", title: "가상 홍보 B", count: 4, url: "", description: "합성 설명 B", author_name: "사용자 B" },
+    // 홍보내용은 제목·설명이 합쳐진 여러 줄 값 — Word 에서 <w:br/> 로 살아야 한다.
+    { activity_date: "2099-01-12", category: "채널A", title: "가상 홍보 A 첫째 줄\n가상 홍보 A 둘째 줄", count: 2, url: "https://example.com/a", deliverable: "합성 결과물 A", author_name: "사용자 A" },
+    // 결과물 없는 건(자동 수집과 같은 모양) — 출력물에서 "-" 로 찍혀야 한다.
+    { activity_date: "2099-01-20", category: "채널B", title: "가상 홍보 B", count: 4, url: "", deliverable: null, author_name: "사용자 B" },
   ],
   coinPay: [
     { entry_type: "적립", place: "가상 사용처 A", headcount: 30, amount: 3000, note: "" },
@@ -69,6 +71,14 @@ async function main() {
   // 주요 내용(summary) 열은 삭제됐다 — 실인원 계(N) 다음은 곧바로 상태(O)여야 한다.
   const header = wb.getWorksheet("사업실적")?.getRow(4);
   if (header?.getCell("O").value !== "상태" || header?.getCell("P").value !== "작성자" || header?.getCell("Q").value) throw new Error("사업실적 헤더 검증 실패");
+  // 홍보 — 제목·설명이 '홍보내용' 한 열로 합쳐지고 '결과물' 열이 붙었다(A~G 유지).
+  const promoSheet = wb.getWorksheet("홍보대외협력");
+  const promoHeader = promoSheet?.getRow(4);
+  const promoHeaders = ["A", "B", "C", "D", "E", "F", "G"].map((col) => promoHeader?.getCell(col).value);
+  if (promoHeaders.join(",") !== "날짜,구분,홍보내용,횟수,결과물,URL,작성자" || promoHeader?.getCell("H").value) throw new Error(`홍보 헤더 검증 실패: ${promoHeaders.join(",")}`);
+  if (promoSheet?.getCell("E5").value !== "합성 결과물 A" || promoSheet?.getCell("E6").value !== "-") throw new Error("홍보 결과물 열 검증 실패");
+  // 횟수 합계는 종전대로 D열이어야 한다(열이 바뀌어도 수식이 따라오면 안 된다).
+  if (!String(promoSheet?.getCell("D7").formula ?? "").startsWith("SUM(D5:D")) throw new Error("홍보 횟수 합계 수식 검증 실패");
 
   // Word — 주요 내용은 사라지고, 운영내용의 줄바꿈은 <w:br/> 로 보존되어야 한다.
   const zip = await JSZip.loadAsync(Buffer.from(docx));
@@ -77,6 +87,11 @@ async function main() {
   const first = documentXml.indexOf("합성 세부 A1 첫째 줄");
   const second = documentXml.indexOf("합성 세부 A1 둘째 줄");
   if (first < 0 || second < first || !documentXml.slice(first, second).includes("<w:br")) throw new Error("Word 운영내용 줄바꿈 검증 실패");
+  // Word 홍보 표 — 제목·설명 → '홍보내용' 한 열 + '결과물' 열, 줄바꿈은 <w:br/>.
+  if (!documentXml.includes("홍보내용") || !documentXml.includes("결과물") || documentXml.includes("합성 설명")) throw new Error("Word 홍보 열 검증 실패");
+  const promoFirst = documentXml.indexOf("가상 홍보 A 첫째 줄");
+  const promoSecond = documentXml.indexOf("가상 홍보 A 둘째 줄");
+  if (promoFirst < 0 || promoSecond < promoFirst || !documentXml.slice(promoFirst, promoSecond).includes("<w:br")) throw new Error("Word 홍보내용 줄바꿈 검증 실패");
 
   // 신규 데이터가 전혀 없는 입력도 두 포맷 모두 생성되어야 한다.
   await buildBusinessReportDocx(emptyExtras);

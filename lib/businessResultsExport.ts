@@ -74,10 +74,13 @@ export type StaffTrainingExportRow = {
 export type PromotionExportRow = {
   activity_date: string;
   category: string;
+  // 홍보내용 — 예전의 '제목 + 설명' 을 합친 한 칸(김민정 9/16). 여러 줄일 수 있고
+  //   줄바꿈은 Word 에서 docCell 이 <w:br/> 로, Excel 에서 wrapText 로 살립니다.
   title: string;
   count: number;
   url: string;
-  description: string;
+  // 결과물 — 선택 입력이라 비어 있을 수 있습니다(자동 수집 행은 항상 빈 값).
+  deliverable: string | null;
   author_name: string;
 };
 
@@ -570,15 +573,19 @@ export async function buildBusinessReportDocx(
     new Paragraph({ spacing: { before: 150, after: 0 }, children: [] }),
     sectionTitle("Ⅲ.", "홍보·대외협력 실적"),
     new Paragraph({ spacing: { before: 70, after: 0 }, children: [] }),
+    // 제목·설명 두 열이 '홍보내용' 한 열로 합쳐지고 '결과물' 열이 붙었습니다
+    //   (김민정 9/16). 폭 합계는 종전과 같은 9500 — 합쳐진 만큼을 홍보내용에
+    //   몰아주고, 결과물은 짧은 낱말이라 좁게 잡습니다.
     docTable(
-      ["날짜", "구분", "제목", "횟수", "설명"],
-      [1200, 1300, 2200, 700, 4100],
+      ["날짜", "구분", "홍보내용", "횟수", "결과물"],
+      [1200, 1200, 4400, 600, 2100],
       input.promotions.map((r) => [
         r.activity_date,
         r.category,
         r.title,
         String(r.count),
-        r.description,
+        // 빈 값은 docCell 의 splitLines 가 "-" 로 찍습니다(자동 수집 건).
+        r.deliverable ?? "",
       ]),
     ),
     new Paragraph({
@@ -939,15 +946,25 @@ export async function buildBusinessReportWorkbook(
   promotions.getCell("A1").alignment = { horizontal: "center" };
   promotions.addRow([]);
   promotions.addRow([]);
-  promotions.addRow(["날짜", "구분", "제목", "횟수", "URL", "설명", "작성자"]);
+  // 제목·설명 → '홍보내용' 한 열, 그 뒤에 '결과물' 열. 열 수(A~G)와 횟수 열(D)
+  //   위치는 그대로라 합계 수식·자동필터 범위는 손대지 않습니다.
+  promotions.addRow([
+    "날짜",
+    "구분",
+    "홍보내용",
+    "횟수",
+    "결과물",
+    "URL",
+    "작성자",
+  ]);
   input.promotions.forEach((r) =>
     promotions.addRow([
       r.activity_date,
       r.category,
       r.title,
       r.count,
+      r.deliverable?.trim() || "-",
       r.url,
-      r.description,
       r.author_name,
     ]),
   );
@@ -967,7 +984,8 @@ export async function buildBusinessReportWorkbook(
     pattern: "solid",
     fgColor: { argb: `FF${paleGray}` },
   };
-  promotions.columns = [14, 16, 28, 10, 34, 42, 14].map((width) => ({ width }));
+  // 홍보내용은 합쳐진 만큼 넓게(줄바꿈은 styleSheet 의 wrapText 로 살아납니다).
+  promotions.columns = [14, 14, 52, 8, 20, 34, 14].map((width) => ({ width }));
   promotions.autoFilter = `A4:G${promotions.rowCount}`;
   styleSheet(promotions);
 

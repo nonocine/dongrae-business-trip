@@ -66,6 +66,16 @@ const promotionCategories = [
 ];
 const number = new Intl.NumberFormat("ko-KR");
 
+// 홍보내용은 여러 줄입니다(제목·설명 통합, 김민정 9/16). 목록에서는 첫 줄만 보여
+//   주고 뒤에 더 있으면 말줄임표를 붙입니다 — 전체는 수정 폼에서 봅니다.
+function promoFirstLine(text: string): string {
+  const lines = (text ?? "").replace(/\r\n?/g, "\n").split("\n");
+  const at = lines.findIndex((line) => line.trim());
+  if (at < 0) return "";
+  const hasMore = lines.slice(at + 1).some((line) => line.trim());
+  return hasMore ? `${lines[at].trim()} …` : lines[at].trim();
+}
+
 // 청/기 구분이 없는 과거 행(청·기 0 인데 계 > 0)은 청·기 를 "-" 로, 계만 표기합니다.
 function trio(youth: number, other: number, total: number): string[] {
   if (youth + other === 0 && total > 0)
@@ -389,7 +399,11 @@ export default function BusinessResultsDashboard({
   }
 
   function removePromotion(row: PromotionResult) {
-    if (!confirm(`'${row.title}' 홍보 실적을 삭제할까요? 되돌릴 수 없습니다.`))
+    if (
+      !confirm(
+        `'${promoFirstLine(row.title)}' 홍보 실적을 삭제할까요? 되돌릴 수 없습니다.`,
+      )
+    )
       return;
     setNotice(null);
     startTransition(async () => {
@@ -795,7 +809,9 @@ export default function BusinessResultsDashboard({
                       className="flex items-center justify-between gap-3 rounded-xl border border-line px-3 py-3 text-sm"
                     >
                       <div className="min-w-0">
-                        <b className="block truncate text-ink">{row.title}</b>
+                        <b className="block truncate text-ink" title={row.title}>
+                          {promoFirstLine(row.title)}
+                        </b>
                         <span className="text-xs text-ink-muted">
                           {row.category}
                         </span>
@@ -1020,7 +1036,7 @@ export default function BusinessResultsDashboard({
               </label>
             ) : (
               /* 등록 — 같은 활동을 밴드·SNS·홈페이지에 함께 올렸다면 모두 체크하면
-                 됩니다. 날짜·제목·횟수·설명은 한 번만 쓰고, 체크한 채널 수만큼
+                 됩니다. 날짜·홍보내용·횟수·결과물은 한 번만 쓰고, 체크한 채널 수만큼
                  저장됩니다. 1개만 체크하면 종전과 같은 1건 등록입니다. */
               <div className={`${labelCls} md:col-span-3`}>
                 구분 — 여러 채널에 함께 올렸다면 모두 선택하세요 (선택한 수만큼
@@ -1106,22 +1122,27 @@ export default function BusinessResultsDashboard({
                 defaultValue={editingPromo?.url ?? ""}
               />
             </label>
-            <label className={`${labelCls} md:col-span-2`}>
-              제목
-              <input
+            {/* 홍보내용 — 예전 '제목'+'설명' 두 칸을 합친 한 칸입니다(김민정 9/16).
+                Enter 로 줄을 바꿔 여러 줄로 쓸 수 있고, 줄바꿈은 목록·출력물까지
+                그대로 이어집니다(세부 실적 운영내용과 같은 방식). */}
+            <label className={`${labelCls} md:col-span-3`}>
+              홍보내용
+              <textarea
                 required
                 name="title"
+                rows={4}
                 className={inputCls}
                 defaultValue={editingPromo?.title ?? ""}
               />
             </label>
-            <label className={`${labelCls} md:col-span-3`}>
-              설명
-              <textarea
-                name="description"
-                rows={2}
+            {/* 결과물 — 선택 입력. 비우면 목록·출력물에 "-" 로 표시됩니다. */}
+            <label className={`${labelCls} md:col-span-2`}>
+              결과물 (선택)
+              <input
+                name="deliverable"
                 className={inputCls}
-                defaultValue={editingPromo?.description ?? ""}
+                placeholder="예: 웹포스터, 활동 사진, 카드뉴스"
+                defaultValue={editingPromo?.deliverable ?? ""}
               />
             </label>
             <button
@@ -1138,10 +1159,13 @@ export default function BusinessResultsDashboard({
                 className="flex flex-wrap items-start justify-between gap-3 rounded-lg border border-line p-3 text-sm"
               >
                 <div className="min-w-0">
-                  <strong>{r.title}</strong>
+                  {/* 여러 줄 홍보내용은 첫 줄만 — 전체는 [수정] 에서 봅니다. */}
+                  <strong className="block truncate" title={r.title}>
+                    {promoFirstLine(r.title)}
+                  </strong>
                   <p className="mt-1 text-ink-muted">
-                    {r.activity_date} · {r.category} · {r.count}회 · 작성{" "}
-                    {r.author_name}
+                    {r.activity_date} · {r.category} · {r.count}회 · 결과물{" "}
+                    {r.deliverable?.trim() || "-"} · 작성 {r.author_name}
                   </p>
                 </div>
                 {(canManage(r) || canDeletePromotion(r)) && (

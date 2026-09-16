@@ -3,13 +3,13 @@ import {
   redact,
   fetchRecentInstagramMedia,
 } from "../lib/instagramApi";
-import { kstYmdFromIso, promotionTitle } from "../lib/promotionImport";
+import { kstYmdFromIso, promotionContent } from "../lib/promotionImport";
 import { parseNaverBlogFeed } from "../lib/naverBlogApi";
 import { parseHomepageNewsFeed } from "../lib/homepageNewsApi";
 
 // 홍보실적 자동 수집 — 토큰·네트워크 없이 확인할 수 있는 부분만 봅니다.
 //   * 실제 API 호출은 INSTAGRAM_ACCESS_TOKEN 이 있어야 하므로, 여기서는
-//     ①게시일(→KST) 변환 ②원문→제목 ③토큰 가림(redact) ④토큰 없을 때의 동작
+//     ①게시일(→KST) 변환 ②원문→홍보내용 ③토큰 가림(redact) ④토큰 없을 때의 동작
 //     ⑤블로그 RSS 파싱 ⑥홈페이지 보도자료 RSS 파싱을 검증합니다.
 //     합성 데이터만 씁니다.
 //   * ①② 는 인스타그램·블로그(·밴드) 공용 규칙(lib/promotionImport)이라 두
@@ -37,37 +37,43 @@ async function main() {
     "RSS 자정 직전",
   );
 
-  // ② 원문 → 제목. 첫 줄 40자, 원문이 비면 라벨+날짜로 대체.
+  // ② 원문 → 홍보내용. 캡션 전체를 줄바꿈까지 그대로, 원문이 비면 라벨+날짜.
+  //   (제목·설명 통합 전에는 첫 줄 40자로 잘랐습니다 — 김민정 9/16.)
   eq(
-    promotionTitle(
+    promotionContent(
       "AI 동래 플레이 그라운드 참여자 모집\n\n#동래구청소년센터",
       "2026-07-15",
       "인스타그램 게시물",
     ),
-    "AI 동래 플레이 그라운드 참여자 모집",
-    "첫 줄 제목",
+    "AI 동래 플레이 그라운드 참여자 모집\n\n#동래구청소년센터",
+    "캡션 전체를 홍보내용으로",
   );
   eq(
-    promotionTitle(
-      "\n\n  두 번째 줄이 진짜 제목  \n뒤에 더",
+    promotionContent(
+      "\n\n  앞뒤 빈 줄은 덜어낸다  \n가운데 줄바꿈은 유지",
       "2026-07-15",
       "인스타그램 게시물",
     ),
-    "두 번째 줄이 진짜 제목",
-    "빈 줄 건너뛰기",
+    "앞뒤 빈 줄은 덜어낸다  \n가운데 줄바꿈은 유지",
+    "앞뒤 빈 줄 정리",
   );
   eq(
-    promotionTitle("가".repeat(60), "2026-07-15", "인스타그램 게시물"),
-    `${"가".repeat(40)}…`,
-    "40자 자르기",
+    promotionContent("가".repeat(60), "2026-07-15", "인스타그램 게시물"),
+    "가".repeat(60),
+    "길어도 자르지 않는다",
   );
   eq(
-    promotionTitle("", "2026-07-15", "인스타그램 게시물"),
+    promotionContent("", "2026-07-15", "인스타그램 게시물"),
     "인스타그램 게시물 2026-07-15",
     "캡션 없음",
   );
   eq(
-    promotionTitle("", "2026-07-15", "블로그 게시물"),
+    promotionContent("   \n \n ", "2026-07-15", "인스타그램 게시물"),
+    "인스타그램 게시물 2026-07-15",
+    "공백뿐인 캡션",
+  );
+  eq(
+    promotionContent("", "2026-07-15", "블로그 게시물"),
     "블로그 게시물 2026-07-15",
     "제목 없음(블로그 라벨)",
   );
@@ -200,13 +206,13 @@ async function main() {
   );
   eq(kstYmdFromIso(news[0].pubDate), "2026-09-04", "보도자료 게시일 → 활동일");
   eq(
-    promotionTitle(news[1].title, "2026-07-08", "보도자료"),
+    promotionContent(news[1].title, "2026-07-08", "보도자료"),
     "[국제신문] 동래구청소년센터, 고창군 청소년 기관과 교류",
-    "보도자료 제목 40자 규칙",
+    "보도자료 제목 → 홍보내용",
   );
   eq(parseHomepageNewsFeed("<rss><channel></channel></rss>").length, 0, "빈 보도자료 피드");
 
-  console.log(JSON.stringify({ ok: true, checks: 36 }));
+  console.log(JSON.stringify({ ok: true, checks: 37 }));
 }
 
 main().catch((error) => {

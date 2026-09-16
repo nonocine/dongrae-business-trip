@@ -10,7 +10,7 @@ import {
 } from "@/lib/instagramApi";
 import { fetchNaverBlogFeed } from "@/lib/naverBlogApi";
 import { fetchHomepageNewsFeed } from "@/lib/homepageNewsApi";
-import { kstYmdFromIso, promotionTitle } from "@/lib/promotionImport";
+import { kstYmdFromIso, promotionContent } from "@/lib/promotionImport";
 import {
   isTrainingPeriodValid,
   resolveTrainingEnd,
@@ -49,10 +49,14 @@ export type PromotionResult = {
   report_month: number;
   activity_date: string;
   category: string;
+  // 홍보내용 — 예전의 '제목 + 설명' 이 합쳐진 한 칸입니다(김민정 9/16). 여러 줄이
+  //   들어올 수 있고, description 컬럼은 더 이상 읽지도 쓰지도 않습니다.
   title: string;
   count: number;
   url: string;
-  description: string;
+  // 결과물 — 웹포스터·활동 사진·카드뉴스 등. 선택 입력이라 비어 있을 수 있고,
+  //   자동 수집 행은 항상 비어 있습니다.
+  deliverable: string | null;
   author_name: string;
   // 'manual' = 사람이 입력, 'auto' = [가져오기] 로 수집(인스타그램·블로그).
   //   auto 행은 아무 직원이나 지울 수 있습니다(deletePromotion 참고).
@@ -583,7 +587,7 @@ export async function saveResultDetails(
 }
 
 // 같은 활동을 밴드·SNS·홈페이지에 함께 올린 경우 한 번 입력으로 채널 수만큼
-//   행을 만듭니다(이민정 7월 실적에서 같은 제목을 4번 타이핑하고 있었음).
+//   행을 만듭니다(이민정 7월 실적에서 같은 내용을 4번 타이핑하고 있었음).
 //   * 등록에만 적용합니다 — 수정은 지금처럼 1건 단위(category 단일 값).
 //   * 채널별 링크는 url_{채널} 로 따로 받고, 비어 있으면 공통 링크를 씁니다.
 //   * categories 가 아예 없는 요청(옛 폼·외부 호출)은 단일 category 로 폴백합니다.
@@ -613,14 +617,18 @@ export async function savePromotion(
       report_month: Math.min(12, asInt(formData.get("month"), 1)),
       activity_date: String(formData.get("activity_date") ?? ""),
       category: String(formData.get("category") ?? "기타").trim() || "기타",
-      title: String(formData.get("title") ?? "").trim(),
+      // 홍보내용은 여러 줄 입력입니다. textarea 를 FormData 로 보내면 줄바꿈이
+      //   CRLF 로 오므로 LF 로 맞춰 저장합니다(출력물 줄바꿈 처리와 같은 형태).
+      title: String(formData.get("title") ?? "")
+        .replace(/\r\n?/g, "\n")
+        .trim(),
       count: asInt(formData.get("count"), 1),
       url: commonUrl,
-      description: String(formData.get("description") ?? "").trim(),
+      deliverable: String(formData.get("deliverable") ?? "").trim(),
       author_name: user.name,
     };
     if (!payload.activity_date || !payload.title) {
-      return { ok: false, message: "날짜와 제목을 입력해주세요." };
+      return { ok: false, message: "날짜와 홍보내용을 입력해주세요." };
     }
     if (id) {
       // 수정 — 관리자가 아니면 본인이 작성한 행만. author_name 은 원 작성자를 유지합니다.
@@ -1276,16 +1284,15 @@ async function registeredPermalinks(links: string[]): Promise<Set<string>> {
 }
 
 // 수집한 게시물 → business_promotions 행. 채널마다 다른 건 앞에서 정규화해
-//   넘기고, 여기서는 공통 규칙(게시일→월, 제목 40자, source='auto')만 적용합니다.
+//   넘기고, 여기서는 공통 규칙(게시일→월, 원문→홍보내용, source='auto')만 적용합니다.
 type ImportSeed = {
   url: string;
-  // 제목 원문(인스타그램 캡션 / 블로그 RSS 제목).
+  // 홍보내용 원문(인스타그램 캡션 / 블로그·보도자료 RSS 제목).
   text: string;
   // 게시일 원문. ISO 8601(인스타그램) 또는 RFC 822(블로그 RSS).
   publishedAt: string;
-  // 원문이 비었을 때 제목에 쓸 이름.
+  // 원문이 비었을 때 홍보내용에 쓸 이름.
   fallbackLabel: string;
-  description: string;
 };
 
 async function insertAutoPromotions(
@@ -1310,10 +1317,11 @@ async function insertAutoPromotions(
       report_month: Number(mo),
       activity_date: activityDate,
       category,
-      title: promotionTitle(s.text, activityDate, s.fallbackLabel),
+      title: promotionContent(s.text, activityDate, s.fallbackLabel),
       count: 1,
       url: s.url,
-      description: s.description,
+      // 결과물은 사람이 채우는 칸이라 자동 수집 행은 비워 둡니다(출력물에선 '-').
+      deliverable: null,
       author_name: authorName,
       source: "auto",
     };
@@ -1340,7 +1348,6 @@ export async function importInstagramPromotions(): Promise<PromotionImportResult
       text: m.caption,
       publishedAt: m.timestamp,
       fallbackLabel: "인스타그램 게시물",
-      description: m.caption,
     })),
     INSTAGRAM_CATEGORY,
     user.name,
@@ -1348,7 +1355,7 @@ export async function importInstagramPromotions(): Promise<PromotionImportResult
 }
 
 // 네이버 블로그 — 공개 RSS 라 토큰이 없고, 버튼도 항상 보입니다.
-//   RSS 본문(description)은 사진 태그가 섞여 있어 쓰지 않습니다 — 설명은 빈 값.
+//   RSS 본문(description)은 사진 태그가 섞여 있어 쓰지 않습니다 — 홍보내용은 글 제목.
 export async function importBlogPromotions(): Promise<PromotionImportResult> {
   const user = await requireUser();
   const items = await fetchNaverBlogFeed();
@@ -1358,7 +1365,6 @@ export async function importBlogPromotions(): Promise<PromotionImportResult> {
       text: i.title,
       publishedAt: i.pubDate,
       fallbackLabel: "블로그 게시물",
-      description: "",
     })),
     BLOG_CATEGORY,
     user.name,
@@ -1369,7 +1375,7 @@ export async function importBlogPromotions(): Promise<PromotionImportResult> {
 //   * 중복 판정 키는 guid(= 글 주소 .../news_board_view?no=187)입니다.
 //     ⚠️ 이 주소의 쿼리(?no=)를 떼면 모든 글이 같은 주소로 접힙니다 —
 //     lib/homepageNewsApi.ts normalizeLink 주석 참고.
-//   * RSS 본문(description)은 지금 빈 값으로 와서 설명도 빈 값으로 둡니다.
+//   * RSS 본문은 지금 빈 값으로 와서 홍보내용에는 글 제목만 들어갑니다.
 //   * ★ 이 피드는 최근 20건만 내려줍니다. 게시판 전체(180건 이상)보다 적게
 //     들어오는 것이 정상이고, 과거분 소급은 이번 범위가 아닙니다.
 export async function importHomepageNewsPromotions(): Promise<PromotionImportResult> {
@@ -1381,7 +1387,6 @@ export async function importHomepageNewsPromotions(): Promise<PromotionImportRes
       text: i.title,
       publishedAt: i.pubDate,
       fallbackLabel: "보도자료",
-      description: "",
     })),
     HOMEPAGE_NEWS_CATEGORY,
     user.name,

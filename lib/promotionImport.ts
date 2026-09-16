@@ -1,6 +1,6 @@
 // =====================================================================
 // 홍보실적 자동 수집 공용 유틸 — 인스타그램·블로그(·밴드 승인 후)가 함께 씁니다.
-//   * 채널마다 API 는 다르지만 "게시일로 월을 정하고, 첫 줄 40자로 제목을 만든다"
+//   * 채널마다 API 는 다르지만 "게시일로 월을 정하고, 원문으로 홍보내용을 만든다"
 //     는 규칙은 같습니다. 그 규칙만 여기에 모읍니다.
 //   * DB 는 모릅니다(순수 함수) — 등록된 링크 조회 같은 DB 작업은 서버 액션
 //     (app/business-results/actions.ts) 쪽에 둡니다. 그래야 토큰·네트워크 없이
@@ -25,23 +25,19 @@ export function kstYmdFromIso(timestamp: string): string {
   )}`;
 }
 
-// 원문 → 홍보실적 제목. 첫 줄(빈 줄 건너뜀)을 40자까지 씁니다.
-//   * 인스타그램은 캡션(여러 줄), 블로그는 RSS 제목(한 줄)이 들어옵니다.
-//   * 원문이 비어 있으면 fallbackLabel + 날짜로 제목을 만듭니다
-//     (사진만 올린 인스타그램 게시물 등).
-const TITLE_MAX = 40;
-export function promotionTitle(
+// 원문 → 홍보실적의 '홍보내용'(title 컬럼). 줄바꿈을 그대로 살려 전부 담습니다.
+//   * '제목 + 설명' 두 칸이 '홍보내용' 한 칸으로 합쳐지면서(김민정 9/16) 긴 원문을
+//     짧은 제목으로 줄일 이유가 없어졌습니다 — 인스타그램 캡션은 예전에 설명 칸에
+//     통째로 들어가던 값이라, 이제 홍보내용 한 칸에 그대로 들어가는 것이 맞습니다.
+//   * 블로그·보도자료 RSS 제목은 원래 한 줄이라 결과가 예전과 같습니다.
+//   * 원문이 비어 있으면 fallbackLabel + 날짜로 만듭니다(사진만 올린 게시물 등).
+export function promotionContent(
   text: string,
   dateYmd: string,
   fallbackLabel: string,
 ): string {
-  const firstLine =
-    text
-      .split("\n")
-      .map((line) => line.trim())
-      .find(Boolean) ?? "";
-  if (!firstLine) return `${fallbackLabel} ${dateYmd || ""}`.trim();
-  return firstLine.length > TITLE_MAX
-    ? `${firstLine.slice(0, TITLE_MAX)}…`
-    : firstLine;
+  // 앞뒤 빈 줄·공백만 덜어내고 가운데 줄바꿈은 그대로 둡니다.
+  const body = (text ?? "").replace(/\r\n?/g, "\n").trim();
+  if (!body) return `${fallbackLabel} ${dateYmd || ""}`.trim();
+  return body;
 }
