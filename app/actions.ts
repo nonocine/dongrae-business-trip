@@ -6,7 +6,6 @@ import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
 import {
   supabase,
-  normalizeBusinessTrip,
   normalizeActivity,
   normalizeDrivingLog,
   settingsFromRows,
@@ -20,13 +19,11 @@ import {
   generateTempPassword,
   type Activity,
   type ActivityKind,
-  type BusinessTrip,
   type Driver,
   type DrivingLog,
   type Employee,
   type EmployeeRank,
   type Settings,
-  type TransportType,
 } from "@/lib/supabase";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
 import {
@@ -38,10 +35,10 @@ import { verifyPayload } from "@/lib/signedCookie";
 import { TRUSTED_DEVICE_COOKIE } from "@/lib/pin";
 
 // =====================================================================
-// SEC-2 (진행 중): dongrae-car 와 공유하는 3개 테이블(drivers·driving_logs·
+// SEC-2 (진행 중): 차량 앱과 공유하는 3개 테이블(drivers·driving_logs·
 //   settings)은 anon 권한 회수 대상이므로 supabaseAdmin(service_role)으로
-//   접근합니다. 그 외 테이블(business_trips 등)과 Storage 는 아직 anon 을
-//   그대로 쓰며, SEC-2 후속에서 이전할 예정입니다.
+//   접근합니다. 통합 활동 Storage 는 아직 anon 클라이언트를 사용하며,
+//   SEC-2 후속에서 비공개 서버 접근으로 이전할 예정입니다.
 //   → 이 파일에 supabase 와 supabaseAdmin 이 공존하는 것은 의도된 중간 상태입니다.
 //   ⚠ supabaseAdmin 은 RLS 를 우회하므로, 새로 추가하는 호출은 반드시 호출부에
 //     권한 게이트(requireAdmin / requireSession 등)가 있는지 확인하세요.
@@ -54,8 +51,6 @@ const EMPLOYEE_COOKIE = "dongrae_employee";
 
 const STORAGE_BUCKET_PHOTOS = "trip-photos";
 const STORAGE_BUCKET_RECEIPTS = "trip-receipts";
-
-const TRANSPORT_VALUES: TransportType[] = ["vehicle", "public", "walk"];
 
 // =====================================================================
 // Sessions (employee)
@@ -154,84 +149,6 @@ async function uploadFiles(
   return urls;
 }
 
-// =====================================================================
-// Business trips
-// =====================================================================
-export async function createBusinessTrip(formData: FormData) {
-  const session = await requireSession();
-
-  const trip_date = String(formData.get("trip_date") ?? "");
-  const destination = String(formData.get("destination") ?? "").trim();
-  // 직원 세션은 traveler를 본인 이름으로 강제 (폼 변조 방지)
-  const traveler =
-    session.kind === "employee"
-      ? session.name
-      : String(formData.get("traveler") ?? "").trim();
-  const companionRaw = formData.getAll("companion");
-  const companion = companionRaw
-    .map((v) => String(v).trim())
-    .filter((v) => v.length > 0);
-  const purpose = String(formData.get("purpose") ?? "").trim();
-  const transport_type = String(formData.get("transport_type") ?? "");
-  const transport_cost_raw = String(formData.get("transport_cost") ?? "").trim();
-  const meeting_content = String(formData.get("meeting_content") ?? "").trim();
-  const main_agenda = String(formData.get("main_agenda") ?? "").trim();
-  const result = String(formData.get("result") ?? "").trim();
-
-  if (!trip_date || !destination || !traveler || !purpose) {
-    throw new Error("필수 항목(일자/출장지/출장자/목적)을 입력해주세요.");
-  }
-  if (!TRANSPORT_VALUES.includes(transport_type as TransportType)) {
-    throw new Error("이동수단을 선택해주세요.");
-  }
-
-  let transport_cost: number | null = null;
-  if (transport_type === "public" && transport_cost_raw) {
-    const n = Number(transport_cost_raw);
-    if (Number.isFinite(n) && n >= 0) transport_cost = Math.round(n);
-  }
-
-  const photoFiles = formData
-    .getAll("photos")
-    .filter((v): v is File => v instanceof File);
-  if (photoFiles.length > 5) {
-    throw new Error("인증샷은 최대 5장까지 업로드할 수 있습니다.");
-  }
-  const receiptFiles = formData
-    .getAll("receipts")
-    .filter((v): v is File => v instanceof File);
-
-  const [photos, receipts] = await Promise.all([
-    uploadFiles(STORAGE_BUCKET_PHOTOS, photoFiles),
-    transport_type === "public"
-      ? uploadFiles(STORAGE_BUCKET_RECEIPTS, receiptFiles)
-      : Promise.resolve([] as string[]),
-  ]);
-
-  const { data, error } = await supabase
-    .from("business_trips")
-    .insert({
-      trip_date,
-      destination,
-      traveler,
-      companion,
-      purpose,
-      transport_type,
-      transport_cost,
-      meeting_content,
-      main_agenda,
-      result,
-      photos,
-      receipts,
-    })
-    .select("id")
-    .single();
-  if (error) throw new Error(error.message);
-
-  revalidatePath("/");
-  redirect(`/trips/${data.id}`);
-}
-
 function extractStorageKey(publicUrl: string, bucket: string): string | null {
   const marker = `/${bucket}/`;
   const idx = publicUrl.indexOf(marker);
@@ -244,181 +161,12 @@ function extractStorageKey(publicUrl: string, bucket: string): string | null {
   }
 }
 
-export async function deleteBusinessTrip(formData: FormData) {
-  await requireAdmin();
-  const id = String(formData.get("id") ?? "");
-  if (!id) throw new Error("삭제할 항목 ID가 없습니다.");
-
-  // 1) photos / receipts 키 수집 → Storage에서 함께 삭제
-  const { data: row, error: fetchErr } = await supabase
-    .from("business_trips")
-    .select("photos, receipts")
-    .eq("id", id)
-    .maybeSingle();
-  if (fetchErr) throw new Error(fetchErr.message);
-
-  if (row) {
-    const photoKeys = toStringArray(row.photos)
-      .map((u) => extractStorageKey(u, STORAGE_BUCKET_PHOTOS))
-      .filter((k): k is string => !!k);
-    const receiptKeys = toStringArray(row.receipts)
-      .map((u) => extractStorageKey(u, STORAGE_BUCKET_RECEIPTS))
-      .filter((k): k is string => !!k);
-
-    if (photoKeys.length > 0) {
-      await supabase.storage.from(STORAGE_BUCKET_PHOTOS).remove(photoKeys);
-    }
-    if (receiptKeys.length > 0) {
-      await supabase.storage.from(STORAGE_BUCKET_RECEIPTS).remove(receiptKeys);
-    }
-  }
-
-  // 2) DB 행 삭제
-  const { error } = await supabase.from("business_trips").delete().eq("id", id);
-  if (error) throw new Error(error.message);
-
-  revalidatePath("/");
-  revalidatePath("/admin");
-}
-
-export async function listBusinessTrips(
-  month?: string
-): Promise<BusinessTrip[]> {
-  const session = await getSession();
-  if (!session) return [];
-
-  let query = supabase
-    .from("business_trips")
-    .select("*")
-    .order("trip_date", { ascending: false })
-    .order("created_at", { ascending: false });
-
-  if (session.kind === "employee") {
-    query = query.eq("traveler", session.name);
-  }
-
-  if (month && /^\d{4}-\d{2}$/.test(month)) {
-    const [y, m] = month.split("-").map(Number);
-    const start = `${month}-01`;
-    const endDate = new Date(Date.UTC(y, m, 1));
-    const end = endDate.toISOString().slice(0, 10);
-    query = query.gte("trip_date", start).lt("trip_date", end);
-  }
-
-  const { data, error } = await query;
-  if (error) throw new Error(error.message);
-  return (data ?? []).map((row) =>
-    normalizeBusinessTrip(row as Record<string, unknown>)
-  );
-}
-
-export async function getBusinessTrip(id: string): Promise<BusinessTrip | null> {
-  const session = await getSession();
-  if (!session) return null;
-
-  const { data, error } = await supabase
-    .from("business_trips")
-    .select("*")
-    .eq("id", id)
-    .maybeSingle();
-  if (error) throw new Error(error.message);
-  if (!data) return null;
-
-  const trip = normalizeBusinessTrip(data as Record<string, unknown>);
-  if (session.kind === "employee" && trip.traveler !== session.name) {
-    return null; // 본인 출장이 아니면 권한 없음으로 취급
-  }
-  return trip;
-}
-
-// =====================================================================
-// Admin stats
-// =====================================================================
-export type AdminStats = {
-  total: number;
-  thisMonth: number;
-  thisMonthCost: number;
-  uniqueTravelers: number;
-  byTraveler: { name: string; count: number }[];
-  byTransport: { type: TransportType; count: number }[];
-  recent: {
-    id: string;
-    destination: string;
-    trip_date: string;
-    traveler: string;
-    transport_type: TransportType;
-  }[];
-};
-
 function todayMonthStartKR(): string {
   const now = new Date();
   const tz = new Date(now.getTime() + 9 * 60 * 60 * 1000);
   const y = tz.getUTCFullYear();
   const m = String(tz.getUTCMonth() + 1).padStart(2, "0");
   return `${y}-${m}-01`;
-}
-
-export async function getAdminStats(): Promise<AdminStats> {
-  await requireAdmin();
-
-  const { data, error } = await supabase
-    .from("business_trips")
-    .select(
-      "id, trip_date, destination, traveler, transport_type, transport_cost, created_at"
-    )
-    .order("trip_date", { ascending: false })
-    .order("created_at", { ascending: false });
-  if (error) throw new Error(error.message);
-  const rows = data ?? [];
-
-  const monthStart = todayMonthStartKR();
-  let thisMonth = 0;
-  let thisMonthCost = 0;
-  const travelerCount = new Map<string, number>();
-  const transportCount = new Map<TransportType, number>();
-  const uniqueTravelers = new Set<string>();
-  for (const r of rows) {
-    const isThisMonth = (r.trip_date as string) >= monthStart;
-    if (isThisMonth) {
-      thisMonth += 1;
-      if (r.transport_type === "public" && r.transport_cost != null) {
-        thisMonthCost += Number(r.transport_cost) || 0;
-      }
-    }
-    const t = r.traveler as string;
-    travelerCount.set(t, (travelerCount.get(t) ?? 0) + 1);
-    uniqueTravelers.add(t);
-    const tt = r.transport_type as TransportType;
-    transportCount.set(tt, (transportCount.get(tt) ?? 0) + 1);
-  }
-
-  const byTraveler = [...travelerCount.entries()]
-    .sort((a, b) => b[1] - a[1])
-    .slice(0, 5)
-    .map(([name, count]) => ({ name, count }));
-
-  const byTransport = TRANSPORT_VALUES.map((type) => ({
-    type,
-    count: transportCount.get(type) ?? 0,
-  }));
-
-  const recent = rows.slice(0, 5).map((r) => ({
-    id: r.id as string,
-    destination: r.destination as string,
-    trip_date: r.trip_date as string,
-    traveler: r.traveler as string,
-    transport_type: r.transport_type as TransportType,
-  }));
-
-  return {
-    total: rows.length,
-    thisMonth,
-    thisMonthCost,
-    uniqueTravelers: uniqueTravelers.size,
-    byTraveler,
-    byTransport,
-    recent,
-  };
 }
 
 // =====================================================================

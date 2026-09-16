@@ -25,6 +25,7 @@ import { sendSlack } from "@/lib/slack";
 export const BACKUP_TABLES: readonly string[] = [
   // --- 활동/차량 ---
   "activities",
+  // 구형 독립 출장일지 데이터. 운영 DB 폐기 전까지 읽기 전용 백업은 유지합니다.
   "business_trips",
   "drivers",
   "driving_logs",
