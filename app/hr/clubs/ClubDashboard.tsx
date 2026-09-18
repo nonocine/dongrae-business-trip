@@ -11,6 +11,8 @@ import {
   confirmClubReport,
   createClub,
   createClubTeacher,
+  deactivateClubTeacherRole,
+  reactivateClubTeacherRole,
   deleteClub,
   deleteClubBudgetPlan,
   deleteClubSession,
@@ -32,6 +34,7 @@ import {
   badgeNeutral,
   badgeNavy,
   badgeWarning,
+  badgeDanger,
   noticeError,
   noticeSuccess,
 } from "@/lib/ui";
@@ -190,6 +193,19 @@ export default function ClubDashboard({
               : `${teacher.name}님을 동아리샘에서 제거했습니다.`
           )
         }
+        onDeactivate={(teacher, reason) =>
+          run(
+            () =>
+              deactivateClubTeacherRole({ instructorId: teacher.id, reason }),
+            `${teacher.name}님의 동아리샘 역할을 중지했습니다. (로그인 계정과 다른 역할은 그대로)`
+          )
+        }
+        onReactivate={(teacher) =>
+          run(
+            () => reactivateClubTeacherRole({ instructorId: teacher.id }),
+            `${teacher.name}님의 동아리샘 역할을 다시 활성으로 바꿨습니다.`
+          )
+        }
       />
 
       <section className={cardCls}>
@@ -269,22 +285,51 @@ function Summary({ label, value }: { label: string; value: string }) {
   );
 }
 
-// 등록된 동아리샘 목록. 제거는 역할 해제일 뿐 계정 삭제가 아니라서,
-//   겸직 여부에 따라 문구를 다르게 해 오해를 막는다.
+// 중지 기록을 사람이 읽는 한 줄로. (비활성 행 마우스 오버용)
+function deactivationNote(teacher: ClubTeacherRow): string {
+  const when = teacher.roleDeactivatedAt
+    ? new Date(teacher.roleDeactivatedAt).toLocaleString("ko-KR", {
+        year: "numeric",
+        month: "2-digit",
+        day: "2-digit",
+        hour: "2-digit",
+        minute: "2-digit",
+      })
+    : "시점 미기록";
+  const who = teacher.roleDeactivatedBy ?? "기록 없음";
+  const why = teacher.roleDeactivateReason ?? "사유 미입력";
+  return `중지: ${when} · ${who} · ${why}`;
+}
+
+// 등록된 동아리샘 목록.
+//   화면에 "활성"이 두 개 나오므로 라벨을 확실히 갈라 둔다.
+//     · 계정 배지("계정 활성/…")  = 동래샘들 로그인 상태. 여기서는 표시만 하고 바꾸지 않는다.
+//     · 역할 배지("동아리샘 활성/중지") = 동아리 역할만의 상태. 중지/다시 활성 버튼이 다루는 대상.
+//   중지(되돌릴 수 있음)와 제거(역할 삭제)는 다른 동작이라 버튼을 둘 다 남긴다.
 function TeacherList({
   teachers,
   pending,
   onRemove,
+  onDeactivate,
+  onReactivate,
 }: {
   teachers: ClubTeacherRow[];
   pending: boolean;
   onRemove: (teacher: ClubTeacherRow) => void;
+  onDeactivate: (teacher: ClubTeacherRow, reason: string) => void;
+  onReactivate: (teacher: ClubTeacherRow) => void;
 }) {
   return (
     <section className={cardCls}>
       <h2 className="text-base font-bold text-ink">동아리샘 목록</h2>
       <p className="mt-1 text-xs text-ink-muted">
-        제거해도 계정은 남습니다. 동아리 역할만 사라집니다.
+        <b>중지</b>는 동아리샘 역할만 잠시 끄는 것이라 언제든 되돌릴 수 있고,{" "}
+        <b>제거</b>는 역할 자체를 지웁니다(다시 등록해야 함). 둘 다 계정과 강사
+        역할은 건드리지 않습니다.
+      </p>
+      <p className="mt-1 text-xs text-ink-hint">
+        “계정” 배지는 동래샘들 로그인 상태, “동아리샘” 배지는 역할 상태입니다.
+        이 화면에서는 역할만 바뀝니다.
       </p>
       {teachers.length === 0 ? (
         <p className="py-8 text-center text-sm text-ink-hint">
@@ -292,41 +337,91 @@ function TeacherList({
         </p>
       ) : (
         <ul className="mt-3 divide-y divide-line">
-          {teachers.map((teacher) => (
-            <li
-              key={teacher.id}
-              className="flex flex-wrap items-center gap-x-2 gap-y-1 py-2"
-            >
-              <span className="font-semibold text-ink">{teacher.name}</span>
-              {teacher.alsoInstructor && (
-                <span className={badgeNavy}>강사 겸직</span>
-              )}
-              <span
-                className={
-                  teacher.status === "active" ? badgeSuccess : badgeNeutral
-                }
+          {teachers.map((teacher) => {
+            const roleActive = teacher.roleStatus === "active";
+            return (
+              <li
+                key={teacher.id}
+                title={roleActive ? undefined : deactivationNote(teacher)}
+                className={`flex flex-wrap items-center gap-x-2 gap-y-1 py-2 ${
+                  roleActive ? "" : "bg-surface/60 opacity-60"
+                }`}
               >
-                {teacher.status === "active" ? "활성" : teacher.status}
-              </span>
-              <span className="text-xs text-ink-muted">
-                {teacher.phone ?? "연락처 없음"}
-              </span>
-              <button
-                type="button"
-                disabled={pending}
-                onClick={() => {
-                  const ask = teacher.alsoInstructor
-                    ? `${teacher.name}님의 동아리샘 역할만 해제합니다. 강사 자격과 서류는 그대로 유지됩니다. 계속할까요?`
-                    : `${teacher.name}님을 동아리샘에서 제거할까요? 계정은 남고 동아리 역할만 사라집니다.`;
-                  if (!window.confirm(ask)) return;
-                  onRemove(teacher);
-                }}
-                className={`ml-auto shrink-0 ${btnSecondary}`}
-              >
-                {teacher.alsoInstructor ? "동아리샘 역할 해제" : "제거"}
-              </button>
-            </li>
-          ))}
+                <span
+                  className={`font-semibold ${
+                    roleActive ? "text-ink" : "text-ink-muted line-through"
+                  }`}
+                >
+                  {teacher.name}
+                </span>
+                {teacher.alsoInstructor && (
+                  <span className={badgeNavy}>강사 겸직</span>
+                )}
+                {/* 역할 상태 — 이 화면의 토글 대상 */}
+                <span className={roleActive ? badgeSuccess : badgeWarning}>
+                  {roleActive ? "동아리샘 활성" : "동아리샘 중지"}
+                </span>
+                {/* 계정(로그인) 상태 — 정보 표시 전용 */}
+                <span
+                  className={
+                    teacher.status === "active" ? badgeNeutral : badgeDanger
+                  }
+                >
+                  계정 {teacher.status === "active" ? "활성" : teacher.status}
+                </span>
+                <span className="text-xs text-ink-muted">
+                  {teacher.phone ?? "연락처 없음"}
+                </span>
+                {!roleActive && (
+                  <span className="w-full text-xs text-ink-hint sm:w-auto">
+                    {deactivationNote(teacher)}
+                  </span>
+                )}
+                <div className="ml-auto flex shrink-0 gap-2">
+                  {roleActive ? (
+                    <button
+                      type="button"
+                      disabled={pending}
+                      onClick={() => {
+                        const reason = window.prompt(
+                          `${teacher.name}님의 동아리샘 역할을 중지합니다.\n로그인 계정과 강사 역할, 이미 맡은 동아리·과거 기록은 그대로 남습니다.\n\n중지 사유(선택, 예: 2026년 활동 종료)`,
+                          ""
+                        );
+                        if (reason === null) return; // 취소
+                        onDeactivate(teacher, reason.trim());
+                      }}
+                      className={btnSecondary}
+                    >
+                      중지
+                    </button>
+                  ) : (
+                    <button
+                      type="button"
+                      disabled={pending}
+                      onClick={() => onReactivate(teacher)}
+                      className={btnSecondary}
+                    >
+                      다시 활성
+                    </button>
+                  )}
+                  <button
+                    type="button"
+                    disabled={pending}
+                    onClick={() => {
+                      const ask = teacher.alsoInstructor
+                        ? `${teacher.name}님의 동아리샘 역할만 해제합니다. 강사 자격과 서류는 그대로 유지됩니다. 계속할까요?`
+                        : `${teacher.name}님을 동아리샘에서 제거할까요? 계정은 남고 동아리 역할만 사라집니다.`;
+                      if (!window.confirm(ask)) return;
+                      onRemove(teacher);
+                    }}
+                    className={btnSecondary}
+                  >
+                    {teacher.alsoInstructor ? "동아리샘 역할 해제" : "제거"}
+                  </button>
+                </div>
+              </li>
+            );
+          })}
         </ul>
       )}
     </section>
@@ -515,8 +610,9 @@ function ClubForm({
           className={inputCls}
         >
           <option value="">동아리샘 미지정</option>
+          {/* 담당샘 후보 = 계정이 살아 있고(로그인 가능) 동아리샘 역할도 활성인 사람만 */}
           {teachers
-            .filter((t) => t.status === "active")
+            .filter((t) => t.status === "active" && t.roleStatus === "active")
             .map((teacher) => (
               <option key={teacher.id} value={teacher.id}>
                 {teacher.name}

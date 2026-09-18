@@ -4,7 +4,15 @@ import { randomUUID } from "node:crypto";
 import { revalidatePath } from "next/cache";
 import { requireClubAccess } from "@/lib/clubAccess";
 import { normalizePhone, saemAppUrl } from "@/lib/saem";
-import { getInstructorIdsWithRole, addRole, removeRole } from "@/lib/saemRoles";
+import {
+  getInstructorIdsWithRole,
+  getRoleRowsWithRole,
+  addRole,
+  removeRole,
+  deactivateRole,
+  reactivateRole,
+  type SaemRoleStatus,
+} from "@/lib/saemRoles";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
 import { sendSlack, siteBaseUrl, slackLink } from "@/lib/slack";
 
@@ -15,14 +23,21 @@ type ActionResult<T = unknown> =
   | ({ ok: true } & T)
   | { ok: false; message: string };
 
+// 한 줄에 "활성"이 두 개 있다. 절대 섞지 말 것.
+//   status     = saem_instructors.status  → 동래샘들 로그인 계정 상태. 표시 전용이고 이 화면에서 바꾸지 않는다.
+//   roleStatus = saem_member_roles.status → 동아리샘 역할 하나만의 상태. 이 화면의 중지/다시 활성 대상.
 export type ClubTeacherRow = {
   id: string;
   name: string;
   phone: string | null;
   email: string | null;
-  status: string;
+  status: string; // 계정(로그인) 상태 — 표시 전용
   password_set_at: string | null;
-  alsoInstructor: boolean; // 강사 겸직 여부 (배지 표시용)
+  alsoInstructor: boolean; // 강사 역할 겸직 여부 (배지 표시용)
+  roleStatus: SaemRoleStatus; // 동아리샘 역할 상태
+  roleDeactivatedAt: string | null;
+  roleDeactivatedBy: string | null;
+  roleDeactivateReason: string | null;
 };
 
 // 등록 UI의 "기존 강사에서 선택"용. 아직 동아리 역할이 없는 강사 목록.
@@ -122,6 +137,7 @@ function monthRange(year: number, month: number) {
 }
 
 // 동아리 역할(club_teacher)을 가진 계정 id 목록. 순수 동아리샘 + 강사 겸직자 모두 포함.
+// 기본이 활성 역할만이라, 담당자 선택 등 "동아리샘을 고르는 자리"에서 중지된 사람은 자동으로 빠진다.
 async function clubTeacherIds(): Promise<string[]> {
   return getInstructorIdsWithRole(CLUB_ROLE);
 }
@@ -132,14 +148,17 @@ export async function getClubDashboard(
 ): Promise<ClubDashboardData> {
   await requireClubAccess();
 
-  // 1) 동아리 역할자 id 목록 (겸직 포함) → 계정 정보 조회
-  let teacherIds: string[] = [];
+  // 1) 동아리 역할자 목록 (겸직 포함) → 계정 정보 조회
+  //    관리 화면이라 중지된 역할까지 함께 읽는다(activeOnly:false). 목록에 회색으로 남겨야 하므로.
+  let roleRows: Awaited<ReturnType<typeof getRoleRowsWithRole>> = [];
   try {
-    teacherIds = await clubTeacherIds();
+    roleRows = await getRoleRowsWithRole(CLUB_ROLE, { activeOnly: false });
   } catch (e) {
     // 역할 테이블이 아직 없으면 미구성으로 처리
     return { configured: false, teachers: [], instructors: [], clubs: [] };
   }
+  const roleById = new Map(roleRows.map((r) => [r.instructorId, r]));
+  const teacherIds = roleRows.map((r) => r.instructorId);
 
   const teacherQuery = teacherIds.length
     ? await supabaseAdmin
@@ -153,16 +172,34 @@ export async function getClubDashboard(
   }
   if (teacherQuery.error) throw new Error(teacherQuery.error.message);
 
-  // 각 동아리샘이 강사 역할도 가졌는지(겸직 배지용)
+  // 각 동아리샘이 (활성) 강사 역할도 가졌는지 — 겸직 배지·겸직 지정 후보용
   const instructorRoleIds = new Set(
     await getInstructorIdsWithRole("instructor")
   );
-  const teachers: ClubTeacherRow[] = (teacherQuery.data ?? []).map((r) => {
-    const row = r as Omit<ClubTeacherRow, "alsoInstructor">;
-    return { ...row, alsoInstructor: instructorRoleIds.has(row.id) };
-  });
+  const teachers: ClubTeacherRow[] = (teacherQuery.data ?? [])
+    .map((r) => {
+      const row = r as Pick<
+        ClubTeacherRow,
+        "id" | "name" | "phone" | "email" | "status" | "password_set_at"
+      >;
+      const role = roleById.get(row.id);
+      return {
+        ...row,
+        alsoInstructor: instructorRoleIds.has(row.id),
+        roleStatus: role?.status ?? "active",
+        roleDeactivatedAt: role?.deactivatedAt ?? null,
+        roleDeactivatedBy: role?.deactivatedBy ?? null,
+        roleDeactivateReason: role?.deactivateReason ?? null,
+      };
+    })
+    // 활성 역할이 먼저, 중지된 역할은 아래로. 그 안에서는 이름순.
+    .sort((a, b) => {
+      if (a.roleStatus !== b.roleStatus) return a.roleStatus === "active" ? -1 : 1;
+      return a.name.localeCompare(b.name, "ko");
+    });
 
-  // 2) 겸직 지정용: 아직 동아리 역할이 없는 강사 목록
+  // 2) 겸직 지정용: 아직 동아리 역할 행이 없는 강사 목록.
+  //    중지된 역할을 가진 사람은 여기 다시 뜨지 않는다 — 목록의 [다시 활성] 버튼으로 되살린다.
   const teacherIdSet = new Set(teacherIds);
   const instrQuery = await supabaseAdmin
     .from("saem_instructors")
@@ -624,6 +661,51 @@ export async function removeClubTeacher(input: {
       ok: false,
       message:
         error instanceof Error ? error.message : "제거하지 못했습니다.",
+    };
+  }
+}
+
+// 동아리샘 역할 "중지". 제거(removeClubTeacher)와 달리 행이 남아 되돌릴 수 있다.
+//   건드리는 것: saem_member_roles(club_teacher).status 하나뿐.
+//   건드리지 않는 것: saem_instructors.status(로그인 계정), 강사 역할, 이미 지정된 담당 동아리,
+//                     과거 활동기록·월간보고. 과거 데이터는 그대로 남는다.
+export async function deactivateClubTeacherRole(input: {
+  instructorId: string;
+  reason?: string;
+}): Promise<ActionResult> {
+  try {
+    // 권한은 현행 정책(로그인 직원 누구나) 그대로. 서버에서 다시 검증한다.
+    const access = await requireClubAccess();
+    const id = input.instructorId?.trim();
+    if (!id) return { ok: false, message: "대상이 없습니다." };
+    await deactivateRole(id, CLUB_ROLE, input.reason, access.name);
+    revalidatePath("/hr/clubs");
+    return { ok: true };
+  } catch (error) {
+    return {
+      ok: false,
+      message:
+        error instanceof Error ? error.message : "중지하지 못했습니다.",
+    };
+  }
+}
+
+// 중지했던 동아리샘 역할을 다시 활성으로. 중지 기록(언제·누가·왜)은 지워진다.
+export async function reactivateClubTeacherRole(input: {
+  instructorId: string;
+}): Promise<ActionResult> {
+  try {
+    await requireClubAccess();
+    const id = input.instructorId?.trim();
+    if (!id) return { ok: false, message: "대상이 없습니다." };
+    await reactivateRole(id, CLUB_ROLE);
+    revalidatePath("/hr/clubs");
+    return { ok: true };
+  } catch (error) {
+    return {
+      ok: false,
+      message:
+        error instanceof Error ? error.message : "다시 활성하지 못했습니다.",
     };
   }
 }
