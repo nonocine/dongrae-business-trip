@@ -923,68 +923,72 @@ export default function BusinessResultsDashboard({
       )}
       {tab === "promotions" && (
         <section className={cardCls}>
-          <div className="flex items-center justify-between gap-3">
+          {/* 좁은 화면(휴대폰)에서는 제목 아래로 버튼이 내려가고 버튼 3개가
+              세로로 쌓입니다. 예전에는 한 줄에 우겨넣느라 버튼 글자가 한 자씩
+              세로로 꺾이고 아래 안내문과 겹쳤습니다(관장 실기기 제보).
+              sm(640px) 이상에서는 종전과 똑같이 제목 오른쪽에 가로로 붙습니다.
+              채용공고 목록 머리글(app/hr/RecruitmentPostingsTab.tsx)과 같은
+              flex-wrap + w-full sm:w-auto 패턴입니다. */}
+          <div className="flex flex-wrap items-center justify-between gap-2">
             <h2 className="font-bold text-ink">
               {editingPromo
                 ? "홍보·대외협력 수정"
                 : `${periodLabel} 홍보·대외협력`}
             </h2>
-            <div className="flex items-center gap-3">
-              {/* 가져오기 — 누르면 아직 등록 안 된 게시물이 전부 즉시 등록됩니다
-                  (고르는 단계 없음). 권한은 수기 입력과 동일(이 화면에 들어온 직원).
-                  인스타그램은 토큰이 있어야 보이고, 블로그·보도자료는 공개 RSS 라
-                  항상 보입니다. */}
-              {!editingPromo && (
-                <>
-                  {data.instagramConfigured && (
-                    <button
-                      type="button"
-                      disabled={pending}
-                      className={`${btnSecondary} h-9 px-3 text-xs`}
-                      onClick={() =>
-                        runImport("인스타그램", importInstagramPromotions)
-                      }
-                    >
-                      📷 인스타그램에서 가져오기
-                    </button>
-                  )}
+            {/* 가져오기 — 누르면 아직 등록 안 된 게시물이 전부 즉시 등록됩니다
+                (고르는 단계 없음). 권한은 수기 입력과 동일(이 화면에 들어온 직원).
+                인스타그램은 토큰이 있어야 보이고, 블로그·보도자료는 공개 RSS 라
+                항상 보입니다. */}
+            {!editingPromo && (
+              <div className="flex w-full flex-col gap-2 sm:w-auto sm:flex-row sm:items-center sm:gap-3">
+                {data.instagramConfigured && (
                   <button
                     type="button"
                     disabled={pending}
-                    className={`${btnSecondary} h-9 px-3 text-xs`}
-                    onClick={() => runImport("블로그", importBlogPromotions)}
-                  >
-                    ✍️ 블로그에서 가져오기
-                  </button>
-                  {/* 보도자료 — 홈페이지 게시판 RSS. 구분은 "홈페이지" 로
-                      들어갑니다(직원들이 수기로 쓰던 값과 같음).
-                      ★ RSS 가 최근 20건만 내려줘서 게시판 전체보다 적게
-                        들어오는 것이 정상입니다. 과거분 소급은 범위 밖. */}
-                  <button
-                    type="button"
-                    disabled={pending}
-                    className={`${btnSecondary} h-9 px-3 text-xs`}
+                    className={`${btnSecondary} h-9 w-full whitespace-nowrap px-3 text-xs sm:w-auto`}
                     onClick={() =>
-                      runImport("보도자료", importHomepageNewsPromotions)
+                      runImport("인스타그램", importInstagramPromotions)
                     }
                   >
-                    📰 보도자료에서 가져오기
+                    📷 인스타그램에서 가져오기
                   </button>
-                </>
-              )}
-              {editingPromo && (
+                )}
                 <button
                   type="button"
-                  className="text-sm font-semibold text-ink-muted hover:underline"
-                  onClick={() => {
-                    setEditingPromo(null);
-                    resetPromoChannels();
-                  }}
+                  disabled={pending}
+                  className={`${btnSecondary} h-9 w-full whitespace-nowrap px-3 text-xs sm:w-auto`}
+                  onClick={() => runImport("블로그", importBlogPromotions)}
                 >
-                  수정 취소
+                  ✍️ 블로그에서 가져오기
                 </button>
-              )}
-            </div>
+                {/* 보도자료 — 홈페이지 게시판 RSS. 구분은 "홈페이지" 로
+                    들어갑니다(직원들이 수기로 쓰던 값과 같음).
+                    ★ RSS 가 최근 20건만 내려줘서 게시판 전체보다 적게
+                      들어오는 것이 정상입니다. 과거분 소급은 범위 밖. */}
+                <button
+                  type="button"
+                  disabled={pending}
+                  className={`${btnSecondary} h-9 w-full whitespace-nowrap px-3 text-xs sm:w-auto`}
+                  onClick={() =>
+                    runImport("보도자료", importHomepageNewsPromotions)
+                  }
+                >
+                  📰 보도자료에서 가져오기
+                </button>
+              </div>
+            )}
+            {editingPromo && (
+              <button
+                type="button"
+                className="text-sm font-semibold text-ink-muted hover:underline"
+                onClick={() => {
+                  setEditingPromo(null);
+                  resetPromoChannels();
+                }}
+              >
+                수정 취소
+              </button>
+            )}
           </div>
 
           {/* ④ RSS 는 최근 글만 내려줍니다 — 게시판 전체가 다 들어오지

@@ -245,11 +245,14 @@ export default function StaffTrainingTab({
                       {row.source === "mandatory" ? "의무교육" : "수동"}
                     </span>
                   </td>
-                  <td className="border-t border-line px-3 py-2.5 text-center">
+                  {/* 좁은 화면에서 이 칸이 눌리면 "수정"·"삭제" 가 한 자씩
+                      세로로 꺾였습니다. 표는 원래 가로 스크롤이므로 칸이
+                      제 폭을 갖게 두고 글자만 줄바꿈을 막습니다. */}
+                  <td className="whitespace-nowrap border-t border-line px-3 py-2.5 text-center">
                     <div className="flex justify-center gap-1">
                       <button
                         type="button"
-                        className="rounded border border-line px-2 py-1 text-xs font-bold text-navy hover:bg-navy-soft"
+                        className="whitespace-nowrap rounded border border-line px-2 py-1 text-xs font-bold text-navy hover:bg-navy-soft"
                         onClick={() => {
                           setEditing(row);
                           window.scrollTo({ top: 0, behavior: "smooth" });
@@ -260,7 +263,7 @@ export default function StaffTrainingTab({
                       <button
                         type="button"
                         disabled={pending}
-                        className="rounded border border-line px-2 py-1 text-xs text-ink-muted hover:bg-surface"
+                        className="whitespace-nowrap rounded border border-line px-2 py-1 text-xs text-ink-muted hover:bg-surface"
                         onClick={() => remove(row)}
                       >
                         삭제

@@ -6,6 +6,11 @@ import {
   type DrivingLog,
   type Settings,
 } from "@/lib/supabase";
+import {
+  pdfTableStyle,
+  pdfTdStyle,
+  pdfThStyle,
+} from "@/app/components/pdfReportStyles";
 
 function formatKoreanDate(d: string | null) {
   if (!d) return "-";
@@ -183,39 +188,12 @@ export default function ActivityPdfReport({
       </div>
 
       {/* 메타 표 */}
-      <table
-        style={{
-          width: "100%",
-          marginTop: "16px",
-          borderCollapse: "collapse",
-          fontSize: "13px",
-        }}
-      >
+      <table style={{ ...pdfTableStyle, marginTop: "16px" }}>
         <tbody>
           {rows.map((r, i) => (
             <tr key={i}>
-              <th
-                style={{
-                  width: "100px",
-                  padding: "7px 10px",
-                  verticalAlign: "middle",
-                  background: "#f1f5f9",
-                  border: "1px solid #cbd5e1",
-                  textAlign: "center",
-                  fontWeight: 600,
-                }}
-              >
-                {r.label}
-              </th>
-              <td
-                style={{
-                  padding: "7px 12px",
-                  verticalAlign: "middle",
-                  border: "1px solid #cbd5e1",
-                }}
-              >
-                {r.value}
-              </td>
+              <th style={pdfThStyle}>{r.label}</th>
+              <td style={pdfTdStyle}>{r.value}</td>
             </tr>
           ))}
         </tbody>
@@ -241,38 +219,13 @@ export default function ActivityPdfReport({
       {drivingLog && (
         <>
           <SectionTitle>차량 운행 정보</SectionTitle>
-          <table
-            style={{
-              width: "100%",
-              marginTop: "4px",
-              borderCollapse: "collapse",
-              fontSize: "13px",
-            }}
-          >
+          <table style={{ ...pdfTableStyle, marginTop: "4px" }}>
             <tbody>
               {settings &&
                 (settings.vehicle_model || settings.vehicle_number) && (
                   <tr>
-                    <th
-                      style={{
-                        width: "100px",
-                        padding: "7px 10px",
-                        verticalAlign: "middle",
-                        background: "#f1f5f9",
-                        border: "1px solid #cbd5e1",
-                        textAlign: "center",
-                        fontWeight: 600,
-                      }}
-                    >
-                      차종/차량번호
-                    </th>
-                    <td
-                      style={{
-                        padding: "7px 12px",
-                        verticalAlign: "middle",
-                        border: "1px solid #cbd5e1",
-                      }}
-                    >
+                    <th style={pdfThStyle}>차종/차량번호</th>
+                    <td style={pdfTdStyle}>
                       {[settings.vehicle_model, settings.vehicle_number]
                         .filter(Boolean)
                         .join(" / ") || "-"}
@@ -280,92 +233,24 @@ export default function ActivityPdfReport({
                   </tr>
                 )}
               <tr>
-                <th
-                  style={{
-                    width: "100px",
-                    padding: "7px 10px",
-                    verticalAlign: "middle",
-                    background: "#f1f5f9",
-                    border: "1px solid #cbd5e1",
-                    textAlign: "center",
-                    fontWeight: 600,
-                  }}
-                >
-                  운전자
-                </th>
-                <td style={{ padding: "7px 12px", verticalAlign: "middle", border: "1px solid #cbd5e1" }}>
-                  {drivingLog.driver}
-                </td>
+                <th style={pdfThStyle}>운전자</th>
+                <td style={pdfTdStyle}>{drivingLog.driver}</td>
               </tr>
               <tr>
-                <th
-                  style={{
-                    width: "100px",
-                    padding: "7px 10px",
-                    verticalAlign: "middle",
-                    background: "#f1f5f9",
-                    border: "1px solid #cbd5e1",
-                    textAlign: "center",
-                    fontWeight: 600,
-                  }}
-                >
-                  출발
-                </th>
-                <td style={{ padding: "7px 12px", verticalAlign: "middle", border: "1px solid #cbd5e1" }}>
-                  {drivingLog.departure || "-"}
-                </td>
+                <th style={pdfThStyle}>출발</th>
+                <td style={pdfTdStyle}>{drivingLog.departure || "-"}</td>
               </tr>
               <tr>
-                <th
-                  style={{
-                    width: "100px",
-                    padding: "7px 10px",
-                    verticalAlign: "middle",
-                    background: "#f1f5f9",
-                    border: "1px solid #cbd5e1",
-                    textAlign: "center",
-                    fontWeight: 600,
-                  }}
-                >
-                  출장지
-                </th>
-                <td style={{ padding: "7px 12px", verticalAlign: "middle", border: "1px solid #cbd5e1" }}>
-                  {drivingLog.waypoint || "-"}
-                </td>
+                <th style={pdfThStyle}>출장지</th>
+                <td style={pdfTdStyle}>{drivingLog.waypoint || "-"}</td>
               </tr>
               <tr>
-                <th
-                  style={{
-                    width: "100px",
-                    padding: "7px 10px",
-                    verticalAlign: "middle",
-                    background: "#f1f5f9",
-                    border: "1px solid #cbd5e1",
-                    textAlign: "center",
-                    fontWeight: 600,
-                  }}
-                >
-                  도착
-                </th>
-                <td style={{ padding: "7px 12px", verticalAlign: "middle", border: "1px solid #cbd5e1" }}>
-                  {drivingLog.destination || "-"}
-                </td>
+                <th style={pdfThStyle}>도착</th>
+                <td style={pdfTdStyle}>{drivingLog.destination || "-"}</td>
               </tr>
               <tr>
-                <th
-                  style={{
-                    width: "100px",
-                    padding: "7px 10px",
-                    verticalAlign: "middle",
-                    background: "#f1f5f9",
-                    border: "1px solid #cbd5e1",
-                    textAlign: "center",
-                    fontWeight: 600,
-                  }}
-                >
-                  운행거리
-                </th>
-                <td style={{ padding: "7px 12px", verticalAlign: "middle", border: "1px solid #cbd5e1" }}>
+                <th style={pdfThStyle}>운행거리</th>
+                <td style={pdfTdStyle}>
                   {drivingLog.distance != null
                     ? `${drivingLog.distance.toLocaleString("ko-KR")} km`
                     : "-"}
@@ -379,22 +264,8 @@ export default function ActivityPdfReport({
               </tr>
               {drivingLog.confirmed_by && (
                 <tr>
-                  <th
-                    style={{
-                      width: "100px",
-                      padding: "7px 10px",
-                      verticalAlign: "middle",
-                      background: "#f1f5f9",
-                      border: "1px solid #cbd5e1",
-                      textAlign: "center",
-                      fontWeight: 600,
-                    }}
-                  >
-                    확인자
-                  </th>
-                  <td style={{ padding: "7px 12px", verticalAlign: "middle", border: "1px solid #cbd5e1" }}>
-                    {drivingLog.confirmed_by}
-                  </td>
+                  <th style={pdfThStyle}>확인자</th>
+                  <td style={pdfTdStyle}>{drivingLog.confirmed_by}</td>
                 </tr>
               )}
             </tbody>

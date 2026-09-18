@@ -2,6 +2,11 @@ import {
   TRANSPORT_LABEL,
   type BusinessTrip,
 } from "@/lib/supabase";
+import {
+  pdfTableStyle,
+  pdfTdStyle,
+  pdfThStyle,
+} from "@/app/components/pdfReportStyles";
 
 function formatKoreanDate(d: string) {
   const [y, m, day] = d.split("-");
@@ -75,14 +80,7 @@ export default function TripPdfReport({ trip }: { trip: BusinessTrip }) {
       </div>
 
       {/* 메타 표 */}
-      <table
-        style={{
-          width: "100%",
-          marginTop: "16px",
-          borderCollapse: "collapse",
-          fontSize: "13px",
-        }}
-      >
+      <table style={{ ...pdfTableStyle, marginTop: "16px" }}>
         <tbody>
           <Row label="출장일자" value={formatKoreanDate(trip.trip_date)} />
           <Row label="출장지" value={trip.destination} />
@@ -138,28 +136,8 @@ export default function TripPdfReport({ trip }: { trip: BusinessTrip }) {
 function Row({ label, value }: { label: string; value: string }) {
   return (
     <tr>
-      <th
-        style={{
-          width: "100px",
-          padding: "7px 10px",
-          verticalAlign: "middle",
-          background: "#f1f5f9",
-          border: "1px solid #cbd5e1",
-          textAlign: "center",
-          fontWeight: 600,
-        }}
-      >
-        {label}
-      </th>
-      <td
-        style={{
-          padding: "7px 12px",
-          verticalAlign: "middle",
-          border: "1px solid #cbd5e1",
-        }}
-      >
-        {value}
-      </td>
+      <th style={pdfThStyle}>{label}</th>
+      <td style={pdfTdStyle}>{value}</td>
     </tr>
   );
 }

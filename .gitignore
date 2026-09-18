@@ -52,3 +52,6 @@ next-env.d.ts
 /playwright-report/
 /blob-report/
 /playwright/.cache/
+
+# 검증 스크립트 결과물 (스크린샷·캡처 PNG/PDF)
+/test-output/
