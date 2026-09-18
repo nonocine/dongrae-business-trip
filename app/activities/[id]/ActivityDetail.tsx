@@ -1,6 +1,7 @@
 "use client";
 
 import { useRef, useState } from "react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import {
   ACTIVITY_BADGE_CLASS,
@@ -41,7 +42,10 @@ export default function ActivityDetail({
   isAdmin: boolean;
   sessionName: string | null;
 }) {
+  // 수정 권한 = 삭제 권한. 관리자(구글 관장·master) 또는 본인이 작성한 활동.
+  //   서버(updateActivity/deleteActivity)에서도 같은 가드로 다시 검증합니다.
   const canDelete = isAdmin || (sessionName !== null && sessionName === activity.author);
+  const canEdit = canDelete;
   const router = useRouter();
   const reportRef = useRef<HTMLDivElement>(null);
   const [pdfBusy, setPdfBusy] = useState(false);
@@ -143,7 +147,7 @@ export default function ActivityDetail({
           )}
           {a.transport_cost != null && (
             <Field
-              label="교통비"
+              label="출장비"
               value={`${a.transport_cost.toLocaleString("ko-KR")}원`}
             />
           )}
@@ -249,7 +253,7 @@ export default function ActivityDetail({
       )}
 
       {a.photos.length > 0 && (
-        <FileGallery title={`인증샷 (${a.photos.length}장)`} urls={a.photos} />
+        <FileGallery title={`사진자료 (${a.photos.length}장)`} urls={a.photos} />
       )}
       {a.receipts.length > 0 && (
         <FileGallery title={`영수증 (${a.receipts.length}장)`} urls={a.receipts} />
@@ -277,6 +281,14 @@ export default function ActivityDetail({
           >
             {delBusy ? "삭제 중…" : "삭제"}
           </button>
+        )}
+        {canEdit && (
+          <Link
+            href={`/activities/${activity.id}/edit`}
+            className="rounded-md border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50"
+          >
+            수정
+          </Link>
         )}
         <button
           type="button"

@@ -136,7 +136,7 @@ export default function TripDetail({
       {trip.photos.length > 0 && (
         <section className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
           <h3 className="text-sm font-semibold text-slate-900">
-            인증샷 ({trip.photos.length}장)
+            사진자료 ({trip.photos.length}장)
           </h3>
           <div className="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-3">
             {trip.photos.map((src, i) => (
@@ -150,7 +150,7 @@ export default function TripDetail({
                 {/* eslint-disable-next-line @next/next/no-img-element */}
                 <img
                   src={src}
-                  alt={`인증샷 ${i + 1}`}
+                  alt={`사진자료 ${i + 1}`}
                   className="h-full w-full object-cover"
                 />
               </a>

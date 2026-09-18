@@ -112,7 +112,7 @@ export default function ActivityPdfReport({
   // Costs
   const costParts: string[] = [];
   if (a.transport_cost != null)
-    costParts.push(`교통비 ${a.transport_cost.toLocaleString("ko-KR")}원`);
+    costParts.push(`출장비 ${a.transport_cost.toLocaleString("ko-KR")}원`);
   if (a.accommodation_cost != null)
     costParts.push(`숙박비 ${a.accommodation_cost.toLocaleString("ko-KR")}원`);
   if (a.training_cost != null)
@@ -198,6 +198,7 @@ export default function ActivityPdfReport({
                 style={{
                   width: "100px",
                   padding: "7px 10px",
+                  verticalAlign: "middle",
                   background: "#f1f5f9",
                   border: "1px solid #cbd5e1",
                   textAlign: "center",
@@ -209,6 +210,7 @@ export default function ActivityPdfReport({
               <td
                 style={{
                   padding: "7px 12px",
+                  verticalAlign: "middle",
                   border: "1px solid #cbd5e1",
                 }}
               >
@@ -255,6 +257,7 @@ export default function ActivityPdfReport({
                       style={{
                         width: "100px",
                         padding: "7px 10px",
+                        verticalAlign: "middle",
                         background: "#f1f5f9",
                         border: "1px solid #cbd5e1",
                         textAlign: "center",
@@ -266,6 +269,7 @@ export default function ActivityPdfReport({
                     <td
                       style={{
                         padding: "7px 12px",
+                        verticalAlign: "middle",
                         border: "1px solid #cbd5e1",
                       }}
                     >
@@ -280,6 +284,7 @@ export default function ActivityPdfReport({
                   style={{
                     width: "100px",
                     padding: "7px 10px",
+                    verticalAlign: "middle",
                     background: "#f1f5f9",
                     border: "1px solid #cbd5e1",
                     textAlign: "center",
@@ -288,7 +293,7 @@ export default function ActivityPdfReport({
                 >
                   운전자
                 </th>
-                <td style={{ padding: "7px 12px", border: "1px solid #cbd5e1" }}>
+                <td style={{ padding: "7px 12px", verticalAlign: "middle", border: "1px solid #cbd5e1" }}>
                   {drivingLog.driver}
                 </td>
               </tr>
@@ -297,6 +302,7 @@ export default function ActivityPdfReport({
                   style={{
                     width: "100px",
                     padding: "7px 10px",
+                    verticalAlign: "middle",
                     background: "#f1f5f9",
                     border: "1px solid #cbd5e1",
                     textAlign: "center",
@@ -305,7 +311,7 @@ export default function ActivityPdfReport({
                 >
                   출발
                 </th>
-                <td style={{ padding: "7px 12px", border: "1px solid #cbd5e1" }}>
+                <td style={{ padding: "7px 12px", verticalAlign: "middle", border: "1px solid #cbd5e1" }}>
                   {drivingLog.departure || "-"}
                 </td>
               </tr>
@@ -314,6 +320,7 @@ export default function ActivityPdfReport({
                   style={{
                     width: "100px",
                     padding: "7px 10px",
+                    verticalAlign: "middle",
                     background: "#f1f5f9",
                     border: "1px solid #cbd5e1",
                     textAlign: "center",
@@ -322,7 +329,7 @@ export default function ActivityPdfReport({
                 >
                   출장지
                 </th>
-                <td style={{ padding: "7px 12px", border: "1px solid #cbd5e1" }}>
+                <td style={{ padding: "7px 12px", verticalAlign: "middle", border: "1px solid #cbd5e1" }}>
                   {drivingLog.waypoint || "-"}
                 </td>
               </tr>
@@ -331,6 +338,7 @@ export default function ActivityPdfReport({
                   style={{
                     width: "100px",
                     padding: "7px 10px",
+                    verticalAlign: "middle",
                     background: "#f1f5f9",
                     border: "1px solid #cbd5e1",
                     textAlign: "center",
@@ -339,7 +347,7 @@ export default function ActivityPdfReport({
                 >
                   도착
                 </th>
-                <td style={{ padding: "7px 12px", border: "1px solid #cbd5e1" }}>
+                <td style={{ padding: "7px 12px", verticalAlign: "middle", border: "1px solid #cbd5e1" }}>
                   {drivingLog.destination || "-"}
                 </td>
               </tr>
@@ -348,6 +356,7 @@ export default function ActivityPdfReport({
                   style={{
                     width: "100px",
                     padding: "7px 10px",
+                    verticalAlign: "middle",
                     background: "#f1f5f9",
                     border: "1px solid #cbd5e1",
                     textAlign: "center",
@@ -356,7 +365,7 @@ export default function ActivityPdfReport({
                 >
                   운행거리
                 </th>
-                <td style={{ padding: "7px 12px", border: "1px solid #cbd5e1" }}>
+                <td style={{ padding: "7px 12px", verticalAlign: "middle", border: "1px solid #cbd5e1" }}>
                   {drivingLog.distance != null
                     ? `${drivingLog.distance.toLocaleString("ko-KR")} km`
                     : "-"}
@@ -374,6 +383,7 @@ export default function ActivityPdfReport({
                     style={{
                       width: "100px",
                       padding: "7px 10px",
+                      verticalAlign: "middle",
                       background: "#f1f5f9",
                       border: "1px solid #cbd5e1",
                       textAlign: "center",
@@ -382,7 +392,7 @@ export default function ActivityPdfReport({
                   >
                     확인자
                   </th>
-                  <td style={{ padding: "7px 12px", border: "1px solid #cbd5e1" }}>
+                  <td style={{ padding: "7px 12px", verticalAlign: "middle", border: "1px solid #cbd5e1" }}>
                     {drivingLog.confirmed_by}
                   </td>
                 </tr>
@@ -392,10 +402,10 @@ export default function ActivityPdfReport({
         </>
       )}
 
-      {/* 인증샷 */}
+      {/* 사진자료 */}
       {photos.length > 0 && (
         <>
-          <SectionTitle>인증샷</SectionTitle>
+          <SectionTitle>사진자료</SectionTitle>
           <PhotoGrid photos={photos} />
         </>
       )}
@@ -487,7 +497,7 @@ function PhotoImg({ src, index }: { src: string; index: number }) {
     // eslint-disable-next-line @next/next/no-img-element
     <img
       src={src}
-      alt={`인증샷 ${index + 1}`}
+      alt={`사진자료 ${index + 1}`}
       crossOrigin="anonymous"
       style={cellStyle}
     />

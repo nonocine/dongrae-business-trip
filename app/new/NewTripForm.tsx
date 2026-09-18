@@ -297,7 +297,7 @@ export default function NewTripForm({
         {transport === "public" && (
           <div className="mt-3">
             <label htmlFor="transport_cost" className={labelCls}>
-              교통비 (원)
+              출장비 (원)
             </label>
             <input
               id="transport_cost"
@@ -353,7 +353,7 @@ export default function NewTripForm({
 
       <div>
         <div className="flex items-center justify-between">
-          <label className={labelCls}>인증샷 (1~5장)</label>
+          <label className={labelCls}>사진자료 (1~5장)</label>
           <span className="text-xs text-slate-400">
             {photoFiles.length}/{MAX_PHOTOS}
           </span>

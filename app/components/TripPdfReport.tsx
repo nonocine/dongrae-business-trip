@@ -94,7 +94,7 @@ export default function TripPdfReport({ trip }: { trip: BusinessTrip }) {
             value={
               TRANSPORT_LABEL[trip.transport_type] +
               (trip.transport_type === "public" && trip.transport_cost != null
-                ? ` (교통비 ${trip.transport_cost.toLocaleString("ko-KR")}원)`
+                ? ` (출장비 ${trip.transport_cost.toLocaleString("ko-KR")}원)`
                 : "")
             }
           />
@@ -107,10 +107,10 @@ export default function TripPdfReport({ trip }: { trip: BusinessTrip }) {
       <Block label="회의/방문 내용" content={trip.meeting_content || "-"} />
       <Block label="결과 및 성과" content={trip.result || "-"} />
 
-      {/* 인증샷 */}
+      {/* 사진자료 */}
       {photos.length > 0 && (
         <>
-          <SectionTitle>인증샷</SectionTitle>
+          <SectionTitle>사진자료</SectionTitle>
           <PhotoGrid photos={photos} />
         </>
       )}
@@ -142,6 +142,7 @@ function Row({ label, value }: { label: string; value: string }) {
         style={{
           width: "100px",
           padding: "7px 10px",
+          verticalAlign: "middle",
           background: "#f1f5f9",
           border: "1px solid #cbd5e1",
           textAlign: "center",
@@ -153,6 +154,7 @@ function Row({ label, value }: { label: string; value: string }) {
       <td
         style={{
           padding: "7px 12px",
+          verticalAlign: "middle",
           border: "1px solid #cbd5e1",
         }}
       >
@@ -231,7 +233,7 @@ function PhotoImg({ src, index }: { src: string; index: number }) {
     // eslint-disable-next-line @next/next/no-img-element
     <img
       src={src}
-      alt={`인증샷 ${index + 1}`}
+      alt={`사진자료 ${index + 1}`}
       crossOrigin="anonymous"
       style={cellStyle}
     />

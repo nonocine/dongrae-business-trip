@@ -2,7 +2,8 @@
 
 import Link from "next/link";
 import { useState, useTransition } from "react";
-import { createActivity } from "@/app/actions";
+import { useRouter } from "next/navigation";
+import { createActivity, updateActivity } from "@/app/actions";
 import { btnPrimary, btnSecondary, cardCls } from "@/lib/ui";
 import {
   DEFAULT_DEPARTURE,
@@ -10,6 +11,7 @@ import {
   TRANSPORT_LABEL,
   TRANSPORT_ICON,
   getAllowedTransports,
+  type Activity,
   type ActivityKind,
   type Settings,
   type TransportType,
@@ -29,6 +31,11 @@ type Props = {
   employees: string[];
   lockedTraveler: string | null;
   settings: Settings | null;
+  /**
+   * 수정 모드 — 이 값이 있으면 같은 폼을 기존 값으로 프리필해 [수정]으로 씁니다.
+   * (별도 수정 폼을 만들지 않고 작성 폼 하나를 재사용합니다.)
+   */
+  activity?: Activity | null;
 };
 
 const KIND_DATE_LABEL: Record<
@@ -48,7 +55,12 @@ export default function ActivityForm({
   employees,
   lockedTraveler,
   settings,
+  activity = null,
 }: Props) {
+  const editing = activity !== null;
+  // 운행일지가 연결된 활동은 이동수단을 바꾸면 운행 기록과 어긋나므로 잠급니다.
+  const transportLocked = editing && activity.driving_log_id !== null;
+  const router = useRouter();
   const allowedTransports = getAllowedTransports(kind);
   const showTransport =
     kind === "outside_work" || kind === "business_trip";
@@ -108,20 +120,36 @@ export default function ActivityForm({
 
   // Form state
   const [transport, setTransport] = useState<TransportType | "">(
-    allowedTransports[0] ?? ""
+    activity?.transport_type ?? allowedTransports[0] ?? ""
   );
-  const [accommodation, setAccommodation] = useState(false);
-  const [companions, setCompanions] = useState<string[]>([]);
+  const [accommodation, setAccommodation] = useState(
+    activity?.accommodation ?? false
+  );
+  const [companions, setCompanions] = useState<string[]>(
+    activity?.companion ?? []
+  );
   const [companionPick, setCompanionPick] = useState("");
   const [photoFiles, setPhotoFiles] = useState<File[]>([]);
   const [photoPreviews, setPhotoPreviews] = useState<string[]>([]);
   const [receiptFiles, setReceiptFiles] = useState<File[]>([]);
   const [certFiles, setCertFiles] = useState<File[]>([]);
+  // 수정 모드 — 그대로 둘 기존 첨부(빼면 저장 시 Storage 에서도 삭제됩니다).
+  const [keptPhotos, setKeptPhotos] = useState<string[]>(activity?.photos ?? []);
+  const [keptReceipts, setKeptReceipts] = useState<string[]>(
+    activity?.receipts ?? []
+  );
+  const [keptCerts, setKeptCerts] = useState<string[]>(
+    activity?.certificate ?? []
+  );
   const [error, setError] = useState<string | null>(null);
   const [pending, startTransition] = useTransition();
 
+  const photoSlotsUsed = keptPhotos.length + photoFiles.length;
+
   // 차량(기관차량) 사용 시 driving_logs 자동 작성용 입력
+  //   * 수정 모드에서는 운행일지·누적거리를 건드리지 않으므로 숨깁니다.
   const showDrivingFields =
+    !editing &&
     (kind === "outside_work" || kind === "business_trip") &&
     transport === "vehicle";
   const [totalDistance, setTotalDistance] = useState<string>("");
@@ -149,7 +177,8 @@ export default function ActivityForm({
   function handlePhotoSelect(e: React.ChangeEvent<HTMLInputElement>) {
     const files = Array.from(e.target.files ?? []);
     if (!files.length) return;
-    const next = [...photoFiles, ...files].slice(0, MAX_PHOTOS);
+    const room = Math.max(0, MAX_PHOTOS - keptPhotos.length);
+    const next = [...photoFiles, ...files].slice(0, room);
     setPhotoFiles(next);
     setPhotoPreviews(next.map((f) => URL.createObjectURL(f)));
     e.target.value = "";
@@ -192,6 +221,34 @@ export default function ActivityForm({
         formData.delete("companion");
         for (const c of companions) formData.append("companion", c);
 
+        if (editing) {
+          // 그대로 둘 기존 첨부 — 여기서 빠진 것은 서버가 Storage 에서 지웁니다.
+          formData.set("id", activity.id);
+          formData.delete("keep_photos");
+          for (const u of keptPhotos) formData.append("keep_photos", u);
+          formData.delete("keep_receipts");
+          for (const u of keptReceipts) formData.append("keep_receipts", u);
+          formData.delete("keep_certificate");
+          for (const u of keptCerts) formData.append("keep_certificate", u);
+
+          startTransition(async () => {
+            try {
+              const res = await updateActivity(formData);
+              if (!res.ok) {
+                setError(res.message);
+                return;
+              }
+              router.push(`/activities/${activity.id}`);
+              router.refresh();
+            } catch (e) {
+              setError(
+                e instanceof Error ? e.message : "저장 중 오류가 발생했습니다."
+              );
+            }
+          });
+          return;
+        }
+
         startTransition(async () => {
           try {
             await createActivity(formData);
@@ -217,7 +274,9 @@ export default function ActivityForm({
           <>
             <div className="mt-1 flex items-center justify-between rounded-lg border border-line bg-surface px-3 py-2 text-sm">
               <span className="font-medium text-ink">{lockedTraveler}</span>
-              <span className="text-xs text-ink-hint">본인</span>
+              <span className="text-xs text-ink-hint">
+                {editing ? "작성자 (변경 불가)" : "본인"}
+              </span>
             </div>
             <input type="hidden" name="author" value={lockedTraveler} />
           </>
@@ -261,7 +320,7 @@ export default function ActivityForm({
             name="start_date"
             type="date"
             required
-            defaultValue={defaultDate}
+            defaultValue={activity?.start_date ?? defaultDate}
             className={inputCls}
           />
         </div>
@@ -274,6 +333,7 @@ export default function ActivityForm({
               id="end_date"
               name="end_date"
               type="date"
+              defaultValue={activity?.end_date ?? ""}
               className={inputCls}
             />
           </div>
@@ -291,6 +351,7 @@ export default function ActivityForm({
             name="location"
             type="text"
             required
+            defaultValue={activity?.location ?? ""}
             placeholder={locationLabel}
             className={inputCls}
           />
@@ -307,6 +368,7 @@ export default function ActivityForm({
               name="country"
               type="text"
               required
+              defaultValue={activity?.country ?? ""}
               placeholder="예) 일본"
               className={inputCls}
             />
@@ -320,6 +382,7 @@ export default function ActivityForm({
                 id="city"
                 name="city"
                 type="text"
+                defaultValue={activity?.city ?? ""}
                 placeholder="예) 도쿄"
                 className={inputCls}
               />
@@ -338,6 +401,7 @@ export default function ActivityForm({
             id="organization"
             name="organization"
             type="text"
+            defaultValue={activity?.organization ?? ""}
             placeholder="예) 한국청소년정책연구원"
             className={inputCls}
           />
@@ -352,6 +416,7 @@ export default function ActivityForm({
             id="course_name"
             name="course_name"
             type="text"
+            defaultValue={activity?.course_name ?? ""}
             placeholder="예) 청소년 정책 심화과정"
             className={inputCls}
           />
@@ -368,6 +433,7 @@ export default function ActivityForm({
             id="visa_info"
             name="visa_info"
             type="text"
+            defaultValue={activity?.visa_info ?? ""}
             placeholder="예) 단기상용 (C-2)"
             className={inputCls}
           />
@@ -449,6 +515,7 @@ export default function ActivityForm({
           name="purpose"
           type="text"
           required
+          defaultValue={activity?.purpose ?? ""}
           className={inputCls}
         />
       </div>
@@ -470,7 +537,11 @@ export default function ActivityForm({
               return (
                 <label
                   key={v}
-                  className={`flex cursor-pointer flex-col items-center gap-1 rounded-lg border px-3 py-3 text-sm shadow-sm transition ${
+                  className={`flex flex-col items-center gap-1 rounded-lg border px-3 py-3 text-sm shadow-sm transition ${
+                    transportLocked
+                      ? "cursor-not-allowed opacity-60"
+                      : "cursor-pointer"
+                  } ${
                     active
                       ? "border-navy bg-navy-soft text-navy"
                       : "border-line bg-card text-ink-body hover:bg-surface"
@@ -481,7 +552,11 @@ export default function ActivityForm({
                     name="transport_type"
                     value={v}
                     checked={active}
-                    onChange={() => setTransport(v)}
+                    disabled={transportLocked && !active}
+                    onChange={() => {
+                      if (transportLocked) return;
+                      setTransport(v);
+                    }}
                     className="sr-only"
                   />
                   <span className="text-2xl leading-none">
@@ -492,6 +567,12 @@ export default function ActivityForm({
               );
             })}
           </div>
+          {transportLocked && (
+            <p className="mt-1.5 text-xs text-ink-muted">
+              차량 운행일지가 연결된 활동이라 이동수단은 바꿀 수 없습니다.
+              운행일지·누적거리는 이 화면에서 수정되지 않습니다.
+            </p>
+          )}
         </div>
       )}
 
@@ -577,11 +658,11 @@ export default function ActivityForm({
         </div>
       )}
 
-      {/* 비용 (교통비/숙박비/연수비) */}
+      {/* 비용 (출장비/숙박비/연수비) */}
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
         <div>
           <label htmlFor="transport_cost" className={labelCls}>
-            교통비 (원)
+            출장비 (원)
           </label>
           <input
             id="transport_cost"
@@ -590,6 +671,7 @@ export default function ActivityForm({
             min="0"
             step="100"
             inputMode="numeric"
+            defaultValue={activity?.transport_cost ?? ""}
             placeholder="0"
             className={inputCls}
           />
@@ -606,6 +688,7 @@ export default function ActivityForm({
               min="0"
               step="100"
               inputMode="numeric"
+              defaultValue={activity?.accommodation_cost ?? ""}
               placeholder="0"
               className={inputCls}
             />
@@ -623,6 +706,7 @@ export default function ActivityForm({
               min="0"
               step="100"
               inputMode="numeric"
+              defaultValue={activity?.training_cost ?? ""}
               placeholder="0"
               className={inputCls}
             />
@@ -659,7 +743,11 @@ export default function ActivityForm({
                     type="radio"
                     name="education_type"
                     value={v}
-                    defaultChecked={v === "집합"}
+                    defaultChecked={
+                      activity?.education_type
+                        ? activity.education_type === v
+                        : v === "집합"
+                    }
                     className="sr-only"
                   />
                   {v}
@@ -676,6 +764,7 @@ export default function ActivityForm({
                 id="instructor"
                 name="instructor"
                 type="text"
+                defaultValue={activity?.instructor ?? ""}
                 className={inputCls}
               />
             </div>
@@ -690,6 +779,7 @@ export default function ActivityForm({
                 min="0"
                 step="0.5"
                 inputMode="decimal"
+                defaultValue={activity?.education_hours ?? ""}
                 placeholder="시간"
                 className={inputCls}
               />
@@ -705,6 +795,7 @@ export default function ActivityForm({
                 min="0"
                 step="1"
                 inputMode="numeric"
+                defaultValue={activity?.attendees_count ?? ""}
                 placeholder="명"
                 className={inputCls}
               />
@@ -718,24 +809,54 @@ export default function ActivityForm({
         <label htmlFor="content" className={labelCls}>
           {contentLabel}
         </label>
-        <textarea id="content" name="content" className={textareaCls} />
+        <textarea
+          id="content"
+          name="content"
+          defaultValue={activity?.content ?? ""}
+          className={textareaCls}
+        />
       </div>
       <div>
         <label htmlFor="result" className={labelCls}>
           결과 및 성과
         </label>
-        <textarea id="result" name="result" className={textareaCls} />
+        <textarea
+          id="result"
+          name="result"
+          defaultValue={activity?.result ?? ""}
+          className={textareaCls}
+        />
       </div>
 
-      {/* 인증샷 */}
+      {/* 사진자료 */}
       <div>
         <div className="flex items-center justify-between">
-          <label className={labelCls}>인증샷 (1~5장)</label>
+          <label className={labelCls}>사진자료 (1~5장)</label>
           <span className="text-xs text-ink-hint">
-            {photoFiles.length}/{MAX_PHOTOS}
+            {photoSlotsUsed}/{MAX_PHOTOS}
           </span>
         </div>
         <div className="mt-2 grid grid-cols-3 gap-2 sm:grid-cols-4">
+          {/* 기존 사진 — ✕ 로 빼면 저장 시 함께 삭제됩니다. */}
+          {keptPhotos.map((src) => (
+            <div
+              key={src}
+              className="relative aspect-square overflow-hidden rounded-lg border border-line bg-surface"
+            >
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img src={src} alt="" className="h-full w-full object-cover" />
+              <button
+                type="button"
+                onClick={() =>
+                  setKeptPhotos(keptPhotos.filter((u) => u !== src))
+                }
+                className="absolute right-1 top-1 rounded-full bg-black/60 px-1.5 text-xs font-bold text-white hover:bg-black/80"
+                aria-label="기존 사진 삭제"
+              >
+                ✕
+              </button>
+            </div>
+          ))}
           {photoPreviews.map((src, i) => (
             <div
               key={i}
@@ -756,7 +877,7 @@ export default function ActivityForm({
               </button>
             </div>
           ))}
-          {photoFiles.length < MAX_PHOTOS && (
+          {photoSlotsUsed < MAX_PHOTOS && (
             <label className="flex aspect-square cursor-pointer flex-col items-center justify-center rounded-lg border border-dashed border-line bg-card text-ink-muted hover:bg-surface">
               <span className="text-2xl">＋</span>
               <span className="text-xs">사진 추가</span>
@@ -777,6 +898,10 @@ export default function ActivityForm({
         <FileListField
           label="영수증"
           files={receiptFiles}
+          existing={keptReceipts}
+          onRemoveExisting={(u) =>
+            setKeptReceipts(keptReceipts.filter((x) => x !== u))
+          }
           onChange={handleSimpleFileSelect(setReceiptFiles)}
           onRemove={(i) => removeAt(setReceiptFiles, i)}
         />
@@ -787,6 +912,10 @@ export default function ActivityForm({
         <FileListField
           label={certificateLabel}
           files={certFiles}
+          existing={keptCerts}
+          onRemoveExisting={(u) =>
+            setKeptCerts(keptCerts.filter((x) => x !== u))
+          }
           onChange={handleSimpleFileSelect(setCertFiles)}
           onRemove={(i) => removeAt(setCertFiles, i)}
         />
@@ -799,25 +928,46 @@ export default function ActivityForm({
       )}
 
       <div className="flex justify-end gap-2 pt-2">
-        <Link href="/new" className={btnSecondary}>
+        <Link
+          href={editing ? `/activities/${activity.id}` : "/new"}
+          className={btnSecondary}
+        >
           취소
         </Link>
         <button type="submit" disabled={pending} className={btnPrimary}>
-          {pending ? "저장 중…" : "저장"}
+          {pending
+            ? "저장 중…"
+            : editing
+            ? "수정 저장"
+            : "저장"}
         </button>
       </div>
     </form>
   );
 }
 
+function fileNameOf(url: string): string {
+  try {
+    const tail = decodeURIComponent(url).split("/").pop() ?? url;
+    return tail.split("?")[0] || url;
+  } catch {
+    return url;
+  }
+}
+
 function FileListField({
   label,
   files,
+  existing = [],
+  onRemoveExisting,
   onChange,
   onRemove,
 }: {
   label: string;
   files: File[];
+  /** 수정 모드에서 그대로 둘 기존 첨부 URL. */
+  existing?: string[];
+  onRemoveExisting?: (url: string) => void;
   onChange: (e: React.ChangeEvent<HTMLInputElement>) => void;
   onRemove: (i: number) => void;
 }) {
@@ -825,6 +975,30 @@ function FileListField({
     <div>
       <label className={labelCls}>{label}</label>
       <div className="mt-2 space-y-1.5">
+        {existing.map((u) => (
+          <div
+            key={u}
+            className="flex items-center justify-between gap-2 rounded-lg border border-line bg-surface px-3 py-2 text-sm"
+          >
+            <a
+              href={u}
+              target="_blank"
+              rel="noreferrer"
+              className="truncate text-ink-body hover:underline"
+            >
+              {fileNameOf(u)}
+            </a>
+            {onRemoveExisting && (
+              <button
+                type="button"
+                onClick={() => onRemoveExisting(u)}
+                className="shrink-0 text-xs font-medium text-stamp hover:underline"
+              >
+                삭제
+              </button>
+            )}
+          </div>
+        ))}
         {files.map((f, i) => (
           <div
             key={i}

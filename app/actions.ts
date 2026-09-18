@@ -195,7 +195,7 @@ export async function createBusinessTrip(formData: FormData) {
     .getAll("photos")
     .filter((v): v is File => v instanceof File);
   if (photoFiles.length > 5) {
-    throw new Error("인증샷은 최대 5장까지 업로드할 수 있습니다.");
+    throw new Error("사진자료는 최대 5장까지 업로드할 수 있습니다.");
   }
   const receiptFiles = formData
     .getAll("receipts")
@@ -986,7 +986,7 @@ export async function createActivity(formData: FormData) {
     .getAll("certificate")
     .filter((v): v is File => v instanceof File);
   if (photoFiles.length > 5) {
-    throw new Error("인증샷은 최대 5장까지 업로드할 수 있습니다.");
+    throw new Error("사진자료는 최대 5장까지 업로드할 수 있습니다.");
   }
 
   let photos: string[] = [];
@@ -1046,6 +1046,305 @@ export async function createActivity(formData: FormData) {
   revalidatePath("/");
   revalidatePath("/admin");
   redirect(`/activities/${data.id}`);
+}
+
+// =====================================================================
+// 활동 수정 (레거시 활동일지)
+//   * 권한은 삭제(deleteActivity)와 완전히 동일합니다 — 관리자(구글 관장·master)
+//     또는 본인이 작성한 활동. 새 권한 체계를 만들지 않고 같은 가드를 서버에서
+//     다시 검증합니다. 화면의 [수정] 버튼 노출 조건도 [삭제]와 같은 식입니다.
+//   * 수정 대상이 아닌 것: 활동 유형(activity_type)·작성자(author)·차량
+//     운행일지(driving_logs)·누적거리(settings.initial_mileage).
+//     → 운행일지가 연결된 활동은 이동수단도 잠급니다(폼·서버 양쪽).
+//   * 실패는 throw 대신 { ok:false, message } 로 돌려 화면에 이유를 노출합니다.
+// =====================================================================
+export type ActivityUpdateResult = { ok: true } | { ok: false; message: string };
+
+export async function updateActivity(
+  formData: FormData
+): Promise<ActivityUpdateResult> {
+  // 성공 시 새로 올린 파일 URL — DB 저장 실패 시 되돌리기 위해 바깥에 둡니다.
+  let uploadedPhotos: string[] = [];
+  let uploadedReceipts: string[] = [];
+  let uploadedCertificate: string[] = [];
+
+  try {
+    const session = await getSession();
+    if (!session) return { ok: false, message: "로그인이 필요합니다." };
+
+    const id = String(formData.get("id") ?? "").trim();
+    if (!id) return { ok: false, message: "수정할 활동 ID가 없습니다." };
+
+    const { data: row, error: fetchErr } = await supabaseAdmin
+      .from("activities")
+      .select("*")
+      .eq("id", id)
+      .maybeSingle();
+    if (fetchErr) return { ok: false, message: fetchErr.message };
+    if (!row) return { ok: false, message: "수정할 활동을 찾을 수 없습니다." };
+
+    // 권한 재검증 — deleteActivity 와 같은 가드.
+    const canManageAll = await isManagerAdmin();
+    const owner = (row as { author: string }).author;
+    if (!canManageAll && owner !== session.name) {
+      return { ok: false, message: "본인 활동만 수정할 수 있습니다." };
+    }
+
+    // 유형은 바꾸지 않습니다 — 저장된 값이 정상인지만 확인.
+    const kindRaw = String((row as { activity_type: string }).activity_type);
+    if (!isActivityKind(kindRaw)) {
+      return { ok: false, message: "올바르지 않은 활동 유형입니다." };
+    }
+    const kind = kindRaw;
+    const prev = normalizeActivity(row as Record<string, unknown>);
+
+    // 폼이 유형별로 감추는 칸은 제출되지 않습니다. 감춰진 칸까지 null 로
+    //   덮어써 기존 값을 날리지 않도록, 보이는 칸만 폼 값으로 바꿉니다.
+    const shows = {
+      end_date:
+        kind === "business_trip" ||
+        kind === "domestic_training" ||
+        kind === "overseas_training",
+      location: kind !== "overseas_training",
+      countryCity: kind === "overseas_training",
+      organization:
+        kind === "domestic_training" || kind === "overseas_training",
+      course_name:
+        kind === "domestic_training" || kind === "overseas_training",
+      visa_info: kind === "overseas_training",
+      transport: kind === "outside_work" || kind === "business_trip",
+      accommodation: kind === "business_trip",
+      accommodation_cost:
+        kind === "business_trip" || kind === "overseas_training",
+      training_cost:
+        kind === "domestic_training" || kind === "overseas_training",
+      education: kind === "education",
+    };
+    const pick = <T,>(visible: boolean, next: T, kept: T): T =>
+      visible ? next : kept;
+
+    const companion = formData
+      .getAll("companion")
+      .map((v) => String(v).trim())
+      .filter((v) => v.length > 0);
+
+    const purpose = String(formData.get("purpose") ?? "").trim();
+    const content = String(formData.get("content") ?? "").trim();
+    const result = String(formData.get("result") ?? "").trim();
+
+    const start_date = strOrNull(formData.get("start_date"));
+    if (!start_date) return { ok: false, message: "날짜를 입력해주세요." };
+    if (!purpose) return { ok: false, message: "목적을 입력해주세요." };
+
+    const end_date = pick(
+      shows.end_date,
+      strOrNull(formData.get("end_date")),
+      prev.end_date
+    );
+    const location = pick(
+      shows.location,
+      strOrNull(formData.get("location")),
+      prev.location
+    );
+    const city = pick(
+      shows.countryCity,
+      strOrNull(formData.get("city")),
+      prev.city
+    );
+    const country = pick(
+      shows.countryCity,
+      strOrNull(formData.get("country")),
+      prev.country
+    );
+    const organization = pick(
+      shows.organization,
+      strOrNull(formData.get("organization")),
+      prev.organization
+    );
+    const course_name = pick(
+      shows.course_name,
+      strOrNull(formData.get("course_name")),
+      prev.course_name
+    );
+    const visa_info = pick(
+      shows.visa_info,
+      strOrNull(formData.get("visa_info")),
+      prev.visa_info
+    );
+
+    // 이동수단 — 운행일지가 연결돼 있으면(= 폼에서도 잠김) 기존 값을 그대로 둡니다.
+    const transportRaw = strOrNull(formData.get("transport_type"));
+    const transport_type =
+      prev.driving_log_id != null || !shows.transport
+        ? prev.transport_type
+        : transportRaw != null &&
+          (TRANSPORT_VALUES as string[]).includes(transportRaw)
+        ? (transportRaw as TransportType)
+        : null;
+
+    const transport_cost = numOrNull(formData.get("transport_cost"));
+    const accommodation = pick(
+      shows.accommodation,
+      String(formData.get("accommodation") ?? "") === "on" ? true : null,
+      prev.accommodation
+    );
+    const accommodation_cost = pick(
+      shows.accommodation_cost,
+      numOrNull(formData.get("accommodation_cost")),
+      prev.accommodation_cost
+    );
+    const training_cost = pick(
+      shows.training_cost,
+      numOrNull(formData.get("training_cost")),
+      prev.training_cost
+    );
+
+    const education_type = pick(
+      shows.education,
+      strOrNull(formData.get("education_type")),
+      prev.education_type
+    );
+    const instructor = pick(
+      shows.education,
+      strOrNull(formData.get("instructor")),
+      prev.instructor
+    );
+    const education_hours = pick(
+      shows.education,
+      numOrNull(formData.get("education_hours")),
+      prev.education_hours
+    );
+    const attendees_count = pick(
+      shows.education,
+      numOrNull(formData.get("attendees_count")),
+      prev.attendees_count
+    );
+
+    // -----------------------------------------------------------------
+    // 첨부파일 — "남길 기존 파일(keep_*) + 새로 올린 파일".
+    //   keep 목록에서 빠진 기존 파일은 저장 성공 후 Storage 에서도 지웁니다.
+    // -----------------------------------------------------------------
+    const prevPhotos = prev.photos;
+    const prevReceipts = prev.receipts;
+    const prevCertificate = prev.certificate;
+
+    const keepOf = (field: string, prev: string[]) => {
+      const sent = formData.getAll(field).map((v) => String(v));
+      return prev.filter((u) => sent.includes(u));
+    };
+    const keptPhotos = keepOf("keep_photos", prevPhotos);
+    const keptReceipts = keepOf("keep_receipts", prevReceipts);
+    const keptCertificate = keepOf("keep_certificate", prevCertificate);
+
+    const filesOf = (field: string) =>
+      formData
+        .getAll(field)
+        .filter((v): v is File => v instanceof File && v.size > 0);
+    const photoFiles = filesOf("photos");
+    const receiptFiles = filesOf("receipts");
+    const certificateFiles = filesOf("certificate");
+
+    if (keptPhotos.length + photoFiles.length > 5) {
+      return {
+        ok: false,
+        message: "사진자료는 최대 5장까지 업로드할 수 있습니다.",
+      };
+    }
+
+    try {
+      [uploadedPhotos, uploadedReceipts, uploadedCertificate] =
+        await Promise.all([
+          uploadFiles(STORAGE_BUCKET_PHOTOS, photoFiles),
+          uploadFiles(STORAGE_BUCKET_RECEIPTS, receiptFiles),
+          uploadFiles(STORAGE_BUCKET_RECEIPTS, certificateFiles),
+        ]);
+    } catch (e) {
+      return {
+        ok: false,
+        message: e instanceof Error ? e.message : "파일 업로드에 실패했습니다.",
+      };
+    }
+
+    const photos = [...keptPhotos, ...uploadedPhotos];
+    const receipts = [...keptReceipts, ...uploadedReceipts];
+    const certificate = [...keptCertificate, ...uploadedCertificate];
+
+    const { error: updErr } = await supabaseAdmin
+      .from("activities")
+      .update({
+        // activity_type(유형)·author(작성자)·driving_log_id 는 건드리지 않습니다.
+        companion,
+        purpose,
+        content,
+        result,
+        photos,
+        receipts,
+        certificate,
+        start_date,
+        end_date,
+        location,
+        organization,
+        city,
+        country,
+        transport_type,
+        transport_cost,
+        accommodation,
+        accommodation_cost,
+        training_cost,
+        course_name,
+        visa_info,
+        education_type,
+        instructor,
+        education_hours,
+        attendees_count,
+      })
+      .eq("id", id);
+
+    if (updErr) {
+      // 저장 실패 — 이번에 새로 올린 파일은 고아가 되므로 정리합니다.
+      await removeUploaded(uploadedPhotos, uploadedReceipts, uploadedCertificate);
+      return { ok: false, message: updErr.message };
+    }
+
+    // 저장 성공 후에야 제거된 기존 파일을 Storage 에서 지웁니다.
+    await removeUploaded(
+      prevPhotos.filter((u) => !keptPhotos.includes(u)),
+      prevReceipts.filter((u) => !keptReceipts.includes(u)),
+      prevCertificate.filter((u) => !keptCertificate.includes(u))
+    );
+
+    revalidatePath("/");
+    revalidatePath("/admin");
+    revalidatePath("/activities");
+    revalidatePath(`/activities/${id}`);
+    return { ok: true };
+  } catch (e) {
+    await removeUploaded(uploadedPhotos, uploadedReceipts, uploadedCertificate);
+    return {
+      ok: false,
+      message: e instanceof Error ? e.message : "저장 중 오류가 발생했습니다.",
+    };
+  }
+}
+
+// Storage 정리 헬퍼 — photos 는 사진 버킷, receipts/certificate 는 영수증 버킷.
+async function removeUploaded(
+  photoUrls: string[],
+  receiptUrls: string[],
+  certificateUrls: string[]
+) {
+  const photoKeys = photoUrls
+    .map((u) => extractStorageKey(u, STORAGE_BUCKET_PHOTOS))
+    .filter((k): k is string => !!k);
+  const receiptKeys = [...receiptUrls, ...certificateUrls]
+    .map((u) => extractStorageKey(u, STORAGE_BUCKET_RECEIPTS))
+    .filter((k): k is string => !!k);
+  if (photoKeys.length > 0) {
+    await supabase.storage.from(STORAGE_BUCKET_PHOTOS).remove(photoKeys);
+  }
+  if (receiptKeys.length > 0) {
+    await supabase.storage.from(STORAGE_BUCKET_RECEIPTS).remove(receiptKeys);
+  }
 }
 
 export async function listActivities(opts?: {
