@@ -1,12 +1,14 @@
 "use client";
 
 import { useMemo, useState, useTransition } from "react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import {
   badgeNeutral,
   btnPrimary,
   btnSecondary,
   cardCls,
+  panelCls,
   panelToneCls,
   sectionTitleCls,
   inputCls,
@@ -1228,10 +1230,23 @@ export default function BusinessResultsDashboard({
             파생값입니다. 규칙이 갈라지면 같은 달 온나 건수가 두 화면에서
             다르게 나옵니다. */}
       {tab === "onna" && (
-        <section className={cardCls}>
-          <p className="text-sm leading-6 text-ink-muted">
-            온나(사직동 자유공간) 실적 화면은 준비 중입니다.
+        // 준비 중인 것은 맞습니다. 다만 "준비 중" 한 줄만 두면 온나 자료가
+        //   아예 없는 줄 압니다 — 지금 볼 수 있는 자리를 같이 알려 줍니다.
+        <section className={panelCls}>
+          <h2 className={sectionTitleCls("navy")}>온나(사직동 자유공간)</h2>
+          <p className="mt-3 text-sm font-medium text-ink">
+            온나 실적 집계 화면은 준비 중입니다.
           </p>
+          <p className="mt-1 text-sm leading-6 text-ink-muted">
+            실적을 어떻게 집계할지는 직원 의논 후 정합니다. 그때까지도 온나
+            대관·청소년 공간 이용 내역은 [시설관리 › 대관예약]의 온나 탭에서
+            그대로 볼 수 있습니다.
+          </p>
+          <div className="mt-4">
+            <Link href="/hr/facility/rentals" className={btnSecondary}>
+              대관예약에서 온나 이용 내역 보기
+            </Link>
+          </div>
         </section>
       )}
       {tab === "trainings" && (

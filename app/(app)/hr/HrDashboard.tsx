@@ -12,10 +12,12 @@ import {
   cardCls,
   panelToneCls,
   sectionTitleCls,
+  btnSecondary,
   inputCls,
   tabBarCls,
   tabNavCls,
   tabItemCls,
+  type RuleTone,
 } from "@/lib/ui";
 
 export type TabKey = "records" | "contracts" | "certificates" | "recruitment";
@@ -53,18 +55,33 @@ export default function HrDashboard({
           canManageAuth={canManageAuth}
         />
       )}
+      {/* 계약서·증명서 탭은 "곧 제공될 예정입니다" 자리표시자였습니다.
+          둘 다 사실이 아니었습니다 — 증명서는 이미 완성돼 발급까지 되고 있고,
+          근로계약서도 인사기록카드 첨부서류로 이미 보관 중입니다. 그 표시
+          때문에 "아직 대기 중" 으로 잘못 알려져 있었습니다(2026-09-23 정리).
+          없는 화면을 만드는 대신, 있는 자리를 알려 줍니다. */}
       {tab === "contracts" && (
-        <PlaceholderCard
-          icon="📝"
+        <WhereItLivesCard
+          tone="blue"
           title="계약서"
-          desc="근로계약서·연봉계약서를 관리할 수 있습니다."
+          lead="계약서 전용 관리 화면은 아직 없습니다. 다만 근로계약서는 이미 보관되고 있습니다."
+          body="근로계약서는 인사기록카드의 [첨부서류] 탭에 필수 항목으로 들어갑니다. 직원별로 올리고 내려받을 수 있습니다."
+          actions={[
+            { label: "인사기록카드로 이동", onClick: () => setTab("records") },
+            { label: "내 인사기록카드에서 내 계약서 보기", href: "/profile/hr" },
+          ]}
         />
       )}
       {tab === "certificates" && (
-        <PlaceholderCard
-          icon="📄"
+        <WhereItLivesCard
+          tone="blue"
           title="증명서 발급"
-          desc="재직·경력증명서를 발급하고 발급 내역을 관리할 수 있습니다."
+          lead="증명서 발급은 이미 쓰고 있습니다. 자리가 이 탭이 아닐 뿐입니다."
+          body="재직·경력증명서는 발급대장에서 신청을 확인하고 발급합니다. 직원 본인이 신청하는 곳은 [내 인사기록카드 › 증명서] 로 따로 있습니다."
+          actions={[
+            { label: "증명서 발급대장 열기", href: "/hr/certificates" },
+            { label: "내 증명서 신청하기", href: "/profile/hr#my-certificates" },
+          ]}
         />
       )}
       {tab === "recruitment" && (
@@ -407,30 +424,55 @@ function EmployeeChecklistCard({
 }
 
 // =====================================================================
-// 빈 탭 placeholder
+// "그 기능은 여기 있습니다" 안내 카드
+//
+//   빈 탭에 "곧 제공될 예정입니다" 를 띄우던 자리표시자를 대신합니다.
+//   그 문구는 이미 있는 기능까지 대기 중인 것처럼 보이게 만들어, 관장·직원이
+//   실제로 세 번 착각했습니다. 없는 것은 없다고 적되, **있는 자리를 반드시
+//   같이 알려 줍니다** — 그게 이 카드의 전부입니다.
+//
+//   action 은 두 종류입니다.
+//     href    : 다른 화면으로 이동
+//     onClick : 같은 페이지의 다른 탭으로 전환(탭은 클라이언트 상태라 링크가
+//               아닙니다 — 그래서 리다이렉트가 아니라 이 카드를 씁니다)
 // =====================================================================
-function PlaceholderCard({
-  icon,
+type WhereAction = { label: string; href?: string; onClick?: () => void };
+
+function WhereItLivesCard({
+  tone,
   title,
-  desc,
+  lead,
+  body,
+  actions,
 }: {
-  icon: string;
+  tone: RuleTone;
   title: string;
-  desc: string;
+  lead: string;
+  body: string;
+  actions: WhereAction[];
 }) {
   return (
-    <section className={cardCls}>
-      <h3 className="text-sm font-semibold text-ink">{title}</h3>
-      <div className="mt-2 flex flex-col items-center justify-center gap-2 py-16 text-center">
-        <div
-          aria-hidden
-          className="text-5xl text-ink-hint"
-          style={{ filter: "grayscale(100%) opacity(0.6)" }}
-        >
-          {icon}
-        </div>
-        <p className="text-sm font-medium text-ink-muted">{desc}</p>
-        <p className="text-xs text-ink-hint">곧 제공될 예정입니다.</p>
+    <section className={panelToneCls(tone)}>
+      <h3 className={sectionTitleCls(tone)}>{title}</h3>
+      <p className="mt-3 text-sm font-medium text-ink">{lead}</p>
+      <p className="mt-1 text-sm leading-6 text-ink-muted">{body}</p>
+      <div className="mt-4 flex flex-wrap gap-2">
+        {actions.map((a) =>
+          a.href ? (
+            <Link key={a.label} href={a.href} className={btnSecondary}>
+              {a.label}
+            </Link>
+          ) : (
+            <button
+              key={a.label}
+              type="button"
+              onClick={a.onClick}
+              className={btnSecondary}
+            >
+              {a.label}
+            </button>
+          ),
+        )}
       </div>
     </section>
   );
