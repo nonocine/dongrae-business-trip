@@ -5,6 +5,47 @@
 export const cardCls =
   "rounded-xl border border-line bg-card p-4 shadow-sm sm:p-5";
 
+// =====================================================================
+// 구분선 스타일 (2026-09, 관장 피드백)
+//
+//   "흰 배경에 글자만 있어서 영역 구분이 안 된다. 촌스럽게 색을 채우지 말고
+//    테두리 구분선으로, 우리 로고 색에 맞게."
+//
+//   그래서 두 가지를 지킵니다.
+//     · 배경은 흰색 그대로. 면을 색으로 채우지 않습니다.
+//     · 선 색은 로고 4색을 흰색에 30% 섞은 값(globals.css --rule-*).
+//       원색 선을 그으면 그게 더 촌스러워서 채도를 낮췄습니다.
+//       기본 경계는 중성(--rule), 로고색은 '한 군데' 포인트에만 씁니다.
+//
+//   ★ 지금은 /hr/clubs 에서만 씁니다. 관장 확인 뒤 다른 화면으로 넓힐 때
+//     이 상수만 가져다 쓰면 되도록 여기 모아 둡니다.
+// =====================================================================
+
+// 바깥 섹션 — 카드보다 경계가 또렷한 판. 배경은 흰색 유지.
+export const panelCls = "rounded-xl border border-rule bg-card p-4 sm:p-5";
+
+// 안쪽 블록 — 섹션 안에서 한 덩이를 또 나눌 때(표·폼 묶음).
+export const blockCls = "rounded-lg border border-rule bg-card p-3";
+
+// 섹션 제목 — 왼쪽에 로고색 띠 하나. 색은 여기서만 들어갑니다.
+//   tone 을 주지 않으면 네이비(기본 포인트색)를 씁니다.
+export type RuleTone = "blue" | "red" | "green" | "yellow" | "navy";
+const RULE_BAR: Record<RuleTone, string> = {
+  blue: "border-l-logo-blue",
+  red: "border-l-logo-red",
+  green: "border-l-logo-green",
+  yellow: "border-l-logo-yellow",
+  navy: "border-l-navy",
+};
+export function sectionTitleCls(tone: RuleTone = "navy"): string {
+  return `border-l-[3px] ${RULE_BAR[tone]} pl-2.5 text-base font-bold text-ink`;
+}
+
+// 표 — 머리줄과 행 경계를 같은 선으로 통일.
+export const tableHeadCls =
+  "border-b border-rule text-left text-xs font-medium text-ink-hint";
+export const tableRowCls = "border-b border-rule/70 last:border-0";
+
 // --- 입력 ---
 export const inputCls =
   "mt-1 block w-full rounded-lg border border-line bg-card px-3 py-2 text-sm text-ink-body shadow-sm placeholder:text-ink-hint focus:border-navy focus:outline-none focus:ring-1 focus:ring-navy";

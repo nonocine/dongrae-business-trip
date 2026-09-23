@@ -15,7 +15,7 @@
 // =====================================================================
 
 import { cache } from "react";
-import { getGoogleSession } from "@/app/actions";
+import { getGoogleSession, isManagerAdmin } from "@/app/actions";
 import { getMyProfile, getMyEmployeeRoles } from "@/app/(app)/profile/hr/actions";
 import { getUnreadMailCount } from "@/app/(app)/mail/actions";
 import { getTrainingsAdminSummary } from "@/app/(app)/hr/trainings/actions";
@@ -34,10 +34,13 @@ export type ShellData = {
 };
 
 export const getShellData = cache(async (): Promise<ShellData> => {
-  const [my, roles, g] = await Promise.all([
+  const [my, roles, g, managerAdmin] = await Promise.all([
     getMyProfile(),
     getMyEmployeeRoles(),
     getGoogleSession(),
+    // /admin 진입 기준 — isM0 보다 좁습니다(구글 세션 + master/관장).
+    //   사이드바의 '관리자 대시보드' 를 가드와 같은 조건으로 걸기 위해 함께 봅니다.
+    isManagerAdmin(),
   ]);
 
   const rank = my?.driver?.rank ?? null;
@@ -53,7 +56,7 @@ export const getShellData = cache(async (): Promise<ShellData> => {
     ]);
 
   return {
-    ctx: { isM0, roles },
+    ctx: { isM0, roles, isManagerAdmin: managerAdmin },
     badges: {
       "/mail": unreadMailCount,
       "/hr/trainings": trainingAdminSummary?.totalNotMet,

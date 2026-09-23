@@ -27,7 +27,11 @@ import {
 } from "@/app/(app)/hr/clubs/actions";
 import ClubPlanEditor from "@/app/(app)/hr/clubs/ClubPlanEditor";
 import {
-  cardCls,
+  panelCls,
+  blockCls,
+  sectionTitleCls,
+  tableHeadCls,
+  tableRowCls,
   btnPrimary,
   btnSecondary,
   btnDanger,
@@ -41,7 +45,7 @@ import {
 } from "@/lib/ui";
 
 const inputCls =
-  "w-full rounded-md border border-line bg-card px-3 py-2 text-sm text-ink-body shadow-sm focus:border-navy focus:outline-none focus:ring-1 focus:ring-navy";
+  "w-full rounded-md border border-rule bg-card px-3 py-2 text-sm text-ink-body shadow-sm focus:border-navy focus:outline-none focus:ring-1 focus:ring-navy";
 
 export default function ClubDashboard({
   year,
@@ -92,7 +96,7 @@ export default function ClubDashboard({
 
   if (!data.configured) {
     return (
-      <section className={cardCls}>
+      <section className={panelCls}>
         <h1 className="text-xl font-bold text-ink">동아리관리 준비가 필요합니다</h1>
         <p className="mt-2 text-sm text-ink-muted">
           동아리관리 데이터베이스 변경사항을 먼저 적용한 뒤 사용할 수 있습니다.
@@ -103,30 +107,23 @@ export default function ClubDashboard({
 
   return (
     <div className="space-y-5">
-      <section className={cardCls}>
-        <div className="flex flex-wrap items-start justify-between gap-3">
-          <div>
-            <p className="text-xs font-semibold text-brand-blue">동래샘들 연계</p>
-            <h1 className="mt-1 text-xl font-bold text-ink">청소년동아리 관리</h1>
-            <p className="mt-1 text-sm text-ink-muted">
-              동아리샘의 활동일지와 출석을 월간보고·사업실적으로 연결합니다.
-            </p>
-          </div>
-          <Link href="/business-results" className={btnSecondary}>
-            사업실적 보기
-          </Link>
-        </div>
-        <div className="mt-4 flex items-center justify-between rounded-lg bg-surface px-3 py-2">
+      {/* 도구 줄 — 제목·설명은 페이지 머리글(page.tsx)에 이미 있고 사이드바가
+          현재 위치를 보여주므로 여기서 반복하지 않습니다(관장 피드백). */}
+      <section className={`${panelCls} flex flex-wrap items-center justify-between gap-3`}>
+        <div className="flex items-center gap-2">
           <button type="button" onClick={() => moveMonth(-1)} className={btnSecondary}>
             이전 달
           </button>
-          <strong className="text-base text-navy">
+          <strong className="min-w-[7.5rem] text-center text-base text-navy">
             {year}년 {month}월
           </strong>
           <button type="button" onClick={() => moveMonth(1)} className={btnSecondary}>
             다음 달
           </button>
         </div>
+        <Link href="/business-results" className={btnSecondary}>
+          사업실적 보기
+        </Link>
       </section>
 
       {message && (
@@ -209,10 +206,10 @@ export default function ClubDashboard({
         }
       />
 
-      <section className={cardCls}>
+      <section className={panelCls}>
         <div className="flex flex-wrap items-center justify-between gap-2">
           <div>
-            <h2 className="text-base font-bold text-ink">{month}월 제출 현황</h2>
+            <h2 className={sectionTitleCls("blue")}>{month}월 제출 현황</h2>
             <p className="mt-0.5 text-xs text-ink-muted">
               활동일지가 모두 제출된 동아리만 월간보고를 확정할 수 있습니다.
             </p>
@@ -256,10 +253,10 @@ export default function ClubDashboard({
                 예전에는 결과보고만 보여서 "누가 계획서를 안 냈는지" 를 알 수
                 없었습니다(김준호 선생님 요청). 계획서는 한 해 단위라 달을
                 옮겨도 같은 값이고, 결과보고는 그 달 기준입니다. */}
-            <div className="mb-4 overflow-x-auto rounded-lg border border-line">
+            <div className="mb-4 overflow-x-auto rounded-lg border border-rule">
               <table className="w-full min-w-[420px] border-collapse text-sm">
                 <thead>
-                  <tr className="border-b border-line bg-surface text-left text-xs text-ink-hint">
+                  <tr className={`${tableHeadCls} bg-surface`}>
                     <th className="px-3 py-2 font-medium">동아리</th>
                     <th className="px-3 py-2 font-medium">동아리샘</th>
                     <th className="px-3 py-2 text-center font-medium">
@@ -275,7 +272,7 @@ export default function ClubDashboard({
                     const planOk = !!club.planSubmittedAt;
                     const reportOk = club.reportStatus === "confirmed";
                     return (
-                      <tr key={club.id} className="border-b border-line last:border-0">
+                      <tr key={club.id} className={tableRowCls}>
                         <td className="px-3 py-2 font-medium text-ink">
                           {club.name}
                         </td>
@@ -349,7 +346,7 @@ function Mark({ ok }: { ok: boolean }) {
 
 function Summary({ label, value }: { label: string; value: string }) {
   return (
-    <div className={cardCls}>
+    <div className={panelCls}>
       <p className="text-xs font-semibold text-ink-muted">{label}</p>
       <p className="mt-1 text-xl font-bold text-navy">{value}</p>
     </div>
@@ -391,8 +388,8 @@ function TeacherList({
   onReactivate: (teacher: ClubTeacherRow) => void;
 }) {
   return (
-    <section className={cardCls}>
-      <h2 className="text-base font-bold text-ink">동아리샘 목록</h2>
+    <section className={panelCls}>
+      <h2 className={sectionTitleCls("green")}>동아리샘 목록</h2>
       <p className="mt-1 text-xs text-ink-muted">
         <b>중지</b>는 동아리샘 역할만 잠시 끄는 것이라 언제든 되돌릴 수 있고,{" "}
         <b>제거</b>는 역할 자체를 지웁니다(다시 등록해야 함). 둘 다 계정과 강사
@@ -523,8 +520,8 @@ function TeacherForm({
   const candidates = instructors.filter((i) => !i.alreadyClub);
 
   return (
-    <div className={cardCls}>
-      <h2 className="text-base font-bold text-ink">동아리샘 등록</h2>
+    <div className={panelCls}>
+      <h2 className={sectionTitleCls("green")}>동아리샘 등록</h2>
       <p className="mt-1 text-xs text-ink-muted">
         강사가 동아리도 맡으면 새 계정을 만들지 말고 “기존 강사에서 추가”로 겸직
         지정하세요. 계정·비밀번호는 그대로 유지됩니다.
@@ -649,7 +646,7 @@ function ClubForm({
   const [goal, setGoal] = useState("");
   return (
     <form
-      className={cardCls}
+      className={panelCls}
       onSubmit={(event) => {
         event.preventDefault();
         onSubmit({
@@ -663,7 +660,7 @@ function ClubForm({
         });
       }}
     >
-      <h2 className="text-base font-bold text-ink">동아리 등록</h2>
+      <h2 className={sectionTitleCls("yellow")}>동아리 등록</h2>
       <p className="mt-1 text-xs text-ink-muted">
         {year}년 동아리와 담당 동아리샘을 연결합니다.
       </p>
@@ -770,7 +767,7 @@ function ClubCard({
       ? badgeWarning
       : badgeNeutral;
   return (
-    <article className="rounded-xl border border-line bg-card p-4">
+    <article className={blockCls}>
       {/* 접기 토글과 삭제는 형제 버튼 — 토글 안에 버튼을 넣으면 중첩이 된다. */}
       <div className="flex items-start gap-2">
         <button
@@ -869,7 +866,7 @@ function ClubCard({
             <div className="mt-2 overflow-x-auto">
               <table className="w-full min-w-[720px] border-collapse text-sm">
                 <thead>
-                  <tr className="border-b border-line text-left text-xs text-ink-hint">
+                  <tr className={tableHeadCls}>
                     <th className="py-1.5 pr-2 font-medium">회차</th>
                     <th className="py-1.5 pr-2 font-medium">날짜</th>
                     <th className="py-1.5 pr-2 font-medium">활동내용</th>
@@ -882,7 +879,7 @@ function ClubCard({
                 <tbody>
                   {club.sessions.map((session) =>
                     editingId === session.id ? (
-                      <tr key={session.id} className="border-b border-line">
+                      <tr key={session.id} className={tableRowCls}>
                         <td colSpan={7} className="py-2">
                           <div className="grid gap-2 sm:grid-cols-2">
                             <input
@@ -938,7 +935,7 @@ function ClubCard({
                     ) : (
                       <tr
                         key={session.id}
-                        className="border-b border-line align-top"
+                        className={`${tableRowCls} align-top`}
                       >
                         <td className="py-2 pr-2 text-ink-body">
                           {session.sessionNo}
@@ -1019,7 +1016,7 @@ function ClubCard({
               <div className="overflow-x-auto">
                 <table className="w-full min-w-[480px] border-collapse text-sm">
                   <thead>
-                    <tr className="border-b border-line text-left text-xs text-ink-hint">
+                    <tr className={tableHeadCls}>
                       <th className="py-1.5 pr-2 font-medium">항목</th>
                       <th className="py-1.5 pr-2 font-medium">내역</th>
                       <th className="py-1.5 pr-2 text-right font-medium">계획액</th>
@@ -1028,7 +1025,7 @@ function ClubCard({
                   </thead>
                   <tbody>
                     {club.budgetPlans.map((plan: ClubBudgetPlanRow) => (
-                      <tr key={plan.id} className="border-b border-line">
+                      <tr key={plan.id} className={tableRowCls}>
                         <td className="py-2 pr-2 text-ink-body">{plan.category}</td>
                         <td className="py-2 pr-2 text-ink-body">
                           {plan.description || "-"}

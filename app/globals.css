@@ -46,6 +46,18 @@
   --logo-green: #3fae5e;
   --logo-yellow: #f3c83e;
 
+  /* 구분선 — "색을 채우지 말고 테두리로, 로고 색에 맞게" (관장 피드백).
+     위 로고 원색을 흰 배경에 30% 만 섞은 값입니다. 원색으로 선을 그으면
+     그게 더 촌스러워서, 배경은 흰색을 유지하고 선만 은은하게 물들입니다.
+       --rule      : 기본 구분선(중성). 카드 경계는 전부 이것.
+       --rule-*    : 포인트용. 섹션 제목 왼쪽 띠·카드 상단 선처럼 '한 군데' 에만.
+     ※ --line(#e5e7eb)보다 한 톤 진합니다 — 흰 배경에서 경계가 보이게. */
+  --rule: #dcdfe4;
+  --rule-blue: #c6d3e8;
+  --rule-red: #f8c7c3;
+  --rule-green: #c5e7cf;
+  --rule-yellow: #fbeec5;
+
   /* 하위 호환 — 기존 코드가 참조하는 변수명 유지 */
   --background: var(--canvas);
   --foreground: var(--ink);
@@ -95,6 +107,11 @@
   --color-logo-blue: var(--logo-blue);
   --color-logo-green: var(--logo-green);
   --color-logo-yellow: var(--logo-yellow);
+  --color-rule: var(--rule);
+  --color-rule-blue: var(--rule-blue);
+  --color-rule-red: var(--rule-red);
+  --color-rule-green: var(--rule-green);
+  --color-rule-yellow: var(--rule-yellow);
 
   /* 하위 호환 */
   --color-surface-border: var(--surface-border);

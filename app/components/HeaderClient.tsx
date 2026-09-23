@@ -9,19 +9,15 @@ import { findActive } from "@/lib/menuActive";
 
 type SessionKind = "employee" | null;
 
-type NavChild = { href: string; label: string };
-type NavItem = { href: string; label: string; children?: NavChild[] };
 
 export default function HeaderClient({
   kind,
   name,
-  canAccessHr,
   canAccessAdmin,
   tree,
 }: {
   kind: SessionKind;
   name: string | null;
-  canAccessHr: boolean;
   canAccessAdmin: boolean;
   // 폰 드로어가 그릴 메뉴 — PC 사이드바와 같은 트리(서버가 만들어 내려줍니다).
   //   비로그인이면 null.
@@ -42,28 +38,22 @@ export default function HeaderClient({
     ? findActive(tree.groups, tree.legacy, pathname, search)
     : { key: "", group: "" };
 
-  // 좌측 네비게이션 (권한별)
-  const navItems: NavItem[] = [];
-  if (loggedIn) {
-    navItems.push({ href: "/", label: "메인" });
-    navItems.push({ href: "/activities", label: "활동일지" });
-    navItems.push({ href: "/new", label: "활동 작성" });
-    if (canAccessHr)
-      navItems.push({
-        href: "/hr",
-        label: "HR 관리",
-        children: [
-          { href: "/hr?tab=recruitment", label: "채용 관리" },
-          { href: "/hr/external-judges", label: "외부 심사위원" },
-          { href: "/hr?tab=records", label: "직원 관리" },
-        ],
-      });
-    if (isAdmin) navItems.push({ href: "/admin", label: "관리자" });
-  }
+  // ★ 데스크톱 가로 네비(메인·활동일지·활동 작성·HR 관리·관리자)는 제거했습니다.
+  //   좌측 사이드바가 그 역할을 전부 하므로 중복이었고, 무엇보다 게이트가
+  //   달랐습니다 — 헤더는 직급(canAccessHr = 관장·부장)으로 걸고 사이드바는
+  //   직무·권한등급으로 걸어서, hr 직무를 가진 팀장은 사이드바에 '인사' 가
+  //   있는데 헤더에는 'HR 관리' 가 없었습니다. 메뉴가 두 곳에서 따로 살면
+  //   반드시 이렇게 어긋납니다.
+  //   여기서만 갈 수 있던 /admin 은 lib/menu.ts 의 '관리자 영역' 으로 옮겼습니다.
+  //   폰은 그대로입니다 — 햄버거 드로어가 메뉴 역할을 합니다(md 미만).
 
   return (
     <header className="border-b border-line bg-card">
-      <div className="mx-auto flex w-full max-w-6xl items-center gap-2 px-4 py-3 sm:gap-3 sm:py-4">
+      {/* 로고를 화면 왼쪽 끝에 붙입니다(가운데 정렬 컨테이너를 쓰지 않음).
+          좌측 패딩을 사이드바 폭(w-60=240px)에 맞춰, PC 에서 로고가 사이드바
+          열 위에 얹혀 좌측 열이 하나로 이어져 보이게 했습니다.
+          폰에서는 사이드바가 없으므로 기존처럼 px-4 만 줍니다. */}
+      <div className="flex w-full items-center gap-2 px-4 py-3 sm:gap-3 sm:py-4 md:pl-5">
         {/* 모바일 햄버거 */}
         {loggedIn && (
           <button
@@ -104,26 +94,7 @@ export default function HeaderClient({
           </span>
         </Link>
 
-        {/* 데스크톱 가로 네비 */}
-        {loggedIn && (
-          <nav className="ml-3 hidden items-center gap-0.5 md:flex">
-            {navItems.map((item) =>
-              item.children ? (
-                <DesktopNavMenu key={item.href} item={item} />
-              ) : (
-                <Link
-                  key={item.href}
-                  href={item.href}
-                  className="rounded-md px-3 py-1.5 text-sm font-medium text-ink-muted transition hover:bg-surface hover:text-ink"
-                >
-                  {item.label}
-                </Link>
-              )
-            )}
-          </nav>
-        )}
-
-        {/* 우측 사용자 영역 */}
+        {/* 우측 사용자 영역 — 계정 메뉴만 남습니다. */}
         <div className="ml-auto flex items-center gap-2">
           {loggedIn && (
             <>
@@ -372,41 +343,5 @@ function DrawerRow({
     >
       {body}
     </Link>
-  );
-}
-
-// 데스크톱 네비 드롭다운 — children 이 있는 상위 메뉴(HR 관리)용.
-function DesktopNavMenu({ item }: { item: NavItem }) {
-  const [open, setOpen] = useState(false);
-  return (
-    <div className="relative">
-      <button
-        type="button"
-        onClick={() => setOpen((v) => !v)}
-        className="inline-flex items-center gap-1 rounded-md px-3 py-1.5 text-sm font-medium text-ink-muted transition hover:bg-surface hover:text-ink"
-      >
-        {item.label}
-        <span aria-hidden className="text-[10px]">
-          ▾
-        </span>
-      </button>
-      {open && (
-        <>
-          <div className="fixed inset-0 z-30" onClick={() => setOpen(false)} />
-          <div className="absolute left-0 z-40 mt-1 w-44 overflow-hidden rounded-lg border border-line bg-card py-1 shadow-lg">
-            {item.children?.map((c) => (
-              <Link
-                key={c.href}
-                href={c.href}
-                onClick={() => setOpen(false)}
-                className="block px-3 py-2 text-sm text-ink-body hover:bg-surface"
-              >
-                {c.label}
-              </Link>
-            ))}
-          </div>
-        </>
-      )}
-    </div>
   );
 }

@@ -73,11 +73,17 @@ export const MENU_GROUP_LABEL: Record<MenuGroup, string> = {
 //       관장에게는 비품관리·안전점검·운행기록·대관예약 진입점이 아예 없었습니다
 //       (들어갈 수는 있는데 메뉴에 없어 주소를 직접 쳐야 했습니다).
 //       메뉴가 가드보다 좁으면 그냥 버그입니다.
+//   managerAdmin: /admin 진입 가능 여부 — isManagerAdmin() 과 같은 기준.
+//     ★ m0 보다 좁습니다. isM0Grant 는 rank ∈ (관장·부장) 이거나 master 이거나
+//       auth_level='M0' 면 참이지만, isManagerAdmin 은 '구글 세션' 이면서
+//       master 이거나 rank='관장' 일 때만 참입니다. 부장(M0)도, 비번 로그인도
+//       /admin 에서는 튕깁니다. m0 로 걸면 눌렀다 튕기는 메뉴가 됩니다.
 export type MenuVisibility =
   | { kind: "everyone" }
   | { kind: "m0" }
   | { kind: "role"; role: string }
-  | { kind: "m0OrRole"; role: string };
+  | { kind: "m0OrRole"; role: string }
+  | { kind: "managerAdmin" };
 
 export type MenuItem = {
   // 같은 경로가 여러 그룹에 있어(예: /mail 은 공통·관리자 양쪽) 경로로는
@@ -441,6 +447,19 @@ export const MENU_ITEMS: MenuItem[] = [
     desc: "월별 실적 취합·검토·결과보고서",
     show: { kind: "m0" },
   },
+  {
+    // 상단 가로 네비를 걷어내면서(2026-09) 여기로 옮긴 항목입니다.
+    //   예전에는 헤더 네비와 계정 메뉴에만 있어 사이드바에서는 갈 수 없었습니다.
+    //   ★ 조건이 managerAdmin 인 이유는 위 MenuVisibility 주석 참고 —
+    //     /admin 가드(isManagerAdmin)가 m0 보다 좁습니다.
+    key: "admin-console",
+    group: "admin",
+    label: "관리자 대시보드",
+    href: "/admin",
+    icon: "🛠",
+    desc: "직원 계정·활동 통계 등 관리자 전용 화면",
+    show: { kind: "managerAdmin" },
+  },
 
   // ---------- 레거시 — 활동일지 계열 ----------
   //   대시보드 카드로는 지금도 없고 상단 네비(HeaderClient)에만 있습니다.
@@ -472,6 +491,9 @@ export const MENU_ITEMS: MenuItem[] = [
 export type MenuContext = {
   isM0: boolean;
   roles: ReadonlySet<string> | string[];
+  // /admin 진입 가능 여부(isManagerAdmin). m0 와 기준이 다릅니다 — 위 주석 참고.
+  //   값을 주지 않으면 false 로 봅니다(메뉴는 좁게 여는 쪽이 안전합니다).
+  isManagerAdmin?: boolean;
 };
 
 function hasRole(ctx: MenuContext, role: string): boolean {
@@ -490,6 +512,8 @@ export function canSeeMenuItem(item: MenuItem, ctx: MenuContext): boolean {
       return hasRole(ctx, item.show.role);
     case "m0OrRole":
       return ctx.isM0 || hasRole(ctx, item.show.role);
+    case "managerAdmin":
+      return ctx.isManagerAdmin === true;
   }
 }
 

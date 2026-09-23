@@ -243,7 +243,7 @@ export default function ClubPlanEditor({
           <div className="mt-2 overflow-x-auto">
             <table className="w-full min-w-[640px] border-collapse text-sm">
               <thead>
-                <tr className="border-b border-line text-left text-xs text-ink-hint">
+                <tr className="border-b border-rule text-left text-xs text-ink-hint">
                   <th className="py-1.5 pr-2 font-medium">회차</th>
                   <th className="py-1.5 pr-2 font-medium">날짜</th>
                   <th className="py-1.5 pr-2 font-medium">활동내용</th>
@@ -254,7 +254,7 @@ export default function ClubPlanEditor({
               <tbody>
                 {plan.sessions.map((s) =>
                   editId === s.id ? (
-                    <tr key={s.id} className="border-b border-line">
+                    <tr key={s.id} className="border-b border-rule/70 last:border-0">
                       <td colSpan={5} className="py-2">
                         <div className="grid gap-2 sm:grid-cols-2">
                           <input
@@ -308,7 +308,7 @@ export default function ClubPlanEditor({
                       </td>
                     </tr>
                   ) : (
-                    <tr key={s.id} className="border-b border-line">
+                    <tr key={s.id} className="border-b border-rule/70 last:border-0">
                       <td className="py-2 pr-2 text-ink-muted">
                         {s.sessionNo}회
                       </td>
@@ -424,7 +424,7 @@ export default function ClubPlanEditor({
           <div className="mt-2 overflow-x-auto">
             <table className="w-full min-w-[480px] border-collapse text-sm">
               <thead>
-                <tr className="border-b border-line text-left text-xs text-ink-hint">
+                <tr className="border-b border-rule text-left text-xs text-ink-hint">
                   <th className="py-1.5 pr-2 font-medium">구분</th>
                   <th className="py-1.5 pr-2 font-medium">내역</th>
                   <th className="py-1.5 pr-2 text-right font-medium">금액</th>
@@ -433,7 +433,7 @@ export default function ClubPlanEditor({
               </thead>
               <tbody>
                 {plan.budgetPlans.map((b) => (
-                  <tr key={b.id} className="border-b border-line">
+                  <tr key={b.id} className="border-b border-rule/70 last:border-0">
                     <td className="py-2 pr-2 text-ink-body">{b.category}</td>
                     <td className="py-2 pr-2 text-ink-body">
                       {b.description || "-"}
@@ -524,7 +524,7 @@ export default function ClubPlanEditor({
       {/* --- 계획 대비 실적 ---
           실제 지출은 이미 saem_club_expenses 에 따로 쌓이고 있어, 계획과
           비교만 하면 됩니다. 복잡한 분석은 하지 않습니다. */}
-      <div className="rounded-lg border border-line bg-surface p-3">
+      <div className="rounded-lg border border-rule bg-card p-3">
         <p className="text-sm font-semibold text-navy">
           계획 대비 실적 ({plan.year}년)
         </p>

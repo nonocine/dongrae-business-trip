@@ -1,6 +1,4 @@
-import { getSession, getGoogleSession, isManagerAdmin } from "@/app/actions";
-import { canAccessHr, type EmployeeRank } from "@/lib/supabase";
-import { supabaseAdmin } from "@/lib/supabaseAdmin";
+import { getSession, isManagerAdmin } from "@/app/actions";
 import HeaderClient from "@/app/components/HeaderClient";
 import { getShellData } from "@/app/(app)/shellData";
 import { buildMenuTree, type MenuTree } from "@/lib/menuTree";
@@ -8,31 +6,15 @@ import { buildMenuTree, type MenuTree } from "@/lib/menuTree";
 export default async function Header() {
   const session = await getSession();
 
-  // 관리자(관장) 진입 권한 — /admin 게이트(isManagerAdmin)와 동일 기준.
+  // 관리자(관장) 표기 — /admin 게이트(isManagerAdmin)와 동일 기준.
+  //   헤더에서는 이름 자리에 "관리자" 로 보여줄지와 계정 메뉴에 관리자
+  //   대시보드를 띄울지에만 씁니다.
   const canAccessAdmin = await isManagerAdmin();
 
-  // HR 메뉴 노출 권한 — requireHrAdmin 과 동일 기준:
-  //   Google(master·관장·부장) 또는 직원 비번 로그인(관장·부장).
-  let hrAccess = canAccessAdmin; // 관장/master 는 HR 도 당연히 접근.
-  if (!hrAccess) {
-    const g = await getGoogleSession();
-    if (g) {
-      hrAccess = !!g.rank && canAccessHr(g.rank as EmployeeRank | null);
-    } else if (session?.kind === "employee") {
-      try {
-        const { data } = await supabaseAdmin
-          .from("drivers")
-          .select("rank")
-          .eq("name", session.name)
-          .eq("is_active", true)
-          .maybeSingle();
-        const rank = (data?.rank as EmployeeRank | null) ?? null;
-        hrAccess = canAccessHr(rank);
-      } catch {
-        hrAccess = false;
-      }
-    }
-  }
+  // ★ 예전에는 여기서 HR 접근 권한(canAccessHr)도 계산해 헤더 가로 네비의
+  //   'HR 관리' 를 켜고 껐습니다. 그 네비를 걷어내면서(2026-09) 함께 지웠습니다.
+  //   직급 기반이라 직무·권한등급으로 연 /hr 가드와 어긋나 있었고, 좌측
+  //   사이드바가 lib/menu.ts 조건으로 같은 일을 정확히 하고 있습니다.
 
   // 폰 드로어가 쓸 메뉴 트리 — PC 사이드바와 '같은' 트리입니다.
   //   ★ 드로어가 자기 메뉴 배열을 갖고 있으면 lib/menu.ts 와 별개로 살아서,
@@ -49,7 +31,6 @@ export default async function Header() {
     <HeaderClient
       kind={session?.kind ?? null}
       name={session?.name ?? null}
-      canAccessHr={hrAccess}
       canAccessAdmin={canAccessAdmin}
       tree={tree}
     />
