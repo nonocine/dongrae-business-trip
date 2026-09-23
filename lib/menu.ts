@@ -267,6 +267,18 @@ export const MENU_ITEMS: MenuItem[] = [
     show: { kind: "m0OrRole", role: "accounting" },
   },
   {
+    // 강사비 지출표 — 회계 담당이 이체·품의를 올리는 화면.
+    //   가드는 /hr/salary 와 같은 resolveSalaryAccess(M0 또는 accounting)
+    //   이므로 여기 조건도 m0OrRole 로 맞춰 둡니다.
+    key: "accounting-payouts",
+    group: "accounting",
+    label: "강사비 지출표",
+    href: "/hr/payouts",
+    icon: "🧾",
+    desc: "정산 확정분 지급 내역·계좌·합계, 엑셀 내려받기",
+    show: { kind: "m0OrRole", role: "accounting" },
+  },
+  {
     key: "accounting-leave-plans",
     group: "accounting",
     label: "연차 사용촉진",
