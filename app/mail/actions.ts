@@ -25,9 +25,8 @@ import {
   isMailCategory,
   isMailFetchStale,
   isMailStatus,
-  type AttachmentSkipReason,
+  toAttachments,
   type MailCategory,
-  type MailAttachmentMeta,
   type MailDetail,
   type MailListItem,
   type MailListView,
@@ -51,26 +50,12 @@ function toStatus(v: unknown): MailStatus {
   return v === "processing" || v === "done" ? v : "unread";
 }
 
-function toSkipReason(v: unknown): AttachmentSkipReason | null {
-  return v === "too_large" || v === "failed" ? v : null;
-}
-
-function toAttachments(raw: unknown): MailAttachmentMeta[] {
-  if (!Array.isArray(raw)) return [];
-  return raw.map((item) => {
-    const o = (item ?? {}) as Record<string, unknown>;
-    return {
-      name: String(o.name ?? "첨부파일"),
-      size: Number(o.size ?? 0),
-      storage_path: (o.storage_path as string | null) ?? null,
-      skip_reason: toSkipReason(o.skip_reason),
-    };
-  });
-}
-
 // 목록 조회 컬럼 — 상세는 select("*") 라 따로 두지 않습니다.
+//   ★ 0단계에서 attachments 를 추가했습니다. 목록 행의 📎 에서 상세를 열지 않고
+//     바로 파일명을 보고 내려받기 위해서입니다. 첨부 '본체' 가 아니라 메타
+//     (이름·크기·경로)만 담긴 jsonb 라 300행을 실어도 수십 KB 수준입니다.
 const LIST_COLUMNS =
-  "id,from_name,from_email,subject,received_at,has_attachments,assignee_name,status,ai_summary,ai_category,ai_suggested_assignee,ai_processed_at,opened_at,deleted_at";
+  "id,from_name,from_email,subject,received_at,has_attachments,attachments,assignee_name,status,ai_summary,ai_category,ai_suggested_assignee,ai_processed_at,opened_at,deleted_at";
 
 // 일괄 처리 상한 — 실수로 전체를 날리는 사고를 막는 안전장치.
 const BULK_LIMIT = 300;
@@ -83,6 +68,7 @@ function toListItem(raw: Record<string, unknown>): MailListItem {
     subject: String(raw.subject ?? ""),
     received_at: (raw.received_at as string | null) ?? null,
     has_attachments: raw.has_attachments === true,
+    attachments: toAttachments(raw.attachments),
     assignee_name: String(raw.assignee_name ?? ""),
     status: toStatus(raw.status),
     ai_summary: String(raw.ai_summary ?? ""),
@@ -328,23 +314,15 @@ export async function getMailDetail(id: string): Promise<MailDetail | null> {
     body_text: String(raw.body_text ?? ""),
     body_html: (raw.body_html as string | null) ?? null,
     memo: String(raw.memo ?? ""),
-    attachments: toAttachments(raw.attachments),
     fetched_at: (raw.fetched_at as string | null) ?? null,
   };
 }
 
-// 첨부 열람용 서명 URL(1시간). 경로가 없으면(용량 초과) null.
-export async function signMailAttachment(
-  path: string | null,
-): Promise<string | null> {
-  await requireMailAccess();
-  if (!path) return null;
-  const { data, error } = await supabaseAdmin.storage
-    .from(MAIL_BUCKET)
-    .createSignedUrl(path, 3600);
-  if (error || !data) return null;
-  return data.signedUrl;
-}
+// 첨부 다운로드는 서버액션이 아니라 라우트가 맡습니다.
+//   app/api/mail/attachment/[id]/[index]/route.ts 참고. 예전의
+//   signMailAttachment(path) 는 두 가지 이유로 제거했습니다.
+//     1) 화면이 await 뒤에 window.open 을 불러 팝업 차단에 걸렸습니다.
+//     2) 클라이언트가 버킷 안 임의 경로를 지정할 수 있었습니다.
 
 type ActionResult = { ok: true } | { ok: false; message: string };
 

@@ -34,6 +34,8 @@ import {
   attachmentSkipNotice,
   formatBytes,
   hasPendingSuggestion,
+  mailAttachmentHref,
+  type MailAttachmentMeta,
   type MailDetail,
   type MailListView,
   type MailReply,
@@ -57,7 +59,6 @@ import {
   sendMailReply,
   setMailCategory,
   setMailStatus,
-  signMailAttachment,
   trashMail,
 } from "./actions";
 import Button from "@/app/components/Button";
@@ -76,6 +77,59 @@ function formatReceived(iso: string | null): string {
 
 // 페이지당 건수 — 비품관리(app/hr/facility/assets)와 같은 20건/페이지 방식입니다.
 const PAGE_SIZE = 20;
+
+const attachChipCls =
+  "flex max-w-full items-center gap-1 rounded-lg border border-line px-2.5 py-1.5 text-left text-xs text-ink-body hover:bg-surface";
+
+// 첨부 한 건 — 사본이 있으면 링크, 없으면 이유를 알리는 버튼.
+//   ★ <a href> 인 것이 핵심입니다. 0단계 이전에는 서버액션으로 서명 URL 을 받은
+//     뒤 window.open 을 불렀는데, await 를 지난 뒤라 사용자 제스처가 끊겨
+//     사파리·일부 크롬이 팝업으로 보고 막았습니다. 지금은 클릭이 곧 이동입니다.
+//   ★ 원본 파일명은 라우트가 Content-Disposition 으로 내려줍니다. <a download>
+//     속성은 교차 출처로 리다이렉트되는 순간 무시되므로 일부러 쓰지 않습니다.
+function AttachmentChip({
+  mailId,
+  att,
+  index,
+  onUnavailable,
+}: {
+  mailId: string;
+  att: MailAttachmentMeta;
+  index: number;
+  onUnavailable: (att: MailAttachmentMeta) => void;
+}) {
+  const label = (
+    <>
+      <span aria-hidden className="shrink-0">
+        📎
+      </span>
+      <span className="min-w-0 truncate">{att.name}</span>
+      <span className="shrink-0 text-ink-hint">({formatBytes(att.size)})</span>
+    </>
+  );
+
+  // 사본이 없는 첨부(10MB 초과·업로드 실패·2단계 이전 기존 행).
+  //   링크로 두면 눌렀을 때 라우트의 오류 문구가 새 화면으로 떠 버립니다.
+  //   화면 안에서 이유를 알리는 쪽이 낫습니다.
+  if (!att.storage_path) {
+    return (
+      <button
+        type="button"
+        onClick={() => onUnavailable(att)}
+        className={`${attachChipCls} border-dashed text-ink-muted`}
+      >
+        {label}
+        <span className="shrink-0 text-stamp">· 사본 없음</span>
+      </button>
+    );
+  }
+
+  return (
+    <a href={mailAttachmentHref(mailId, index)} className={attachChipCls}>
+      {label}
+    </a>
+  );
+}
 
 const navBtn =
   "rounded-lg border border-line px-2.5 py-1.5 text-xs font-semibold text-ink-body hover:bg-surface disabled:opacity-40";
@@ -120,6 +174,11 @@ export default function MailInbox({
   const [replyQuote, setReplyQuote] = useState("");
   const [quoteOpen, setQuoteOpen] = useState(false);
 
+  // --- 목록 첨부 펼침(0단계) ---
+  //   상세를 열지 않고 목록에서 바로 첨부를 받기 위한 것. 값은 펼쳐진 메일 id.
+  //   한 번에 한 행만 펼칩니다(여러 행이 동시에 벌어지면 목록이 훑어지지 않음).
+  const [attachFor, setAttachFor] = useState<string | null>(null);
+
   // --- 일괄 선택(ML-10) ---
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [confirmBulk, setConfirmBulk] = useState<
@@ -140,6 +199,8 @@ export default function MailInbox({
   if (filterKey !== seenFilterKey) {
     setSeenFilterKey(filterKey);
     setPage(1);
+    // 펼쳐 둔 첨부도 접습니다 — 목록이 통째로 바뀌므로 남겨 둘 이유가 없습니다.
+    setAttachFor(null);
   }
   const totalPages = Math.max(1, Math.ceil(view.items.length / PAGE_SIZE));
   const safePage = Math.min(page, totalPages);
@@ -185,6 +246,7 @@ export default function MailInbox({
   function goPage(p: number) {
     setPage(p);
     setSelected(new Set());
+    setAttachFor(null); // 페이지를 넘기면 펼쳐 둔 첨부도 접습니다.
   }
 
   // 일괄 액션 공통 — 성공하면 선택을 비우고 목록을 새로고침합니다.
@@ -249,6 +311,17 @@ export default function MailInbox({
     return () => window.removeEventListener("keydown", onKey);
   }, [open, closeDetail]);
 
+  // 펼친 첨부도 ESC 로 접습니다(상세가 닫혀 있을 때만 — 상세가 열려 있으면
+  //   위 핸들러가 상세를 닫는 것이 먼저입니다).
+  useEffect(() => {
+    if (!attachFor || open) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setAttachFor(null);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [attachFor, open]);
+
   function pushFilters(next: Partial<typeof filters>) {
     const merged = { ...filters, ...next };
     const params = new URLSearchParams();
@@ -269,6 +342,7 @@ export default function MailInbox({
     setMsg(null);
     setLoadingId(item.id);
     setReplyOpen(false);
+    setAttachFor(null); // 상세가 덮으므로 목록에 펼쳐 둔 첨부는 접습니다.
     start(async () => {
       // 상세를 여는 순간 열람으로 기록합니다(최초 1회만 저장됨).
       const [found, replyList] = await Promise.all([
@@ -414,24 +488,13 @@ export default function MailInbox({
     });
   }
 
-  function openAttachment(
-    path: string | null,
-    name: string,
-    reason: "too_large" | "failed" | null | undefined,
-  ) {
-    if (!path) {
-      // 사본이 없는 이유를 구분해 안내합니다(예전에는 전부 "용량 초과" 였음).
-      setMsg({ ok: false, text: attachmentSkipNotice(name, reason) });
-      return;
-    }
-    setMsg(null);
-    start(async () => {
-      const url = await signMailAttachment(path);
-      if (!url) {
-        setMsg({ ok: false, text: "첨부 링크를 만들지 못했습니다." });
-        return;
-      }
-      window.open(url, "_blank", "noopener,noreferrer");
+  // 사본이 없는 첨부를 눌렀을 때 — 이유를 구분해 안내합니다
+  //   (예전에는 508KB PDF 도 전부 "용량 초과" 로 표시됐습니다).
+  //   조용히 아무 일도 없는 상태로 두지 않는 것이 이 함수의 목적입니다.
+  function notifyUnavailable(att: MailAttachmentMeta) {
+    setMsg({
+      ok: false,
+      text: attachmentSkipNotice(att.name, att.skip_reason),
     });
   }
 
@@ -797,16 +860,19 @@ export default function MailInbox({
             const unopened = !item.opened;
             const suggestion = hasPendingSuggestion(item);
             const checked = selected.has(item.id);
+            // 📎 를 누를 수 있는 건 첨부 메타가 실제로 내려온 경우뿐입니다.
+            //   has_attachments 만 true 이고 배열이 빈 행이 있어도(과거 수집 실패)
+            //   빈 띠가 펼쳐지지 않게 합니다.
+            const attachable = item.attachments.length > 0;
+            const attachOpen = attachFor === item.id;
             return (
-              // 행 전체가 버튼이면 안쪽에 체크박스·[적용] 버튼을 넣을 수 없어
-              // (중첩 불가) 여는 영역만 버튼으로 두고 나머지는 형제로 뺐습니다.
-              //
-              // 반응형: 기본(폰)은 쌓고, sm 이상에서 원래의 가로 3단으로 되돌립니다.
-              //   폰에서는 flex-wrap 으로 [체크박스+본문] / [담당자] 두 줄이 되고,
-              //   sm:flex-nowrap 이 한 줄 배치를 복원합니다.
+              // 바깥 래퍼는 배경·구분선만 맡고, 안쪽이 기존의 한 줄입니다.
+              //   첨부 띠를 한 줄 아래에 붙이려면 래퍼가 하나 더 필요합니다 —
+              //   기존 행은 sm 에서 flex-nowrap 이라 w-full 자식을 넣으면
+              //   아래로 내려가지 않고 한 줄에 끼어 들어갑니다.
               <div
                 key={item.id}
-                className={`flex w-full flex-wrap items-start gap-x-3 gap-y-1.5 px-3 py-3 transition-colors hover:bg-navy-soft/40 sm:flex-nowrap sm:gap-3 ${
+                className={`transition-colors hover:bg-navy-soft/40 ${
                   checked
                     ? "bg-navy-soft/30"
                     : unopened
@@ -814,6 +880,13 @@ export default function MailInbox({
                       : ""
                 }`}
               >
+              {/* 행 전체가 버튼이면 안쪽에 체크박스·[적용]·[📎] 를 넣을 수 없어
+                  (중첩 불가) 여는 영역만 버튼으로 두고 나머지는 형제로 뺐습니다.
+
+                  반응형: 기본(폰)은 쌓고, sm 이상에서 원래의 가로 3단으로 되돌립니다.
+                    폰에서는 flex-wrap 으로 [체크박스+본문+📎] / [담당자] 두 줄이 되고,
+                    sm:flex-nowrap 이 한 줄 배치를 복원합니다. */}
+              <div className="flex w-full flex-wrap items-start gap-x-3 gap-y-1.5 px-3 py-3 sm:flex-nowrap sm:gap-3">
                 <input
                   type="checkbox"
                   className="mt-1.5 shrink-0"
@@ -867,9 +940,9 @@ export default function MailInbox({
                       <span className="min-w-0 truncate">
                         {item.subject || "(제목 없음)"}
                       </span>
-                      {item.has_attachments && (
-                        <span className="shrink-0 text-ink-hint">📎</span>
-                      )}
+                      {/* 📎 는 제목 뒤가 아니라 아래 고정 칸으로 옮겼습니다 —
+                          제목 길이에 따라 위치가 흔들리면 목록이 훑어지지 않고,
+                          제목 안에 있으면 여는 버튼 안이라 누를 수도 없습니다. */}
                     </span>
                     {/* AI 한 줄 요약 — 분석을 마친 메일만. 분석 전에는 비워 둡니다. */}
                     {item.ai_processed && item.ai_summary && (
@@ -882,6 +955,39 @@ export default function MailInbox({
                     {formatReceived(item.received_at)}
                   </span>
                 </button>
+
+                {/* 첨부 — 제목 길이와 무관하게 늘 같은 자리에 오는 고정 칸.
+                    누르면 아래에 파일 이름과 받기 링크가 펼쳐집니다(상세를
+                    열 필요 없음). 폰에서는 첫 줄 오른쪽 끝에 붙습니다. */}
+                <span className="mt-0.5 flex w-6 shrink-0 justify-center">
+                  {attachable ? (
+                    <button
+                      type="button"
+                      aria-expanded={attachOpen}
+                      aria-label={`첨부 ${item.attachments.length}개 ${
+                        attachOpen ? "접기" : "보기"
+                      }`}
+                      onClick={() => setAttachFor(attachOpen ? null : item.id)}
+                      className={`flex items-center rounded-md px-1 py-0.5 text-xs leading-none hover:bg-navy-soft ${
+                        attachOpen ? "bg-navy-soft text-navy" : "text-ink-hint"
+                      }`}
+                    >
+                      <span aria-hidden>📎</span>
+                      {item.attachments.length > 1 && (
+                        <span className="text-[10px] font-semibold">
+                          {item.attachments.length}
+                        </span>
+                      )}
+                    </button>
+                  ) : (
+                    item.has_attachments && (
+                      // 첨부가 있다고만 기록되고 메타가 없는 행 — 표시만 합니다.
+                      <span aria-hidden className="text-xs text-ink-hint">
+                        📎
+                      </span>
+                    )
+                  )}
+                </span>
 
                 {/* 담당자 — 미지정이고 추천이 있으면 추천과 [적용] 을 함께.
                     폰에선 제목 아래 한 줄(가로)로 내려오고, sm 이상에선 오른쪽
@@ -907,6 +1013,24 @@ export default function MailInbox({
                     여는 중…
                   </span>
                 )}
+              </div>
+
+              {/* 펼친 첨부 — 떠 있는 팝오버가 아니라 행 아래 띠입니다.
+                  목록 컨테이너가 overflow-hidden(둥근 모서리용)이라 떠 있는
+                  요소는 잘립니다. 띠는 잘릴 일이 없고 폰에서도 그대로 됩니다. */}
+              {attachOpen && attachable && (
+                <div className="flex flex-wrap gap-2 border-t border-line/70 bg-card/60 px-3 pb-3 pt-2 sm:pl-10">
+                  {item.attachments.map((att, i) => (
+                    <AttachmentChip
+                      key={`${att.name}-${i}`}
+                      mailId={item.id}
+                      att={att}
+                      index={i}
+                      onUnavailable={notifyUnavailable}
+                    />
+                  ))}
+                </div>
+              )}
               </div>
             );
           })}
@@ -1203,29 +1327,13 @@ export default function MailInbox({
               {detail.attachments.length > 0 && (
                 <ul className="mt-2 flex flex-wrap gap-2">
                   {detail.attachments.map((att, i) => (
-                    <li key={`${att.name}-${i}`}>
-                      <button
-                        type="button"
-                        disabled={pending}
-                        onClick={() =>
-                          openAttachment(
-                            att.storage_path,
-                            att.name,
-                            att.skip_reason,
-                          )
-                        }
-                        className="rounded-lg border border-line px-3 py-1.5 text-xs text-ink-body hover:bg-surface disabled:opacity-50"
-                      >
-                        📎 {att.name}{" "}
-                        <span className="text-ink-hint">
-                          ({formatBytes(att.size)})
-                        </span>
-                        {!att.storage_path && (
-                          <span className="ml-1 text-stamp">
-                            · 원본은 네이버 확인
-                          </span>
-                        )}
-                      </button>
+                    <li key={`${att.name}-${i}`} className="max-w-full">
+                      <AttachmentChip
+                        mailId={detail.id}
+                        att={att}
+                        index={i}
+                        onUnavailable={notifyUnavailable}
+                      />
                     </li>
                   ))}
                 </ul>

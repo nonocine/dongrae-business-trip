@@ -52,6 +52,39 @@ export type MailAttachmentMeta = {
   skip_reason?: AttachmentSkipReason | null;
 };
 
+// attachments jsonb → 타입이 보장된 배열.
+//   순수 함수라 서버 액션·라우트·화면이 모두 같은 해석을 쓰도록 여기에 둡니다
+//   (예전에는 app/mail/actions.ts 안에만 있어 라우트가 다시 만들어야 했습니다).
+function toSkipReason(v: unknown): AttachmentSkipReason | null {
+  return v === "too_large" || v === "failed" ? v : null;
+}
+
+export function toAttachments(raw: unknown): MailAttachmentMeta[] {
+  if (!Array.isArray(raw)) return [];
+  return raw.map((item) => {
+    const o = (item ?? {}) as Record<string, unknown>;
+    return {
+      name: String(o.name ?? "첨부파일"),
+      size: Number(o.size ?? 0),
+      storage_path: (o.storage_path as string | null) ?? null,
+      skip_reason: toSkipReason(o.skip_reason),
+    };
+  });
+}
+
+// 첨부 다운로드 주소 — 화면은 이 주소를 <a href> 에 그대로 겁니다.
+//   ★ 서명 URL 을 화면에서 미리 받아두지 않는 이유가 둘입니다.
+//     1) 서명은 만료됩니다. 목록 20행 × 첨부 여러 개를 미리 서명해 두면
+//        화면을 열어둔 사이에 전부 죽습니다.
+//     2) 클릭한 뒤에 서명을 받으면 await 동안 사용자 제스처가 끊겨
+//        window.open 이 팝업으로 차단됩니다(0단계 이전의 실제 증상).
+//     라우트로 넘기면 클릭이 곧 이동이라 둘 다 생기지 않습니다.
+//   경로(storage_path)는 일부러 주소에 넣지 않습니다 — 라우트가 메일 id 로
+//   DB 를 다시 읽어 그 메일에 실제로 달린 첨부만 내려줍니다.
+export function mailAttachmentHref(mailId: string, index: number): string {
+  return `/api/mail/attachment/${encodeURIComponent(mailId)}/${index}`;
+}
+
 export type MailListItem = {
   id: string;
   from_name: string;
@@ -59,6 +92,10 @@ export type MailListItem = {
   subject: string;
   received_at: string | null;
   has_attachments: boolean;
+  // 첨부 메타(파일명·크기·사본 경로). 본문은 들어 있지 않습니다.
+  //   ★ 0단계에서 목록에도 내려주기 시작했습니다 — 목록 행의 📎 에서 바로
+  //     이름을 보고 내려받으려면 상세를 열지 않고도 이 값이 있어야 합니다.
+  attachments: MailAttachmentMeta[];
   assignee_name: string;
   status: MailStatus;
   ai_summary: string;
@@ -91,11 +128,11 @@ export function hasPendingSuggestion(item: {
   return !item.assignee_name && !!item.ai_suggested_assignee;
 }
 
+// attachments 는 MailListItem 에 있으므로 여기서 다시 선언하지 않습니다.
 export type MailDetail = MailListItem & {
   body_text: string;
   body_html: string | null;
   memo: string;
-  attachments: MailAttachmentMeta[];
   fetched_at: string | null;
 };
 
