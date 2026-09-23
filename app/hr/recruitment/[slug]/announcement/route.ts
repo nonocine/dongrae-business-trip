@@ -19,7 +19,7 @@ export async function GET(
   request: Request,
   { params }: { params: Promise<{ slug: string }> }
 ) {
-  await requireHrAdmin(); // 미인증 시 '/' redirect
+  await requireHrAdmin("recruitment"); // 미인증 시 '/' redirect
   const { slug } = await params;
 
   // select("*") — salary_grade 등 없는 컬럼이 있어도 안전(undefined → 빈칸).

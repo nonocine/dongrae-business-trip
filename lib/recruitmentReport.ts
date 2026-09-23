@@ -85,7 +85,7 @@ function avg(scores: ReviewerScore[]): number | null {
 export async function loadReportData(
   slug: string
 ): Promise<ReportData | null> {
-  await requireHrAdmin();
+  await requireHrAdmin("recruitment");
   const s = slug?.trim() ?? "";
   if (!s) return null;
 

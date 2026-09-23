@@ -9,7 +9,7 @@ export const dynamic = "force-dynamic";
 
 export default async function ExternalJudgesPage() {
   await enforcePasswordChange();
-  await requireHrAdmin();
+  await requireHrAdmin("recruitment");
 
   const judges = await listExternalJudges();
 

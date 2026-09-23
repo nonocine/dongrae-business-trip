@@ -21,7 +21,7 @@ export async function GET(
   _request: Request,
   { params }: { params: Promise<{ slug: string; id: string }> }
 ) {
-  await requireHrAdmin(); // 미인증 시 '/' redirect
+  await requireHrAdmin("recruitment"); // 미인증 시 '/' redirect
   const { slug, id } = await params;
   if (!id) return new Response("지원자 정보가 누락되었습니다.", { status: 400 });
 

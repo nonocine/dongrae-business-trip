@@ -3,7 +3,6 @@ import { notFound } from "next/navigation";
 import Header from "@/app/components/Header";
 import { enforcePasswordChange } from "@/app/actions";
 import { requireHrAdmin } from "@/app/hr/actions";
-import { isM0Grant } from "@/lib/authLevels";
 import ScreeningDashboard from "./ScreeningDashboard";
 import {
   getPostingForAdmin,
@@ -19,9 +18,9 @@ export default async function RecruitmentAdminPage({
   params: Promise<{ slug: string }>;
 }) {
   await enforcePasswordChange();
-  const me = await requireHrAdmin();
+  const me = await requireHrAdmin("recruitment");
   // M0(관장·부장·master)만 합격자 직원 전환 버튼 노출.
-  const canManageAuth = isM0Grant({ rank: me.rank });
+  const canManageAuth = me.isM0;
 
   const { slug } = await params;
   const adm = await getPostingForAdmin(slug);

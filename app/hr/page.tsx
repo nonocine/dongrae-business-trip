@@ -8,7 +8,6 @@ import {
   listRecruitmentPostings,
 } from "@/app/hr/actions";
 import { enforcePasswordChange } from "@/app/actions";
-import { isM0Grant } from "@/lib/authLevels";
 
 export const dynamic = "force-dynamic";
 
@@ -29,17 +28,32 @@ export default async function HrPage({
   // 관장·부장 직원 세션이 아니면 / 로 redirect.
   //   권한등급(auth_level) 변경 가능 여부 — M0(관장·부장·master) 공유.
   const me = await requireHrAdmin();
-  const canManageAuth = isM0Grant({ rank: me.rank });
+  const canManageAuth = me.isM0;
+
+  // 볼 수 있는 탭 — 영역(scope)에서 옵니다.
+  //   인사(records) 영역 = 인사기록카드·계약서·증명서, 채용 영역 = 채용공고.
+  //   ★ 화면에서 감추는 것과 별개로, 각 액션이 requireHrAdmin(scope) 로
+  //     다시 막습니다. 여기서는 조회 자체를 하지 않는 것이 핵심입니다 —
+  //     채용 담당자에게 전 직원 인사기록을 내려보내지 않습니다.
+  const canRecords = me.scopes.includes("records");
+  const canRecruitment = me.scopes.includes("recruitment");
+  const allowedTabs: TabKey[] = VALID_TABS.filter((t) =>
+    t === "recruitment" ? canRecruitment : canRecords,
+  );
 
   const { tab } = await searchParams;
-  const initialTab: TabKey = VALID_TABS.includes(tab as TabKey)
+  const requested = VALID_TABS.includes(tab as TabKey)
     ? (tab as TabKey)
     : "records";
+  // 못 보는 탭을 요청했으면 볼 수 있는 첫 탭으로 보냅니다.
+  const initialTab: TabKey = allowedTabs.includes(requested)
+    ? requested
+    : allowedTabs[0];
 
   const [drivers, profiles, recruitmentPostings] = await Promise.all([
-    listDriversForHrProfile(),
-    listEmployeeProfiles(),
-    listRecruitmentPostings(),
+    canRecords ? listDriversForHrProfile() : Promise.resolve([]),
+    canRecords ? listEmployeeProfiles() : Promise.resolve([]),
+    canRecruitment ? listRecruitmentPostings() : Promise.resolve([]),
   ]);
 
   return (
@@ -65,6 +79,7 @@ export default async function HrPage({
           recruitmentPostings={recruitmentPostings}
           initialTab={initialTab}
           canManageAuth={canManageAuth}
+          allowedTabs={allowedTabs}
         />
       </main>
     </>

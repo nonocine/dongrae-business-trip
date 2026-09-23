@@ -31,7 +31,6 @@ import {
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
 import { requireHrAdmin } from "@/app/hr/actions";
 import { isEmployeeDocKey } from "@/lib/employeeDocs";
-import { isM0Grant } from "@/lib/authLevels";
 import { signPayload, verifyPayload } from "@/lib/signedCookie";
 import {
   SCREENING_ITEMS,
@@ -194,7 +193,7 @@ export async function getPostingForAdmin(slug: string): Promise<
     }
   | null
 > {
-  await requireHrAdmin();
+  await requireHrAdmin("recruitment");
   if (!slug) return null;
   const { data, error } = await supabase
     .from("recruitment_postings")
@@ -369,7 +368,7 @@ export async function saveScreeningScore(
   formData: FormData
 ): Promise<{ ok: true } | { ok: false; message: string }> {
   try {
-    const me = await requireHrAdmin();
+    const me = await requireHrAdmin("recruitment");
     const slug = String(formData.get("slug") ?? "").trim();
     const applicationId = String(formData.get("application_id") ?? "").trim();
     if (!applicationId)
@@ -455,7 +454,7 @@ export async function updateApplicationStatus(
   slug: string
 ): Promise<{ ok: true } | { ok: false; message: string }> {
   try {
-    await requireHrAdmin();
+    await requireHrAdmin("recruitment");
     if (!applicationId)
       return { ok: false, message: "application_id가 누락되었습니다." };
 
@@ -498,8 +497,8 @@ export async function convertApplicantToEmployee(
   applicationId: string
 ): Promise<{ ok: true; driverId: string } | { ok: false; message: string }> {
   try {
-    const me = await requireHrAdmin();
-    if (!isM0Grant({ rank: me.rank })) {
+    const me = await requireHrAdmin("recruitment");
+    if (!me.isM0) {
       return { ok: false, message: "직원 전환은 관장·부장만 가능합니다." };
     }
     if (!applicationId) {
@@ -701,7 +700,7 @@ export async function saveScreeningRejectReason(
   slug: string
 ): Promise<{ ok: true } | { ok: false; message: string }> {
   try {
-    await requireHrAdmin();
+    await requireHrAdmin("recruitment");
     if (!applicationId)
       return { ok: false, message: "application_id가 누락되었습니다." };
 
@@ -741,7 +740,7 @@ export async function bulkAnonymizeApplicants(slug: string): Promise<
   | { ok: false; message: string }
 > {
   try {
-    await requireHrAdmin();
+    await requireHrAdmin("recruitment");
     if (!slug)
       return { ok: false, message: "공고 정보가 누락되었습니다." };
 
@@ -911,7 +910,7 @@ export async function addInternalJudge(input: {
   driverId: string;
   role: string;
 }): Promise<Judge> {
-  const me = await requireHrAdmin();
+  const me = await requireHrAdmin("recruitment");
   const postingId = input.postingId?.trim() ?? "";
   const driverId = input.driverId?.trim() ?? "";
   const role = input.role?.trim() ?? "";
@@ -971,7 +970,7 @@ export async function addExternalJudge(input: {
   externalPoolId: string;
   role: string;
 }): Promise<Judge> {
-  const me = await requireHrAdmin();
+  const me = await requireHrAdmin("recruitment");
   const postingId = input.postingId?.trim() ?? "";
   const externalPoolId = input.externalPoolId?.trim() ?? "";
   const roleInput = input.role?.trim() ?? "";
@@ -1041,7 +1040,7 @@ export async function updateJudge(
   judgeId: string,
   patch: { name?: string; role?: string; affiliation?: string }
 ): Promise<void> {
-  await requireHrAdmin();
+  await requireHrAdmin("recruitment");
   if (!judgeId) throw new Error("심사위원 정보가 누락되었습니다.");
 
   const update: Record<string, unknown> = {};
@@ -1118,7 +1117,7 @@ async function countJudgeScores(judgeIds: string[]): Promise<number> {
 // 5) 위원 삭제 — 채점 이력이 있으면 차단 (비활성화 권장).
 // ---------------------------------------------------------------------
 export async function deleteJudge(judgeId: string): Promise<void> {
-  await requireHrAdmin();
+  await requireHrAdmin("recruitment");
   if (!judgeId) throw new Error("심사위원 정보가 누락되었습니다.");
 
   // 채점 이력 확인 — 서류·면접·점수 테이블 전부.
@@ -1146,7 +1145,7 @@ export async function deleteJudge(judgeId: string): Promise<void> {
 // 6) 활성/비활성 토글 — 기존 점수는 보존.
 // ---------------------------------------------------------------------
 export async function toggleJudgeActive(judgeId: string): Promise<void> {
-  await requireHrAdmin();
+  await requireHrAdmin("recruitment");
   if (!judgeId) throw new Error("심사위원 정보가 누락되었습니다.");
 
   const { data, error } = await supabaseAdmin
@@ -1177,7 +1176,7 @@ export async function reorderJudges(
   postingId: string,
   judgeIds: string[]
 ): Promise<void> {
-  await requireHrAdmin();
+  await requireHrAdmin("recruitment");
   if (!postingId) throw new Error("공고 정보가 누락되었습니다.");
   if (!Array.isArray(judgeIds) || judgeIds.length === 0) return;
 
@@ -1206,7 +1205,7 @@ export async function reorderJudges(
 // E1) 풀 조회 — phone/소속 등 PII 포함이므로 관장·부장만.
 // ---------------------------------------------------------------------
 export async function listExternalJudges(): Promise<ExternalJudge[]> {
-  await requireHrAdmin();
+  await requireHrAdmin("recruitment");
   const { data, error } = await supabaseAdmin
     .from("external_judges_pool")
     .select("*")
@@ -1228,7 +1227,7 @@ export async function createExternalJudge(input: {
   notes?: string;
   privacy_agreed: boolean;
 }): Promise<ExternalJudge> {
-  const me = await requireHrAdmin();
+  const me = await requireHrAdmin("recruitment");
   const name = input.name?.trim() ?? "";
   const phone = normalizePhone(input.phone ?? "");
   const affiliation = input.affiliation?.trim() ?? "";
@@ -1292,7 +1291,7 @@ export async function updateExternalJudge(
     notes?: string;
   }
 ): Promise<void> {
-  await requireHrAdmin();
+  await requireHrAdmin("recruitment");
   if (!id) throw new Error("외부위원 정보가 누락되었습니다.");
 
   const update: Record<string, unknown> = {};
@@ -1390,7 +1389,7 @@ export async function toggleExternalJudgeActive(
   id: string
 ): Promise<{ ok: true } | { ok: false; message: string }> {
   try {
-    await requireHrAdmin();
+    await requireHrAdmin("recruitment");
     if (!id) return { ok: false, message: "외부위원 정보가 누락되었습니다." };
 
     const { data, error } = await supabaseAdmin
@@ -1456,7 +1455,7 @@ export async function deleteExternalJudge(
   id: string
 ): Promise<{ ok: true } | { ok: false; message: string }> {
   try {
-    await requireHrAdmin();
+    await requireHrAdmin("recruitment");
     if (!id) return { ok: false, message: "외부위원 정보가 누락되었습니다." };
 
     // 1) 이 풀 위원의 모든 배정 행(공고 무관) id 수집.
@@ -1514,7 +1513,7 @@ export async function uploadExternalJudgeStamp(
   formData: FormData
 ): Promise<{ ok: true; stampUrl: string | null } | { ok: false; message: string }> {
   try {
-    await requireHrAdmin();
+    await requireHrAdmin("recruitment");
     const id = String(formData.get("id") ?? "").trim();
     const file = formData.get("stamp");
     if (!id) return { ok: false, message: "외부위원 정보가 누락되었습니다." };
@@ -1562,7 +1561,7 @@ export async function deleteExternalJudgeStamp(
   id: string
 ): Promise<{ ok: true } | { ok: false; message: string }> {
   try {
-    await requireHrAdmin();
+    await requireHrAdmin("recruitment");
     if (!id) return { ok: false, message: "외부위원 정보가 누락되었습니다." };
     const { data: ej, error: exErr } = await supabaseAdmin
       .from("external_judges_pool")
@@ -1594,7 +1593,7 @@ export async function deleteExternalJudgeStamp(
 export async function getExternalJudgeStampUrl(
   id: string
 ): Promise<string | null> {
-  await requireHrAdmin();
+  await requireHrAdmin("recruitment");
   if (!id) return null;
   const { data } = await supabaseAdmin
     .from("external_judges_pool")
@@ -2020,7 +2019,7 @@ export async function assignJudgeToPosting(
   poolId: string
 ): Promise<{ ok: true; judge: Judge } | { ok: false; message: string }> {
   try {
-    const me = await requireHrAdmin();
+    const me = await requireHrAdmin("recruitment");
     const s = slug?.trim() ?? "";
     const externalPoolId = poolId?.trim() ?? "";
     if (!s) return { ok: false, message: "공고 정보가 누락되었습니다." };
@@ -2110,7 +2109,7 @@ export async function unassignJudgeFromPosting(
   judgeId: string
 ): Promise<{ ok: true } | { ok: false; message: string }> {
   try {
-    await requireHrAdmin();
+    await requireHrAdmin("recruitment");
     const s = slug?.trim() ?? "";
     const jid = judgeId?.trim() ?? "";
     if (!jid) return { ok: false, message: "심사위원 정보가 누락되었습니다." };
@@ -2151,7 +2150,7 @@ export async function assignInternalJudgeToPosting(
   driverId: string
 ): Promise<{ ok: true; judge: Judge } | { ok: false; message: string }> {
   try {
-    const me = await requireHrAdmin();
+    const me = await requireHrAdmin("recruitment");
     const s = slug?.trim() ?? "";
     const dId = driverId?.trim() ?? "";
     if (!s) return { ok: false, message: "공고 정보가 누락되었습니다." };

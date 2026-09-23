@@ -17,27 +17,23 @@
 //     안내이지 메뉴가 아닙니다. 사이드바에 상주할 항목이 아니므로 화면이 직접
 //     그립니다. 공개 페이지(로그인 없이 보는 채용 공고)도 제외합니다.
 //
-//   ★ 권한 조건은 "지금 대시보드가 카드를 보여주는 조건" 을 그대로 옮긴 것입니다.
-//     각 라우트의 실제 서버 가드와 대조한 결과 어긋나는 곳이 있는데, 이번 단계는
-//     리팩터이므로 고치지 않고 아래 주석에 남깁니다.
+//   ★ 권한 조건은 각 라우트의 실제 서버 가드와 맞춰 둡니다. 메뉴가 가드보다
+//     넓으면 눌렀다 튕기고, 좁으면 진입점이 사라집니다. 둘 다 버그입니다.
+//     2026-09 대조에서 나온 세 건은 모두 정리했습니다.
 //
-//       1) /hr?tab=records · /hr?tab=recruitment
-//          메뉴: hr 직무 / recruitment 직무에게 보임.
-//          가드: app/hr/page.tsx → requireHrAdmin() 은 '직무를 보지 않습니다'.
-//                Google master 이거나 drivers.rank ∈ (관장·부장) 만 통과.
-//          → hr·recruitment 직무만 가진 팀원은 카드를 눌러도 "/" 로 튕깁니다.
+//       1·2) /hr?tab=records · /hr?tab=recruitment — 가드를 넓혔습니다.
+//            requireHrAdmin 이 직급(관장·부장)만 보던 것을 직무·권한등급까지
+//            보도록 바꿨습니다(app/hr/actions.ts). 이제 hr·recruitment 직무
+//            보유자와 auth_level='M0' 인 직원이 통과합니다. 메뉴 조건은 그대로
+//            두어도 가드와 맞습니다(관리자 영역 카드가 M0 몫을 덮습니다).
 //
-//       2) isM0Grant 와 requireHrAdmin 의 기준이 다릅니다.
-//          isM0Grant: rank ∈ (관장·부장) OR email=master OR auth_level='M0'
-//          requireHrAdmin: auth_level 을 보지 않음(rank·master 만).
-//          → rank=팀원 + auth_level='M0' 인 직원은 '관리자 영역' 카드를 보지만
-//            /hr · /hr/external-judges 에서 튕깁니다.
+//       3) /hr/facility/* · /hr/salary · /hr/leave-plans — 메뉴를 넓혔습니다.
+//          가드가 `isM0 || 직무` 인데 메뉴가 직무만 봤습니다 → m0OrRole 로
+//          바꿔 가드와 일치시켰습니다. 가드는 건드리지 않았습니다.
 //
-//       3) /hr/facility/* · /hr/salary · /hr/leave-plans
-//          메뉴: 해당 직무(facility·accounting) 보유자에게만.
-//          가드: isM0 || 직무 — M0 도 들어갑니다.
-//          → facility 직무가 없는 관장에게는 비품관리·안전점검·운행기록·대관예약
-//            진입점이 대시보드에 아예 없습니다(주소를 직접 쳐야 들어감).
+//   ★ 여기 조건과 라우트 가드는 각자 따로 삽니다. 이 배열은 '무엇을 보여줄까'
+//     를 정할 뿐이고, 실제 차단은 언제나 서버 가드가 합니다. 새 항목을 넣을
+//     때는 그 라우트의 가드를 읽고 같은 조건을 쓰세요.
 //
 //   선례: lib/employeeRoles.ts — 상수 배열 + 순수 헬퍼.
 // =====================================================================
@@ -72,10 +68,16 @@ export const MENU_GROUP_LABEL: Record<MenuGroup, string> = {
 //   everyone: 로그인한 직원 전원
 //   m0      : 권한등급 M0(관장·부장·master)
 //   role    : 해당 직무(employee_roles) 보유자
+//   m0OrRole: M0 이거나 해당 직무 — 가드가 `isM0 || 직무` 인 라우트용.
+//     ★ 예전에는 이런 라우트도 role 로만 걸어 두어, facility 직무가 없는
+//       관장에게는 비품관리·안전점검·운행기록·대관예약 진입점이 아예 없었습니다
+//       (들어갈 수는 있는데 메뉴에 없어 주소를 직접 쳐야 했습니다).
+//       메뉴가 가드보다 좁으면 그냥 버그입니다.
 export type MenuVisibility =
   | { kind: "everyone" }
   | { kind: "m0" }
-  | { kind: "role"; role: string };
+  | { kind: "role"; role: string }
+  | { kind: "m0OrRole"; role: string };
 
 export type MenuItem = {
   // 같은 경로가 여러 그룹에 있어(예: /mail 은 공통·관리자 양쪽) 경로로는
@@ -207,7 +209,7 @@ export const MENU_ITEMS: MenuItem[] = [
     href: "/hr/facility/assets",
     icon: "📦",
     desc: "비품 대장·장소 관리·엑셀",
-    show: { kind: "role", role: "facility" },
+    show: { kind: "m0OrRole", role: "facility" },
   },
   {
     key: "facility-safety",
@@ -216,7 +218,7 @@ export const MENU_ITEMS: MenuItem[] = [
     href: "/hr/facility/safety",
     icon: "🦺",
     desc: "월별 안전점검표·PDF 출력",
-    show: { kind: "role", role: "facility" },
+    show: { kind: "m0OrRole", role: "facility" },
   },
   {
     key: "facility-driving",
@@ -225,7 +227,7 @@ export const MENU_ITEMS: MenuItem[] = [
     href: "/hr/facility/driving",
     icon: "🚗",
     desc: "차량 운행일지 조회·월별 운행대장",
-    show: { kind: "role", role: "facility" },
+    show: { kind: "m0OrRole", role: "facility" },
   },
   {
     key: "facility-rentals",
@@ -234,7 +236,7 @@ export const MENU_ITEMS: MenuItem[] = [
     href: "/hr/facility/rentals",
     icon: "🏛️",
     desc: "홈페이지 대관·청소년 공간 예약 조회 (조회 전용)",
-    show: { kind: "role", role: "facility" },
+    show: { kind: "m0OrRole", role: "facility" },
   },
 
   // ---------- 담당 업무 › 회계 ----------
@@ -245,7 +247,7 @@ export const MENU_ITEMS: MenuItem[] = [
     href: "/hr/salary",
     icon: "💰",
     desc: "호봉표·기준값·직원별 급여 설정",
-    show: { kind: "role", role: "accounting" },
+    show: { kind: "m0OrRole", role: "accounting" },
   },
   {
     key: "accounting-leave-plans",
@@ -254,7 +256,7 @@ export const MENU_ITEMS: MenuItem[] = [
     href: "/hr/leave-plans",
     icon: "🌴",
     desc: "미사용 연차 사용계획서 발부·수합·서식 출력",
-    show: { kind: "role", role: "accounting" },
+    show: { kind: "m0OrRole", role: "accounting" },
   },
   {
     key: "accounting-budget",
@@ -263,7 +265,7 @@ export const MENU_ITEMS: MenuItem[] = [
     href: "",
     icon: "📊",
     desc: "예산 관리",
-    show: { kind: "role", role: "accounting" },
+    show: { kind: "m0OrRole", role: "accounting" },
     pending: true,
   },
 
@@ -486,6 +488,8 @@ export function canSeeMenuItem(item: MenuItem, ctx: MenuContext): boolean {
       return ctx.isM0;
     case "role":
       return hasRole(ctx, item.show.role);
+    case "m0OrRole":
+      return ctx.isM0 || hasRole(ctx, item.show.role);
   }
 }
 

@@ -19,7 +19,6 @@ import {
   removeHrDocuments,
   normalizeDocMap,
   HR_DOCUMENTS_BUCKET,
-  type HrAdminRank,
   type Driver,
   type EmployeeRank,
   type EmployeeProfile,
@@ -41,57 +40,128 @@ import { isEmployeeRoleKey } from "@/lib/employeeRoles";
 import { listRolesForDriver } from "@/lib/employeeRolesServer";
 
 // =====================================================================
-// 인사 모듈 권한 — drivers.rank IN ('관장', '부장') 인 직원 세션만 통과.
-//   * 관리자 세션(ADMIN_COOKIE)은 rank 개념이 없어 거부.
-//   * 미통과 시 / 로 redirect.
+// HR 영역 접근 게이트
+//
+//   ★ 2026-09 개편 — 직급이 아니라 '직무·권한등급' 으로 엽니다.
+//     예전에는 drivers.rank ∈ (관장·부장) 또는 Google master 만 통과했습니다.
+//     그래서 (1) hr·recruitment 직무를 받은 팀원이 대시보드 카드를 눌러도
+//     홈으로 튕겼고, (2) rank=팀원 + auth_level='M0' 인 직원도 튕겼습니다
+//     (권한등급 모듈의 취지가 여기서만 안 먹었습니다).
+//     '부장이 인사를 본다' 는 조직 전제에 묶여 있어 위임도, 다른 기관 적용도
+//     불가능했습니다.
+//
+//   통과 조건 — 다음 중 하나:
+//     · isM0Grant : rank ∈ (관장·부장) OR master 계정 OR auth_level='M0'
+//     · hr 직무          → 인사(records) 영역만
+//     · recruitment 직무 → 채용(recruitment) 영역만
+//
+//   ★ 영역(scope)을 나눈 이유: 두 직무는 하는 일이 다릅니다. 채용 담당자에게
+//     전 직원 인사기록카드를 열어 줄 이유가 없고, 인사 담당자에게 지원자
+//     전형 화면을 열어 줄 이유도 없습니다. 판단이 갈리는 곳은 넓게 열지 않고
+//     좁은 쪽을 택했습니다.
+//
+//   ★★ isM0 를 반드시 함께 돌려줍니다.
+//     권한등급 변경·직무 변경·재직상태 변경·직원 전환처럼 '권한을 만드는'
+//     동작은 M0 전용입니다. 예전에는 requireHrAdmin 통과자가 곧 M0 라
+//     isM0Grant({ rank: me.rank }) 검사가 사실상 항상 참인 형식적 검사였는데,
+//     문을 넓히면 그 전제가 깨져 hr 직무 팀원이 자기 auth_level 을 M0 로
+//     올릴 수 있게 됩니다. 그래서 반환에서 rank 를 아예 빼고 isM0 로 바꿔
+//     기존 호출부가 컴파일 에러로 드러나게 했습니다.
+//
+//   name 은 감사/작성자(reviewer_name·created_by) 식별에 쓰입니다.
+//   공유비번(ADMIN_PASSWORD) 경로는 제거되었습니다.
 // =====================================================================
-// HR 영역 접근 게이트 — 다음 중 하나라도 통과하면 허용:
-//   1) Google Workspace 세션 — master 또는 rank ∈ (관장·부장)
-//   2) 직원 비번 로그인 + drivers.rank ∈ (관장·부장)
-// 반환의 name 은 감사/작성자(reviewer_name·created_by) 식별에 쓰입니다.
-// (rank 는 게이트 식별용이며 호출처에서 소비하지 않습니다.)
-//   * 공유비번(ADMIN_PASSWORD) 경로는 제거되었습니다.
-export async function requireHrAdmin(): Promise<{
+
+// /hr 안에서 갈리는 영역. 탭과 1:1 은 아닙니다(계약서·증명서 탭은 인사에 속함).
+export type HrScope = "records" | "recruitment";
+
+export type HrAccess = {
   name: string;
-  rank: HrAdminRank;
-}> {
-  // 1) Google Workspace — 비번 로그인 경로와 대칭으로 rank 게이팅.
-  //    · 마스터 → 관장으로 통과.
-  //    · rank ∈ (관장·부장) → 그 rank 로 통과.
-  //    · 그 외(팀장·팀원·rank null) → HR 접근 거부, "/" 로 redirect.
+  isM0: boolean;
+  scopes: HrScope[];
+};
+
+// 직무 → 열어 줄 영역.
+const HR_SCOPE_BY_ROLE: Record<string, HrScope> = {
+  hr: "records",
+  recruitment: "recruitment",
+};
+
+// 접근 컨텍스트 — 권한이 없으면 null.
+async function resolveHrAccess(): Promise<HrAccess | null> {
+  let name = "";
+  let rank: string | null = null;
+  let email: string | null = null;
+  let driverId: string | null = null;
+
   const g = await getGoogleSession();
   if (g) {
-    if (g.isMaster) {
-      return { name: g.driverName ?? g.name, rank: "관장" };
-    }
-    if (g.rank && (HR_ADMIN_RANKS as readonly string[]).includes(g.rank)) {
-      return { name: g.driverName ?? g.name, rank: g.rank as HrAdminRank };
-    }
-    redirect("/");
+    email = g.email;
+    name = g.driverName ?? g.name;
+    rank = g.rank ?? null;
+    driverId = g.driverId ?? null;
+  } else {
+    const session = await getSession();
+    if (!session || session.kind !== "employee") return null;
+    name = session.name;
+    const { data, error } = await supabaseAdmin
+      .from("drivers")
+      .select("id, rank")
+      .eq("name", session.name)
+      .eq("is_active", true)
+      .maybeSingle();
+    if (error || !data) return null;
+    driverId = String((data as { id: unknown }).id ?? "") || null;
+    rank = (data as { rank?: string | null }).rank ?? null;
   }
 
-  // 2) 직원 비번 로그인 + 관장·부장 rank
-  const session = await getSession();
-  if (!session || session.kind !== "employee") {
-    redirect("/");
+  // 권한등급(auth_level)은 employee_profiles 에 있습니다. Google 세션 쿠키에는
+  //   rank 만 들어 있어 여기서 따로 읽습니다.
+  let authLevel: string | null = null;
+  if (driverId) {
+    const { data: prof } = await supabaseAdmin
+      .from("employee_profiles")
+      .select("auth_level")
+      .eq("driver_id", driverId)
+      .maybeSingle();
+    authLevel =
+      (prof as { auth_level?: string | null } | null)?.auth_level ?? null;
   }
 
-  const { data, error } = await supabaseAdmin
+  const isM0 = isM0Grant({ rank, email, authLevel });
+  if (isM0) return { name, isM0: true, scopes: ["records", "recruitment"] };
+
+  // --- 직무로 여는 경로 ---
+  //   퇴사자는 직무 행이 남아 있어도 들어오지 못하게 재직 여부를 확인합니다.
+  //   (비번 로그인 경로는 위에서 이미 is_active 로 걸렀고, 여기는 Google 경로
+  //    때문에 필요합니다.)
+  if (!driverId) return null;
+  const { data: drv } = await supabaseAdmin
     .from("drivers")
-    .select("rank")
-    .eq("name", session.name)
-    .eq("is_active", true)
+    .select("is_active")
+    .eq("id", driverId)
     .maybeSingle();
-  if (error || !data) {
-    redirect("/");
-  }
+  if ((drv as { is_active?: unknown } | null)?.is_active === false) return null;
 
-  const rank = (data.rank as string | null) ?? "";
-  if (!(HR_ADMIN_RANKS as readonly string[]).includes(rank)) {
-    redirect("/");
-  }
+  const roles = await listRolesForDriver(driverId);
+  const scopes = [
+    ...new Set(
+      roles
+        .map((r) => HR_SCOPE_BY_ROLE[r])
+        .filter((s): s is HrScope => s !== undefined),
+    ),
+  ];
+  if (scopes.length === 0) return null;
+  return { name, isM0: false, scopes };
+}
 
-  return { name: session.name, rank: rank as HrAdminRank };
+// 페이지·액션 공용 게이트 — 미통과면 "/" 로 redirect.
+//   scope 를 주면 그 영역까지 확인합니다(인사 담당자가 채용 액션을 부르는 등).
+export async function requireHrAdmin(scope?: HrScope): Promise<HrAccess> {
+  const ctx = await resolveHrAccess();
+  if (!ctx) redirect("/");
+  if (scope && !ctx.scopes.includes(scope)) redirect("/");
+  return ctx;
 }
 
 // 인사기록카드 삭제 권한 — master/관장·부장만 통과.
@@ -138,7 +208,7 @@ async function requireHrManagerOrAdmin(): Promise<void> {
 
 // 인사기록카드 입력 대상 후보 — drivers 전체(활성/비활성).
 export async function listDriversForHrProfile(): Promise<Driver[]> {
-  await requireHrAdmin();
+  await requireHrAdmin("records");
   const { data, error } = await supabaseAdmin
     .from("drivers")
     .select("id,name,rank,is_active,created_at")
@@ -157,7 +227,7 @@ export async function listDriversForHrProfile(): Promise<Driver[]> {
 
 // 전체 인사기록카드 목록 (직원명은 drivers 목록으로 매칭).
 export async function listEmployeeProfiles(): Promise<EmployeeProfile[]> {
-  await requireHrAdmin();
+  await requireHrAdmin("records");
   const { data, error } = await supabaseAdmin.from("employee_profiles").select("*");
   if (error) throw new Error(error.message);
   return (data ?? []).map((row) =>
@@ -169,7 +239,7 @@ export async function listEmployeeProfiles(): Promise<EmployeeProfile[]> {
 export async function getEmployeeProfile(
   driverId: string
 ): Promise<EmployeeProfile | null> {
-  await requireHrAdmin();
+  await requireHrAdmin("records");
   if (!driverId) return null;
   const { data, error } = await supabaseAdmin
     .from("employee_profiles")
@@ -183,7 +253,7 @@ export async function getEmployeeProfile(
 
 // 인사기록카드 저장 — driver_id 기준 upsert (있으면 update, 없으면 insert).
 export async function saveEmployeeProfile(formData: FormData) {
-  await requireHrAdmin();
+  await requireHrAdmin("records");
 
   const driver_id = String(formData.get("driver_id") ?? "").trim();
   if (!driver_id) throw new Error("직원을 선택해주세요.");
@@ -293,7 +363,7 @@ export async function deleteEmployeeProfile(driverId: string) {
 export async function getEmployeePhotoUrl(
   driverId: string
 ): Promise<string | null> {
-  await requireHrAdmin();
+  await requireHrAdmin("records");
   if (!driverId) return null;
   const { data, error } = await supabaseAdmin
     .from("employee_profiles")
@@ -327,7 +397,7 @@ export async function uploadEmployeeDocument(
   | { ok: false; message: string }
 > {
   try {
-    await requireHrAdmin();
+    await requireHrAdmin("records");
     const driverId = String(formData.get("driver_id") ?? "").trim();
     const docKey = String(formData.get("doc_key") ?? "").trim();
     if (!driverId) return { ok: false, message: "직원이 지정되지 않았습니다." };
@@ -407,7 +477,7 @@ export async function deleteEmployeeDocument(
   docKey: string
 ): Promise<{ ok: true } | { ok: false; message: string }> {
   try {
-    await requireHrAdmin();
+    await requireHrAdmin("records");
     if (!driverId || !docKey) {
       return { ok: false, message: "요청 정보가 누락되었습니다." };
     }
@@ -454,7 +524,7 @@ export async function getEmployeeDocumentUrl(
   driverId: string,
   docKey: string
 ): Promise<string | null> {
-  await requireHrAdmin();
+  await requireHrAdmin("records");
   if (!driverId || !docKey) return null;
   const { data, error } = await supabaseAdmin
     .from("employee_profiles")
@@ -477,8 +547,8 @@ export async function saveEmployeeAuthLevel(
   authLevel: string
 ): Promise<{ ok: true } | { ok: false; message: string }> {
   try {
-    const me = await requireHrAdmin();
-    if (!isM0Grant({ rank: me.rank })) {
+    const me = await requireHrAdmin("records");
+    if (!me.isM0) {
       return { ok: false, message: "권한등급 변경은 관장·부장만 가능합니다." };
     }
     if (!driverId) return { ok: false, message: "직원이 지정되지 않았습니다." };
@@ -538,8 +608,8 @@ export async function saveEmploymentStatus(
   resignationDate: string | null
 ): Promise<{ ok: true } | { ok: false; message: string }> {
   try {
-    const me = await requireHrAdmin();
-    if (!isM0Grant({ rank: me.rank })) {
+    const me = await requireHrAdmin("records");
+    if (!me.isM0) {
       return { ok: false, message: "재직 상태 변경은 관장·부장만 가능합니다." };
     }
     if (!driverId) return { ok: false, message: "직원이 지정되지 않았습니다." };
@@ -607,7 +677,7 @@ export async function saveEmploymentStatus(
 export async function getEmployeeAuthLevel(
   driverId: string
 ): Promise<string | null> {
-  await requireHrAdmin();
+  await requireHrAdmin("records");
   if (!driverId) return null;
   const { data, error } = await supabaseAdmin
     .from("employee_profiles")
@@ -627,7 +697,7 @@ export async function getEmployeeAuthLevel(
 //   * employee_roles 는 service_role 경유(supabaseAdmin) — listRolesForDriver 재사용.
 // =====================================================================
 export async function getEmployeeRoles(driverId: string): Promise<string[]> {
-  await requireHrAdmin();
+  await requireHrAdmin("records");
   if (!driverId) return [];
   return listRolesForDriver(driverId);
 }
@@ -637,8 +707,8 @@ export async function setEmployeeRoles(
   roleKeys: string[]
 ): Promise<{ ok: true } | { ok: false; message: string }> {
   try {
-    const me = await requireHrAdmin();
-    if (!isM0Grant({ rank: me.rank })) {
+    const me = await requireHrAdmin("records");
+    if (!me.isM0) {
       return { ok: false, message: "직무 변경은 관장·부장만 가능합니다." };
     }
     if (!driverId) return { ok: false, message: "직원이 지정되지 않았습니다." };
@@ -685,12 +755,12 @@ export async function setEmployeeRoles(
 // 계약서 / 증명서 — 오늘은 빈 껍데기. 탭 UI 구현 시 채울 예정.
 // =====================================================================
 export async function listContracts(): Promise<EmploymentContract[]> {
-  await requireHrAdmin();
+  await requireHrAdmin("records");
   return [];
 }
 
 export async function listCertificates(): Promise<CertificateIssued[]> {
-  await requireHrAdmin();
+  await requireHrAdmin("records");
   return [];
 }
 
@@ -781,7 +851,7 @@ function normalizeRecruitmentPostingAdmin(
 export async function listRecruitmentPostings(): Promise<
   RecruitmentPostingAdmin[]
 > {
-  await requireHrAdmin();
+  await requireHrAdmin("recruitment");
   // select("*") — require_certificate_copy 등 신규 컬럼이 없어도 안전.
   const { data, error } = await supabase
     .from("recruitment_postings")
@@ -803,7 +873,7 @@ export async function saveRecruitmentPosting(
   | { ok: false; message: string }
 > {
   try {
-    const me = await requireHrAdmin();
+    const me = await requireHrAdmin("recruitment");
 
     const id = String(formData.get("id") ?? "").trim();
     const slug = String(formData.get("slug") ?? "").trim();
@@ -935,7 +1005,7 @@ export async function deleteRecruitmentPosting(
   id: string
 ): Promise<{ ok: true } | { ok: false; message: string }> {
   try {
-    await requireHrAdmin();
+    await requireHrAdmin("recruitment");
     if (!id) return { ok: false, message: "삭제할 공고 ID가 없습니다." };
 
     // 지원자가 한 명이라도 있으면 onDelete restrict 로 막힙니다.
@@ -978,7 +1048,7 @@ export async function setRecruitmentPostingStatus(
   status: "published" | "closed"
 ): Promise<{ ok: true } | { ok: false; message: string }> {
   try {
-    await requireHrAdmin();
+    await requireHrAdmin("recruitment");
     if (!id) return { ok: false, message: "공고 ID가 없습니다." };
     if (status !== "published" && status !== "closed") {
       return { ok: false, message: "허용되지 않는 상태입니다." };
@@ -1015,7 +1085,7 @@ export async function archiveRecruitmentPosting(
   id: string
 ): Promise<{ ok: true } | { ok: false; message: string }> {
   try {
-    await requireHrAdmin();
+    await requireHrAdmin("recruitment");
     if (!id) return { ok: false, message: "공고 ID가 없습니다." };
 
     const { data, error } = await supabase
@@ -1046,7 +1116,7 @@ export async function unarchiveRecruitmentPosting(
   id: string
 ): Promise<{ ok: true } | { ok: false; message: string }> {
   try {
-    await requireHrAdmin();
+    await requireHrAdmin("recruitment");
     if (!id) return { ok: false, message: "공고 ID가 없습니다." };
 
     const { data, error } = await supabase
@@ -1095,8 +1165,8 @@ export type PasswordHashMigrationResult =
 export async function migratePlaintextPasswords(): Promise<PasswordHashMigrationResult> {
   try {
     // 관장·부장·master 만 통과(그 외는 requireHrAdmin 이 redirect).
-    const me = await requireHrAdmin();
-    if (!isM0Grant({ rank: me.rank })) {
+    const me = await requireHrAdmin("records");
+    if (!me.isM0) {
       return { ok: false, message: "이 작업은 관장·부장만 할 수 있습니다." };
     }
 

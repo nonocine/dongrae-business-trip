@@ -20,7 +20,7 @@ export async function GET(
   _request: Request,
   { params }: { params: Promise<{ slug: string }> }
 ) {
-  await requireHrAdmin(); // 미인증 시 '/' redirect
+  await requireHrAdmin("recruitment"); // 미인증 시 '/' redirect
   const { slug } = await params;
 
   const { data: postingRow, error: pErr } = await supabaseAdmin

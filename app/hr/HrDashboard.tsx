@@ -18,19 +18,25 @@ export default function HrDashboard({
   recruitmentPostings,
   initialTab = "records",
   canManageAuth,
+  allowedTabs,
 }: {
   drivers: Driver[];
   profiles: EmployeeProfile[];
   recruitmentPostings: RecruitmentPostingAdmin[];
   initialTab?: TabKey;
   canManageAuth: boolean;
+  // 이 사람에게 보일 탭 — 서버(app/hr/page.tsx)가 영역(scope)으로 정합니다.
+  //   ★ 화면에서 감추는 것은 안내일 뿐이고, 실제 차단은 각 액션의
+  //     requireHrAdmin(scope) 이 합니다. 탭을 숨겨도 데이터가 안 내려오는
+  //     이유는 서버가 애초에 조회하지 않기 때문입니다.
+  allowedTabs: TabKey[];
 }) {
   const [tab, setTab] = useState<TabKey>(initialTab);
 
   return (
     <div className="space-y-6">
-      <QuickAccess onTab={setTab} />
-      <Tabs current={tab} onChange={setTab} />
+      {allowedTabs.includes("records") && <QuickAccess onTab={setTab} />}
+      <Tabs current={tab} onChange={setTab} allowedTabs={allowedTabs} />
 
       {tab === "records" && (
         <RecordsTab
@@ -69,16 +75,23 @@ export default function HrDashboard({
 function Tabs({
   current,
   onChange,
+  allowedTabs,
 }: {
   current: TabKey;
   onChange: (t: TabKey) => void;
+  allowedTabs: TabKey[];
 }) {
   const tabs: { key: TabKey; label: string }[] = [
     { key: "records", label: "인사기록카드" },
     { key: "contracts", label: "계약서" },
     { key: "certificates", label: "증명서 발급" },
     { key: "recruitment", label: "채용공고" },
-  ];
+  ].filter((t) => allowedTabs.includes(t.key as TabKey)) as {
+    key: TabKey;
+    label: string;
+  }[];
+  // 볼 수 있는 탭이 하나뿐이면 탭 줄 자체를 숨깁니다(고를 것이 없습니다).
+  if (tabs.length <= 1) return null;
   return (
     <div className={tabBarCls}>
       <nav className={tabNavCls}>

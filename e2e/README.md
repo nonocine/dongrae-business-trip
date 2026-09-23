@@ -81,3 +81,20 @@ E2E_FORWARD_TO=본인주소@example.com npx playwright test e2e/mail-send.spec.t
 >
 > 확인할 것: 받은 메일의 첨부 파일명이 `1-26105.hwp` 가 아니라
 > `수정 26년 10월 5학년 … 양식.hwp` 처럼 원본 그대로인지.
+
+## /hr 접근 게이트 검증 (hr-access.spec.ts)
+
+`/hr` 은 2026-09 부터 직급이 아니라 **직무·권한등급**으로 엽니다. 문을 넓히는
+변경이라 "누가 들어오는가" 를 화면에서 직접 확인합니다. 대상은 운영 DB 의 실제
+직원이라 이름을 저장소에 박지 않고 환경변수로 받습니다(없으면 skip).
+
+| 변수 | 넣을 사람 | 기대 동작 |
+|------|-----------|-----------|
+| `E2E_HR_M0` | 관장·부장 등 M0 | 인사·채용 탭 모두 |
+| `E2E_HR_RECORDS` | `hr` 직무만 가진 직원 | 인사만, 채용 라우트는 "/" 로 차단 |
+| `E2E_HR_NONE` | 직무가 없는 일반 직원 | 전부 차단 |
+
+```bash
+E2E_HR_M0=홍길동 E2E_HR_RECORDS=김아무 E2E_HR_NONE=이아무 \
+  npx playwright test e2e/hr-access.spec.ts
+```

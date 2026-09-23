@@ -18,7 +18,7 @@ export default async function JudgesAssignPage({
   params: Promise<{ slug: string }>;
 }) {
   await enforcePasswordChange();
-  await requireHrAdmin();
+  await requireHrAdmin("recruitment");
 
   const { slug } = await params;
   const adm = await getPostingForAdmin(slug);
