@@ -1,5 +1,14 @@
+import { Suspense } from "react";
 import Header from "@/app/components/Header";
 import { getSession } from "@/app/actions";
+import { getShellData } from "@/app/(app)/shellData";
+import Sidebar, { type SidebarGroup } from "@/app/(app)/Sidebar";
+import {
+  MENU_GROUPS,
+  MENU_GROUP_LABEL,
+  menuItemsFor,
+  type MenuGroup,
+} from "@/lib/menu";
 
 // =====================================================================
 // 로그인 후 화면의 공통 껍데기 — 헤더 + 본문 영역.
@@ -27,8 +36,37 @@ import { getSession } from "@/app/actions";
 //     페이지마다 max-w-2xl ~ max-w-6xl, max-w-md 가 섞여 있어 레이아웃이
 //     한 값으로 고정하면 화면이 바뀝니다. 여기서는 세로로 늘어나는 <main>
 //     껍데기만 주고, 폭·여백은 각 페이지가 안쪽 컨테이너로 정합니다.
-//     4단계에서 /mail 만 전폭으로 쓸 때도 이 구조면 그 페이지만 고치면 됩니다.
+//
+//   ★ 좌측 사이드바(4단계)
+//     · 항목은 lib/menu.ts 에서만 옵니다. 여기서 메뉴를 다시 적지 않습니다.
+//     · 권한 필터도 menu.ts 의 조건(canSeeMenuItem)을 그대로 씁니다 —
+//       사이드바에 보이는 항목은 반드시 실제로 들어가지는 항목입니다.
+//     · md(768px) 미만에서는 사이드바가 숨고 폰 배치가 됩니다. 기기 판별이
+//       아니라 CSS 미디어쿼리라, PC 에서 창을 좁혀도 같습니다.
+//     · 배지 숫자는 대시보드와 같은 계산(getShellData)을 씁니다. 한 요청에
+//       한 번만 돌아 두 곳의 숫자가 어긋나지 않습니다.
 // =====================================================================
+
+// 사이드바에 그릴 그룹 — lib/menu.ts 의 정의에서 이 사람이 볼 수 있는 것만.
+//   badgeDesc 는 함수라 클라이언트로 넘길 수 없어 숫자만 뽑아 넘깁니다.
+function buildSidebarGroups(
+  ctx: Awaited<ReturnType<typeof getShellData>>["ctx"],
+  badges: Record<string, number | undefined>,
+): SidebarGroup[] {
+  return MENU_GROUPS.map((group: MenuGroup) => ({
+    group,
+    label: MENU_GROUP_LABEL[group],
+    items: menuItemsFor(group, ctx).map((i) => ({
+      key: i.key,
+      label: i.label,
+      href: i.href,
+      icon: i.icon,
+      // 배지를 쓰겠다고 선언한 항목만(badgeDesc 보유) 숫자를 답니다.
+      badge: i.badgeDesc ? badges[i.href] : undefined,
+      pending: i.pending,
+    })),
+  })).filter((g) => g.items.length > 0);
+}
 
 export default async function AppLayout({
   children,
@@ -38,12 +76,24 @@ export default async function AppLayout({
   const session = await getSession();
 
   // 비로그인 — 껍데기 없이(랜딩이 자기 <main> 을 직접 그립니다).
+  //   사이드바도 당연히 붙지 않습니다.
   if (!session) return <>{children}</>;
+
+  const { ctx, badges } = await getShellData();
+  const groups = buildSidebarGroups(ctx, badges);
 
   return (
     <>
       <Header />
-      <main className="flex w-full flex-1 flex-col">{children}</main>
+      <div className="flex w-full flex-1">
+        {/* useSearchParams 를 쓰는 클라이언트 컴포넌트라 경계가 필요합니다. */}
+        <Suspense fallback={<div className="hidden w-60 shrink-0 border-r border-line bg-card md:block" />}>
+          <Sidebar groups={groups} />
+        </Suspense>
+        {/* min-w-0 필수 — 안 주면 넓은 표가 있는 페이지에서 본문이 사이드바를
+            밀어냅니다(flex 항목의 기본 min-width:auto). */}
+        <main className="flex min-w-0 flex-1 flex-col">{children}</main>
+      </div>
     </>
   );
 }

@@ -1,20 +1,13 @@
 import { Fragment, type ReactNode } from "react";
 import Link from "next/link";
-import {
-  getMyProfile,
-  getMyPhotoUrl,
-  getMyEmployeeRoles,
-} from "@/app/(app)/profile/hr/actions";
+import { getMyProfile, getMyPhotoUrl } from "@/app/(app)/profile/hr/actions";
 import { getMyTrainingSummary } from "@/app/(app)/profile/hr/trainingActions";
 import { getMyLeavePlanNotice } from "@/app/(app)/profile/hr/leavePlanActions";
-import { getTrainingsAdminSummary } from "@/app/(app)/hr/trainings/actions";
-import { getPendingCertRequestCount } from "@/app/(app)/hr/certificates/actions";
-import { getGoogleSession } from "@/app/actions";
 import { listAnnouncements } from "@/app/(app)/announcements/actions";
 import { getMyJudgeAssignments } from "@/app/(app)/hr/recruitment/[slug]/actions";
-import { getUnreadMailCount } from "@/app/(app)/mail/actions";
 import { getMyCredentialSummary } from "@/app/(app)/hr/credentials/actions";
-import { isM0Grant } from "@/lib/authLevels";
+// 메뉴 권한·배지는 좌측 사이드바와 같은 계산을 씁니다(요청당 1회).
+import { getShellData } from "@/app/(app)/shellData";
 import { ddayLabel } from "@/lib/trainings";
 import {
   MENU_GROUP_LABEL,
@@ -233,30 +226,27 @@ export default async function EmployeeDashboard({
   name: string | null;
 }) {
   // 본인 인사정보·사진·직무·구글세션(M0 판정용)·최신 공지·심사 배정·의무교육 요약을 병렬 조회.
+  // --- 메뉴 권한·배지 ---
+  //   ★ 좌측 사이드바와 같은 값을 써야 두 곳의 숫자가 어긋나지 않습니다.
+  //     getShellData 는 cache() 로 감싸여 있어 레이아웃이 이미 불렀더라도
+  //     한 요청에 한 번만 실제로 돕니다(DB 를 두 번 훑지 않습니다).
   const [
+    shell,
     my,
     photoUrl,
-    roles,
-    g,
     recentAnnouncements,
     judgeAssignments,
     trainingSummary,
-    trainingAdminSummary,
     leavePlanNotice,
   ] = await Promise.all([
+    getShellData(),
     getMyProfile(),
     getMyPhotoUrl(),
-    getMyEmployeeRoles(),
-    getGoogleSession(),
     listAnnouncements(3),
     getMyJudgeAssignments(),
     getMyTrainingSummary(),
-    getTrainingsAdminSummary(),
     getMyLeavePlanNotice(),
   ]);
-
-  // 공용 메일함 미처리 건수 — 테이블 미적용이면 0 으로 폴백합니다.
-  const unreadMailCount = await getUnreadMailCount();
 
   // 공용 비밀번호 — 내가 열람 가능한 건수만(항목 이름·비번은 받지 않습니다).
   const credentialSummary = await getMyCredentialSummary();
@@ -265,32 +255,16 @@ export default async function EmployeeDashboard({
   const profile = my?.profile ?? null;
 
   const displayName = driver?.name ?? name ?? "";
-  const rank = driver?.rank ?? null;
-
-  // 권한등급 M0(관장·부장·master) 판정 — rank/이메일/auth_level 중 하나라도 해당.
-  const isM0 = isM0Grant({
-    rank,
-    email: g?.email,
-    authLevel: profile?.auth_level,
-  });
-
-  // 증명서 승인 대기 건수(M0만 — 관리자 영역 배지).
-  const pendingCertCount = isM0 ? await getPendingCertRequestCount() : 0;
+  const rank = shell.rank;
+  const isM0 = shell.ctx.isM0;
+  const badges = shell.badges;
 
   // --- 메뉴 구성 (lib/menu.ts 단일 출처) ---
-  //   메뉴 '정의' 는 menu.ts 가, '데이터' 는 여기가 담당합니다.
-  const menuCtx: MenuContext = { isM0, roles };
+  //   메뉴 '정의' 는 menu.ts 가, '데이터' 는 getShellData 가 담당합니다.
+  const menuCtx: MenuContext = shell.ctx;
   const commonItems = menuItemsFor("common", menuCtx);
   const roleGroups = roleMenuGroupsFor(menuCtx);
   const adminItems = menuItemsFor("admin", menuCtx);
-
-  // 배지 — 경로별 숫자. 값이 없으면(undefined) "아직 못 셌다" 는 뜻이라
-  //   0건과 구분됩니다(의무교육 문구가 둘을 다르게 씁니다).
-  const badges: Record<string, number | undefined> = {
-    "/mail": unreadMailCount,
-    "/hr/trainings": trainingAdminSummary?.totalNotMet,
-    "/hr/certificates": pendingCertCount,
-  };
 
   // 숫자 하나로 표현되지 않는 문구만 화면이 덮습니다(키는 MenuItem.key).
   const descOverrides: Record<string, string> = {};

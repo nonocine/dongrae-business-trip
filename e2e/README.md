@@ -98,3 +98,18 @@ E2E_FORWARD_TO=본인주소@example.com npx playwright test e2e/mail-send.spec.t
 E2E_HR_M0=홍길동 E2E_HR_RECORDS=김아무 E2E_HR_NONE=이아무 \
   npx playwright test e2e/hr-access.spec.ts
 ```
+
+## PC 좌측 사이드바 검증 (sidebar.spec.ts)
+
+`/hr` 접근 게이트와 같은 환경변수를 씁니다(없으면 skip). 사이드바 항목은
+`lib/menu.ts` 의 권한 조건으로 걸러지므로, 권한별로 무엇이 보이는지가 곧
+"어디에 들어갈 수 있는지" 입니다.
+
+```bash
+E2E_HR_M0=홍길동 E2E_HR_RECORDS=김아무 E2E_HR_NONE=이아무 \
+  npx playwright test e2e/sidebar.spec.ts
+```
+
+확인하는 것: 1280px 노출 + 14개 화면의 현재 위치 하이라이트(쿼리가 갈리는
+`/hr?tab=…` 포함), 클릭 시 전체 새로고침 없이 본문만 교체, md 경계(767/768)
+전환과 되돌리기, 폰에서 햄버거 유지, 비로그인 랜딩에 껍데기 없음, 권한별 항목.
