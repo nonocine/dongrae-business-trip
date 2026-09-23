@@ -2,7 +2,7 @@ import { notFound, redirect } from "next/navigation";
 import { getInterviewPosting } from "../interview/actions";
 import {
   getExternalJudgeSession,
-} from "@/app/hr/recruitment/[slug]/actions";
+} from "@/app/(app)/hr/recruitment/[slug]/actions";
 import JudgeLoginForm from "./JudgeLoginForm";
 
 // 매 진입 시 공고 상태와 기존 세션을 다시 확인합니다.

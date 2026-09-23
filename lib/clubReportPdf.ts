@@ -1,7 +1,7 @@
 import { PDFDocument, rgb, type PDFPage, type PDFFont } from "pdf-lib";
 import fontkit from "@pdf-lib/fontkit";
 import { boldFont, fitToFont, fkFont, regularFont } from "@/lib/pdfFont";
-import type { ClubReportRow } from "@/app/hr/clubs/actions";
+import type { ClubReportRow } from "@/app/(app)/hr/clubs/actions";
 
 const PAGE_W = 595.28;
 const PAGE_H = 841.89;

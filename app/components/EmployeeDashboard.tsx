@@ -4,16 +4,16 @@ import {
   getMyProfile,
   getMyPhotoUrl,
   getMyEmployeeRoles,
-} from "@/app/profile/hr/actions";
-import { getMyTrainingSummary } from "@/app/profile/hr/trainingActions";
-import { getMyLeavePlanNotice } from "@/app/profile/hr/leavePlanActions";
-import { getTrainingsAdminSummary } from "@/app/hr/trainings/actions";
-import { getPendingCertRequestCount } from "@/app/hr/certificates/actions";
+} from "@/app/(app)/profile/hr/actions";
+import { getMyTrainingSummary } from "@/app/(app)/profile/hr/trainingActions";
+import { getMyLeavePlanNotice } from "@/app/(app)/profile/hr/leavePlanActions";
+import { getTrainingsAdminSummary } from "@/app/(app)/hr/trainings/actions";
+import { getPendingCertRequestCount } from "@/app/(app)/hr/certificates/actions";
 import { getGoogleSession } from "@/app/actions";
-import { listAnnouncements } from "@/app/announcements/actions";
-import { getMyJudgeAssignments } from "@/app/hr/recruitment/[slug]/actions";
-import { getUnreadMailCount } from "@/app/mail/actions";
-import { getMyCredentialSummary } from "@/app/hr/credentials/actions";
+import { listAnnouncements } from "@/app/(app)/announcements/actions";
+import { getMyJudgeAssignments } from "@/app/(app)/hr/recruitment/[slug]/actions";
+import { getUnreadMailCount } from "@/app/(app)/mail/actions";
+import { getMyCredentialSummary } from "@/app/(app)/hr/credentials/actions";
 import { isM0Grant } from "@/lib/authLevels";
 import { ddayLabel } from "@/lib/trainings";
 import {

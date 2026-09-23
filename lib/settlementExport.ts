@@ -9,7 +9,7 @@
 // =====================================================================
 
 import ExcelJS from "exceljs";
-import type { SettlementDetail } from "@/app/hr/saems/settlementActions";
+import type { SettlementDetail } from "@/app/(app)/hr/saems/settlementActions";
 import { calcFormula } from "@/lib/settlement";
 
 const NAVY = "FF1F3A5F";

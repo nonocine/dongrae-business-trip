@@ -7,7 +7,7 @@ import {
   CareerTab,
   AwardTab,
   TrainingTab,
-} from "@/app/hr/ProfileFormParts";
+} from "@/app/(app)/hr/ProfileFormParts";
 import {
   normalizeEducationList,
   normalizeLicenseList,

@@ -12,7 +12,7 @@
 // =====================================================================
 
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
-import { requireHrAdmin } from "@/app/hr/actions";
+import { requireHrAdmin } from "@/app/(app)/hr/actions";
 import type {
   ReportStatus,
   ReviewerScore,

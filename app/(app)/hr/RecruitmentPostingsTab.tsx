@@ -1,0 +1,902 @@
+"use client";
+
+import Link from "next/link";
+import { useMemo, useState, useTransition } from "react";
+import {
+  cardCls,
+  inputCls,
+  labelCls,
+  btnPrimary,
+  btnSecondary,
+  badgeSuccess,
+  badgeNeutral,
+  badgeWarning,
+  noticeError,
+  noticeSuccess,
+  splitRecruitmentFields,
+  fieldBadgeCls,
+} from "@/lib/ui";
+import { fmtKstDateTime } from "@/lib/datetime";
+import {
+  saveRecruitmentPosting,
+  deleteRecruitmentPosting,
+  setRecruitmentPostingStatus,
+  archiveRecruitmentPosting,
+  unarchiveRecruitmentPosting,
+  type RecruitmentPostingAdmin,
+} from "@/app/(app)/hr/actions";
+import RecruitmentShareButton from "@/app/(app)/hr/RecruitmentShareButton";
+import {
+  RECRUITMENT_DOC_SLOTS,
+  requiredMapFromDocuments,
+} from "@/lib/recruitmentDocs";
+
+// KST(+09:00) 로 timestamptz → datetime-local 입력값(YYYY-MM-DDTHH:mm).
+function isoToKstLocal(iso: string): string {
+  if (!iso) return "";
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return "";
+  const fmt = new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Asia/Seoul",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+  });
+  const parts = fmt.formatToParts(d);
+  const get = (t: string) => parts.find((p) => p.type === t)?.value ?? "";
+  let hour = get("hour");
+  if (hour === "24") hour = "00"; // 자정 표기 보정
+  return `${get("year")}-${get("month")}-${get("day")}T${hour}:${get("minute")}`;
+}
+
+// 결정적 KST 포맷(SSR↔CSR 하이드레이션 불일치 방지). "YYYY.MM.DD HH:mm"
+function fmtKst(iso: string): string {
+  return fmtKstDateTime(iso);
+}
+
+// 제출 서류 필수/선택 토글 버튼 스타일 — 활성 쪽만 파랑 채움.
+function docToggleCls(active: boolean): string {
+  const base =
+    "rounded-md px-3 py-1 text-xs font-semibold transition";
+  return active
+    ? `${base} bg-brand-blue text-white shadow-sm`
+    : `${base} text-ink-muted hover:text-brand-blue`;
+}
+
+type EditingState =
+  | { kind: "new" }
+  | { kind: "edit"; posting: RecruitmentPostingAdmin }
+  | { kind: "duplicate"; source: RecruitmentPostingAdmin }
+  | { kind: "none" };
+
+export default function RecruitmentPostingsTab({
+  postings,
+}: {
+  postings: RecruitmentPostingAdmin[];
+}) {
+  const [editing, setEditing] = useState<EditingState>({ kind: "none" });
+
+  const sorted = useMemo(
+    () =>
+      [...postings].sort((a, b) =>
+        a.created_at < b.created_at ? 1 : a.created_at > b.created_at ? -1 : 0
+      ),
+    [postings]
+  );
+
+  return (
+    <div className="space-y-5">
+      <section className={cardCls}>
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <h3 className="text-sm font-semibold text-ink">
+            채용공고 목록{" "}
+            <span className="ml-1 text-xs font-medium text-ink-hint">
+              {sorted.length}건
+            </span>
+          </h3>
+          <div className="flex w-full flex-wrap items-center gap-2 sm:w-auto">
+            <Link
+              href="/hr/external-judges"
+              className="inline-flex h-[38px] grow items-center justify-center gap-1.5 rounded-lg border border-navy bg-card px-4 text-sm font-semibold text-navy shadow-sm transition hover:bg-navy-soft sm:grow-0"
+            >
+              👥 외부 심사위원 관리
+            </Link>
+            {editing.kind !== "new" && (
+              <button
+                type="button"
+                onClick={() => setEditing({ kind: "new" })}
+                className={`${btnPrimary} grow sm:grow-0`}
+              >
+                ＋ 새 공고
+              </button>
+            )}
+          </div>
+        </div>
+
+        {sorted.length === 0 ? (
+          <p className="mt-3 rounded-lg border border-dashed border-line bg-surface p-4 text-center text-sm text-ink-muted">
+            등록된 공고가 없습니다. “새 공고” 버튼으로 첫 공고를 작성하세요.
+          </p>
+        ) : (
+          <ul className="mt-3 space-y-2">
+            {sorted.map((p) => (
+              <PostingRow
+                key={p.id}
+                posting={p}
+                editingId={
+                  editing.kind === "edit" ? editing.posting.id : null
+                }
+                onEdit={() => setEditing({ kind: "edit", posting: p })}
+                onDuplicate={() =>
+                  setEditing({ kind: "duplicate", source: p })
+                }
+              />
+            ))}
+          </ul>
+        )}
+      </section>
+
+      {editing.kind !== "none" && (
+        <PostingForm
+          key={
+            editing.kind === "edit"
+              ? `edit-${editing.posting.id}`
+              : editing.kind === "duplicate"
+                ? `dup-${editing.source.id}`
+                : "new"
+          }
+          mode={editing.kind}
+          initial={
+            editing.kind === "edit"
+              ? editing.posting
+              : editing.kind === "duplicate"
+                ? editing.source
+                : null
+          }
+          onCancel={() => setEditing({ kind: "none" })}
+          onSaved={() => setEditing({ kind: "none" })}
+        />
+      )}
+    </div>
+  );
+}
+
+// =====================================================================
+// 공고 한 줄 — 제목·상태·기간·작업 버튼
+// =====================================================================
+function PostingRow({
+  posting,
+  editingId,
+  onEdit,
+  onDuplicate,
+}: {
+  posting: RecruitmentPostingAdmin;
+  editingId: string | null;
+  onEdit: () => void;
+  onDuplicate: () => void;
+}) {
+  const [deleting, deleteTransition] = useTransition();
+  const [toggling, toggleTransition] = useTransition();
+  const [archiving, archiveTransition] = useTransition();
+  const [err, setErr] = useState<string | null>(null);
+  // 마운트 시각을 1회 캡처 — 렌더를 순수하게 유지(react-hooks/purity).
+  const [now] = useState(() => Date.now());
+
+  const isArchived = posting.status === "archived";
+
+  // published 가 아니면(draft/closed) "공개 전환", published 면 "비공개 전환".
+  const willPublish = posting.status !== "published";
+
+  const closed =
+    new Date(posting.application_end).getTime() < now &&
+    posting.status === "published";
+
+  const statusBadge = isArchived
+    ? badgeNeutral
+    : posting.status === "published"
+      ? closed
+        ? badgeNeutral
+        : badgeSuccess
+      : posting.status === "closed"
+        ? badgeNeutral
+        : badgeWarning;
+
+  const statusLabel = isArchived
+    ? "🗄 종결"
+    : posting.status === "published"
+      ? closed
+        ? "마감"
+        : "공개"
+      : posting.status === "closed"
+        ? "종료"
+        : "비공개";
+
+  // 채용 종결(보관) 버튼 노출 — 진행/마감 상태(published·closed)에서만.
+  const canArchive =
+    posting.status === "published" || posting.status === "closed";
+
+  const isEditing = editingId === posting.id;
+
+  function handleToggle() {
+    if (
+      !willPublish &&
+      !confirm(
+        `"${posting.title}" 공고를 비공개로 전환하시겠습니까?\n공개 목록·메인 배너·상세 페이지에서 빠집니다. (접수된 지원서는 보존됩니다)`
+      )
+    )
+      return;
+    setErr(null);
+    toggleTransition(async () => {
+      const res = await setRecruitmentPostingStatus(
+        posting.id,
+        willPublish ? "published" : "closed"
+      );
+      if (!res.ok) setErr(res.message);
+    });
+  }
+
+  function handleDelete() {
+    if (
+      !confirm(
+        `"${posting.title}" 공고를 영구 삭제합니다.\n\n지원서·채점 등 모든 기록이 영구 삭제됩니다. 공공기관 기록 보존 의무를 확인하세요.\n(지원서가 한 건이라도 접수되어 있으면 삭제되지 않습니다)`
+      )
+    )
+      return;
+    setErr(null);
+    deleteTransition(async () => {
+      const res = await deleteRecruitmentPosting(posting.id);
+      if (!res.ok) setErr(res.message);
+    });
+  }
+
+  function handleArchive() {
+    if (
+      !confirm(
+        `"${posting.title}" 채용을 종결 처리합니다.\n기록은 보존되며, 심사 배정 카드와 심사화면 접근이 닫힙니다.`
+      )
+    )
+      return;
+    setErr(null);
+    archiveTransition(async () => {
+      const res = await archiveRecruitmentPosting(posting.id);
+      if (!res.ok) setErr(res.message);
+    });
+  }
+
+  function handleUnarchive() {
+    if (
+      !confirm(
+        `"${posting.title}" 공고의 종결을 취소하고 '종료(마감)' 상태로 되돌립니다.\n심사 배정 카드·심사화면 접근이 다시 열립니다.`
+      )
+    )
+      return;
+    setErr(null);
+    archiveTransition(async () => {
+      const res = await unarchiveRecruitmentPosting(posting.id);
+      if (!res.ok) setErr(res.message);
+    });
+  }
+
+  return (
+    <li
+      className={`rounded-lg border bg-card p-3 shadow-sm transition ${
+        isEditing
+          ? "border-brand-blue ring-1 ring-brand-blue-soft"
+          : "border-line"
+      }`}
+    >
+      <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-start sm:justify-between">
+        <div className="min-w-0">
+          <div className="flex flex-wrap items-center gap-1.5">
+            <span className={statusBadge}>{statusLabel}</span>
+            <span className="break-all font-mono text-[11px] text-ink-muted">
+              {posting.slug}
+            </span>
+          </div>
+          <p className="mt-1 break-keep text-sm font-semibold text-ink">
+            {posting.title}
+          </p>
+          <div className="mt-1 flex flex-wrap items-center gap-1">
+            {splitRecruitmentFields(posting.field).map((f, i) => (
+              <span key={`${f}-${i}`} className={fieldBadgeCls(i)}>
+                {f}
+              </span>
+            ))}
+            <span className="text-xs text-ink-muted">
+              · 모집 {posting.recruit_count}명
+            </span>
+            <span className="text-xs font-medium text-navy">
+              · 👁 조회 {posting.view_count.toLocaleString()}회
+            </span>
+          </div>
+          <p className="mt-1 text-[11px] text-ink-hint">
+            {fmtKst(posting.application_start)} ~ {fmtKst(posting.application_end)}
+          </p>
+        </div>
+        <div className="flex w-full flex-wrap items-center gap-1.5 sm:w-auto sm:shrink-0">
+          <Link
+            href={`/recruitment/${posting.slug}`}
+            target="_blank"
+            rel="noreferrer"
+            className="inline-flex grow items-center justify-center rounded-md border border-line bg-card px-2.5 py-1.5 text-xs font-medium text-ink-body hover:bg-surface sm:grow-0 sm:py-1"
+          >
+            공고 보기 ↗
+          </Link>
+          <RecruitmentShareButton slug={posting.slug} title={posting.title} />
+          <Link
+            href={`/hr/recruitment/${posting.slug}`}
+            className="inline-flex grow items-center justify-center rounded-md border border-brand-green bg-card px-2.5 py-1.5 text-xs font-semibold text-brand-green hover:bg-brand-green/10 sm:grow-0 sm:py-1"
+          >
+            채용 관리
+          </Link>
+          <Link
+            href={`/hr/recruitment/${posting.slug}/judges`}
+            className="inline-flex grow items-center justify-center rounded-md border border-navy bg-card px-2.5 py-1.5 text-xs font-semibold text-navy hover:bg-navy-soft sm:grow-0 sm:py-1"
+          >
+            위원 배정
+          </Link>
+          <button
+            type="button"
+            onClick={onEdit}
+            className="inline-flex grow items-center justify-center rounded-md border border-brand-blue bg-card px-2.5 py-1.5 text-xs font-semibold text-brand-blue hover:bg-brand-blue-soft sm:grow-0 sm:py-1"
+          >
+            편집
+          </button>
+          <button
+            type="button"
+            onClick={onDuplicate}
+            className="inline-flex grow items-center justify-center rounded-md border border-brand-blue bg-card px-2.5 py-1.5 text-xs font-semibold text-brand-blue hover:bg-brand-blue-soft sm:grow-0 sm:py-1"
+          >
+            복제하여 새 공고
+          </button>
+          {/* 공개/비공개 전환 — 종결(archived) 공고에는 숨김(먼저 종결 취소). */}
+          {!isArchived && (
+            <button
+              type="button"
+              onClick={handleToggle}
+              disabled={toggling}
+              className={`inline-flex grow items-center justify-center rounded-md border bg-card px-2.5 py-1.5 text-xs font-semibold disabled:opacity-60 sm:grow-0 sm:py-1 ${
+                willPublish
+                  ? "border-brand-green text-brand-green hover:bg-brand-green/10"
+                  : "border-warning text-warning hover:bg-warning-soft"
+              }`}
+            >
+              {toggling
+                ? "전환 중…"
+                : willPublish
+                  ? "공개 전환"
+                  : "비공개 전환"}
+            </button>
+          )}
+          {/* 채용 종결(보관) — published/closed 에서만. 기록 보존 상태 전환. */}
+          {canArchive && (
+            <button
+              type="button"
+              onClick={handleArchive}
+              disabled={archiving}
+              className="inline-flex grow items-center justify-center rounded-md border border-navy bg-card px-2.5 py-1.5 text-xs font-semibold text-navy hover:bg-navy-soft disabled:opacity-60 sm:grow-0 sm:py-1"
+            >
+              {archiving ? "처리 중…" : "채용 종결"}
+            </button>
+          )}
+          {/* 종결 취소(→ closed) — 실수 복구용, M0 에게만 의미. */}
+          {isArchived && (
+            <button
+              type="button"
+              onClick={handleUnarchive}
+              disabled={archiving}
+              className="inline-flex grow items-center justify-center rounded-md border border-brand-green bg-card px-2.5 py-1.5 text-xs font-semibold text-brand-green hover:bg-brand-green/10 disabled:opacity-60 sm:grow-0 sm:py-1"
+            >
+              {archiving ? "처리 중…" : "종결 취소"}
+            </button>
+          )}
+          {/* 삭제 — 기록 소실 방지: 종결(archived) 상태에서만 노출. */}
+          {isArchived && (
+            <button
+              type="button"
+              onClick={handleDelete}
+              disabled={deleting}
+              className="inline-flex grow items-center justify-center rounded-md border border-stamp bg-card px-2.5 py-1.5 text-xs font-medium text-stamp hover:bg-stamp-soft disabled:opacity-60 sm:grow-0 sm:py-1"
+            >
+              {deleting ? "삭제 중…" : "삭제"}
+            </button>
+          )}
+        </div>
+      </div>
+      {err && <p className={`mt-2 ${noticeError}`}>{err}</p>}
+    </li>
+  );
+}
+
+// =====================================================================
+// 공고 작성/편집 폼
+// =====================================================================
+function PostingForm({
+  initial,
+  mode,
+  onCancel,
+  onSaved,
+}: {
+  initial: RecruitmentPostingAdmin | null;
+  mode: "new" | "edit" | "duplicate";
+  onCancel: () => void;
+  onSaved: () => void;
+}) {
+  const isEdit = mode === "edit";
+  const isDuplicate = mode === "duplicate";
+  // 복제: source 의 모든 값을 프리필하되 slug 는 비우고(unique 충돌 회피),
+  //   status 는 draft 로, id 는 넘기지 않는다(insert → 새 공고 생성).
+  const [slug, setSlug] = useState(isEdit ? (initial?.slug ?? "") : "");
+  const [title, setTitle] = useState(initial?.title ?? "");
+  const [field, setField] = useState(initial?.field ?? "");
+  const [recruitCount, setRecruitCount] = useState(
+    String(initial?.recruit_count ?? 1)
+  );
+  const [startLocal, setStartLocal] = useState(
+    initial ? isoToKstLocal(initial.application_start) : ""
+  );
+  const [endLocal, setEndLocal] = useState(
+    initial ? isoToKstLocal(initial.application_end) : ""
+  );
+  const [qualifications, setQualifications] = useState(
+    initial?.qualifications ?? ""
+  );
+  const [preferred, setPreferred] = useState(initial?.preferred ?? "");
+  const [salaryInfo, setSalaryInfo] = useState(initial?.salary_info ?? "");
+  const [processInfo, setProcessInfo] = useState(initial?.process_info ?? "");
+  const [notice, setNotice] = useState(initial?.notice ?? "");
+  // 근무조건
+  const [workContractPeriod, setWorkContractPeriod] = useState(
+    initial?.work_contract_period ?? ""
+  );
+  const [workLocation, setWorkLocation] = useState(initial?.work_location ?? "");
+  const [workHours, setWorkHours] = useState(initial?.work_hours ?? "");
+  const [workDuties, setWorkDuties] = useState(initial?.work_duties ?? "");
+  // 채용절차 세부 심사항목
+  const [screeningCriteria, setScreeningCriteria] = useState(
+    initial?.screening_criteria ?? ""
+  );
+  const [interviewCriteria, setInterviewCriteria] = useState(
+    initial?.interview_criteria ?? ""
+  );
+  // 합격자 발표 일정 (전부 선택 입력, 자유 텍스트)
+  const [interviewCandidateAnnounceDate, setInterviewCandidateAnnounceDate] =
+    useState(initial?.interview_candidate_announce_date ?? "");
+  const [interviewDatetime, setInterviewDatetime] = useState(
+    initial?.interview_datetime ?? ""
+  );
+  const [interviewLocation, setInterviewLocation] = useState(
+    initial?.interview_location ?? ""
+  );
+  const [finalResultAnnounceDate, setFinalResultAnnounceDate] = useState(
+    initial?.final_result_announce_date ?? ""
+  );
+  const [appointmentDate, setAppointmentDate] = useState(
+    initial?.appointment_date ?? ""
+  );
+  const [published, setPublished] = useState(
+    isEdit && initial?.status === "published"
+  );
+  // 제출 서류 5종 필수/선택 — 기존 공고는 저장된 required_documents 값,
+  //   신규는 슬롯 기본값(졸업·성적·자격증=필수, 경력·수상=선택).
+  const [docRequired, setDocRequired] = useState<Record<string, boolean>>(() =>
+    requiredMapFromDocuments(initial?.required_documents ?? null)
+  );
+
+  const [pending, startTransition] = useTransition();
+  const [error, setError] = useState<string | null>(null);
+  const [ok, setOk] = useState<string | null>(null);
+
+  function handleSave() {
+    setError(null);
+    setOk(null);
+    startTransition(async () => {
+      try {
+        const fd = new FormData();
+        // 편집일 때만 id 를 넘긴다 — 복제/신규는 id 없이 insert(원본 보존).
+        if (isEdit && initial?.id) fd.set("id", initial.id);
+        fd.set("slug", slug);
+        fd.set("title", title);
+        fd.set("field", field);
+        fd.set("recruit_count", recruitCount);
+        fd.set("application_start", startLocal);
+        fd.set("application_end", endLocal);
+        fd.set("qualifications", qualifications);
+        fd.set("preferred", preferred);
+        fd.set("salary_info", salaryInfo);
+        fd.set("work_contract_period", workContractPeriod);
+        fd.set("work_location", workLocation);
+        fd.set("work_hours", workHours);
+        fd.set("work_duties", workDuties);
+        fd.set("process_info", processInfo);
+        fd.set("screening_criteria", screeningCriteria);
+        fd.set("interview_criteria", interviewCriteria);
+        fd.set(
+          "interview_candidate_announce_date",
+          interviewCandidateAnnounceDate
+        );
+        fd.set("interview_datetime", interviewDatetime);
+        fd.set("interview_location", interviewLocation);
+        fd.set("final_result_announce_date", finalResultAnnounceDate);
+        fd.set("appointment_date", appointmentDate);
+        fd.set("notice", notice);
+        fd.set("status", published ? "published" : "draft");
+        for (const s of RECRUITMENT_DOC_SLOTS) {
+          fd.set(
+            `doc_required_${s.key}`,
+            docRequired[s.key] ? "true" : "false"
+          );
+        }
+
+        const res = await saveRecruitmentPosting(fd);
+        if (res.ok) {
+          setOk(
+            isEdit ? "수정되었습니다." : `공고가 등록되었습니다. (/${res.slug})`
+          );
+          // 약간 텀을 두고 폼을 닫아 결과 메시지를 보여줌.
+          setTimeout(onSaved, 600);
+        } else {
+          setError(res.message);
+        }
+      } catch (e) {
+        setError(
+          e instanceof Error
+            ? `저장 실패: ${e.message}`
+            : "공고 저장 중 알 수 없는 오류가 발생했습니다."
+        );
+      }
+    });
+  }
+
+  return (
+    <section className={cardCls}>
+      <div className="flex items-center justify-between gap-2 border-b border-line pb-3">
+        <h3 className="text-sm font-semibold text-ink">
+          {isEdit
+            ? "공고 편집"
+            : isDuplicate
+              ? "공고 복제 — 새 공고 작성"
+              : "새 공고 작성"}
+        </h3>
+        <button type="button" onClick={onCancel} className={btnSecondary}>
+          취소
+        </button>
+      </div>
+
+      {isDuplicate && (
+        <p className="mt-3 rounded-lg border border-brand-blue-soft bg-brand-blue-soft/40 px-3 py-2 text-xs text-navy">
+          기존 공고의 내용을 모두 불러왔습니다. <b>공고 URL(slug)</b>을 새로
+          입력하고, 제목·기간 등 바뀐 항목만 수정한 뒤 등록하세요. 원본 공고는
+          그대로 보존됩니다.
+        </p>
+      )}
+
+      <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-2 sm:gap-4">
+        <div className="sm:col-span-2">
+          <label className={labelCls}>공고 URL (slug) *</label>
+          <input
+            type="text"
+            value={slug}
+            onChange={(e) => setSlug(e.target.value)}
+            placeholder="2026-1"
+            className={`${inputCls} font-mono`}
+          />
+          <p className="mt-1 text-[11px] text-ink-hint">
+            영문/숫자/하이픈만 가능. 지원 페이지 URL이 됩니다 — /recruitment/
+            <span className="font-semibold">{slug || "예시"}</span>
+          </p>
+        </div>
+
+        <div className="sm:col-span-2">
+          <label className={labelCls}>제목 *</label>
+          <input
+            type="text"
+            value={title}
+            onChange={(e) => setTitle(e.target.value)}
+            placeholder="동래구청소년센터 직원 채용 (2026년 1차)"
+            className={inputCls}
+          />
+        </div>
+
+        <div>
+          <label className={labelCls}>채용분야 *</label>
+          <input
+            type="text"
+            value={field}
+            onChange={(e) => setField(e.target.value)}
+            placeholder="청소년사업담당"
+            className={inputCls}
+          />
+        </div>
+
+        <div>
+          <label className={labelCls}>모집인원 *</label>
+          <input
+            type="number"
+            min={1}
+            value={recruitCount}
+            onChange={(e) => setRecruitCount(e.target.value)}
+            className={inputCls}
+          />
+        </div>
+
+        <div>
+          <label className={labelCls}>접수 시작 *</label>
+          <input
+            type="datetime-local"
+            value={startLocal}
+            onChange={(e) => setStartLocal(e.target.value)}
+            className={inputCls}
+          />
+          <p className="mt-1 text-[11px] text-ink-hint">한국 시간(KST)</p>
+        </div>
+
+        <div>
+          <label className={labelCls}>접수 마감 *</label>
+          <input
+            type="datetime-local"
+            value={endLocal}
+            onChange={(e) => setEndLocal(e.target.value)}
+            className={inputCls}
+          />
+          <p className="mt-1 text-[11px] text-ink-hint">한국 시간(KST)</p>
+        </div>
+
+        <div className="sm:col-span-2">
+          <label className={labelCls}>자격요건</label>
+          <textarea
+            value={qualifications}
+            onChange={(e) => setQualifications(e.target.value)}
+            rows={4}
+            placeholder="- 학력: 전문대학 졸업 이상&#10;- 청소년지도사 2급 이상 자격 소지자"
+            className={`${inputCls} resize-y`}
+          />
+        </div>
+
+        <div className="sm:col-span-2">
+          <label className={labelCls}>우대사항</label>
+          <textarea
+            value={preferred}
+            onChange={(e) => setPreferred(e.target.value)}
+            rows={3}
+            className={`${inputCls} resize-y`}
+          />
+        </div>
+
+        <div className="sm:col-span-2">
+          <label className={labelCls}>임금조건</label>
+          <textarea
+            value={salaryInfo}
+            onChange={(e) => setSalaryInfo(e.target.value)}
+            rows={3}
+            className={`${inputCls} resize-y`}
+          />
+        </div>
+
+        {/* 근무조건 */}
+        <div className="mt-1 border-t border-line pt-3 text-xs font-bold text-navy sm:col-span-2">
+          근무조건
+        </div>
+        <div>
+          <label className={labelCls}>계약기간</label>
+          <input
+            type="text"
+            value={workContractPeriod}
+            onChange={(e) => setWorkContractPeriod(e.target.value)}
+            placeholder="예: 2026.7.1. ~ 2027.6.30. (1년)"
+            className={inputCls}
+          />
+        </div>
+        <div>
+          <label className={labelCls}>근무지</label>
+          <input
+            type="text"
+            value={workLocation}
+            onChange={(e) => setWorkLocation(e.target.value)}
+            placeholder="예: 동래구청소년센터"
+            className={inputCls}
+          />
+        </div>
+        <div>
+          <label className={labelCls}>근무시간</label>
+          <input
+            type="text"
+            value={workHours}
+            onChange={(e) => setWorkHours(e.target.value)}
+            placeholder="예: 주 5일 09:00~18:00"
+            className={inputCls}
+          />
+        </div>
+        <div className="sm:col-span-2">
+          <label className={labelCls}>주요업무</label>
+          <textarea
+            value={workDuties}
+            onChange={(e) => setWorkDuties(e.target.value)}
+            rows={3}
+            placeholder="담당 업무를 입력하세요."
+            className={`${inputCls} resize-y`}
+          />
+        </div>
+
+        <div className="sm:col-span-2">
+          <label className={labelCls}>채용절차</label>
+          <textarea
+            value={processInfo}
+            onChange={(e) => setProcessInfo(e.target.value)}
+            rows={3}
+            className={`${inputCls} resize-y`}
+          />
+        </div>
+
+        <div className="sm:col-span-2">
+          <label className={labelCls}>서류전형 심사항목</label>
+          <textarea
+            value={screeningCriteria}
+            onChange={(e) => setScreeningCriteria(e.target.value)}
+            rows={4}
+            placeholder={"심사항목 | 세부내용 형태로 입력\n사업이해도 | 센터 사업에 대한 이해\n전문성 | 관련 자격증, 경력..."}
+            className={`${inputCls} resize-y`}
+          />
+        </div>
+
+        <div className="sm:col-span-2">
+          <label className={labelCls}>면접전형 심사항목</label>
+          <textarea
+            value={interviewCriteria}
+            onChange={(e) => setInterviewCriteria(e.target.value)}
+            rows={4}
+            placeholder="면접전형 심사기준 및 배점..."
+            className={`${inputCls} resize-y`}
+          />
+        </div>
+
+        {/* 합격자 발표 일정 — 전부 선택 입력, 자유 텍스트 */}
+        <div className="mt-1 border-t border-line pt-3 text-xs font-bold text-navy sm:col-span-2">
+          합격자 발표 일정
+        </div>
+        <div>
+          <label className={labelCls}>면접 대상자 발표일</label>
+          <input
+            type="text"
+            value={interviewCandidateAnnounceDate}
+            onChange={(e) => setInterviewCandidateAnnounceDate(e.target.value)}
+            placeholder="예: 2026.07.10.(금)"
+            className={inputCls}
+          />
+        </div>
+        <div>
+          <label className={labelCls}>면접일시</label>
+          <input
+            type="text"
+            value={interviewDatetime}
+            onChange={(e) => setInterviewDatetime(e.target.value)}
+            placeholder="예: 2026.07.15.(화) 14:00"
+            className={inputCls}
+          />
+        </div>
+        <div>
+          <label className={labelCls}>면접 장소</label>
+          <input
+            type="text"
+            value={interviewLocation}
+            onChange={(e) => setInterviewLocation(e.target.value)}
+            placeholder="예: 동래구청소년센터 3층"
+            className={inputCls}
+          />
+        </div>
+        <div>
+          <label className={labelCls}>최종합격자 발표일</label>
+          <input
+            type="text"
+            value={finalResultAnnounceDate}
+            onChange={(e) => setFinalResultAnnounceDate(e.target.value)}
+            placeholder="예: 2026.07.20.(월)"
+            className={inputCls}
+          />
+        </div>
+        <div className="sm:col-span-2">
+          <label className={labelCls}>임용일</label>
+          <input
+            type="text"
+            value={appointmentDate}
+            onChange={(e) => setAppointmentDate(e.target.value)}
+            placeholder="예: 최종합격자 발표 후 협의"
+            className={inputCls}
+          />
+        </div>
+
+        <div className="sm:col-span-2">
+          <label className={labelCls}>유의사항</label>
+          <textarea
+            value={notice}
+            onChange={(e) => setNotice(e.target.value)}
+            rows={3}
+            className={`${inputCls} resize-y`}
+          />
+        </div>
+
+        <div className="sm:col-span-2">
+          <label className="inline-flex cursor-pointer items-center gap-2 rounded-lg border border-line bg-surface px-3 py-2">
+            <input
+              type="checkbox"
+              checked={published}
+              onChange={(e) => setPublished(e.target.checked)}
+              className="h-4 w-4 rounded border-line text-brand-blue focus:ring-brand-blue"
+            />
+            <span className="text-sm font-semibold text-ink">
+              공개(published)로 게시
+            </span>
+            <span className="text-xs text-ink-muted">
+              {published
+                ? "외부 지원자가 공고를 열람·지원할 수 있습니다."
+                : "비공개(draft) — 외부에서 보이지 않습니다."}
+            </span>
+          </label>
+        </div>
+
+        <div className="sm:col-span-2">
+          <p className="mb-2 text-xs font-bold text-navy">제출 서류 (필수/선택)</p>
+          <ul className="space-y-2">
+            {RECRUITMENT_DOC_SLOTS.map((s) => {
+              const req = docRequired[s.key] ?? s.defaultRequired;
+              return (
+                <li
+                  key={s.key}
+                  className="flex items-center justify-between gap-2 rounded-lg border border-line bg-surface px-3 py-2"
+                >
+                  <span className="text-sm font-medium text-ink">
+                    {s.label}
+                  </span>
+                  <div className="inline-flex shrink-0 rounded-lg border border-line bg-card p-0.5">
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setDocRequired((m) => ({ ...m, [s.key]: true }))
+                      }
+                      className={docToggleCls(req)}
+                    >
+                      필수
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setDocRequired((m) => ({ ...m, [s.key]: false }))
+                      }
+                      className={docToggleCls(!req)}
+                    >
+                      선택
+                    </button>
+                  </div>
+                </li>
+              );
+            })}
+          </ul>
+          <p className="mt-1.5 text-[11px] text-ink-hint">
+            지원자의 “첨부서류” 탭에 위 설정대로 필수/선택이 표시되고, 제출 시
+            필수 항목 누락이 검증됩니다.
+          </p>
+        </div>
+      </div>
+
+      {error && <p className={`mt-3 ${noticeError}`}>{error}</p>}
+      {ok && <p className={`mt-3 ${noticeSuccess}`}>{ok}</p>}
+
+      <div className="mt-4 flex flex-wrap items-center justify-end gap-2 border-t border-line pt-4">
+        <button type="button" onClick={onCancel} className={btnSecondary}>
+          취소
+        </button>
+        <button
+          type="button"
+          onClick={handleSave}
+          disabled={pending}
+          className={btnPrimary}
+        >
+          {pending ? "저장 중…" : isEdit ? "수정 저장" : "공고 등록"}
+        </button>
+      </div>
+    </section>
+  );
+}

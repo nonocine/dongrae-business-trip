@@ -3,7 +3,7 @@
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { cardCls, inputCls, labelCls, btnPrimary, noticeError } from "@/lib/ui";
-import { loginExternalJudge } from "@/app/hr/recruitment/[slug]/actions";
+import { loginExternalJudge } from "@/app/(app)/hr/recruitment/[slug]/actions";
 
 export default function JudgeLoginForm({ slug }: { slug: string }) {
   const router = useRouter();

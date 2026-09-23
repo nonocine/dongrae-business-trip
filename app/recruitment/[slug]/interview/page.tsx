@@ -1,6 +1,6 @@
 import { notFound } from "next/navigation";
 import { getInterviewPosting } from "./actions";
-import { getInterviewJudgeContext } from "@/app/hr/recruitment/[slug]/actions";
+import { getInterviewJudgeContext } from "@/app/(app)/hr/recruitment/[slug]/actions";
 import InterviewFlow from "./InterviewFlow";
 
 // 매 진입 시 공고 상태(published/closed) 를 다시 확인합니다.

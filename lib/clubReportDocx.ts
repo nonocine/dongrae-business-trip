@@ -15,7 +15,7 @@ import {
   VerticalMergeType,
   WidthType,
 } from "docx";
-import type { ClubReportRow } from "@/app/hr/clubs/actions";
+import type { ClubReportRow } from "@/app/(app)/hr/clubs/actions";
 
 const TABLE_W = 10120;
 // 라벨 열 폭 — 활동표 첫 열(구분)과 같아야 세로선이 맞는다.

@@ -13,7 +13,7 @@ import { supabaseAdmin } from "@/lib/supabaseAdmin";
 import {
   requireInterviewJudge,
   getInterviewJudgeContext,
-} from "@/app/hr/recruitment/[slug]/actions";
+} from "@/app/(app)/hr/recruitment/[slug]/actions";
 import { INTERVIEW_ITEMS, INTERVIEW_MAX } from "@/lib/recruitmentScore";
 
 // =====================================================================
