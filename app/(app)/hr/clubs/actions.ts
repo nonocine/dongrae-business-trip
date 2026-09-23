@@ -64,6 +64,10 @@ export type ClubMonthRow = {
   capacity: number | null;
   room: string | null;
   goal: string | null;
+  // 계획서 제출 시각(saem_programs.plan_submitted_at). null 이면 미제출.
+  //   ★ 월 단위가 아니라 동아리 단위입니다 — 계획서는 한 해짜리라 달을 옮겨도
+  //     같은 값이 보입니다. 결과보고(reportStatus)와는 다른 축입니다.
+  planSubmittedAt: string | null;
   registeredCount: number;
   sessionCount: number;
   submittedCount: number;
@@ -222,7 +226,7 @@ export async function getClubDashboard(
   // 3) 동아리 프로그램 조회
   const programQuery = await supabaseAdmin
     .from("saem_programs")
-    .select("id,name,instructor_id,target,capacity,room,goal,status")
+    .select("id,name,instructor_id,target,capacity,room,goal,plan_submitted_at,status")
     .eq("program_type", "club")
     .eq("status", "active")
     .order("name");
@@ -239,6 +243,7 @@ export async function getClubDashboard(
     capacity: number | null;
     room: string | null;
     goal: string | null;
+    plan_submitted_at: string | null;
   }>;
   if (programs.length === 0)
     return { configured: true, teachers, instructors, clubs: [] };
@@ -367,6 +372,7 @@ export async function getClubDashboard(
       capacity: program.capacity,
       room: program.room,
       goal: program.goal,
+      planSubmittedAt: program.plan_submitted_at,
       registeredCount: enrolledBy.get(program.id) ?? program.capacity ?? 0,
       sessionCount: sessions.length,
       submittedCount: sessions.filter((s) => s.instructor_submitted_at != null)
@@ -1319,6 +1325,223 @@ export async function syncClubBusinessResult(input: {
       ok: false,
       message:
         error instanceof Error ? error.message : "사업실적을 반영하지 못했습니다.",
+    };
+  }
+}
+
+// =====================================================================
+// 동아리 계획서 (2026-09)
+//
+//   김준호 선생님 요청 — "결과보고 제출란만 있고 계획서 제출란이 없다".
+//   테이블·컬럼은 이미 다 있었는데 들어갈 화면이 없어 아무도 못 쓰고 있었다:
+//     saem_programs.goal / .plan_submitted_at
+//     saem_sessions.session_date / .plan_content / .activity_location
+//     saem_club_budget_plans (계획) — 실적은 saem_club_expenses 로 이미 분리돼 있다
+//
+//   ★ 위 대시보드(getClubDashboard)와 조회 범위가 다릅니다.
+//     그쪽은 '그 달' 의 활동·지출만 봅니다(월간보고용). 계획서는 한 해 단위라
+//     (plan_year 가 연도 컬럼입니다) 1년치를 통째로 읽습니다. 9월에 10월
+//     계획을 쓰는 것이 정상인데 월 단위로 묶으면 그게 안 됩니다.
+//
+//   ★ 기존 회차를 덮어쓰지 않습니다. 이미 들어 있는 plan_content·
+//     activity_location 을 그대로 읽어 와 이어서 고치는 방식입니다(추가/수정/
+//     삭제는 기존 addClubSession·updateClubSession·deleteClubSession 재사용).
+// =====================================================================
+
+export type ClubPlanSession = {
+  id: string;
+  sessionNo: number;
+  date: string;
+  content: string;
+  location: string;
+  // 활동일지가 제출된 회차는 계획을 지울 수 없습니다(실적 보존).
+  logged: boolean;
+};
+
+export type ClubPlanData = {
+  programId: string;
+  name: string;
+  year: number;
+  teacherName: string | null;
+  target: string | null;
+  goal: string;
+  planSubmittedAt: string | null;
+  sessions: ClubPlanSession[];
+  budgetPlans: ClubBudgetPlanRow[];
+  budgetPlanTotal: number; // 계획 합계
+  expenseTotal: number; // 같은 해 실제 사용액(saem_club_expenses)
+};
+
+// 한 동아리의 한 해 계획서. 없으면 null(삭제된 동아리 등).
+export async function getClubPlan(
+  programId: string,
+  year: number,
+): Promise<ClubPlanData | null> {
+  await requireClubAccess();
+  if (!programId) return null;
+
+  const { data: program, error: programError } = await supabaseAdmin
+    .from("saem_programs")
+    .select("id,name,goal,plan_submitted_at,instructor_id,target")
+    .eq("id", programId)
+    .eq("program_type", "club")
+    .maybeSingle();
+  if (missingSchema(programError)) return null;
+  if (programError) throw new Error(programError.message);
+  if (!program) return null;
+  const p = program as Record<string, unknown>;
+
+  const yearStart = `${year}-01-01`;
+  const yearEnd = `${year + 1}-01-01`;
+
+  const [sessionQuery, planQuery, expenseQuery, teacherQuery] =
+    await Promise.all([
+      supabaseAdmin
+        .from("saem_sessions")
+        .select("id,session_no,session_date,plan_content,activity_location,instructor_submitted_at,log_content")
+        .eq("program_id", programId)
+        .gte("session_date", yearStart)
+        .lt("session_date", yearEnd)
+        .order("session_date"),
+      supabaseAdmin
+        .from("saem_club_budget_plans")
+        .select("id,budget_category,description,amount,sort_order,created_at")
+        .eq("program_id", programId)
+        .eq("plan_year", year)
+        .order("sort_order")
+        .order("created_at"),
+      supabaseAdmin
+        .from("saem_club_expenses")
+        .select("amount")
+        .eq("program_id", programId)
+        .gte("expense_date", yearStart)
+        .lt("expense_date", yearEnd),
+      p.instructor_id
+        ? supabaseAdmin
+            .from("saem_instructors")
+            .select("name")
+            .eq("id", String(p.instructor_id))
+            .maybeSingle()
+        : Promise.resolve({ data: null, error: null }),
+    ]);
+
+  if (missingSchema(sessionQuery.error)) return null;
+  if (sessionQuery.error) throw new Error(sessionQuery.error.message);
+
+  const sessions: ClubPlanSession[] = (
+    (sessionQuery.data ?? []) as Record<string, unknown>[]
+  ).map((r) => ({
+    id: String(r.id ?? ""),
+    sessionNo: Number(r.session_no ?? 0),
+    date: String(r.session_date ?? ""),
+    content: String(r.plan_content ?? ""),
+    location: String(r.activity_location ?? ""),
+    logged:
+      !!r.instructor_submitted_at || String(r.log_content ?? "").length > 0,
+  }));
+
+  const budgetPlans: ClubBudgetPlanRow[] = (
+    (planQuery.data ?? []) as Record<string, unknown>[]
+  ).map((r) => ({
+    id: String(r.id ?? ""),
+    category: String(r.budget_category ?? ""),
+    description: String(r.description ?? ""),
+    amount: Number(r.amount ?? 0),
+  }));
+
+  const budgetPlanTotal = budgetPlans.reduce((sum, b) => sum + b.amount, 0);
+  const expenseTotal = ((expenseQuery.data ?? []) as { amount?: number }[]).reduce(
+    (sum, e) => sum + Number(e.amount ?? 0),
+    0,
+  );
+
+  return {
+    programId,
+    name: String(p.name ?? ""),
+    year,
+    teacherName:
+      ((teacherQuery.data as { name?: string } | null)?.name ?? null) || null,
+    target: (p.target as string | null) ?? null,
+    goal: String(p.goal ?? ""),
+    planSubmittedAt: (p.plan_submitted_at as string | null) ?? null,
+    sessions,
+    budgetPlans,
+    budgetPlanTotal,
+    expenseTotal,
+  };
+}
+
+// 목표(goal) 저장 — 계획서의 머리글입니다. 제출 여부와 무관하게 언제든 고칩니다.
+export async function saveClubGoal(input: {
+  programId: string;
+  goal: string;
+}): Promise<ActionResult> {
+  try {
+    await requireClubAccess();
+    await requireClubProgram(input.programId);
+    const { error } = await supabaseAdmin
+      .from("saem_programs")
+      .update({ goal: input.goal.trim() || null })
+      .eq("id", input.programId);
+    if (error) throw new Error(error.message);
+    revalidatePath("/hr/clubs");
+    return { ok: true };
+  } catch (error) {
+    return {
+      ok: false,
+      message:
+        error instanceof Error ? error.message : "목표를 저장하지 못했습니다.",
+    };
+  }
+}
+
+// 계획서 제출 — plan_submitted_at 에 시각을 남깁니다.
+//   ★ 잠그지 않습니다. 제출 뒤에도 목표·회차·예산을 계속 고칠 수 있고, 다시
+//     누르면 시각만 갱신됩니다. 제출은 "냈다" 는 표시이지 마감이 아닙니다
+//     (활동일지 제출 instructor_submitted_at 과 다른 성격).
+export async function submitClubPlan(input: {
+  programId: string;
+}): Promise<ActionResult<{ submittedAt: string }>> {
+  try {
+    await requireClubAccess();
+    await requireClubProgram(input.programId);
+    const now = new Date().toISOString();
+    const { error } = await supabaseAdmin
+      .from("saem_programs")
+      .update({ plan_submitted_at: now })
+      .eq("id", input.programId);
+    if (error) throw new Error(error.message);
+    revalidatePath("/hr/clubs");
+    return { ok: true, submittedAt: now };
+  } catch (error) {
+    return {
+      ok: false,
+      message:
+        error instanceof Error
+          ? error.message
+          : "계획서를 제출하지 못했습니다.",
+    };
+  }
+}
+
+// 제출 취소 — 잘못 누른 경우를 되돌립니다(내용은 그대로 남습니다).
+export async function unsubmitClubPlan(input: {
+  programId: string;
+}): Promise<ActionResult> {
+  try {
+    await requireClubAccess();
+    await requireClubProgram(input.programId);
+    const { error } = await supabaseAdmin
+      .from("saem_programs")
+      .update({ plan_submitted_at: null })
+      .eq("id", input.programId);
+    if (error) throw new Error(error.message);
+    revalidatePath("/hr/clubs");
+    return { ok: true };
+  } catch (error) {
+    return {
+      ok: false,
+      message: error instanceof Error ? error.message : "취소하지 못했습니다.",
     };
   }
 }

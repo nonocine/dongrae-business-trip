@@ -25,6 +25,7 @@ import {
   type ClubTeacherRow,
   type InstructorPickRow,
 } from "@/app/(app)/hr/clubs/actions";
+import ClubPlanEditor from "@/app/(app)/hr/clubs/ClubPlanEditor";
 import {
   cardCls,
   btnPrimary,
@@ -251,9 +252,64 @@ export default function ClubDashboard({
           </p>
         ) : (
           <div className="mt-4">
+            {/* 한눈에 보는 제출 현황 — 계획서와 결과보고를 같은 자리에서.
+                예전에는 결과보고만 보여서 "누가 계획서를 안 냈는지" 를 알 수
+                없었습니다(김준호 선생님 요청). 계획서는 한 해 단위라 달을
+                옮겨도 같은 값이고, 결과보고는 그 달 기준입니다. */}
+            <div className="mb-4 overflow-x-auto rounded-lg border border-line">
+              <table className="w-full min-w-[420px] border-collapse text-sm">
+                <thead>
+                  <tr className="border-b border-line bg-surface text-left text-xs text-ink-hint">
+                    <th className="px-3 py-2 font-medium">동아리</th>
+                    <th className="px-3 py-2 font-medium">동아리샘</th>
+                    <th className="px-3 py-2 text-center font-medium">
+                      계획서 ({year}년)
+                    </th>
+                    <th className="px-3 py-2 text-center font-medium">
+                      결과보고 ({month}월)
+                    </th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {data.clubs.map((club) => {
+                    const planOk = !!club.planSubmittedAt;
+                    const reportOk = club.reportStatus === "confirmed";
+                    return (
+                      <tr key={club.id} className="border-b border-line last:border-0">
+                        <td className="px-3 py-2 font-medium text-ink">
+                          {club.name}
+                        </td>
+                        <td className="px-3 py-2 text-xs text-ink-muted">
+                          {club.teacherName ?? "미지정"}
+                        </td>
+                        <td className="px-3 py-2 text-center">
+                          <Mark ok={planOk} />
+                        </td>
+                        <td className="px-3 py-2 text-center">
+                          <Mark ok={reportOk} />
+                        </td>
+                      </tr>
+                    );
+                  })}
+                  <tr className="bg-surface text-xs font-semibold text-ink-body">
+                    <td className="px-3 py-2" colSpan={2}>
+                      제출
+                    </td>
+                    <td className="px-3 py-2 text-center">
+                      {data.clubs.filter((c) => c.planSubmittedAt).length}/
+                      {data.clubs.length}
+                    </td>
+                    <td className="px-3 py-2 text-center">
+                      {confirmed}/{data.clubs.length}
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+
             {data.clubs.length > 1 && (
               <p className="mb-2 text-xs text-ink-muted">
-                동아리명을 눌러 펼치면 활동계획·예산·월간보고를 관리할 수
+                동아리명을 눌러 펼치면 계획서·활동계획·예산·월간보고를 관리할 수
                 있습니다.
               </p>
             )}
@@ -266,6 +322,7 @@ export default function ClubDashboard({
                   month={month}
                   pending={pending}
                   run={run}
+                  onPlanChanged={() => router.refresh()}
                 />
               ))}
             </div>
@@ -273,6 +330,20 @@ export default function ClubDashboard({
         )}
       </section>
     </div>
+  );
+}
+
+// 제출 여부 한 칸 — ○(냈음) / ×(안 냈음). 색만으로 구분하지 않게 기호를 씁니다.
+function Mark({ ok }: { ok: boolean }) {
+  return (
+    <span
+      title={ok ? "제출함" : "미제출"}
+      className={`inline-flex h-6 w-6 items-center justify-center rounded-full text-sm font-bold ${
+        ok ? "bg-success-soft text-success" : "bg-stamp-soft text-stamp"
+      }`}
+    >
+      {ok ? "○" : "×"}
+    </span>
   );
 }
 
@@ -655,6 +726,7 @@ function ClubCard({
   month,
   pending,
   run,
+  onPlanChanged,
 }: {
   club: ClubMonthRow;
   year: number;
@@ -664,6 +736,8 @@ function ClubCard({
     action: () => Promise<{ ok: boolean; message?: string }>,
     success: string
   ) => void;
+  // 계획서를 고치면 위 제출 현황 표도 새로 읽어야 합니다.
+  onPlanChanged: () => void;
 }) {
   const defaultDate = `${year}-${String(month).padStart(2, "0")}-01`;
   const [sessionDate, setSessionDate] = useState(defaultDate);
@@ -681,6 +755,9 @@ function ClubCard({
   const [planDescription, setPlanDescription] = useState("");
   const [planAmount, setPlanAmount] = useState("");
   const [open, setOpen] = useState(false);
+  // 계획서 패널 — 열었을 때만 서버에서 읽어옵니다(동아리 12개를 한꺼번에
+  //   불러오지 않게).
+  const [planOpen, setPlanOpen] = useState(false);
   const executionRate =
     club.budgetPlanTotal > 0
       ? Math.round((club.expenseTotal / club.budgetPlanTotal) * 100)
@@ -752,6 +829,36 @@ function ClubCard({
             value={`${club.expenseTotal.toLocaleString("ko-KR")}원`}
           />
         </dl>
+
+        {/* 계획서 (연간) — 결과보고·월간보고 흐름과 별개입니다.
+            아래 '이 달 활동계획' 은 그 달만 보여주는 월간보고용이고, 여기는
+            한 해 전체를 쓰는 곳입니다. 둘 다 같은 saem_sessions 를 보므로
+            여기서 회차를 추가하면 그 달이 오면 아래에도 나타납니다. */}
+        <details
+          className="mt-3 rounded-lg border border-brand-blue/30 bg-brand-blue-soft/20 p-3"
+          open={planOpen}
+          onToggle={(e) => setPlanOpen((e.target as HTMLDetailsElement).open)}
+        >
+          <summary className="flex cursor-pointer flex-wrap items-center gap-2 text-sm font-semibold text-navy">
+            계획서 작성·제출
+            <span className={club.planSubmittedAt ? badgeSuccess : badgeWarning}>
+              {club.planSubmittedAt
+                ? `제출 ${club.planSubmittedAt.slice(0, 10).replaceAll("-", ".")}`
+                : "미제출"}
+            </span>
+          </summary>
+          {/* 열었을 때만 불러옵니다 — 12개 동아리를 한꺼번에 읽지 않게. */}
+          {planOpen && (
+            <div className="mt-3">
+              <ClubPlanEditor
+                programId={club.id}
+                year={year}
+                onChanged={onPlanChanged}
+              />
+            </div>
+          )}
+        </details>
+
         <div className="mt-3">
           <p className="text-sm font-semibold text-navy">이 달 활동계획</p>
           {club.sessions.length === 0 ? (
