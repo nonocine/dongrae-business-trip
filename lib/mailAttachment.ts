@@ -53,3 +53,25 @@ export async function signedAttachmentUrl(
   // 서명 URL 에는 이미 ?token=… 이 붙어 있으므로 '&' 로 잇습니다.
   return `${data.signedUrl}&download=${encodeURIComponent(name)}`;
 }
+
+// --- 재첨부용 바이트 읽기 (1단계) ---
+//   전달·답장에 원본 첨부를 다시 붙일 때 씁니다. 서명 URL 을 거치지 않고
+//   service_role 로 곧장 내려받습니다 — 서버 안에서만 쓰이므로 URL 이 필요
+//   없고, 만료를 신경 쓸 일도 없습니다.
+//   ★ 사본을 새로 만들지 않습니다. 보낸 뒤 버퍼는 그대로 버립니다.
+export async function readAttachmentBytes(
+  path: string,
+): Promise<Buffer | null> {
+  const { data, error } = await supabaseAdmin.storage
+    .from(MAIL_BUCKET)
+    .download(path);
+  if (error || !data) {
+    console.warn(
+      "[mail] 첨부 읽기 실패:",
+      error?.message ?? "(사유 없음)",
+      path,
+    );
+    return null;
+  }
+  return Buffer.from(await data.arrayBuffer());
+}

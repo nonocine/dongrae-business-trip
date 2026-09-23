@@ -136,21 +136,91 @@ export type MailDetail = MailListItem & {
   fetched_at: string | null;
 };
 
+// --- 보낸 메일(mail_replies) ---
+//   kind 는 DB CHECK 와 같은 값이어야 합니다(reply|forward|new).
+//   'new' 는 원본 없이 새로 쓰는 메일용으로 관장이 미리 열어 둔 자리이며,
+//   화면에는 아직 만들지 않았습니다(1단계 범위 밖).
+export const MAIL_REPLY_KINDS = ["reply", "forward", "new"] as const;
+export type MailReplyKind = (typeof MAIL_REPLY_KINDS)[number];
+
+export const MAIL_REPLY_KIND_LABEL: Record<MailReplyKind, string> = {
+  reply: "답장",
+  forward: "전달",
+  new: "새 메일",
+};
+
+export const MAIL_REPLY_KIND_BADGE: Record<MailReplyKind, string> = {
+  reply: "bg-navy-soft text-navy",
+  forward: "bg-brand-blue-soft text-brand-blue",
+  new: "bg-surface text-ink-muted",
+};
+
+export function isMailReplyKind(v: unknown): v is MailReplyKind {
+  return (MAIL_REPLY_KINDS as readonly unknown[]).includes(v);
+}
+
+// 보낼 때 실제로 붙인 첨부의 기록 — 이름·크기만 남깁니다.
+//   * 원본 첨부를 다시 붙이는 것이므로 사본을 또 만들지 않습니다. 경로를 남기지
+//     않는 이유도 같습니다 — 원본이 영구 삭제되면 그 경로는 죽은 값이 되고,
+//     우리가 알고 싶은 것은 "무엇을 붙여 보냈는가" 이지 "지금 받을 수 있는가"
+//     가 아닙니다.
+export type MailReplyAttachment = { name: string; size: number };
+
+export function toReplyAttachments(raw: unknown): MailReplyAttachment[] {
+  if (!Array.isArray(raw)) return [];
+  return raw.map((item) => {
+    const o = (item ?? {}) as Record<string, unknown>;
+    return { name: String(o.name ?? "첨부파일"), size: Number(o.size ?? 0) };
+  });
+}
+
 // 답장 이력 한 건 — 누가·언제·무엇을 보냈는지 공유가 목적입니다.
 export type MailReply = {
   id: string;
+  kind: MailReplyKind;
   to_email: string;
+  cc_email: string;
   subject: string;
   body: string;
+  attachments: MailReplyAttachment[];
   sent_by: string;
   sent_at: string;
   status: "sent" | "failed";
   error_message: string | null;
 };
 
+// 보낸메일함 한 줄 — 이력과 같은 행이지만 본문 대신 원본 메일 정보를 답니다.
+export type MailSentItem = MailReply & {
+  mail_id: string;
+  // 원본 메일의 제목·보낸사람. 원본이 사라졌으면 빈 값입니다.
+  origin_subject: string;
+  origin_from: string;
+};
+
+// --- 발송 첨부 합계 상한 ---
+//   ★ 네이버 SMTP 가 실제로 몇 MB 까지 받아주는지 문서로 확인하지 못했습니다.
+//     그래서 "우리가 먼저 막는" 상한을 둡니다. 서버에 밀어 넣고 거절당하면
+//     사용자는 한참 기다린 뒤에야 실패를 보고, 사유도 SMTP 원문이라 읽기
+//     어렵습니다. 수집 때 사본을 남기는 기준(10MB)과 같은 값으로 맞췄습니다.
+//   ★ 이 값을 올리기 전에 실제 발송으로 상한을 확인하세요.
+export const MAIL_SEND_MAX_BYTES = 10 * 1024 * 1024;
+
+export function sendAttachmentTotal(list: { size: number }[]): number {
+  return list.reduce((sum, a) => sum + (Number(a.size) || 0), 0);
+}
+
+// 붙일 수 있는 첨부인지 — 사본이 없으면(10MB 초과·업로드 실패·2단계 이전)
+//   Storage 에서 읽어올 것이 없으므로 다시 붙일 수 없습니다.
+export function canAttachToOutgoing(att: MailAttachmentMeta): boolean {
+  return !!att.storage_path;
+}
+
 export type MailListView = {
   configured: boolean;
   items: MailListItem[];
+  // 보낸메일함(status=sent)일 때만 채워집니다. 그 외에는 빈 배열이고,
+  //   반대로 sent 뷰에서는 items 가 빈 배열입니다.
+  sent: MailSentItem[];
   unreadCount: number; // 미처리(status=unread) 건수 — 안읽음(opened_at)과 다른 축
   // 분류 인덱스 배지용 — "안읽음(opened_at IS NULL)" 건수.
   //   ★ 상태·담당자·검색 필터와 무관하게 항상 같은 값입니다(삭제된 메일만 제외).
@@ -198,8 +268,12 @@ export function isMailStatus(v: unknown): v is MailStatus {
   return (MAIL_STATUSES as readonly unknown[]).includes(v);
 }
 
-// 목록 필터의 특수값 — 상태가 아니라 "삭제된 메일만" 을 뜻합니다.
+// 목록 필터의 특수값 — 상태가 아니라 폴더를 뜻합니다.
+//   trash: 삭제된 메일만 / sent: 우리가 보낸 것(mail_replies)
+//   ★ sent 는 보는 테이블 자체가 다릅니다(mail_messages 가 아니라 mail_replies).
+//     그래서 getMailList 가 items 대신 sent 를 채웁니다.
 export const MAIL_TRASH_FILTER = "trash";
+export const MAIL_SENT_FILTER = "sent";
 
 // --- AI 분류(ML-5) 공용 상수 ---
 //   분류 로직은 lib/mailClassifier.ts(서버 전용, supabaseAdmin·SDK 사용)에

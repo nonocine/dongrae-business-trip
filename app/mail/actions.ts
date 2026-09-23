@@ -21,24 +21,40 @@ import {
   MAIL_BUCKET,
   MAIL_CATEGORY_ETC,
   MAIL_CATEGORY_INDEX,
+  MAIL_SEND_MAX_BYTES,
+  MAIL_SENT_FILTER,
   MAIL_TRASH_FILTER,
+  attachmentSkipNotice,
+  canAttachToOutgoing,
+  formatBytes,
   isMailCategory,
   isMailFetchStale,
+  isMailReplyKind,
   isMailStatus,
+  sendAttachmentTotal,
   toAttachments,
+  toReplyAttachments,
+  type MailAttachmentMeta,
   type MailCategory,
   type MailDetail,
   type MailListItem,
   type MailListView,
   type MailReply,
+  type MailReplyAttachment,
+  type MailReplyKind,
+  type MailSentItem,
   type MailStatus,
 } from "@/lib/mail";
 import {
+  forwardSubject,
   isReplyConfigured,
+  quoteForward,
   quoteOriginal,
   replySubject,
   sendReply,
+  type OutgoingAttachment,
 } from "@/lib/mailReply";
+import { readAttachmentBytes } from "@/lib/mailAttachment";
 
 const LIST_LIMIT = 300;
 
@@ -126,6 +142,51 @@ function unopenedCountQuery(category: MailCategory | null) {
   return category === MAIL_CATEGORY_ETC ? q.or(ETC_OR_FILTER) : q.eq("ai_category", category);
 }
 
+// mail_replies 행 → 보낸메일함 한 줄.
+//   원본 메일 정보는 조인해서 붙입니다(PostgREST 의 FK 임베드).
+function toSentItem(raw: Record<string, unknown>): MailSentItem {
+  const origin = (raw.mail_messages ?? null) as Record<string, unknown> | null;
+  return {
+    id: String(raw.id ?? ""),
+    kind: isMailReplyKind(raw.kind) ? raw.kind : "reply",
+    mail_id: String(raw.mail_id ?? ""),
+    to_email: String(raw.to_email ?? ""),
+    cc_email: String(raw.cc_email ?? ""),
+    subject: String(raw.subject ?? ""),
+    body: String(raw.body ?? ""),
+    attachments: toReplyAttachments(raw.attachments),
+    sent_by: String(raw.sent_by ?? ""),
+    sent_at: String(raw.sent_at ?? ""),
+    status: raw.status === "failed" ? "failed" : "sent",
+    error_message: (raw.error_message as string | null) ?? null,
+    origin_subject: String(origin?.subject ?? ""),
+    origin_from: String(origin?.from_name ?? origin?.from_email ?? ""),
+  };
+}
+
+// 보낸메일함 — mail_replies 를 최신순으로. 검색어는 받는사람·제목에 겁니다.
+//   ★ 실패건(status != 'sent')도 함께 내려줍니다. 실패가 조용히 묻히면
+//     아무도 재시도하지 않습니다 — 지금까지 이력이 상세 모달 안에만 있어서
+//     실제로 그런 상태였습니다.
+async function loadSentList(q: string): Promise<MailSentItem[]> {
+  let query = supabaseAdmin
+    .from("mail_replies")
+    .select("*, mail_messages(subject, from_name, from_email)")
+    .order("sent_at", { ascending: false })
+    .limit(LIST_LIMIT);
+  const safe = q.replace(/[,()]/g, " ").trim();
+  if (safe)
+    query = query.or(
+      `subject.ilike.%${safe}%,to_email.ilike.%${safe}%,sent_by.ilike.%${safe}%`,
+    );
+  const { data, error } = await query;
+  if (error) {
+    if (tableMissing(error)) return [];
+    throw new Error(error.message);
+  }
+  return ((data ?? []) as Record<string, unknown>[]).map(toSentItem);
+}
+
 export async function getMailList(filters?: {
   status?: string;
   assignee?: string;
@@ -144,6 +205,10 @@ export async function getMailList(filters?: {
   // status 필터의 특수값 "trash" 는 삭제된 메일만 보여줍니다.
   // 그 외에는 항상 삭제된 메일을 제외합니다(기본 목록에서 숨김).
   const status = filters?.status ?? "";
+  // 보낸메일함은 보는 테이블이 다릅니다(mail_replies). 받은 메일 목록 쿼리를
+  //   돌릴 이유가 없으므로 여기서 갈라집니다 — 나머지(분류 배지·수집 시각
+  //   ·담당자 명단)는 화면 위쪽이 계속 쓰므로 그대로 둡니다.
+  const sentView = status === MAIL_SENT_FILTER;
   const trashView = status === MAIL_TRASH_FILTER;
   query = trashView
     ? query.not("deleted_at", "is", null)
@@ -183,8 +248,12 @@ export async function getMailList(filters?: {
     lastMailQuery,
     staff,
     categoryCounts,
+    sentItems,
   ] = await Promise.all([
-      query,
+      // 보낸메일함에서는 받은 메일 쿼리를 돌리지 않습니다(빈 결과로 대체).
+      sentView
+        ? Promise.resolve({ data: [], error: null, count: null })
+        : query,
       supabaseAdmin
         .from("mail_messages")
         .select("id", { count: "exact", head: true })
@@ -221,12 +290,15 @@ export async function getMailList(filters?: {
         ...MAIL_CATEGORY_INDEX.map((c) => unopenedCountQuery(c)),
         unopenedCountQuery(null),
       ]),
+      // 보낸메일함일 때만 실제로 읽습니다.
+      sentView ? loadSentList(filters?.q ?? "") : Promise.resolve([]),
     ]);
 
   if (tableMissing(listQuery.error)) {
     return {
       configured: false,
       items: [],
+      sent: [],
       unreadCount: 0,
       categoryUnopened: {},
       unopenedCount: 0,
@@ -261,6 +333,7 @@ export async function getMailList(filters?: {
   return {
     configured: true,
     items: ((listQuery.data ?? []) as Record<string, unknown>[]).map(toListItem),
+    sent: sentItems,
     unreadCount: unreadQuery.count ?? 0,
     categoryUnopened,
     unopenedCount: categoryCounts[MAIL_CATEGORY_INDEX.length]?.count ?? 0,
@@ -728,33 +801,53 @@ export async function saveMailMemo(
 // ML-7 답장 — 네이버 SMTP 발신 + 이력 공유
 // =====================================================================
 
-// 답장 폼 기본값 — 받는사람/제목/원문 인용을 서버에서 만들어 내려줍니다.
-export async function getReplyDraft(id: string): Promise<{
+// 답장·전달 폼 기본값 — 받는사람/제목/원문 인용을 서버에서 만들어 내려줍니다.
+//   * kind="reply"   : 받는사람 = 원본 보낸사람, 제목 = RE:, "> " 인용
+//   * kind="forward" : 받는사람 = 빈칸(사람이 입력), 제목 = FW:, 원문 그대로
+//   첨부 목록도 함께 내려 폼에서 체크로 골라 다시 붙일 수 있게 합니다.
+export type MailDraft = {
   configured: boolean;
+  kind: MailReplyKind;
   to: string;
   subject: string;
   quoted: string;
-} | null> {
+  attachments: MailAttachmentMeta[];
+  maxBytes: number;
+};
+
+export async function getMailDraft(
+  id: string,
+  kind: MailReplyKind,
+): Promise<MailDraft | null> {
   await requireMailAccess();
   if (!id) return null;
   const { data, error } = await supabaseAdmin
     .from("mail_messages")
-    .select("from_name, from_email, subject, body_text, received_at")
+    .select("from_name, from_email, subject, body_text, received_at, attachments")
     .eq("id", id)
     .maybeSingle();
   if (error || !data) return null;
   const raw = data as Record<string, unknown>;
 
+  const fromName = String(raw.from_name ?? "");
+  const fromEmail = String(raw.from_email ?? "");
+  const subject = String(raw.subject ?? "");
+  const receivedAt = (raw.received_at as string | null) ?? null;
+  const body = String(raw.body_text ?? "");
+  const forward = kind === "forward";
+
   return {
     configured: isReplyConfigured(),
-    to: String(raw.from_email ?? ""),
-    subject: replySubject(String(raw.subject ?? "")),
-    quoted: quoteOriginal({
-      fromName: String(raw.from_name ?? ""),
-      fromEmail: String(raw.from_email ?? ""),
-      receivedAt: (raw.received_at as string | null) ?? null,
-      body: String(raw.body_text ?? ""),
-    }),
+    kind,
+    // 전달은 받는사람이 정해져 있지 않습니다 — 원본 보낸사람에게 되돌려
+    //   보내는 사고를 막으려고 일부러 비웁니다.
+    to: forward ? "" : fromEmail,
+    subject: forward ? forwardSubject(subject) : replySubject(subject),
+    quoted: forward
+      ? quoteForward({ fromName, fromEmail, receivedAt, subject, body })
+      : quoteOriginal({ fromName, fromEmail, receivedAt, body }),
+    attachments: toAttachments(raw.attachments),
+    maxBytes: MAIL_SEND_MAX_BYTES,
   };
 }
 
@@ -772,9 +865,12 @@ export async function listMailReplies(id: string): Promise<MailReply[]> {
   }
   return ((data ?? []) as Record<string, unknown>[]).map((r) => ({
     id: String(r.id ?? ""),
+    kind: isMailReplyKind(r.kind) ? r.kind : "reply",
     to_email: String(r.to_email ?? ""),
+    cc_email: String(r.cc_email ?? ""),
     subject: String(r.subject ?? ""),
     body: String(r.body ?? ""),
+    attachments: toReplyAttachments(r.attachments),
     sent_by: String(r.sent_by ?? ""),
     sent_at: String(r.sent_at ?? ""),
     status: r.status === "failed" ? "failed" : "sent",
@@ -787,11 +883,80 @@ export async function listMailReplies(id: string): Promise<MailReply[]> {
 //   * 실패: mail_replies(status=failed, error_message) 기록 후 사유를 반환.
 //     SMTP 실패가 화면 전체를 죽이지 않도록 여기서 잡아 결과로 돌려줍니다.
 //   * 네이버 원본은 어떤 경우에도 건드리지 않습니다.
+// 재첨부 대상을 고르고 Storage 에서 바이트를 읽어옵니다.
+//   ★ 화면이 보낸 순번만 믿고 경로를 받지 않습니다 — 경로를 받으면 버킷 안
+//     아무 파일이나 붙여 보낼 수 있게 됩니다(0단계에서 닫은 것과 같은 문).
+//   ★ 크기 검사는 화면에서도 하지만 여기서 다시 합니다. 화면 검사는 안내용이고
+//     실제 방어선은 이쪽입니다.
+async function collectOutgoingAttachments(
+  mailId: string,
+  indexes: number[],
+): Promise<
+  | { ok: true; files: OutgoingAttachment[]; meta: MailReplyAttachment[] }
+  | { ok: false; message: string }
+> {
+  const picked = [...new Set(indexes)].filter(
+    (i) => Number.isInteger(i) && i >= 0,
+  );
+  if (picked.length === 0) return { ok: true, files: [], meta: [] };
+
+  const { data, error } = await supabaseAdmin
+    .from("mail_messages")
+    .select("attachments")
+    .eq("id", mailId)
+    .maybeSingle();
+  if (error || !data)
+    return { ok: false, message: "원본 메일의 첨부를 찾지 못했습니다." };
+
+  const all = toAttachments((data as { attachments: unknown }).attachments);
+  const chosen: MailAttachmentMeta[] = [];
+  for (const i of picked) {
+    const att = all[i];
+    if (!att) return { ok: false, message: "첨부 목록이 바뀌었습니다. 다시 열어주세요." };
+    if (!canAttachToOutgoing(att)) {
+      // 사본이 없으면 붙일 것이 없습니다. 화면이 막아 두지만 여기서도 거릅니다.
+      return { ok: false, message: attachmentSkipNotice(att.name, att.skip_reason) };
+    }
+    chosen.push(att);
+  }
+
+  const total = sendAttachmentTotal(chosen);
+  if (total > MAIL_SEND_MAX_BYTES) {
+    return {
+      ok: false,
+      message: `첨부 합계가 ${formatBytes(total)} 입니다. ${formatBytes(
+        MAIL_SEND_MAX_BYTES,
+      )} 이하만 보낼 수 있습니다. 파일을 덜어내고 다시 시도해주세요.`,
+    };
+  }
+
+  const files: OutgoingAttachment[] = [];
+  for (const att of chosen) {
+    const bytes = await readAttachmentBytes(att.storage_path!);
+    if (!bytes)
+      return {
+        ok: false,
+        message: `${att.name} 을(를) 읽지 못해 보내지 않았습니다. 다시 시도해주세요.`,
+      };
+    // filename 은 반드시 원본 이름 — Storage 키(ASCII 안전 이름)를 쓰면
+    //   받는 사람에게 "1-26105.hwp" 로 도착합니다.
+    files.push({ filename: att.name, content: bytes });
+  }
+  return {
+    ok: true,
+    files,
+    meta: chosen.map((a) => ({ name: a.name, size: a.size })),
+  };
+}
+
 export async function sendMailReply(input: {
   id: string;
+  kind?: MailReplyKind;
   to: string;
+  cc?: string;
   subject: string;
   body: string;
+  attachIndexes?: number[];
   markDone: boolean;
 }): Promise<ActionResult> {
   let ctxName = "";
@@ -801,11 +966,17 @@ export async function sendMailReply(input: {
 
     const id = input.id;
     if (!id) return { ok: false, message: "대상 메일이 없습니다." };
+    const kind: MailReplyKind = isMailReplyKind(input.kind)
+      ? input.kind
+      : "reply";
     const to = input.to.trim();
     if (!to) return { ok: false, message: "받는사람 주소를 입력해주세요." };
+    const cc = (input.cc ?? "").trim();
     const body = input.body.trim();
     if (!body) return { ok: false, message: "본문을 입력해주세요." };
-    const subject = input.subject.trim() || "RE: (제목 없음)";
+    const subject =
+      input.subject.trim() ||
+      (kind === "forward" ? "FW: (제목 없음)" : "RE: (제목 없음)");
 
     if (!isReplyConfigured()) {
       return {
@@ -815,38 +986,53 @@ export async function sendMailReply(input: {
       };
     }
 
+    // 첨부를 모읍니다. 여기서 막히면 아직 아무것도 보내지 않은 상태라
+    //   이력도 남기지 않습니다(보내려다 만 것은 '실패' 가 아닙니다).
+    const picked = await collectOutgoingAttachments(
+      id,
+      input.attachIndexes ?? [],
+    );
+    if (!picked.ok) return { ok: false, message: picked.message };
+
+    const record = {
+      mail_id: id,
+      kind,
+      to_email: to,
+      cc_email: cc || null,
+      subject,
+      body,
+      attachments: picked.meta,
+      sent_by: ctxName,
+    };
+
     try {
-      await sendReply({ to, subject, text: body });
+      await sendReply({
+        to,
+        cc,
+        subject,
+        text: body,
+        attachments: picked.files,
+      });
     } catch (sendError) {
       const message =
         sendError instanceof Error
           ? sendError.message
           : "메일 발송에 실패했습니다.";
-      // 실패도 이력으로 남깁니다(재시도 판단·공유 목적).
-      await supabaseAdmin.from("mail_replies").insert({
-        mail_id: id,
-        to_email: to,
-        subject,
-        body,
-        sent_by: ctxName,
-        status: "failed",
-        error_message: message,
-      });
+      // 실패도 이력으로 남깁니다(재시도 판단·공유 목적). 보낸메일함에서
+      //   사유와 함께 보입니다 — 실패가 조용히 묻히지 않게 하는 지점입니다.
+      await supabaseAdmin
+        .from("mail_replies")
+        .insert({ ...record, status: "failed", error_message: message });
       revalidatePath("/mail");
       return { ok: false, message: `발송 실패: ${message}` };
     }
 
-    const { error } = await supabaseAdmin.from("mail_replies").insert({
-      mail_id: id,
-      to_email: to,
-      subject,
-      body,
-      sent_by: ctxName,
-      status: "sent",
-    });
+    const { error } = await supabaseAdmin
+      .from("mail_replies")
+      .insert({ ...record, status: "sent" });
     if (error) {
       // 메일은 이미 나갔으므로 실패로 되돌리지 않고 경고만 남깁니다.
-      console.warn("[mail] 답장 이력 저장 실패:", error.message);
+      console.warn("[mail] 발송 이력 저장 실패:", error.message);
     }
 
     if (input.markDone) {
@@ -859,7 +1045,7 @@ export async function sendMailReply(input: {
     revalidatePath("/mail");
     return { ok: true };
   } catch (e) {
-    return actionError(e, "답장을 보내지 못했습니다.");
+    return actionError(e, "메일을 보내지 못했습니다.");
   }
 }
 

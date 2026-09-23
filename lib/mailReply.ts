@@ -44,6 +44,13 @@ export function replySubject(original: string): string {
   return /^re\s*:/i.test(s) ? s : `RE: ${s}`;
 }
 
+// "FW: 원제목" — RE: 와 같은 규칙. FW:/FWD: 어느 쪽으로 시작해도 덧붙이지 않습니다.
+export function forwardSubject(original: string): string {
+  const s = (original ?? "").trim();
+  if (!s) return "FW: (제목 없음)";
+  return /^fwd?\s*:/i.test(s) ? s : `FW: ${s}`;
+}
+
 // 본문 하단 원문 인용 — 각 줄 앞에 "> " 를 붙인 표준 형태.
 export function quoteOriginal(input: {
   fromName: string;
@@ -70,11 +77,53 @@ export function quoteOriginal(input: {
   return `\n\n-------- 원본 메일 --------\n${header}\n${quoted}`;
 }
 
-// 답장 발송 — 실패 시 throw(호출부에서 status=failed 로 기록).
+// 전달용 원문 — 답장의 "> " 인용과 달리 원문을 그대로 싣습니다.
+//   전달받는 사람은 이 메일을 처음 보므로, 인용부호로 흐리게 만들 이유가 없고
+//   보낸사람·받은날짜·제목이 함께 있어야 무엇을 전달받았는지 압니다.
+export function quoteForward(input: {
+  fromName: string;
+  fromEmail: string;
+  receivedAt: string | null;
+  subject: string;
+  body: string;
+}): string {
+  const who =
+    [input.fromName, input.fromEmail ? `<${input.fromEmail}>` : ""]
+      .filter(Boolean)
+      .join(" ") || "(보낸사람 없음)";
+  const when = input.receivedAt
+    ? new Date(input.receivedAt).toISOString().slice(0, 16).replace("T", " ")
+    : "(날짜 없음)";
+  const head = [
+    "",
+    "",
+    "-------- 전달된 메일 --------",
+    `보낸사람: ${who}`,
+    `받은날짜: ${when} (UTC)`,
+    `제목: ${(input.subject ?? "").trim() || "(제목 없음)"}`,
+    "",
+  ].join("\n");
+  return head + (input.body ?? "").slice(0, QUOTE_MAX_CHARS);
+}
+
+// 첨부 한 건 — 원본 메일에서 읽어온 바이트를 그대로 다시 붙입니다.
+//   ★ filename 에는 반드시 '원본' 이름을 넣습니다. Storage 키는 ASCII 안전
+//     이름이라(storageSafeName) 그걸 쓰면 받는 사람에게 "1-26105.hwp" 로
+//     도착합니다 — 0단계에서 고친 것과 같은 함정입니다.
+export type OutgoingAttachment = {
+  filename: string;
+  content: Buffer;
+  contentType?: string;
+};
+
+// 발송 — 실패 시 throw(호출부에서 status=failed 로 기록).
+//   답장·전달이 같은 경로를 씁니다. 차이는 제목·본문·받는사람뿐입니다.
 export async function sendReply(input: {
   to: string;
+  cc?: string;
   subject: string;
   text: string;
+  attachments?: OutgoingAttachment[];
 }): Promise<void> {
   if (!isReplyConfigured()) {
     throw new Error(
@@ -83,12 +132,23 @@ export async function sendReply(input: {
   }
   const to = (input.to ?? "").trim();
   if (!to) throw new Error("받는사람 주소가 없습니다.");
+  const cc = (input.cc ?? "").trim();
 
   const tp = transport();
   await tp.sendMail({
     from: `동래구청소년센터 <${senderAddress()}>`,
     to,
+    ...(cc ? { cc } : {}),
     subject: input.subject,
     text: input.text,
+    ...(input.attachments && input.attachments.length > 0
+      ? {
+          attachments: input.attachments.map((a) => ({
+            filename: a.filename,
+            content: a.content,
+            ...(a.contentType ? { contentType: a.contentType } : {}),
+          })),
+        }
+      : {}),
   });
 }

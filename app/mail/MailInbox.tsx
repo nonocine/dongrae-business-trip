@@ -29,16 +29,24 @@ import {
   MAIL_CATEGORY_BADGE,
   MAIL_CATEGORY_INDEX,
   MAIL_CATEGORY_INDEX_COLOR,
+  MAIL_REPLY_KIND_BADGE,
+  MAIL_REPLY_KIND_LABEL,
+  MAIL_SEND_MAX_BYTES,
+  MAIL_SENT_FILTER,
   MAIL_TRASH_FILTER,
   assigneeLabel,
   attachmentSkipNotice,
+  canAttachToOutgoing,
   formatBytes,
   hasPendingSuggestion,
   mailAttachmentHref,
+  sendAttachmentTotal,
   type MailAttachmentMeta,
   type MailDetail,
   type MailListView,
   type MailReply,
+  type MailReplyKind,
+  type MailSentItem,
 } from "@/lib/mail";
 import {
   analyzeMailNow,
@@ -51,7 +59,7 @@ import {
   bulkTrashMail,
   fetchMailNow,
   getMailDetail,
-  getReplyDraft,
+  getMailDraft,
   listMailReplies,
   markMailOpened,
   restoreMail,
@@ -162,14 +170,24 @@ export default function MailInbox({
   const [memo, setMemo] = useState("");
   const [search, setSearch] = useState(filters.q);
 
-  // --- 답장(ML-7) ---
+  // --- 답장·전달(ML-7 / 1단계) ---
+  //   같은 폼을 kind 로 나눠 씁니다 — 발송 경로가 같고, 다른 것은 받는사람·
+  //   제목·인용 형태뿐입니다.
   const [replyOpen, setReplyOpen] = useState(false);
+  const [replyKind, setReplyKind] = useState<MailReplyKind>("reply");
   const [replyTo, setReplyTo] = useState("");
+  const [replyCc, setReplyCc] = useState("");
   const [replySubjectText, setReplySubjectText] = useState("");
   const [replyBody, setReplyBody] = useState("");
   const [replyMarkDone, setReplyMarkDone] = useState(true); // 기본 켬
   const [replyConfigured, setReplyConfigured] = useState(true);
   const [replies, setReplies] = useState<MailReply[]>([]);
+  // 다시 붙일 첨부 — 원본 메일 첨부의 '순번' 집합입니다(경로가 아니라 순번을
+  //   보내는 이유는 actions.ts collectOutgoingAttachments 주석 참고).
+  const [replyAttachOptions, setReplyAttachOptions] = useState<
+    MailAttachmentMeta[]
+  >([]);
+  const [replyAttachSel, setReplyAttachSel] = useState<Set<number>>(new Set());
   // 원문 인용은 본문과 분리해 보관하고, 보낼 때만 이어 붙입니다.
   const [replyQuote, setReplyQuote] = useState("");
   const [quoteOpen, setQuoteOpen] = useState(false);
@@ -202,14 +220,28 @@ export default function MailInbox({
     // 펼쳐 둔 첨부도 접습니다 — 목록이 통째로 바뀌므로 남겨 둘 이유가 없습니다.
     setAttachFor(null);
   }
-  const totalPages = Math.max(1, Math.ceil(view.items.length / PAGE_SIZE));
+  const open = detail !== null;
+  const trashView = filters.status === MAIL_TRASH_FILTER;
+  // 보낸메일함은 mail_replies 를 봅니다 — 받은 메일 목록과 행 모양이 다릅니다.
+  const sentView = filters.status === MAIL_SENT_FILTER;
+
+  // 페이지 계산은 지금 보고 있는 폴더의 길이 기준입니다.
+  const rowCount = sentView ? view.sent.length : view.items.length;
+  const totalPages = Math.max(1, Math.ceil(rowCount / PAGE_SIZE));
   const safePage = Math.min(page, totalPages);
   const pageOffset = (safePage - 1) * PAGE_SIZE;
   // 이 페이지에 보이는 메일 — 선택·일괄 처리는 모두 이 목록을 기준으로 합니다.
   const pageItems = view.items.slice(pageOffset, pageOffset + PAGE_SIZE);
+  const pageSent = view.sent.slice(pageOffset, pageOffset + PAGE_SIZE);
 
-  const open = detail !== null;
-  const trashView = filters.status === MAIL_TRASH_FILTER;
+  // 재첨부 합계 — 화면 안내용입니다. 실제 차단은 서버에서도 다시 합니다
+  //   (actions.ts collectOutgoingAttachments).
+  const attachTotalBytes = sendAttachmentTotal(
+    [...replyAttachSel]
+      .map((i) => replyAttachOptions[i])
+      .filter((a): a is MailAttachmentMeta => !!a),
+  );
+  const attachOverLimit = attachTotalBytes > MAIL_SEND_MAX_BYTES;
 
   // ★ 선택 목록은 "현재 화면에 보이는 것" 과 교집합으로 렌더 중에 계산합니다.
   //   필터가 바뀌어 사라진 메일의 id 가 state 에 남아 있어도 일괄 처리 대상이
@@ -409,24 +441,73 @@ export default function MailInbox({
     });
   }
 
-  // [답장] — 받는사람/제목/원문 인용을 서버에서 받아 폼을 채웁니다.
-  function openReply(id: string) {
+  // [답장]·[전달] — 받는사람/제목/원문 인용/첨부 목록을 서버에서 받아 폼을 채웁니다.
+  function openCompose(id: string, kind: MailReplyKind) {
     setMsg(null);
     start(async () => {
-      const draft = await getReplyDraft(id);
+      const draft = await getMailDraft(id, kind);
       if (!draft) {
-        setMsg({ ok: false, text: "답장 정보를 불러오지 못했습니다." });
+        setMsg({ ok: false, text: "메일 정보를 불러오지 못했습니다." });
         return;
       }
+      setReplyKind(draft.kind);
       setReplyConfigured(draft.configured);
       setReplyTo(draft.to);
+      setReplyCc("");
       setReplySubjectText(draft.subject);
       // 본문은 빈 칸에서 시작하고, 원문 인용은 접어 둡니다(보낼 때 이어 붙임).
       setReplyBody("");
       setReplyQuote(draft.quoted);
       setQuoteOpen(false);
-      setReplyMarkDone(true);
+      setReplyMarkDone(kind === "reply"); // 전달은 '완료' 와 무관한 동작입니다.
+      setReplyAttachOptions(draft.attachments);
+      // 전달은 첨부를 같이 넘기는 것이 보통이라 붙일 수 있는 것을 미리 켭니다.
+      //   답장은 원본 첨부를 되돌려 보낼 일이 드물어 꺼 둡니다.
+      setReplyAttachSel(
+        kind === "forward"
+          ? new Set(
+              draft.attachments
+                .map((a, i) => (canAttachToOutgoing(a) ? i : -1))
+                .filter((i) => i >= 0),
+            )
+          : new Set(),
+      );
       setReplyOpen(true);
+    });
+  }
+
+  function toggleReplyAttach(index: number) {
+    setReplyAttachSel((prev) => {
+      const next = new Set(prev);
+      if (next.has(index)) next.delete(index);
+      else next.add(index);
+      return next;
+    });
+  }
+
+  // 원본 메일 열기 — 보낸메일함에서 "원본 보기" 로 건너뛸 때 씁니다.
+  //   목록 안의 순번을 모르므로 이전/다음은 비활성이 됩니다(activeIndex = null).
+  function openMailById(mailId: string) {
+    if (!mailId) return;
+    setMsg(null);
+    setLoadingId(mailId);
+    setReplyOpen(false);
+    setAttachFor(null);
+    start(async () => {
+      const [found, replyList] = await Promise.all([
+        getMailDetail(mailId),
+        listMailReplies(mailId),
+        markMailOpened(mailId),
+      ]);
+      setLoadingId(null);
+      if (!found) {
+        setMsg({ ok: false, text: "원본 메일을 찾을 수 없습니다." });
+        return;
+      }
+      setDetail(found);
+      setActiveIndex(null);
+      setMemo(found.memo);
+      setReplies(replyList);
     });
   }
 
@@ -436,10 +517,13 @@ export default function MailInbox({
     start(async () => {
       const res = await sendMailReply({
         id: detail.id,
+        kind: replyKind,
         to: replyTo,
+        cc: replyCc,
         subject: replySubjectText,
         // 접어 둔 원문 인용은 발송 시점에 본문 뒤로 붙입니다.
         body: `${replyBody.trim()}\n${replyQuote}`,
+        attachIndexes: [...replyAttachSel],
         markDone: replyMarkDone,
       });
       if (!res.ok) {
@@ -448,7 +532,10 @@ export default function MailInbox({
         setReplies(await listMailReplies(detail.id));
         return;
       }
-      setMsg({ ok: true, text: "답장을 보냈습니다." });
+      setMsg({
+        ok: true,
+        text: `${MAIL_REPLY_KIND_LABEL[replyKind]}을(를) 보냈습니다.`,
+      });
       setReplyOpen(false);
       const [refreshed, replyList] = await Promise.all([
         getMailDetail(detail.id),
@@ -577,6 +664,7 @@ export default function MailInbox({
                     {MAIL_STATUS_LABEL[s]}
                   </option>
                 ))}
+                <option value={MAIL_SENT_FILTER}>📤 보낸메일함</option>
                 <option value={MAIL_TRASH_FILTER}>🗑 휴지통</option>
               </select>
             </label>
@@ -682,7 +770,11 @@ export default function MailInbox({
             · 필터는 서버(getMailList)에서 걸리며 상태·담당자·검색과 AND 로 겹칩니다.
             · 배지는 "안읽음(opened_at IS NULL)" 건수. 다른 필터를 걸어도 바뀌지
               않습니다 — 그래야 "그 분류에 몇 건 남았나" 로 읽힙니다. 0이면 숨깁니다.
-            · 좁은 화면에서는 tabBarCls 의 overflow-x-auto 로 가로 스크롤됩니다. */}
+            · 좁은 화면에서는 tabBarCls 의 overflow-x-auto 로 가로 스크롤됩니다.
+            · 보낸메일함에서는 감춥니다 — 분류는 '받은' 메일의 축이라, 보낸 것을
+              보는 동안 받은 메일 건수가 떠 있으면 무엇을 세는 숫자인지 헷갈립니다.
+              (휴지통은 받은 메일이므로 그대로 둡니다.) */}
+      {!sentView && (
       <div className={tabBarCls}>
         <nav className={tabNavCls} aria-label="분류">
           {categoryTabs.map((t) => {
@@ -716,6 +808,7 @@ export default function MailInbox({
           })}
         </nav>
       </div>
+      )}
 
       {/* 모달이 열려 있을 때는 모달 안에서 같은 메시지를 보여줍니다(중복 방지). */}
       {msg && !open && (
@@ -727,6 +820,17 @@ export default function MailInbox({
         </p>
       )}
 
+      {sentView ? (
+        <SentMailbox
+          items={pageSent}
+          total={view.sent.length}
+          page={safePage}
+          totalPages={totalPages}
+          onPage={goPage}
+          onOpenOrigin={openMailById}
+          busy={pending}
+        />
+      ) : (
       <section className={cardCls}>
         <div className="flex items-center justify-between gap-3">
           <h2 className="font-bold text-ink">
@@ -1046,6 +1150,7 @@ export default function MailInbox({
         {/* 20건 이하면 렌더되지 않습니다(1페이지). */}
         <Pagination page={safePage} totalPages={totalPages} onChange={goPage} />
       </section>
+      )}
 
       {/* 일괄 삭제/영구삭제 확인 — 되돌리기 어려운 동작이라 1회 확인 */}
       {confirmBulk && (
@@ -1369,7 +1474,7 @@ export default function MailInbox({
             {replies.length > 0 && (
               <div className="max-h-40 shrink-0 overflow-auto border-t border-line px-4 py-3 sm:px-5">
                 <h3 className="text-xs font-semibold text-ink">
-                  답장 이력 {replies.length}건
+                  보낸 이력 {replies.length}건
                 </h3>
                 <ul className="mt-2 space-y-2">
                   {replies.map((r) => (
@@ -1378,6 +1483,11 @@ export default function MailInbox({
                       className="rounded-lg border border-line bg-surface px-3 py-2"
                     >
                       <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs">
+                        <span
+                          className={`rounded-full px-1.5 py-0.5 text-[10px] font-semibold ${MAIL_REPLY_KIND_BADGE[r.kind]}`}
+                        >
+                          {MAIL_REPLY_KIND_LABEL[r.kind]}
+                        </span>
                         <span className="font-semibold text-ink">
                           {r.sent_by}
                         </span>
@@ -1385,6 +1495,19 @@ export default function MailInbox({
                           {formatReceived(r.sent_at)}
                         </span>
                         <span className="text-ink-muted">→ {r.to_email}</span>
+                        {r.cc_email && (
+                          <span className="text-ink-hint">
+                            참조 {r.cc_email}
+                          </span>
+                        )}
+                        {r.attachments.length > 0 && (
+                          <span
+                            className="text-ink-hint"
+                            title={r.attachments.map((a) => a.name).join(", ")}
+                          >
+                            📎 {r.attachments.length}
+                          </span>
+                        )}
                         {r.status === "failed" ? (
                           <span className="rounded-full bg-stamp-soft px-1.5 py-0.5 text-[10px] font-semibold text-stamp">
                             실패
@@ -1415,9 +1538,13 @@ export default function MailInbox({
               <div className="max-h-[60%] shrink-0 overflow-auto border-t border-line px-4 py-3 sm:px-5">
                 <div className="rounded-xl border border-navy/30 border-l-4 border-l-navy bg-navy-soft/25 p-4">
                   <div className="flex flex-wrap items-baseline justify-between gap-2">
-                    <h3 className="text-sm font-bold text-navy">답장 작성</h3>
+                    <h3 className="text-sm font-bold text-navy">
+                      {MAIL_REPLY_KIND_LABEL[replyKind]} 작성
+                    </h3>
                     <span className="text-xs text-ink-muted">
-                      받는사람: {replyTo || "(주소 없음)"}
+                      {replyKind === "forward" && !replyTo
+                        ? "받는사람을 입력하세요"
+                        : `받는사람: ${replyTo || "(주소 없음)"}`}
                     </span>
                   </div>
 
@@ -1434,6 +1561,10 @@ export default function MailInbox({
                       <input
                         className={inputCls}
                         value={replyTo}
+                        placeholder={
+                          replyKind === "forward" ? "보낼 주소를 입력하세요" : ""
+                        }
+                        autoFocus={replyKind === "forward"}
                         onChange={(e) => setReplyTo(e.target.value)}
                       />
                     </label>
@@ -1445,7 +1576,83 @@ export default function MailInbox({
                         onChange={(e) => setReplySubjectText(e.target.value)}
                       />
                     </label>
+                    <label className={`${labelCls} sm:col-span-2`}>
+                      참조 (선택)
+                      <input
+                        className={inputCls}
+                        value={replyCc}
+                        placeholder="여러 명이면 쉼표로 구분"
+                        onChange={(e) => setReplyCc(e.target.value)}
+                      />
+                    </label>
                   </div>
+
+                  {/* 원본 첨부 다시 붙이기 — 사본이 있는 것만 고를 수 있습니다. */}
+                  {replyAttachOptions.length > 0 && (
+                    <div className="mt-3 rounded-lg border border-line bg-card p-3">
+                      <div className="flex flex-wrap items-baseline justify-between gap-2">
+                        <span className="text-xs font-semibold text-ink">
+                          원본 첨부 다시 붙이기
+                        </span>
+                        <span
+                          className={`text-[11px] ${
+                            attachOverLimit ? "font-bold text-stamp" : "text-ink-muted"
+                          }`}
+                        >
+                          선택 {replyAttachSel.size}개 ·{" "}
+                          {formatBytes(attachTotalBytes)} /{" "}
+                          {formatBytes(MAIL_SEND_MAX_BYTES)}
+                        </span>
+                      </div>
+                      <ul className="mt-2 space-y-1">
+                        {replyAttachOptions.map((att, i) => {
+                          const usable = canAttachToOutgoing(att);
+                          return (
+                            <li key={`${att.name}-${i}`}>
+                              <label
+                                className={`flex items-start gap-2 text-xs ${
+                                  usable
+                                    ? "cursor-pointer text-ink-body"
+                                    : "cursor-not-allowed text-ink-hint"
+                                }`}
+                              >
+                                <input
+                                  type="checkbox"
+                                  className="mt-0.5 shrink-0"
+                                  disabled={!usable}
+                                  checked={replyAttachSel.has(i)}
+                                  onChange={() => toggleReplyAttach(i)}
+                                />
+                                <span className="min-w-0">
+                                  <span className="break-all">{att.name}</span>{" "}
+                                  <span className="text-ink-hint">
+                                    ({formatBytes(att.size)})
+                                  </span>
+                                  {/* 사본이 없으면 Storage 에서 읽어올 것이 없어
+                                      붙일 수 없습니다. 이유를 그대로 보여줍니다. */}
+                                  {!usable && (
+                                    <span className="mt-0.5 block text-[11px] text-stamp">
+                                      {attachmentSkipNotice(
+                                        att.name,
+                                        att.skip_reason,
+                                      )}
+                                    </span>
+                                  )}
+                                </span>
+                              </label>
+                            </li>
+                          );
+                        })}
+                      </ul>
+                      {attachOverLimit && (
+                        <p className={`mt-2 ${noticeError}`}>
+                          첨부 합계가 {formatBytes(MAIL_SEND_MAX_BYTES)} 를
+                          넘습니다. 네이버가 받아주는 상한을 확인하지 못했으므로
+                          이 크기를 넘으면 보내지 않습니다 — 파일을 덜어내 주세요.
+                        </p>
+                      )}
+                    </div>
+                  )}
 
                   <label className={`${labelCls} mt-3 block`}>
                     본문
@@ -1489,6 +1696,11 @@ export default function MailInbox({
                       />
                       보낸 뒤 이 메일을 완료 처리
                     </label>
+                    {replyKind === "forward" && (
+                      <span className="text-[11px] text-ink-hint">
+                        전달은 원본을 건드리지 않습니다.
+                      </span>
+                    )}
                     <div className="flex items-center gap-2">
                       <button
                         type="button"
@@ -1500,7 +1712,9 @@ export default function MailInbox({
                       </button>
                       <Button
                         loading={pending}
-                        disabled={!replyConfigured}
+                        disabled={
+                          !replyConfigured || attachOverLimit || !replyTo.trim()
+                        }
                         onClick={submitReply}
                         className="px-6 font-bold"
                       >
@@ -1540,14 +1754,26 @@ export default function MailInbox({
               </div>
               <div className="mt-2 flex flex-wrap items-center gap-2">
                 {!replyOpen && !detail.deleted_at && (
-                  <button
-                    type="button"
-                    className={btnSecondary}
-                    disabled={pending}
-                    onClick={() => openReply(detail.id)}
-                  >
-                    ↩ 답장
-                  </button>
+                  <>
+                    <button
+                      type="button"
+                      className={btnSecondary}
+                      disabled={pending}
+                      onClick={() => openCompose(detail.id, "reply")}
+                    >
+                      ↩ 답장
+                    </button>
+                    {/* 전달 — 답장과 같은 발송 경로를 쓰고, 원본 첨부를 다시
+                        붙일 수 있습니다(사본이 있는 것만). */}
+                    <button
+                      type="button"
+                      className={btnSecondary}
+                      disabled={pending}
+                      onClick={() => openCompose(detail.id, "forward")}
+                    >
+                      ↪ 전달
+                    </button>
+                  </>
                 )}
                 {detail.deleted_at ? (
                   <button
@@ -1592,6 +1818,138 @@ export default function MailInbox({
 //   비품관리(app/hr/facility/assets/AssetManager.tsx)와 같은 방식·같은 모양입니다.
 //   폰에서는 버튼이 많아질 수 있어 flex-wrap 으로 줄이 넘어가게 둡니다.
 // =====================================================================
+// 보낸메일함 — mail_replies 를 모아 보는 폴더.
+//   ★ 실패건을 숨기지 않습니다. 지금까지 발송 실패는 원본 메일 상세를 열어야만
+//     보였고, 그래서 아무도 재시도하지 않았습니다. 여기서는 실패가 목록 위로
+//     올라오고 사유가 함께 붙습니다.
+//   행 모양이 받은 메일과 다르므로(받는사람·종류·발송상태) 같은 행을 재사용하지
+//   않고 따로 그립니다.
+function SentMailbox({
+  items,
+  total,
+  page,
+  totalPages,
+  onPage,
+  onOpenOrigin,
+  busy,
+}: {
+  items: MailSentItem[];
+  total: number;
+  page: number;
+  totalPages: number;
+  onPage: (p: number) => void;
+  onOpenOrigin: (mailId: string) => void;
+  busy: boolean;
+}) {
+  const failed = items.filter((i) => i.status === "failed").length;
+  return (
+    <section className={cardCls}>
+      <div className="flex items-center justify-between gap-3">
+        <h2 className="font-bold text-ink">보낸메일함</h2>
+        <span className="text-xs text-ink-muted">
+          {total}건{total > PAGE_SIZE && ` · ${page}/${totalPages}페이지`}
+        </span>
+      </div>
+      <p className="mt-2 text-xs text-ink-muted">
+        이 화면에서 보낸 답장·전달입니다. 네이버 메일의 보낸메일함과는 별개로
+        우리가 남긴 기록입니다.
+        {failed > 0 && (
+          <span className="font-semibold text-stamp">
+            {" "}
+            이 페이지에 실패 {failed}건이 있습니다.
+          </span>
+        )}
+      </p>
+
+      <div className="mt-3 divide-y divide-line overflow-hidden rounded-xl border border-line">
+        {items.map((r) => (
+          <div key={r.id} className="px-3 py-3">
+            <div className="flex flex-wrap items-start gap-x-3 gap-y-1.5 sm:flex-nowrap sm:gap-3">
+              <span
+                className={`mt-0.5 shrink-0 rounded-full px-1.5 py-0.5 text-[10px] font-semibold ${MAIL_REPLY_KIND_BADGE[r.kind]}`}
+              >
+                {MAIL_REPLY_KIND_LABEL[r.kind]}
+              </span>
+              <span className="mt-0.5 min-w-0 flex-1 truncate text-sm text-ink-body sm:w-40 sm:flex-none">
+                {r.to_email || "(받는사람 없음)"}
+              </span>
+              <span className="min-w-0 flex-1">
+                <span className="flex items-center gap-1.5 text-sm font-medium text-ink">
+                  <span className="min-w-0 truncate">
+                    {r.subject || "(제목 없음)"}
+                  </span>
+                  {r.attachments.length > 0 && (
+                    <span
+                      className="shrink-0 text-xs text-ink-hint"
+                      title={r.attachments.map((a) => a.name).join(", ")}
+                    >
+                      📎 {r.attachments.length}
+                    </span>
+                  )}
+                </span>
+                {r.cc_email && (
+                  <span className="mt-0.5 block truncate text-xs text-ink-hint">
+                    참조 {r.cc_email}
+                  </span>
+                )}
+              </span>
+              <span className="mt-0.5 shrink-0 text-xs text-ink-muted sm:w-36 sm:text-right">
+                {r.sent_by} · {formatReceived(r.sent_at)}
+              </span>
+              <span className="mt-0.5 shrink-0">
+                {r.status === "failed" ? (
+                  <span className="rounded-full bg-stamp-soft px-1.5 py-0.5 text-[10px] font-semibold text-stamp">
+                    실패
+                  </span>
+                ) : (
+                  <span className="rounded-full bg-success-soft px-1.5 py-0.5 text-[10px] font-semibold text-success">
+                    발송
+                  </span>
+                )}
+              </span>
+            </div>
+
+            {/* 실패 사유는 접지 않고 그대로 보입니다. */}
+            {r.error_message && (
+              <p className="mt-1.5 whitespace-pre-line rounded-lg bg-stamp-soft/60 px-2.5 py-1.5 text-[11px] leading-5 text-stamp">
+                {r.error_message}
+              </p>
+            )}
+
+            <div className="mt-1.5 flex flex-wrap items-center gap-2">
+              <button
+                type="button"
+                disabled={busy || !r.mail_id}
+                onClick={() => onOpenOrigin(r.mail_id)}
+                className="rounded-md border border-line px-2 py-0.5 text-[11px] font-semibold text-ink-body hover:bg-surface disabled:opacity-50"
+              >
+                원본 메일 보기
+              </button>
+              {r.origin_subject ? (
+                <span className="min-w-0 truncate text-[11px] text-ink-hint">
+                  원본: {r.origin_from ? `${r.origin_from} · ` : ""}
+                  {r.origin_subject}
+                </span>
+              ) : (
+                <span className="text-[11px] text-ink-hint">
+                  원본 메일이 남아 있지 않습니다.
+                </span>
+              )}
+            </div>
+          </div>
+        ))}
+        {total === 0 && (
+          <p className="px-4 py-12 text-center text-sm text-ink-muted">
+            아직 보낸 메일이 없습니다.
+          </p>
+        )}
+      </div>
+
+      <Pagination page={page} totalPages={totalPages} onChange={onPage} />
+    </section>
+  );
+}
+
 function Pagination({
   page,
   totalPages,
