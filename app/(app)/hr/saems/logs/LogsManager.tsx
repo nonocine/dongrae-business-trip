@@ -68,10 +68,13 @@ export default function LogsManager({
   termOptions,
   initial,
   defaultTermId,
+  canManage,
 }: {
   termOptions: TermOption[];
   initial: LogResult;
   defaultTermId: string;
+  // false = 열람만. 조회·상세는 그대로 보되 확정·확정취소·초기화는 감춘다.
+  canManage: boolean;
 }) {
   const [termId, setTermId] = useState(defaultTermId);
   const [result, setResult] = useState<LogResult>(initial);
@@ -263,14 +266,16 @@ export default function LogsManager({
               </span>
             )}
           </h3>
-          <button
-            type="button"
-            onClick={confirmSelected}
-            disabled={pending || selected.size === 0}
-            className={btnPrimary}
-          >
-            선택 확정 ({selected.size})
-          </button>
+          {canManage && (
+            <button
+              type="button"
+              onClick={confirmSelected}
+              disabled={pending || selected.size === 0}
+              className={btnPrimary}
+            >
+              선택 확정 ({selected.size})
+            </button>
+          )}
         </div>
 
         {dayRows.length === 0 ? (
@@ -282,7 +287,7 @@ export default function LogsManager({
             <table className="w-full min-w-[820px] border-collapse">
               <thead>
                 <tr className="border-b border-line">
-                  <th className={`${thCls} w-8`}></th>
+                  {canManage && <th className={`${thCls} w-8`}></th>}
                   <th className={thCls}>프로그램</th>
                   <th className={thCls}>강사</th>
                   <th className={thCls}>상태</th>
@@ -299,7 +304,10 @@ export default function LogsManager({
                     <FragmentRow key={r.id}>
                       {showDivider && (
                         <tr className="bg-surface/70">
-                          <td colSpan={8} className="px-2 py-1 text-xs font-bold text-navy">
+                          <td
+                            colSpan={canManage ? 8 : 7}
+                            className="px-2 py-1 text-xs font-bold text-navy"
+                          >
                             {r.periodNo != null ? `${r.periodNo}교시` : "교시 미지정"}
                             {r.timeStart
                               ? ` ${hhmm(r.timeStart)}~${hhmm(r.timeEnd)}`
@@ -311,15 +319,17 @@ export default function LogsManager({
                         className="cursor-pointer border-b border-line/60 hover:bg-surface"
                         onClick={() => setDetail(r)}
                       >
-                        <td className={tdCls} onClick={(e) => e.stopPropagation()}>
-                          <input
-                            type="checkbox"
-                            disabled={!canSelect}
-                            checked={selected.has(r.id)}
-                            onChange={() => toggle(r.id)}
-                            className="h-4 w-4"
-                          />
-                        </td>
+                        {canManage && (
+                          <td className={tdCls} onClick={(e) => e.stopPropagation()}>
+                            <input
+                              type="checkbox"
+                              disabled={!canSelect}
+                              checked={selected.has(r.id)}
+                              onChange={() => toggle(r.id)}
+                              className="h-4 w-4"
+                            />
+                          </td>
+                        )}
                         <td className={`${tdCls} font-medium text-ink`}>
                           {r.programName}
                         </td>
@@ -362,6 +372,7 @@ export default function LogsManager({
       {detail && (
         <DetailModal
           row={detail}
+          canManage={canManage}
           onClose={() => setDetail(null)}
           onChanged={(text) => {
             setDetail(null);
@@ -433,11 +444,13 @@ function Stat({ label, value }: { label: string; value: string }) {
 
 function DetailModal({
   row,
+  canManage,
   onClose,
   onChanged,
   onError,
 }: {
   row: LogRow;
+  canManage: boolean;
   onClose: () => void;
   onChanged: (text: string) => void;
   onError: (text: string) => void;
@@ -504,7 +517,7 @@ function DetailModal({
         </div>
 
         <div className="mt-4 flex flex-wrap gap-2">
-          {!row.confirmed ? (
+          {!canManage ? null : !row.confirmed ? (
             <>
               <button
                 type="button"
@@ -555,7 +568,7 @@ function DetailModal({
           </button>
         </div>
 
-        {askReset && (
+        {askReset && canManage && (
           <div className="mt-4 rounded-lg border border-stamp/40 bg-stamp-soft p-3">
             <p className="text-sm text-stamp">
               {row.instructorName ?? "담당 강사"} 선생님의 {row.session_no}회차

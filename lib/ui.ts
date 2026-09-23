@@ -17,19 +17,47 @@ export const cardCls =
 //       원색 선을 그으면 그게 더 촌스러워서 채도를 낮췄습니다.
 //       기본 경계는 중성(--rule), 로고색은 '한 군데' 포인트에만 씁니다.
 //
-//   ★ 지금은 /hr/clubs 에서만 씁니다. 관장 확인 뒤 다른 화면으로 넓힐 때
-//     이 상수만 가져다 쓰면 되도록 여기 모아 둡니다.
+//   ★ 2026-09 관장 확인 뒤 다음 화면으로 넓혔습니다.
+//       /hr/clubs · /mail · /business-results · /hr(인사기록카드) ·
+//       /hr/facility/*(비품·운행·장소·대관·안전점검) · /hr/partners ·
+//       /profile/hr(내 의무교육·증명서)
+//     넓히지 않은 화면과 이유는 커밋 메시지에 적어 두었습니다.
 // =====================================================================
 
-// 바깥 섹션 — 카드보다 경계가 또렷한 판. 배경은 흰색 유지.
-export const panelCls = "rounded-xl border border-rule bg-card p-4 sm:p-5";
+// 색 배정 규칙 — 화면마다 다르게 고르면 색이 뜻을 잃습니다. 이 뜻을 쓰세요.
+//   blue   : 조회·현황 (검색·필터·요약처럼 '보는' 구역)
+//   green  : 사람·목록·결과 (명부, 집계된 실적처럼 '쌓인' 구역)
+//   yellow : 입력·등록 (내가 채워 넣는 구역)
+//   red    : 조치 필요 (설정 미비 안내 등 — 아껴 쓰세요)
+//   navy   : 중성. 색을 줄 이유가 없으면 이것(=panelCls).
 
-// 안쪽 블록 — 섹션 안에서 한 덩이를 또 나눌 때(표·폼 묶음).
+// 색 이름 — 섹션의 '의미' 에 맞춰 고릅니다. 한 화면에 2~4색까지만 쓰세요.
+//   색이 많아지면 구분이 아니라 소음이 됩니다.
+export type RuleTone = "blue" | "red" | "green" | "yellow" | "navy";
+
+// 박스 테두리색(65% 농도) — 관장 요청으로 테두리 자체에 로고색을 씁니다.
+//   30/50/65% 를 실제 화면에 띄워 비교한 결과입니다(globals.css 주석 참고).
+const PANEL_EDGE: Record<RuleTone, string> = {
+  blue: "border-edge-blue",
+  red: "border-edge-red",
+  green: "border-edge-green",
+  yellow: "border-edge-yellow",
+  navy: "border-rule",
+};
+
+// 바깥 섹션 — 카드보다 경계가 또렷한 판. 배경은 흰색 유지(면을 칠하지 않음).
+//   tone 을 주면 테두리에 그 색이 들어갑니다. 안 주면 중성 선.
+export function panelToneCls(tone: RuleTone = "navy"): string {
+  return `rounded-xl border ${PANEL_EDGE[tone]} bg-card p-4 sm:p-5`;
+}
+// 색 없는 기본 판 — 기존 호출부 호환.
+export const panelCls = panelToneCls("navy");
+
+// 안쪽 블록 — 섹션 안에서 한 덩이를 또 나눌 때(표·폼 묶음). 늘 중성입니다.
+//   바깥 판에 색이 있는데 안쪽까지 색을 주면 경계가 겹쳐 지저분해집니다.
 export const blockCls = "rounded-lg border border-rule bg-card p-3";
 
-// 섹션 제목 — 왼쪽에 로고색 띠 하나. 색은 여기서만 들어갑니다.
-//   tone 을 주지 않으면 네이비(기본 포인트색)를 씁니다.
-export type RuleTone = "blue" | "red" | "green" | "yellow" | "navy";
+// 섹션 제목 — 왼쪽에 로고색 띠 하나(원색). 판 테두리와 같은 tone 을 주세요.
 const RULE_BAR: Record<RuleTone, string> = {
   blue: "border-l-logo-blue",
   red: "border-l-logo-red",

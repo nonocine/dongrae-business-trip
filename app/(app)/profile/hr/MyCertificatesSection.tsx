@@ -11,7 +11,8 @@ import {
   type CertRequest,
 } from "@/lib/certificates";
 import {
-  cardCls,
+  panelToneCls,
+  sectionTitleCls,
   btnPrimary,
   btnSecondary,
   badgeNavy,
@@ -75,9 +76,10 @@ export default function MyCertificatesSection({
   }
 
   return (
-    <section className={cardCls} id="my-certificates">
+    // 노랑: 내가 신청·발급하는 구역
+    <section className={panelToneCls("yellow")} id="my-certificates">
       <div className="mb-3 flex items-center justify-between">
-        <h3 className="text-sm font-bold text-ink">증명서 발급</h3>
+        <h3 className={sectionTitleCls("yellow")}>증명서 발급</h3>
         <button
           type="button"
           onClick={() => {

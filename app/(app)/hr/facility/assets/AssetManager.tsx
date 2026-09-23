@@ -26,7 +26,7 @@ import {
   deleteAsset,
 } from "@/app/(app)/hr/facility/actions";
 import {
-  cardCls,
+  panelToneCls,
   btnPrimary,
   btnSecondary,
   badgeNeutral,
@@ -227,7 +227,7 @@ export default function AssetManager({
   return (
     <div className="space-y-5">
       {/* 필터 바 */}
-      <section className={cardCls}>
+      <section className={panelToneCls("blue")}>
         <div className="flex flex-wrap items-center gap-2">
           <select
             value={year}
@@ -343,7 +343,7 @@ export default function AssetManager({
       </section>
 
       {/* 목록 */}
-      <section className={cardCls}>
+      <section className={panelToneCls("green")}>
         <div className="mb-3 flex items-center justify-between gap-2">
           <p className="text-xs text-ink-hint">
             {activeFilter

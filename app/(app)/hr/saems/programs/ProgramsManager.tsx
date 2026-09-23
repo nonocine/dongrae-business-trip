@@ -302,9 +302,14 @@ function OutputMenu({ programId }: { programId: string }) {
 export default function ProgramsManager({
   projects,
   instructors,
+  canManage,
 }: {
   projects: SaemProject[];
   instructors: InstructorOption[];
+  // false = 열람만. 편성(추가·수정·삭제·회차생성)과 출력(PDF)을 감추고,
+  //   수강료·정산 방식 열도 뺀다 — 강사 보수에 해당하는 값이라 서버에서
+  //   이미 비워져 온다(listPrograms 주석 참고).
+  canManage: boolean;
 }) {
   const router = useRouter();
   const [projectId, setProjectId] = useState(projects[0]?.id ?? "");
@@ -409,7 +414,7 @@ export default function ProgramsManager({
             ))}
           </select>
 
-          {term && (
+          {term && canManage && (
             <select
               value={term.status}
               onChange={(e) => changeStatus(e.target.value as TermStatus)}
@@ -424,6 +429,8 @@ export default function ProgramsManager({
           )}
 
           <div className="ml-auto flex flex-wrap gap-2">
+            {canManage && (
+              <>
             <button type="button" onClick={() => setModal({ kind: "project" })} className={btnSecondary}>
               프로젝트 추가
             </button>
@@ -442,6 +449,8 @@ export default function ProgramsManager({
             <button type="button" onClick={() => setModal({ kind: "copy" })} className={btnSecondary} disabled={!termId}>
               차시 복사
             </button>
+              </>
+            )}
           </div>
         </div>
         {term && (term.start_date || term.end_date || term.default_weeks != null) && (
@@ -470,14 +479,16 @@ export default function ProgramsManager({
           <h3 className="text-sm font-bold text-ink">
             프로그램 {termId ? `(${programs.length})` : ""}
           </h3>
-          <button
-            type="button"
-            onClick={() => setModal({ kind: "program", program: null })}
-            className={btnPrimary}
-            disabled={!termId}
-          >
-            + 프로그램 추가
-          </button>
+          {canManage && (
+            <button
+              type="button"
+              onClick={() => setModal({ kind: "program", program: null })}
+              className={btnPrimary}
+              disabled={!termId}
+            >
+              + 프로그램 추가
+            </button>
+          )}
         </div>
 
         {!termId ? (
@@ -498,9 +509,13 @@ export default function ProgramsManager({
                   <th className={thCls}>장소</th>
                   <th className={thCls}>회차</th>
                   <th className={`${thCls} text-right`}>정원</th>
-                  <th className={`${thCls} text-right`}>수강료</th>
-                  <th className={`${thCls} text-right`}>정산 방식</th>
-                  <th className={`${thCls} text-right`}>관리</th>
+                  {canManage && (
+                    <>
+                      <th className={`${thCls} text-right`}>수강료</th>
+                      <th className={`${thCls} text-right`}>정산 방식</th>
+                      <th className={`${thCls} text-right`}>관리</th>
+                    </>
+                  )}
                 </tr>
               </thead>
               <tbody>
@@ -515,6 +530,7 @@ export default function ProgramsManager({
                     <td className={tdCls}>{p.room ?? "-"}</td>
                     <td className={tdCls}>
                       {p.sessionCount === 0 ? (
+                        canManage ? (
                         <button
                           type="button"
                           onClick={() => setModal({ kind: "sessions", program: p })}
@@ -523,6 +539,9 @@ export default function ProgramsManager({
                         >
                           0회차 — 회차 생성
                         </button>
+                        ) : (
+                          <span className={badgeDanger}>0회차</span>
+                        )
                       ) : (
                         <span className="inline-flex items-center gap-1">
                           <span className="text-xs text-ink-body">
@@ -537,6 +556,8 @@ export default function ProgramsManager({
                       )}
                     </td>
                     <td className={`${tdCls} text-right`}>{p.capacity ?? "-"}</td>
+                    {canManage && (
+                      <>
                     <td className={`${tdCls} text-right font-mono`}>
                       {formatKRW(p.tuition)}
                     </td>
@@ -584,6 +605,8 @@ export default function ProgramsManager({
                         </button>
                       </div>
                     </td>
+                      </>
+                    )}
                   </tr>
                 ))}
               </tbody>

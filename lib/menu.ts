@@ -44,7 +44,6 @@ export const MENU_GROUPS = [
   "facility", // 담당 업무 › 시설관리
   "accounting", // 담당 업무 › 회계
   "hr", // 담당 업무 › 인사
-  "saem", // 담당 업무 › 강사관리
   "mutual", // 담당 업무 › 상조회
   "recruitment", // 담당 업무 › 채용
   "admin", // 관리자 영역 — M0
@@ -57,7 +56,6 @@ export const MENU_GROUP_LABEL: Record<MenuGroup, string> = {
   facility: "시설관리",
   accounting: "회계",
   hr: "인사",
-  saem: "강사관리",
   mutual: "상조회",
   recruitment: "채용",
   admin: "관리자 영역",
@@ -140,6 +138,19 @@ export const MENU_ITEMS: MenuItem[] = [
     href: "/hr/clubs",
     icon: "🎸",
     desc: "동아리샘·활동일지·월간 결과보고·실적 연계",
+    show: { kind: "everyone" },
+  },
+  {
+    // 2026-09 관장 지시로 '담당 업무 › 강사관리' 에서 공통으로 옮겼습니다.
+    //   동아리관리와 같은 정책 — 로그인한 직원이면 누구나 들어옵니다.
+    //   단 계좌·주민번호·정산 금액·수강생 연락처는 여전히 관리 권한(M0 또는
+    //   saem 직무)에게만 갑니다. lib/saemAccess.ts 의 resolveSaemView 참고.
+    key: "saem-instructors",
+    group: "common",
+    label: "강사·프로그램 관리",
+    href: "/hr/saems/instructors",
+    icon: "🧑‍🏫",
+    desc: "외부 강사·프로그램·근무일지 조회 (편성·정산은 담당자)",
     show: { kind: "everyone" },
   },
   {
@@ -308,17 +319,6 @@ export const MENU_ITEMS: MenuItem[] = [
       n && n > 0
         ? `미이수 총 ${n}건 — 등록·현황판`
         : "법정 의무교육 등록·이수 현황",
-  },
-
-  // ---------- 담당 업무 › 강사관리 ----------
-  {
-    key: "saem-instructors",
-    group: "saem",
-    label: "강사·프로그램 관리",
-    href: "/hr/saems/instructors",
-    icon: "🧑‍🏫",
-    desc: "외부 강사 등록·초대, 프로그램·근무일지",
-    show: { kind: "role", role: "saem" },
   },
 
   // ---------- 담당 업무 › 상조회 ----------
@@ -529,7 +529,6 @@ export const ROLE_MENU_GROUPS: readonly MenuGroup[] = [
   "facility",
   "accounting",
   "hr",
-  "saem",
   "mutual",
   "recruitment",
 ];

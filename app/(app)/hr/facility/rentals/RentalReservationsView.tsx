@@ -4,7 +4,7 @@ import { useRouter } from "next/navigation";
 import { useState, useTransition } from "react";
 
 import {
-  cardCls,
+  panelToneCls,
   inputCls,
   labelCls,
   linkCls,
@@ -222,7 +222,7 @@ export default function RentalReservationsView({
         </nav>
       </div>
 
-      <section className={cardCls}>
+      <section className={panelToneCls("blue")}>
         {/* 요약 — 선택한 시설 탭 기준. 건수·이용인원은 확정 건만 셉니다. */}
         <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
           <SummaryTile
@@ -318,7 +318,7 @@ export default function RentalReservationsView({
         )}
       </section>
 
-      <section className={cardCls}>
+      <section className={panelToneCls("green")}>
         {/* 2차 필터 — 구분(셀렉트) · 상태(체크박스) */}
         <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
           <label className={labelCls}>

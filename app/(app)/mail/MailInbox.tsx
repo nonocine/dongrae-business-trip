@@ -8,7 +8,8 @@ import {
   badgeWarning,
   btnPrimary,
   btnSecondary,
-  cardCls,
+  panelToneCls,
+  sectionTitleCls,
   inputCls,
   labelCls,
   noticeError,
@@ -626,8 +627,9 @@ export default function MailInbox({
 
   if (!view.configured)
     return (
-      <section className={cardCls}>
-        <h2 className="font-bold text-ink">메일 저장 준비가 필요합니다</h2>
+      // 빨강: 조치가 필요한 상태 안내
+      <section className={panelToneCls("red")}>
+        <h2 className={sectionTitleCls("red")}>메일 저장 준비가 필요합니다</h2>
         <p className="mt-2 text-sm leading-6 text-ink-muted">
           화면과 수집 기능은 준비됐습니다. 운영 Supabase에{" "}
           <code>mail_messages</code> 테이블을 적용하면 바로 사용할 수 있습니다.
@@ -648,7 +650,8 @@ export default function MailInbox({
 
   return (
     <div className="space-y-4">
-      <section className={cardCls}>
+      {/* 파랑: 조회 조건(상태·분류·검색) */}
+      <section className={panelToneCls("blue")}>
         <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
           <div className="grid flex-1 gap-2 sm:grid-cols-3">
             <label className={labelCls}>
@@ -831,9 +834,10 @@ export default function MailInbox({
           busy={pending}
         />
       ) : (
-      <section className={cardCls}>
+      // 초록: 받은 메일(들어온 것)
+      <section className={panelToneCls("green")}>
         <div className="flex items-center justify-between gap-3">
-          <h2 className="font-bold text-ink">
+          <h2 className={sectionTitleCls("green")}>
             {trashView ? "휴지통" : "받은 메일"}
           </h2>
           <span className="text-xs text-ink-muted">
@@ -1843,9 +1847,10 @@ function SentMailbox({
 }) {
   const failed = items.filter((i) => i.status === "failed").length;
   return (
-    <section className={cardCls}>
+    // 노랑: 보낸 메일(내가 내보낸 것) — 받은 메일과 색으로 구분
+    <section className={panelToneCls("yellow")}>
       <div className="flex items-center justify-between gap-3">
-        <h2 className="font-bold text-ink">보낸메일함</h2>
+        <h2 className={sectionTitleCls("yellow")}>보낸메일함</h2>
         <span className="text-xs text-ink-muted">
           {total}건{total > PAGE_SIZE && ` · ${page}/${totalPages}페이지`}
         </span>

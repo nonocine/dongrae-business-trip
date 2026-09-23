@@ -3,7 +3,7 @@
 import { useRouter } from "next/navigation";
 import { useTransition } from "react";
 
-import { cardCls, inputCls, btnSecondary, linkCls, badgeNavy } from "@/lib/ui";
+import { panelToneCls, inputCls, btnSecondary, linkCls, badgeNavy } from "@/lib/ui";
 import {
   formatPeriod,
   formatPassengers,
@@ -71,7 +71,7 @@ export default function DrivingLogView({
 
   return (
     <div className="space-y-4">
-      <section className={cardCls}>
+      <section className={panelToneCls("blue")}>
         {/* 상단 요약 — 건수·거리는 조회 기간, 누적거리는 차량 전체 기준 */}
         <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
           <SummaryTile
@@ -126,7 +126,7 @@ export default function DrivingLogView({
         </div>
       </section>
 
-      <section className={cardCls}>
+      <section className={panelToneCls("green")}>
         {logs.length === 0 ? (
           <p className="py-6 text-center text-sm text-ink-muted">
             {month

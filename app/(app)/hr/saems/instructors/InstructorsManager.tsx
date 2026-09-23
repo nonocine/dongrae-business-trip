@@ -42,9 +42,13 @@ const BACKUP_HREF = "/hr/saems/instructors/backup-zip";
 export default function InstructorsManager({
   instructors,
   isM0,
+  canManage,
 }: {
   instructors: InstructorListRow[];
   isM0: boolean;
+  // 강사관리 '관리' 권한(M0 또는 saem 직무). false = 열람만 하는 직원.
+  //   등록·엑셀·상세(계좌·주민번호·서류함)는 이 사람에게 보이지 않습니다.
+  canManage: boolean;
 }) {
   const router = useRouter();
   const [q, setQ] = useState("");
@@ -95,17 +99,21 @@ export default function InstructorsManager({
             placeholder="이름·전화 검색"
             className={`${selCls} min-w-[200px] flex-1`}
           />
-          <a href={EXPORT_HREF} className={btnSecondary}>
-            엑셀 다운로드
-          </a>
+          {canManage && (
+            <a href={EXPORT_HREF} className={btnSecondary}>
+              엑셀 다운로드
+            </a>
+          )}
           {isM0 && (
             <a href={BACKUP_HREF} className={btnSecondary}>
               전체 백업(ZIP)
             </a>
           )}
-          <button type="button" onClick={() => setOpen(true)} className={btnPrimary}>
-            + 강사 등록
-          </button>
+          {canManage && (
+            <button type="button" onClick={() => setOpen(true)} className={btnPrimary}>
+              + 강사 등록
+            </button>
+          )}
         </div>
         <div className="mt-2 flex flex-wrap items-center justify-between gap-2">
           <p className="text-xs text-ink-hint">
@@ -166,15 +174,23 @@ export default function InstructorsManager({
                   </th>
                   <th className={`${thCls} text-right`}>서류</th>
                   <th className={`${thCls} text-right`}>프로그램</th>
-                  <th className={`${thCls} w-6`} aria-label="이동" />
+                  {canManage && <th className={`${thCls} w-6`} aria-label="이동" />}
                 </tr>
               </thead>
               <tbody>
                 {filtered.map((i) => (
                   <tr
                     key={i.id}
-                    onClick={() => router.push(`/hr/saems/instructors/${i.id}`)}
-                    className="group cursor-pointer border-b border-line/60 hover:bg-surface"
+                    onClick={
+                      canManage
+                        ? () => router.push(`/hr/saems/instructors/${i.id}`)
+                        : undefined
+                    }
+                    className={
+                      canManage
+                        ? "group cursor-pointer border-b border-line/60 hover:bg-surface"
+                        : "border-b border-line/60"
+                    }
                   >
                     <td className={`${tdCls} font-medium text-ink`}>{i.name}</td>
                     <td className={`${tdCls} font-mono text-xs`}>
@@ -220,9 +236,11 @@ export default function InstructorsManager({
                     <td className={`${tdCls} text-right font-mono`}>
                       {i.programCount}
                     </td>
-                    <td className={`${tdCls} pr-1 text-right`}>
-                      <RowChevron />
-                    </td>
+                    {canManage && (
+                      <td className={`${tdCls} pr-1 text-right`}>
+                        <RowChevron />
+                      </td>
+                    )}
                   </tr>
                 ))}
               </tbody>
@@ -231,7 +249,7 @@ export default function InstructorsManager({
         )}
       </section>
 
-      {open && (
+      {open && canManage && (
         <RegisterModal
           onClose={() => setOpen(false)}
           onCreated={(id) => router.push(`/hr/saems/instructors/${id}`)}

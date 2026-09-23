@@ -32,7 +32,8 @@ import {
 import { fmtKstDate } from "@/lib/datetime";
 import { kstTodayYmd } from "@/lib/trainings";
 import {
-  cardCls,
+  panelToneCls,
+  sectionTitleCls,
   btnPrimary,
   btnSecondary,
   btnDanger,
@@ -500,8 +501,8 @@ ${l.occurred_on} ${l.content}
 
   return (
     <div className="space-y-4">
-      {/* 검색 · 등록 · 거래종료 보기 */}
-      <section className={cardCls}>
+      {/* 검색 · 등록 · 거래종료 보기 — 파랑: 조회 구역 */}
+      <section className={panelToneCls("blue")}>
         <div className="flex flex-wrap items-center gap-2">
           <input
             className={`${inCls} max-w-xs flex-1`}
@@ -559,9 +560,10 @@ ${l.occurred_on} ${l.content}
 
       {/* 거래처 등록 · 수정 */}
       {formOpen && (
-        <section className={cardCls}>
+        // 노랑: 입력(등록·수정) 구역
+        <section className={panelToneCls("yellow")}>
           <div className="flex items-center justify-between gap-2">
-            <h3 className="text-sm font-bold tracking-wide text-navy">
+            <h3 className={sectionTitleCls("yellow")}>
               {form.id ? "거래처 수정" : "거래처 등록"}
             </h3>
             <button
@@ -692,7 +694,8 @@ ${l.occurred_on} ${l.content}
 
       {/* 상세 — 거래처 정보 + 담당자 관리 */}
       {detail && (
-        <section className={cardCls}>
+        // 초록: 한 거래처의 상세·담당자(사람) 구역
+        <section className={panelToneCls("green")}>
           <div className="flex items-start justify-between gap-2">
             <div className="min-w-0">
               <div className="flex flex-wrap items-center gap-2">
@@ -1121,9 +1124,9 @@ ${l.occurred_on} ${l.content}
         </section>
       )}
 
-      {/* 목록 */}
-      <section className={cardCls}>
-        <h3 className="mb-3 text-sm font-bold tracking-wide text-navy">
+      {/* 목록 — 초록: 쌓인 목록(명부) 구역 */}
+      <section className={panelToneCls("green")}>
+        <h3 className={`mb-3 ${sectionTitleCls("green")}`}>
           {tab === "전체" ? "거래처 목록" : `${tab} 거래처`}
         </h3>
         {filtered.length === 0 ? (

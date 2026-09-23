@@ -16,7 +16,7 @@
 
 import { revalidatePath } from "next/cache";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
-import { requireSaemAccess } from "@/lib/saemAccess";
+import { requireSaemAccess, requireSaemView } from "@/lib/saemAccess";
 import { normalizeCertStatus, type CertStatus } from "@/lib/saem";
 import { fmtKstDate } from "@/lib/datetime";
 import { kstTodayYmd } from "@/lib/trainings";
@@ -83,8 +83,10 @@ const STATUS_ORDER: Record<CertStatus, number> = {
   approved: 2,
 };
 
+// 발급대장 조회는 로그인 직원 누구나. 승인·반려·수정은 그대로 관리 권한.
+//   단 주소(address)는 강사 개인정보라 열람자에게는 서버에서 비운다.
 export async function listLectureCertificates(): Promise<LectureCertRow[]> {
-  await requireSaemAccess();
+  const view = await requireSaemView();
   const { data } = await supabaseAdmin
     .from(CERT)
     .select(
@@ -114,6 +116,7 @@ export async function listLectureCertificates(): Promise<LectureCertRow[]> {
   //   정렬이므로, 각 상태 묶음 안에서는 최신순이 그대로 유지된다.
   return rows
     .map((r) => toRow(r, nameById.get(String(r.instructor_id ?? "")) ?? ""))
+    .map((r) => (view.canManage ? r : { ...r, address: "" }))
     .sort((a, b) => STATUS_ORDER[a.status] - STATUS_ORDER[b.status]);
 }
 

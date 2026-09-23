@@ -63,9 +63,13 @@ async function fileToBase64(file: File): Promise<string> {
 export default function EnrollmentsManager({
   termOptions,
   defaultTermId,
+  canManage,
 }: {
   termOptions: TermOption[];
   defaultTermId: string;
+  // false = 열람만. 현황(인원 수)까지만 보이고, 명단 상세(연락처·생년월일)와
+  //   업로드는 막는다 — 미성년 수강생 개인정보이기 때문.
+  canManage: boolean;
 }) {
   const [termId, setTermId] = useState(defaultTermId);
   // null = 아직 안 불러옴(로딩).
@@ -131,17 +135,19 @@ export default function EnrollmentsManager({
               </option>
             ))}
           </select>
-          <button
-            type="button"
-            onClick={() => {
-              setMsg(null);
-              setUploadOpen(true);
-            }}
-            className={`ml-auto ${btnPrimary}`}
-            disabled={!termId}
-          >
-            명단 업로드
-          </button>
+          {canManage && (
+            <button
+              type="button"
+              onClick={() => {
+                setMsg(null);
+                setUploadOpen(true);
+              }}
+              className={`ml-auto ${btnPrimary}`}
+              disabled={!termId}
+            >
+              명단 업로드
+            </button>
+          )}
         </div>
         {list.length > 0 && (
           <p className="mt-2 text-xs text-ink-hint">
@@ -174,7 +180,7 @@ export default function EnrollmentsManager({
                   <th className={`${thCls} text-right`}>정원</th>
                   <th className={`${thCls} text-right`}>등록</th>
                   <th className={thCls}>상태</th>
-                  <th className={`${thCls} text-right`}>명단</th>
+                  {canManage && <th className={`${thCls} text-right`}>명단</th>}
                 </tr>
               </thead>
               <tbody>
@@ -185,7 +191,10 @@ export default function EnrollmentsManager({
                     <Rows key={r.programId}>
                       {showDivider && (
                         <tr className="bg-surface/70">
-                          <td colSpan={6} className="px-2 py-1 text-xs font-bold text-navy">
+                          <td
+                            colSpan={canManage ? 6 : 5}
+                            className="px-2 py-1 text-xs font-bold text-navy"
+                          >
                             {r.periodNo != null ? `${r.periodNo}교시` : "교시 미지정"}
                             {r.timeStart
                               ? ` ${hhmm(r.timeStart)}~${hhmm(r.timeEnd)}`
@@ -194,8 +203,12 @@ export default function EnrollmentsManager({
                         </tr>
                       )}
                       <tr
-                        className="group cursor-pointer border-b border-line/60 hover:bg-surface"
-                        onClick={() => setDetail(r)}
+                        className={
+                          canManage
+                            ? "group cursor-pointer border-b border-line/60 hover:bg-surface"
+                            : "border-b border-line/60"
+                        }
+                        onClick={canManage ? () => setDetail(r) : undefined}
                       >
                         <td className={`${tdCls} font-medium text-ink`}>
                           {r.programName}
@@ -228,11 +241,13 @@ export default function EnrollmentsManager({
                             )}
                           </span>
                         </td>
-                        <td className={`${tdCls} text-right`}>
-                          <span className="text-xs text-navy underline-offset-2 group-hover:underline">
-                            보기 →
-                          </span>
-                        </td>
+                        {canManage && (
+                          <td className={`${tdCls} text-right`}>
+                            <span className="text-xs text-navy underline-offset-2 group-hover:underline">
+                              보기 →
+                            </span>
+                          </td>
+                        )}
                       </tr>
                     </Rows>
                   );
@@ -243,7 +258,7 @@ export default function EnrollmentsManager({
         )}
       </section>
 
-      {uploadOpen && (
+      {uploadOpen && canManage && (
         <UploadModal
           termId={termId}
           onClose={() => setUploadOpen(false)}
@@ -255,7 +270,7 @@ export default function EnrollmentsManager({
         />
       )}
 
-      {detail && (
+      {detail && canManage && (
         <DetailModal
           program={detail}
           onClose={() => setDetail(null)}

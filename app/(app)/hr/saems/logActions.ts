@@ -2,7 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
-import { requireSaemAccess } from "@/lib/saemAccess";
+import { requireSaemAccess, requireSaemView } from "@/lib/saemAccess";
 import { kstTodayYmd } from "@/lib/trainings";
 
 const TERM = "saem_terms";
@@ -20,8 +20,9 @@ export type TermOption = {
   status: string;
 };
 
+// 조회(차시 목록·근무일지)는 로그인 직원 누구나. 확정·취소·초기화는 그대로.
 export async function getTermOptions(): Promise<TermOption[]> {
-  await requireSaemAccess();
+  await requireSaemView();
   const [{ data: terms }, { data: projs }] = await Promise.all([
     supabaseAdmin.from(TERM).select("id, name, project_id, status, start_date"),
     supabaseAdmin.from(PROJ).select("id, name"),
@@ -98,7 +99,7 @@ export async function getLogs(input: {
   termId?: string;
   date?: string;
 }): Promise<LogResult> {
-  await requireSaemAccess();
+  await requireSaemView();
   const today = kstTodayYmd();
 
   // 대상 차시.

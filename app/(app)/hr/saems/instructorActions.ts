@@ -10,7 +10,7 @@ import {
   signHrDocument,
   removeHrDocuments,
 } from "@/lib/supabase";
-import { requireSaemAccess } from "@/lib/saemAccess";
+import { requireSaemAccess, requireSaemView } from "@/lib/saemAccess";
 import { encryptSecret } from "@/lib/credentialCrypto";
 import {
   normalizePhone,
@@ -55,8 +55,27 @@ export type InstructorListRow = SaemInstructor & {
 };
 
 // --- 목록(서류·프로그램 수 집계) ---
+// 민감 항목 가리기 — 열람만 하는 직원(canManage=false)에게는 내려보내지
+//   않습니다. 화면에서 숨기는 게 아니라 '서버에서 비우는' 것이 중요합니다.
+//   숨기기만 하면 RSC 페이로드에 값이 그대로 실려 개발자도구에서 보입니다.
+//     · 계좌(은행·번호·예금주)  · 주민번호 앞 7자리  · 초대 토큰
+//   ※ 암호문(rrn_enc)·비밀번호 해시는 원래 SaemInstructor 화이트리스트에
+//     없어 애초에 나가지 않습니다(lib/saem.ts 주석 참고).
+function maskInstructor<T extends SaemInstructor>(row: T, canManage: boolean): T {
+  if (canManage) return row;
+  return {
+    ...row,
+    bank_name: null,
+    bank_account: null,
+    account_holder: null,
+    rrnMask: null,
+    invite_token: null,
+  };
+}
+
 export async function listInstructors(): Promise<InstructorListRow[]> {
-  await requireSaemAccess();
+  // 열람은 로그인 직원 누구나(관장 지시). 민감 항목은 아래에서 가립니다.
+  const view = await requireSaemView();
   const [{ data: ins }, { data: docs }, { data: progs }, { data: roleRows }] =
     await Promise.all([
       supabaseAdmin.from(INSTR).select("*"),
@@ -101,7 +120,10 @@ export async function listInstructors(): Promise<InstructorListRow[]> {
       return set.has("instructor") || !set.has("club_teacher");
     })
     .map((r) => {
-      const i = toInstructor(r as Record<string, unknown>);
+      const i = maskInstructor(
+        toInstructor(r as Record<string, unknown>),
+        view.canManage
+      );
       return {
         ...i,
         docCount: slotsByInstr.get(i.id)?.size ?? 0,

@@ -132,3 +132,25 @@ E2E_HR_M0=홍길동 E2E_HR_RECORDS=김아무 E2E_HR_NONE=이아무 \
 E2E_HR_NAME=홍길동 E2E_CLUB=뚜미즈 E2E_CLUB_WITH_SESSIONS=화양연화 \
   npx playwright test e2e/club-plan.spec.ts
 ```
+
+## 강사·프로그램 관리 개방 검증 (saem-access.spec.ts)
+
+`/hr/saems/*` 는 2026-09 부터 **로그인한 직원 전원**에게 열려 있습니다(동아리
+관리와 같은 정책). 다만 계좌·주민번호·정산 금액·수강생 연락처는 기존 권한
+(M0 또는 `saem` 직무)에만 남겼습니다. 여기서도 대상은 운영 DB 의 실제 직원이라
+환경변수로 받습니다(없으면 skip).
+
+| 변수 | 넣을 사람 | 기대 동작 |
+|------|-----------|-----------|
+| `E2E_SAEM_MANAGE` | M0 또는 `saem` 직무 | 지금까지처럼 전부 |
+| `E2E_SAEM_VIEW` | `saem` 직무가 없는 직원 | 열람만 — 정산 탭·등록·엑셀 없음 |
+
+```bash
+E2E_SAEM_MANAGE=홍길동 E2E_SAEM_VIEW=이아무 \
+  npx playwright test e2e/saem-access.spec.ts
+```
+
+확인하는 것: 열람자의 진입 성공과 정산 탭 부재, **응답 본문(RSC 페이로드)에
+계좌번호·주민번호 앞자리가 실리지 않는지**, 강사 상세·정산에 주소를 직접 쳐도
+목록으로 되돌려지는지, 프로그램·수강생·근무일지의 편집 버튼과 수강료·정산 방식
+열이 없는지, 관리 권한자에게는 전부 그대로인지.

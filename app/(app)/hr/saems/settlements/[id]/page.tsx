@@ -1,6 +1,7 @@
 import Link from "next/link";
-import { notFound } from "next/navigation";
+import { notFound, redirect } from "next/navigation";
 import { getSettlement } from "@/app/(app)/hr/saems/settlementActions";
+import { resolveSaemAccess } from "@/lib/saemAccess";
 import SettlementDetail from "@/app/(app)/hr/saems/settlements/[id]/SettlementDetail";
 
 export const dynamic = "force-dynamic";
@@ -10,6 +11,9 @@ export default async function SettlementDetailPage({
 }: {
   params: Promise<{ id: string }>;
 }) {
+  // 금액 화면 — 목록과 같은 이유로 기존 권한 유지(settlements/page.tsx 주석).
+  if (!(await resolveSaemAccess())) redirect("/hr/saems/instructors");
+
   const { id } = await params;
   const detail = await getSettlement(id);
   if (!detail) notFound();

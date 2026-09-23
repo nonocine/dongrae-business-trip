@@ -19,6 +19,7 @@ import {
 } from "@/lib/safetyCheck";
 import {
   cardCls,
+  panelToneCls,
   btnPrimary,
   btnSecondary,
   badgeSuccess,
@@ -124,7 +125,7 @@ export default function SafetyDetail({
   return (
     <div className="space-y-5">
       {/* 헤더 */}
-      <section className={cardCls}>
+      <section className={panelToneCls("blue")}>
         <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
           <div className="flex items-center gap-2">
             <h3 className="text-base font-bold text-ink">

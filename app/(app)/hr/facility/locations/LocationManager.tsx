@@ -9,7 +9,7 @@ import {
   toggleLocation,
 } from "@/app/(app)/hr/facility/actions";
 import {
-  cardCls,
+  panelToneCls,
   btnPrimary,
   badgeSuccess,
   badgeNeutral,
@@ -127,7 +127,7 @@ export default function LocationManager({
   return (
     <div className="space-y-5">
       {/* 추가 */}
-      <section className={cardCls}>
+      <section className={panelToneCls("yellow")}>
         <label className="block text-[11px] font-semibold text-navy">
           장소 추가
         </label>
@@ -165,7 +165,7 @@ export default function LocationManager({
       )}
 
       {/* 목록 */}
-      <section className={cardCls}>
+      <section className={panelToneCls("green")}>
         {locations.length === 0 ? (
           <div className="py-10 text-center text-sm text-ink-hint">
             등록된 장소가 없습니다.

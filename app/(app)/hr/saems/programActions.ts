@@ -2,7 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
-import { requireSaemAccess } from "@/lib/saemAccess";
+import { requireSaemAccess, requireSaemView } from "@/lib/saemAccess";
 import {
   toProject,
   toTerm,
@@ -62,8 +62,9 @@ function normSchedule(sc: Partial<SessionSchedule> | undefined): SessionSchedule
 }
 
 // --- 조회 ---
+// 조회는 로그인 직원 누구나(관장 지시). 쓰기는 아래 그대로 requireSaemAccess.
 export async function listProjects(): Promise<SaemProject[]> {
-  await requireSaemAccess();
+  await requireSaemView();
   const { data } = await supabaseAdmin
     .from(PROJ)
     .select("*")
@@ -73,7 +74,7 @@ export async function listProjects(): Promise<SaemProject[]> {
 }
 
 export async function listTerms(projectId: string): Promise<SaemTerm[]> {
-  await requireSaemAccess();
+  await requireSaemView();
   if (!projectId) return [];
   const { data } = await supabaseAdmin
     .from(TERM)
@@ -91,7 +92,7 @@ export type ProgramRow = SaemProgram & {
   lastSessionDate: string | null;
 };
 export async function listPrograms(termId: string): Promise<ProgramRow[]> {
-  await requireSaemAccess();
+  const view = await requireSaemView();
   if (!termId) return [];
   const { data } = await supabaseAdmin
     .from(PROG)
@@ -99,7 +100,22 @@ export async function listPrograms(termId: string): Promise<ProgramRow[]> {
     .eq("term_id", termId)
     .order("period_no", { ascending: true })
     .order("sort_order", { ascending: true });
-  const programs = (data ?? []).map((r) => toProgram(r as Record<string, unknown>));
+  // 단가·정산율·수강료는 강사 보수(=정산 금액)에 해당한다. 열람만 하는
+  //   직원에게는 서버에서 비워 보낸다 — 화면에서 숨기는 것으로는 RSC
+  //   페이로드에 값이 그대로 남는다.
+  const programs = (data ?? [])
+    .map((r) => toProgram(r as Record<string, unknown>))
+    .map((p) =>
+      view.canManage
+        ? p
+        : {
+            ...p,
+            tuition: null,
+            hourly_rate: null,
+            deduction_rate: null,
+            share_rate: null,
+          }
+    );
   const insIds = [
     ...new Set(programs.map((p) => p.instructor_id).filter(Boolean) as string[]),
   ];
@@ -164,7 +180,7 @@ export async function listPrograms(termId: string): Promise<ProgramRow[]> {
 
 export type InstructorOption = { id: string; name: string };
 export async function listInstructorOptions(): Promise<InstructorOption[]> {
-  await requireSaemAccess();
+  await requireSaemView();
   const { data } = await supabaseAdmin
     .from("saem_instructors")
     .select("id, name, status")

@@ -61,8 +61,12 @@ function StatusBadge({ status }: { status: CertStatus }) {
 
 export default function CertificatesManager({
   initial,
+  canManage,
 }: {
   initial: LectureCertRow[];
+  // false = 열람만. 승인·반려·수정과 양식 미리보기(PDF 라우트)를 감춘다.
+  //   주소는 강사 개인정보라 서버에서 이미 비워져 온다.
+  canManage: boolean;
 }) {
   const [rows, setRows] = useState<LectureCertRow[]>(initial);
   const [filter, setFilter] = useState<Filter>("all");
@@ -221,6 +225,7 @@ export default function CertificatesManager({
         <DetailModal
           key={detail.id}
           row={detail}
+          canManage={canManage}
           pendingOuter={pending}
           onClose={() => setDetailId(null)}
           onDone={(text, close) => {
@@ -236,18 +241,20 @@ export default function CertificatesManager({
 
 function DetailModal({
   row,
+  canManage,
   pendingOuter,
   onClose,
   onDone,
   onError,
 }: {
   row: LectureCertRow;
+  canManage: boolean;
   pendingOuter: boolean;
   onClose: () => void;
   onDone: (text: string, close: boolean) => void;
   onError: (text: string) => void;
 }) {
-  const editable = row.status === "pending";
+  const editable = canManage && row.status === "pending";
   const [edit, setEdit] = useState(false);
   const [form, setForm] = useState({
     applicantName: row.applicantName,
@@ -346,7 +353,7 @@ function DetailModal({
         ) : (
           <div className="space-y-3">
             <Row label="성명" value={row.applicantName} />
-            <Row label="주소" value={row.address} />
+            {canManage && <Row label="주소" value={row.address} />}
             <Row label="강의내용" value={row.lectureContent} multiline />
             <Row label="강의일자" value={row.lecturePeriod} />
             {row.instructorName && (
@@ -425,7 +432,7 @@ function DetailModal({
               </button>
             </>
           )}
-          {!edit && (
+          {!edit && canManage && (
             // 미리보기 — 주민번호 칸은 공란으로 나간다(신청 데이터에 없음).
             //   실제 발급(주민번호 기재)은 강사 화면에서 한다. 출력 이력도 남지 않는다.
             <a
@@ -437,7 +444,7 @@ function DetailModal({
               양식 미리보기
             </a>
           )}
-          {!editable && (
+          {!editable && canManage && (
             <span className={badgeNeutral}>
               처리된 신청은 수정할 수 없습니다.
             </span>
@@ -447,7 +454,7 @@ function DetailModal({
           </button>
         </div>
 
-        {askReject && (
+        {askReject && canManage && (
           <div className="mt-4 rounded-lg border border-stamp/40 bg-stamp-soft p-3">
             <p className="text-sm text-stamp">
               {row.applicantName || "신청자"} 님의 강의확인증 신청을 반려합니다.

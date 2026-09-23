@@ -18,7 +18,73 @@ export type SaemAccess = {
   name: string;
   driverId: string | null;
   isM0: boolean;
+  // 강사관리 '관리' 권한 — M0 또는 saem 직무. 열람만 하는 사람은 false.
+  canManage: boolean;
 };
+
+// =====================================================================
+// 열람 게이트 (2026-09) — 로그인한 직원이면 누구나.
+//
+//   관장 지시: "강사관리는 직원 누구나 접근". 동아리관리(lib/clubAccess.ts)와
+//   같은 정책입니다.
+//
+//   ★ 하지만 이 구역에는 열어서는 안 되는 것이 섞여 있습니다.
+//       · 강사 계좌(bank_name/bank_account/account_holder)
+//       · 주민번호 앞 7자리(rrnMask) — 암호문(rrn_enc)은 원래 화면에 안 갑니다
+//       · 초대 토큰(invite_token) — 유출되면 남의 계정을 가져갈 수 있습니다
+//       · 정산 금액(saem_settlements / saem_settlement_items)
+//       · 강사 첨부서류(이력서·성범죄경력조회 등)
+//     그래서 '열람' 과 '관리' 를 나눴습니다. 위 항목은 canManage(=예전 기준,
+//     M0 또는 saem 직무)에게만 갑니다. 목록·프로그램·근무일지처럼 업무상
+//     같이 봐야 하는 것만 전 직원에게 엽니다.
+//
+//   ★ 쓰기 동작은 전부 그대로 requireSaemAccess(=관리) 를 씁니다. 이름을
+//     바꾸지 않은 이유가 그것입니다 — 55곳을 건드리지 않아야 실수로 열리는
+//     쓰기가 생기지 않습니다.
+// =====================================================================
+export async function resolveSaemView(): Promise<SaemAccess | null> {
+  const me = await getSession();
+  if (!me || me.kind !== "employee" || !me.name.trim()) return null;
+  const g = await getGoogleSession();
+
+  const { data: driver } = await supabaseAdmin
+    .from("drivers")
+    .select("id, rank")
+    .eq("name", me.name.trim())
+    .maybeSingle();
+  const driverId =
+    driver && typeof (driver as { id?: unknown }).id === "string"
+      ? String((driver as { id: string }).id)
+      : null;
+  const rank = (driver as { rank?: string | null } | null)?.rank ?? null;
+
+  let authLevel: string | null = null;
+  if (driverId) {
+    const { data: prof } = await supabaseAdmin
+      .from("employee_profiles")
+      .select("auth_level")
+      .eq("driver_id", driverId)
+      .maybeSingle();
+    authLevel =
+      (prof as { auth_level?: string | null } | null)?.auth_level ?? null;
+  }
+
+  const isM0 = isM0Grant({ rank, email: g?.email, authLevel });
+  const roles = driverId ? await listRolesForDriver(driverId) : [];
+  return {
+    name: me.name.trim(),
+    driverId,
+    isM0,
+    canManage: isM0 || roles.includes("saem"),
+  };
+}
+
+// 열람 액션용 — 로그인 직원이면 통과. 미로그인만 throw.
+export async function requireSaemView(): Promise<SaemAccess> {
+  const ctx = await resolveSaemView();
+  if (!ctx) throw new Error("직원 로그인이 필요합니다.");
+  return ctx;
+}
 
 export async function resolveSaemAccess(): Promise<SaemAccess | null> {
   const me = await getSession();
@@ -51,7 +117,7 @@ export async function resolveSaemAccess(): Promise<SaemAccess | null> {
   const roles = driverId ? await listRolesForDriver(driverId) : [];
   const canAccess = isM0 || roles.includes("saem");
   if (!canAccess) return null;
-  return { name: me.name.trim(), driverId, isM0 };
+  return { name: me.name.trim(), driverId, isM0, canManage: true };
 }
 
 export async function requireSaemAccess(opts?: {

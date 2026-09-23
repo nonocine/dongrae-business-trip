@@ -12,7 +12,8 @@ import {
 import { ddayLabel, isDueSoon, CERT_ACCEPT } from "@/lib/trainings";
 import { fmtKstDate } from "@/lib/datetime";
 import {
-  cardCls,
+  panelToneCls,
+  sectionTitleCls,
   btnPrimary,
   badgeWarning,
   badgeNeutral,
@@ -114,9 +115,10 @@ export default function MyTrainingsSection({
   const visibleDone = showAllDone ? done : done.slice(0, DONE_PREVIEW);
 
   return (
-    <section id="my-trainings" className={cardCls}>
+    // 파랑: 내 현황을 보는 구역
+    <section id="my-trainings" className={panelToneCls("blue")}>
       <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
-        <h3 className="text-sm font-bold tracking-wide text-navy">
+        <h3 className={sectionTitleCls("blue")}>
           내 의무교육 ({initial.year}년)
         </h3>
         <span className="text-xs text-ink-muted">

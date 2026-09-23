@@ -8,7 +8,15 @@ import PasswordMigrationCard from "@/app/(app)/hr/PasswordMigrationCard";
 import RowChevron from "@/app/components/RowChevron";
 import type { Driver, EmployeeProfile } from "@/lib/supabase";
 import type { RecruitmentPostingAdmin } from "@/app/(app)/hr/actions";
-import { cardCls, inputCls, tabBarCls, tabNavCls, tabItemCls } from "@/lib/ui";
+import {
+  cardCls,
+  panelToneCls,
+  sectionTitleCls,
+  inputCls,
+  tabBarCls,
+  tabNavCls,
+  tabItemCls,
+} from "@/lib/ui";
 
 export type TabKey = "records" | "contracts" | "certificates" | "recruitment";
 
@@ -227,8 +235,8 @@ function RecordsTab({
 
   return (
     <div className="space-y-5">
-      {/* 직원 선택 + 재직/퇴사 필터 */}
-      <section className={cardCls}>
+      {/* 직원 선택 + 재직/퇴사 필터 — 파랑: 조회·선택 구역 */}
+      <section className={panelToneCls("blue")}>
         <div className="flex flex-wrap items-center justify-between gap-2">
           <label className="block text-xs font-medium text-ink-muted">
             인사기록카드를 편집할 직원 선택
@@ -340,8 +348,9 @@ function EmployeeChecklistCard({
 }) {
   const done = drivers.filter((d) => profileMap.has(d.id)).length;
   return (
-    <section className={`${cardCls} h-fit`}>
-      <h3 className="text-sm font-semibold text-ink">
+    // 초록: 사람(직원 명부) 구역 — /hr/clubs 의 동아리샘 목록과 같은 뜻
+    <section className={`${panelToneCls("green")} h-fit`}>
+      <h3 className={sectionTitleCls("green")}>
         직원 목록{" "}
         <span className="ml-1 text-xs font-medium text-ink-hint">
           입력 완료 {done} / {drivers.length}

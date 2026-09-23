@@ -9,7 +9,7 @@ import {
 } from "@/app/(app)/hr/facility/safetyActions";
 import { ymLabel, type SafetyCheck } from "@/lib/safetyCheck";
 import {
-  cardCls,
+  panelToneCls,
   btnPrimary,
   btnSecondary,
   badgeSuccess,
@@ -82,7 +82,7 @@ export default function SafetyList({
   return (
     <div className="space-y-5">
       {/* 새 점검 */}
-      <section className={cardCls}>
+      <section className={panelToneCls("yellow")}>
         <p className="mb-2 text-sm font-bold text-ink">새 점검</p>
         <div className="flex flex-wrap items-center gap-2">
           <select
@@ -137,7 +137,7 @@ export default function SafetyList({
       )}
 
       {/* 목록 */}
-      <section className={cardCls}>
+      <section className={panelToneCls("green")}>
         {checks.length === 0 ? (
           <div className="py-10 text-center text-sm text-ink-hint">
             점검 기록이 없습니다. 위에서 새 점검을 생성하세요.

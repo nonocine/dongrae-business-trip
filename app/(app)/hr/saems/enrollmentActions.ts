@@ -10,7 +10,7 @@
 
 import { revalidatePath } from "next/cache";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
-import { requireSaemAccess } from "@/lib/saemAccess";
+import { requireSaemAccess, requireSaemView } from "@/lib/saemAccess";
 import {
   parseErpWorkbook,
   matchErpGroup,
@@ -145,10 +145,13 @@ async function instructorNames(
   return map;
 }
 
+// 현황(프로그램별 인원 수)은 로그인 직원 누구나 — 개인정보가 없는 집계다.
+//   ↓ 아래 명단 상세(listProgramEnrollments)는 미성년 수강생의 연락처·
+//     생년월일이 그대로 들어 있어 기존 권한을 유지한다.
 export async function listEnrollmentOverview(
   termId: string
 ): Promise<EnrollmentOverviewRow[]> {
-  await requireSaemAccess();
+  await requireSaemView();
   if (!termId) return [];
   const programs = await loadTermPrograms(termId);
   if (!programs.length) return [];

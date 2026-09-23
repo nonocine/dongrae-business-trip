@@ -7,6 +7,8 @@ import {
   btnPrimary,
   btnSecondary,
   cardCls,
+  panelToneCls,
+  sectionTitleCls,
   inputCls,
   labelCls,
   noticeError,
@@ -420,8 +422,9 @@ export default function BusinessResultsDashboard({
 
   if (!data.configured)
     return (
-      <section className={cardCls}>
-        <h2 className="font-bold text-ink">사업실적 저장 준비가 필요합니다</h2>
+      // 빨강: 조치가 필요한 상태 안내
+      <section className={panelToneCls("red")}>
+        <h2 className={sectionTitleCls("red")}>사업실적 저장 준비가 필요합니다</h2>
         <p className="mt-2 text-sm leading-6 text-ink-muted">
           화면과 저장 기능은 준비됐습니다. 운영 Supabase에 새 테이블을 적용하기
           전이라 현재 앱 데이터에는 영향을 주지 않습니다.
@@ -431,7 +434,8 @@ export default function BusinessResultsDashboard({
 
   return (
     <div className="space-y-4">
-      <section className={cardCls}>
+      {/* 파랑: 조회 조건(연도·월·사업) */}
+      <section className={panelToneCls("blue")}>
         <div className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
           <div className="flex flex-wrap gap-2">
             <label className={labelCls}>
@@ -624,10 +628,11 @@ export default function BusinessResultsDashboard({
               </div>
             </article>
           </section>
-          <section className={cardCls}>
+          {/* 초록: 집계된 실적(결과) */}
+          <section className={panelToneCls("green")}>
             <div className="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
               <div>
-                <h3 className="text-lg font-bold text-ink">프로그램별 실적</h3>
+                <h3 className={sectionTitleCls("green")}>프로그램별 실적</h3>
                 <p className="mt-1 text-sm text-ink-muted">
                   같은 프로그램은 선택 기간의 수치를 합산합니다.
                 </p>
@@ -833,8 +838,9 @@ export default function BusinessResultsDashboard({
       )}
       {tab === "programs" && (
         <div className="space-y-4">
-          <section className={cardCls}>
-            <h2 className="font-bold text-ink">
+          {/* 노랑: 입력 구역 */}
+          <section className={panelToneCls("yellow")}>
+            <h2 className={sectionTitleCls("yellow")}>
               {editing ? "프로그램 실적 수정" : "프로그램 실적 입력"}
             </h2>
             <p className="mt-1 text-xs text-ink-muted">
@@ -922,7 +928,8 @@ export default function BusinessResultsDashboard({
         </div>
       )}
       {tab === "promotions" && (
-        <section className={cardCls}>
+        // 노랑: 입력 구역(실적 입력과 같은 뜻)
+        <section className={panelToneCls("yellow")}>
           {/* 좁은 화면(휴대폰)에서는 제목 아래로 버튼이 내려가고 버튼 3개가
               세로로 쌓입니다. 예전에는 한 줄에 우겨넣느라 버튼 글자가 한 자씩
               세로로 꺾이고 아래 안내문과 겹쳤습니다(관장 실기기 제보).
@@ -930,7 +937,7 @@ export default function BusinessResultsDashboard({
               채용공고 목록 머리글(app/hr/RecruitmentPostingsTab.tsx)과 같은
               flex-wrap + w-full sm:w-auto 패턴입니다. */}
           <div className="flex flex-wrap items-center justify-between gap-2">
-            <h2 className="font-bold text-ink">
+            <h2 className={sectionTitleCls("yellow")}>
               {editingPromo
                 ? "홍보·대외협력 수정"
                 : `${periodLabel} 홍보·대외협력`}
@@ -1237,8 +1244,9 @@ export default function BusinessResultsDashboard({
         />
       )}
       {tab === "report" && (
-        <section className={cardCls}>
-          <h2 className="font-bold text-ink">{periodLabel} 종합보고서</h2>
+        // 초록: 집계된 결과물
+        <section className={panelToneCls("green")}>
+          <h2 className={sectionTitleCls("green")}>{periodLabel} 종합보고서</h2>
           <div className="mt-4 grid gap-2 text-sm sm:grid-cols-2">
             <p>
               사업 {aggregatedResults.length}개 / 운영 {totals.sessions}회

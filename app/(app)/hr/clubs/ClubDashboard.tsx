@@ -28,6 +28,7 @@ import {
 import ClubPlanEditor from "@/app/(app)/hr/clubs/ClubPlanEditor";
 import {
   panelCls,
+  panelToneCls,
   blockCls,
   sectionTitleCls,
   tableHeadCls,
@@ -206,7 +207,7 @@ export default function ClubDashboard({
         }
       />
 
-      <section className={panelCls}>
+      <section className={panelToneCls("blue")}>
         <div className="flex flex-wrap items-center justify-between gap-2">
           <div>
             <h2 className={sectionTitleCls("blue")}>{month}월 제출 현황</h2>
@@ -388,7 +389,7 @@ function TeacherList({
   onReactivate: (teacher: ClubTeacherRow) => void;
 }) {
   return (
-    <section className={panelCls}>
+    <section className={panelToneCls("green")}>
       <h2 className={sectionTitleCls("green")}>동아리샘 목록</h2>
       <p className="mt-1 text-xs text-ink-muted">
         <b>중지</b>는 동아리샘 역할만 잠시 끄는 것이라 언제든 되돌릴 수 있고,{" "}
@@ -520,7 +521,7 @@ function TeacherForm({
   const candidates = instructors.filter((i) => !i.alreadyClub);
 
   return (
-    <div className={panelCls}>
+    <div className={panelToneCls("green")}>
       <h2 className={sectionTitleCls("green")}>동아리샘 등록</h2>
       <p className="mt-1 text-xs text-ink-muted">
         강사가 동아리도 맡으면 새 계정을 만들지 말고 “기존 강사에서 추가”로 겸직
@@ -646,7 +647,7 @@ function ClubForm({
   const [goal, setGoal] = useState("");
   return (
     <form
-      className={panelCls}
+      className={panelToneCls("yellow")}
       onSubmit={(event) => {
         event.preventDefault();
         onSubmit({
