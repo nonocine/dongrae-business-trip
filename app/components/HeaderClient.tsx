@@ -2,7 +2,10 @@
 
 import Link from "next/link";
 import { useState } from "react";
+import { usePathname, useSearchParams } from "next/navigation";
 import { logoutCurrent } from "@/app/actions";
+import { MENU_HOME, type MenuTree } from "@/lib/menuTree";
+import { findActive } from "@/lib/menuActive";
 
 type SessionKind = "employee" | null;
 
@@ -14,19 +17,30 @@ export default function HeaderClient({
   name,
   canAccessHr,
   canAccessAdmin,
+  tree,
 }: {
   kind: SessionKind;
   name: string | null;
   canAccessHr: boolean;
   canAccessAdmin: boolean;
+  // 폰 드로어가 그릴 메뉴 — PC 사이드바와 같은 트리(서버가 만들어 내려줍니다).
+  //   비로그인이면 null.
+  tree: MenuTree | null;
 }) {
   const [mobileOpen, setMobileOpen] = useState(false);
   const [userMenuOpen, setUserMenuOpen] = useState(false);
+  const pathname = usePathname() ?? "/";
+  const search = useSearchParams();
 
   const loggedIn = kind !== null;
   // 관리자 표기/진입은 관장 권한(canAccessAdmin) 기준 — 구글 master/관장 포함.
   const isAdmin = canAccessAdmin;
   const displayName = isAdmin ? "관리자" : name ?? "";
+
+  // 드로어의 현재 위치 — PC 사이드바와 같은 판정(lib/menuActive).
+  const drawerActive = tree
+    ? findActive(tree.groups, tree.legacy, pathname, search)
+    : { key: "", group: "" };
 
   // 좌측 네비게이션 (권한별)
   const navItems: NavItem[] = [];
@@ -189,6 +203,7 @@ export default function HeaderClient({
         >
           <div className="absolute inset-0 bg-black/40" />
           <div
+            data-drawer="menu"
             className="absolute inset-y-0 left-0 flex w-64 flex-col bg-card shadow-xl"
             onClick={(e) => e.stopPropagation()}
           >
@@ -212,40 +227,51 @@ export default function HeaderClient({
               </span>
             </div>
 
+            {/* 업무 메뉴 — PC 사이드바와 같은 트리(lib/menu.ts → menuTree).
+                예전에는 이 드로어가 자기 배열(메인·활동일지·활동 작성·HR 관리)
+                을 갖고 있어, 권한 조건을 고쳐도 폰만 옛 항목을 보여줬습니다. */}
             <nav className="flex flex-1 flex-col gap-0.5 overflow-y-auto p-2">
-              {navItems.map((item) =>
-                item.children ? (
-                  <div key={item.href} className="flex flex-col gap-0.5">
-                    <Link
-                      href={item.href}
-                      onClick={() => setMobileOpen(false)}
-                      className="rounded-md px-3 py-2.5 text-sm font-semibold text-ink hover:bg-surface"
-                    >
-                      {item.label}
-                    </Link>
-                    <div className="ml-3 flex flex-col gap-0.5 border-l border-line pl-2">
-                      {item.children.map((c) => (
-                        <Link
-                          key={c.href}
-                          href={c.href}
-                          onClick={() => setMobileOpen(false)}
-                          className="rounded-md px-3 py-2 text-sm text-ink-body hover:bg-surface"
-                        >
-                          {c.label}
-                        </Link>
-                      ))}
-                    </div>
-                  </div>
-                ) : (
-                  <Link
-                    key={item.href}
-                    href={item.href}
-                    onClick={() => setMobileOpen(false)}
-                    className="rounded-md px-3 py-2.5 text-sm font-medium text-ink-body hover:bg-surface"
-                  >
-                    {item.label}
-                  </Link>
-                )
+              {/* 메인 — 상단 고정. menu.ts 배열에는 없습니다(대시보드에 '메인'
+                  카드가 생기지 않게). */}
+              <DrawerRow
+                item={MENU_HOME}
+                active={pathname === "/" && drawerActive.key === ""}
+                onGo={() => setMobileOpen(false)}
+              />
+
+              {tree?.groups.map((g) => (
+                <div key={g.group} className="mt-1.5">
+                  <p className="px-3 pb-0.5 text-[11px] font-bold tracking-wide text-navy">
+                    {g.label}
+                  </p>
+                  {g.items.map((it) => (
+                    <DrawerRow
+                      key={it.key}
+                      item={it}
+                      active={it.key === drawerActive.key}
+                      onGo={() => setMobileOpen(false)}
+                    />
+                  ))}
+                </div>
+              ))}
+
+              {/* 이전 기능 — 레거시를 맨 아래 별도 구역으로. 지우는 것이 아니라
+                  자리만 내린 것이라 눌러서 그대로 들어갑니다. */}
+              {tree && tree.legacy.length > 0 && (
+                <div className="mt-2 border-t border-line pt-2">
+                  <p className="px-3 pb-0.5 text-[11px] font-semibold text-ink-hint">
+                    이전 기능
+                  </p>
+                  {tree.legacy.map((it) => (
+                    <DrawerRow
+                      key={it.key}
+                      item={it}
+                      active={it.key === drawerActive.key}
+                      muted
+                      onGo={() => setMobileOpen(false)}
+                    />
+                  ))}
+                </div>
               )}
 
               <div className="my-1 border-t border-line" />
@@ -290,6 +316,62 @@ export default function HeaderClient({
         </div>
       )}
     </header>
+  );
+}
+
+// 드로어 항목 한 줄 — 누르면 드로어가 닫힙니다(onGo).
+//   겉모습은 기존 드로어 그대로 두고, 현재 위치 강조만 더했습니다.
+function DrawerRow({
+  item,
+  active,
+  muted,
+  onGo,
+}: {
+  item: { label: string; href: string; icon: string; badge?: number; pending?: boolean };
+  active: boolean;
+  muted?: boolean;
+  onGo: () => void;
+}) {
+  const body = (
+    <>
+      <span aria-hidden className="shrink-0 text-base">
+        {item.icon}
+      </span>
+      <span className="min-w-0 flex-1 truncate">{item.label}</span>
+      {!!item.badge && item.badge > 0 && (
+        <span
+          className={`shrink-0 rounded-full px-1.5 py-0.5 text-[10px] font-bold ${
+            active ? "bg-navy text-white" : "bg-stamp-soft text-stamp"
+          }`}
+        >
+          {item.badge > 999 ? "999+" : item.badge}
+        </span>
+      )}
+    </>
+  );
+
+  if (item.pending) {
+    return (
+      <span className="flex cursor-not-allowed items-center gap-2 rounded-md px-3 py-2.5 text-sm text-ink-hint">
+        {body}
+      </span>
+    );
+  }
+  return (
+    <Link
+      href={item.href}
+      onClick={onGo}
+      aria-current={active ? "page" : undefined}
+      className={`flex items-center gap-2 rounded-md px-3 py-2.5 text-sm transition ${
+        active
+          ? "bg-navy-soft font-bold text-navy"
+          : muted
+            ? "text-ink-muted hover:bg-surface"
+            : "font-medium text-ink-body hover:bg-surface"
+      }`}
+    >
+      {body}
+    </Link>
   );
 }
 

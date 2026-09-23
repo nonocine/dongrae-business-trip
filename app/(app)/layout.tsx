@@ -2,13 +2,8 @@ import { Suspense } from "react";
 import Header from "@/app/components/Header";
 import { getSession } from "@/app/actions";
 import { getShellData } from "@/app/(app)/shellData";
-import Sidebar, { type SidebarGroup } from "@/app/(app)/Sidebar";
-import {
-  MENU_GROUPS,
-  MENU_GROUP_LABEL,
-  menuItemsFor,
-  type MenuGroup,
-} from "@/lib/menu";
+import Sidebar from "@/app/(app)/Sidebar";
+import { buildMenuTree } from "@/lib/menuTree";
 
 // =====================================================================
 // 로그인 후 화면의 공통 껍데기 — 헤더 + 본문 영역.
@@ -47,27 +42,6 @@ import {
 //       한 번만 돌아 두 곳의 숫자가 어긋나지 않습니다.
 // =====================================================================
 
-// 사이드바에 그릴 그룹 — lib/menu.ts 의 정의에서 이 사람이 볼 수 있는 것만.
-//   badgeDesc 는 함수라 클라이언트로 넘길 수 없어 숫자만 뽑아 넘깁니다.
-function buildSidebarGroups(
-  ctx: Awaited<ReturnType<typeof getShellData>>["ctx"],
-  badges: Record<string, number | undefined>,
-): SidebarGroup[] {
-  return MENU_GROUPS.map((group: MenuGroup) => ({
-    group,
-    label: MENU_GROUP_LABEL[group],
-    items: menuItemsFor(group, ctx).map((i) => ({
-      key: i.key,
-      label: i.label,
-      href: i.href,
-      icon: i.icon,
-      // 배지를 쓰겠다고 선언한 항목만(badgeDesc 보유) 숫자를 답니다.
-      badge: i.badgeDesc ? badges[i.href] : undefined,
-      pending: i.pending,
-    })),
-  })).filter((g) => g.items.length > 0);
-}
-
 export default async function AppLayout({
   children,
 }: {
@@ -80,7 +54,9 @@ export default async function AppLayout({
   if (!session) return <>{children}</>;
 
   const { ctx, badges } = await getShellData();
-  const groups = buildSidebarGroups(ctx, badges);
+  // 사이드바와 폰 드로어(Header 안)가 같은 트리를 씁니다 — 권한별로 보이는
+  //   항목이 PC 와 폰에서 어긋날 수 없습니다.
+  const tree = buildMenuTree(ctx, badges);
 
   return (
     <>
@@ -88,7 +64,7 @@ export default async function AppLayout({
       <div className="flex w-full flex-1">
         {/* useSearchParams 를 쓰는 클라이언트 컴포넌트라 경계가 필요합니다. */}
         <Suspense fallback={<div className="hidden w-60 shrink-0 border-r border-line bg-card md:block" />}>
-          <Sidebar groups={groups} />
+          <Sidebar tree={tree} />
         </Suspense>
         {/* min-w-0 필수 — 안 주면 넓은 표가 있는 페이지에서 본문이 사이드바를
             밀어냅니다(flex 항목의 기본 min-width:auto). */}

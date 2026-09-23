@@ -2,6 +2,8 @@ import { getSession, getGoogleSession, isManagerAdmin } from "@/app/actions";
 import { canAccessHr, type EmployeeRank } from "@/lib/supabase";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
 import HeaderClient from "@/app/components/HeaderClient";
+import { getShellData } from "@/app/(app)/shellData";
+import { buildMenuTree, type MenuTree } from "@/lib/menuTree";
 
 export default async function Header() {
   const session = await getSession();
@@ -32,12 +34,24 @@ export default async function Header() {
     }
   }
 
+  // 폰 드로어가 쓸 메뉴 트리 — PC 사이드바와 '같은' 트리입니다.
+  //   ★ 드로어가 자기 메뉴 배열을 갖고 있으면 lib/menu.ts 와 별개로 살아서,
+  //     권한 조건이 바뀌어도 폰만 옛 항목을 보여줍니다. 그래서 여기서 만들어
+  //     넘깁니다. getShellData 는 cache() 라 레이아웃이 이미 불렀으면 다시
+  //     돌지 않습니다(한 요청에 한 번).
+  let tree: MenuTree | null = null;
+  if (session) {
+    const { ctx, badges } = await getShellData();
+    tree = buildMenuTree(ctx, badges);
+  }
+
   return (
     <HeaderClient
       kind={session?.kind ?? null}
       name={session?.name ?? null}
       canAccessHr={hrAccess}
       canAccessAdmin={canAccessAdmin}
+      tree={tree}
     />
   );
 }
