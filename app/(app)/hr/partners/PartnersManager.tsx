@@ -29,11 +29,14 @@ import {
   type PartnerTransactionLog,
   type PartnerWithContacts,
 } from "@/lib/businessPartners";
-import { fmtKstDate } from "@/lib/datetime";
+import { fmtKstDate, fmtKstDateTime } from "@/lib/datetime";
 import { kstTodayYmd } from "@/lib/trainings";
 import {
+  panelCls,
   panelToneCls,
   sectionTitleCls,
+  tableHeadCls,
+  tableRowCls,
   btnPrimary,
   btnSecondary,
   btnDanger,
@@ -694,8 +697,9 @@ ${l.occurred_on} ${l.content}
 
       {/* 상세 — 거래처 정보 + 담당자 관리 */}
       {detail && (
-        // 초록: 한 거래처의 상세·담당자(사람) 구역
-        <section className={panelToneCls("green")}>
+        // 중성: 한 거래처를 감싸는 껍데기. 안에 초록(거래이력) 판이 들어가므로
+        //   바깥까지 색을 주면 경계가 겹쳐 지저분해집니다(lib/ui.ts 주석).
+        <section className={panelCls}>
           <div className="flex items-start justify-between gap-2">
             <div className="min-w-0">
               <div className="flex flex-wrap items-center gap-2">
@@ -985,9 +989,10 @@ ${l.occurred_on} ${l.content}
           {/* 거래 이력 — "이 업체와 무엇을 했는가"를 시간순으로 남깁니다.
               담당자가 바뀌어도, 담당 직원이 바뀌어도 인수인계 때 그대로 읽힙니다.
               등록은 누구나, 수정·삭제는 등록자 본인 또는 관장·부장(canEdit). */}
-          <div className="mt-4 border-t border-line pt-3">
+          {/* 초록: 쌓인 기록 구역 — 색 규칙은 lib/ui.ts 머리말 참고. */}
+          <div className={`${panelToneCls("green")} mt-4`}>
             <div className="flex items-center justify-between gap-2">
-              <h4 className="text-sm font-bold tracking-wide text-navy">
+              <h4 className={sectionTitleCls("green")}>
                 거래 이력 ({detail.logs.length})
               </h4>
               <button
@@ -1004,53 +1009,68 @@ ${l.occurred_on} ${l.content}
                 등록된 거래 이력이 없습니다. 예: 2026-03 간판 제작
               </p>
             ) : (
-              <ul className="mt-3 space-y-2">
-                {detail.logs.map((l) => (
-                  <li
-                    key={l.id}
-                    className="rounded-lg border border-line p-3 text-sm"
-                  >
-                    <div className="flex flex-wrap items-start justify-between gap-2">
-                      <div className="min-w-0">
-                        <div className="flex flex-wrap items-center gap-2">
-                          <strong className="text-ink">
-                            {l.occurred_on
-                              ? fmtKstDate(l.occurred_on)
-                              : "날짜 없음"}
-                          </strong>
-                          {l.created_by && (
-                            <span className={badgeNeutral}>{l.created_by}</span>
-                          )}
-                        </div>
-                        <p className="mt-0.5 whitespace-pre-wrap text-ink-body">
+              // 날짜 / 내용 / 작성자 / 작성시각 — 내용은 여러 줄일 수 있어
+              //   whitespace-pre-wrap 을 유지하고, 나머지 칸은 줄바꿈을 막습니다.
+              <div className="mt-3 overflow-x-auto">
+                <table className="w-full min-w-[620px] border-collapse">
+                  <thead>
+                    <tr className={`${tableHeadCls} bg-surface`}>
+                      <th className="whitespace-nowrap px-2 py-2">거래 일자</th>
+                      <th className="px-2 py-2">내용</th>
+                      <th className="whitespace-nowrap px-2 py-2">작성자</th>
+                      <th className="whitespace-nowrap px-2 py-2">작성시각</th>
+                      <th className="w-32 whitespace-nowrap px-2 py-2 text-right">
+                        관리
+                      </th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {detail.logs.map((l) => (
+                      <tr key={l.id} className={`${tableRowCls} align-top`}>
+                        <td className="whitespace-nowrap px-2 py-2 text-sm font-semibold text-ink">
+                          {l.occurred_on ? fmtKstDate(l.occurred_on) : "날짜 없음"}
+                        </td>
+                        <td className="px-2 py-2 text-sm whitespace-pre-wrap text-ink-body">
                           {l.content || <span className="text-ink-hint">-</span>}
-                        </p>
-                      </div>
-                      {/* 남이 등록한 이력에는 버튼 자체가 나오지 않습니다.
-                          (서버 판정값 canEdit — 실제 차단도 서버에서) */}
-                      {l.canEdit && (
-                        <div className="flex shrink-0 gap-1">
-                          <button
-                            type="button"
-                            className={`${btnSecondary} h-8 px-3 text-xs`}
-                            onClick={() => openEditLog(l)}
-                          >
-                            수정
-                          </button>
-                          <button
-                            type="button"
-                            className={`${btnDanger} h-8 px-3 text-xs`}
-                            disabled={busy}
-                            onClick={() => removeLog(l)}
-                          >
-                            삭제
-                          </button>
-                        </div>
-                      )}
-                    </div>
-                  </li>
-                ))}
-              </ul>
+                        </td>
+                        <td className="whitespace-nowrap px-2 py-2">
+                          {l.created_by ? (
+                            <span className={badgeNeutral}>{l.created_by}</span>
+                          ) : (
+                            <span className="text-xs text-ink-hint">-</span>
+                          )}
+                        </td>
+                        <td className="whitespace-nowrap px-2 py-2 text-xs text-ink-muted">
+                          {fmtKstDateTime(l.created_at)}
+                        </td>
+                        {/* 남이 등록한 이력에는 버튼 자체가 나오지 않습니다.
+                            (서버 판정값 canEdit — 실제 차단도 서버에서) */}
+                        <td className="whitespace-nowrap px-2 py-2 text-right">
+                          {l.canEdit && (
+                            <div className="flex shrink-0 justify-end gap-1">
+                              <button
+                                type="button"
+                                className={`${btnSecondary} h-8 shrink-0 px-3 text-xs`}
+                                onClick={() => openEditLog(l)}
+                              >
+                                수정
+                              </button>
+                              <button
+                                type="button"
+                                className={`${btnDanger} h-8 shrink-0 px-3 text-xs`}
+                                disabled={busy}
+                                onClick={() => removeLog(l)}
+                              >
+                                삭제
+                              </button>
+                            </div>
+                          )}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
             )}
 
             {/* 이력 등록 · 수정 */}
