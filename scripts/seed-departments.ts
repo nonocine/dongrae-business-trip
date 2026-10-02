@@ -129,6 +129,7 @@ async function main() {
       type: TYPE,
       title: (drv.rank ?? "").trim(),
       department: dept,
+      duty: "",
       effective_date: EFFECTIVE_DATE,
       note: NOTE,
     };

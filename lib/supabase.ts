@@ -519,11 +519,12 @@ export type AppointmentType = (typeof APPOINTMENT_TYPES)[number];
 // =====================================================================
 // 부서(DP-1) — 인사발령의 부서 칸 선택지.
 //   * 부서는 employee_profiles 에 별도 컬럼이 없고 appointments jsonb 안의
-//     department 필드로만 존재한다(최신 발령의 값이 그 직원의 현재 부서).
+//     department 필드로만 존재한다. 현재 소속 계산은 lib/appointments 단일 출처.
 //   * 자유 텍스트라 오타·표기 흔들림이 생기기 쉬워 선택지를 고정한다. 다만
 //     조직 개편으로 새 부서가 생길 수 있으므로 "직접 입력"도 함께 둔다.
-//   * 관장·부장처럼 팀 소속이 없는 자리는 발령을 만들지 않는다 — 그 경우
-//     화면은 drivers.rank 로 폴백해 직책을 보여 준다.
+//   * 관장·부장처럼 팀 소속이 없는 자리도 발령은 입력한다(부서는 비워 둠).
+//     발령이 없으면 화면은 "발령기록 없음"을 띄운다 — drivers.rank 로 메꾸지
+//     않는다(직급과 직위는 다른 축).
 // =====================================================================
 export const DEPARTMENTS = [
   "교육문화사업팀",
@@ -553,6 +554,8 @@ export type EmployeeAppointment = {
   type: AppointmentType;
   title: string;
   department: string;
+  // 담당업무(선택) — 예: 시설관리. 증명서 "직위 및 담당업무"에 "팀장(시설관리)"로 합쳐집니다.
+  duty: string;
   effective_date: string;
   note: string;
 };
@@ -947,6 +950,8 @@ function normalizeAppointmentItem(item: unknown): EmployeeAppointment {
     type,
     title: String(o.title ?? "").trim(),
     department: String(o.department ?? "").trim(),
+    // 담당업무 — 예전에는 정규화에서 빠져, 폼으로 저장하면 기존 값이 사라졌습니다.
+    duty: String(o.duty ?? "").trim(),
     effective_date: String(o.effective_date ?? "").trim(),
     note: String(o.note ?? "").trim(),
   };

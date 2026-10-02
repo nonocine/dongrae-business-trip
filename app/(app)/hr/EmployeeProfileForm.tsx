@@ -50,6 +50,7 @@ import {
   EmployeeRolesSection,
   type ProfileTabKey,
 } from "@/app/(app)/hr/ProfileFormParts";
+import CurrentAssignment from "@/app/(app)/hr/CurrentAssignment";
 import {
   btnPrimary,
   btnDanger,
@@ -86,9 +87,12 @@ export default function EmployeeProfileForm({
   profile,
   canManageAuth,
   knownDepartments,
+  today,
   onDeleted,
 }: {
   knownDepartments?: string[];
+  // KST 오늘 "YYYY-MM-DD" — 현재 소속 판정 기준(서버 계산).
+  today: string;
   driver: Driver;
   profile: EmployeeProfile | null;
   // 권한등급(auth_level) 변경 가능 여부 — 관장(최고권한)만 true.
@@ -260,6 +264,12 @@ export default function EmployeeProfileForm({
             {locked ? "🔒 잠김" : profile ? "입력됨" : "미입력"}
           </span>
         </div>
+        {/* 현재 소속 — 저장된 인사발령 이력에서 계산(lib/appointments). */}
+        <CurrentAssignment
+          appointments={profile?.appointments}
+          today={today}
+          variant="card"
+        />
 
         <div className="mt-3">
           <ProfileTabs current={tab} onChange={setTab} />

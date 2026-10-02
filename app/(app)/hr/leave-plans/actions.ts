@@ -14,6 +14,7 @@ import { supabaseAdmin } from "@/lib/supabaseAdmin";
 import { requireSalaryAccess } from "@/lib/salaryAccess";
 import { sendSlackDM, siteBaseUrl, slackLink } from "@/lib/slack";
 import { kstTodayYmd } from "@/lib/trainings";
+import { currentAssignment } from "@/lib/appointments";
 import { downloadHrImage } from "@/lib/recruitmentApplicantDocData";
 import {
   buildLeavePlanPdf,
@@ -54,21 +55,10 @@ export type LeavePlanEmployee = {
   department: string | null;
 };
 
-function pickDepartment(appointments: unknown): string | null {
-  if (!Array.isArray(appointments) || appointments.length === 0) return null;
-  const sorted = [...appointments].sort((a, b) =>
-    String((a as { effective_date?: string }).effective_date ?? "").localeCompare(
-      String((b as { effective_date?: string }).effective_date ?? "")
-    )
-  );
-  const last = sorted[sorted.length - 1] as { department?: string };
-  return last?.department?.trim() || null;
-}
-
 async function loadRoster(): Promise<LeavePlanEmployee[]> {
   const [{ data: drivers, error: dErr }, { data: profs, error: pErr }] =
     await Promise.all([
-      supabaseAdmin.from(DRV).select("id, name, rank, is_active"),
+      supabaseAdmin.from(DRV).select("id, name, is_active"),
       supabaseAdmin
         .from(PROF)
         .select("driver_id, employment_status, email, appointments"),
@@ -80,12 +70,15 @@ async function loadRoster(): Promise<LeavePlanEmployee[]> {
     string,
     { status: string; email: string | null; department: string | null }
   >();
+  const today = kstTodayYmd();
   for (const p of profs ?? []) {
     const r = p as Record<string, unknown>;
     profByDriver.set(String(r.driver_id ?? ""), {
       status: String(r.employment_status ?? "active"),
       email: (r.email as string | null) ?? null,
-      department: pickDepartment(r.appointments),
+      // 현재 소속 — lib/appointments 단일 출처(인사기록카드·증명서와 같은 규칙).
+      department:
+        currentAssignment(r.appointments, today).current?.department ?? null,
     });
   }
 
@@ -101,8 +94,8 @@ async function loadRoster(): Promise<LeavePlanEmployee[]> {
       driver_id: id,
       name: String(r.name ?? ""),
       email: prof?.email ?? null,
-      // 발령 부서 없으면 직급 표기(증명서 모듈과 동일 폴백).
-      department: prof?.department ?? clean(r.rank as string | null),
+      // 발령 부서가 없으면 비워 둡니다 — drivers.rank(직급)는 부서가 아닙니다.
+      department: prof?.department ?? null,
     });
   }
   return out.sort((a, b) => a.name.localeCompare(b.name, "ko"));

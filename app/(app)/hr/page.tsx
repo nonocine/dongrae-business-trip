@@ -7,6 +7,7 @@ import {
   listRecruitmentPostings,
 } from "@/app/(app)/hr/actions";
 import { enforcePasswordChange } from "@/app/actions";
+import { kstTodayYmd } from "@/lib/trainings";
 
 export const dynamic = "force-dynamic";
 
@@ -77,6 +78,7 @@ export default async function HrPage({
         initialTab={initialTab}
         canManageAuth={canManageAuth}
         allowedTabs={allowedTabs}
+        today={kstTodayYmd()}
       />
     </div>
   );

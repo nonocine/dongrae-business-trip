@@ -24,6 +24,7 @@ import {
 import { buildCertificatePdf } from "@/lib/certificatePdf";
 import { downloadHrImage } from "@/lib/recruitmentApplicantDocData";
 import { kstTodayYmd } from "@/lib/trainings";
+import { currentAssignment, positionWithDuty } from "@/lib/appointments";
 import {
   sendSlack,
   sendSlackDMDetailed,
@@ -115,33 +116,16 @@ type ProfileLite = {
   duty: string | null;
 };
 
-// 최신 발령(effective_date 최대)에서 근무부서·직위 도출.
-function pickAppointment(appointments: unknown): {
-  department: string | null;
-  title: string | null;
-} {
-  if (!Array.isArray(appointments) || appointments.length === 0)
-    return { department: null, title: null };
-  const sorted = [...appointments].sort((a, b) =>
-    String((a as { effective_date?: string }).effective_date ?? "").localeCompare(
-      String((b as { effective_date?: string }).effective_date ?? "")
-    )
-  );
-  const last = sorted[sorted.length - 1] as {
-    department?: string;
-    title?: string;
-  };
-  return {
-    department: last.department?.trim() || null,
-    title: last.title?.trim() || null,
-  };
-}
-
+// 근무부서·직위는 lib/appointments.currentAssignment 단일 출처에서 도출합니다
+//   (인사기록카드·직원 목록과 같은 규칙: 오늘 기준 발효된 최신 발령).
+//   발령이 없으면 null — 증명서에는 "-" 로 찍힙니다. drivers.rank(직급)로
+//   메꾸지 않습니다(직급과 직위는 다른 축). 담당자는 발급 화면에서 경고를 보고
+//   직위 칸을 직접 고치거나 인사발령을 먼저 입력하면 됩니다.
 async function loadProfile(driverId: string): Promise<ProfileLite | null> {
   const [{ data: driver }, { data: prof }] = await Promise.all([
     supabaseAdmin
       .from("drivers")
-      .select("name, rank")
+      .select("name")
       .eq("id", driverId)
       .maybeSingle(),
     supabaseAdmin
@@ -153,9 +137,8 @@ async function loadProfile(driverId: string): Promise<ProfileLite | null> {
       .maybeSingle(),
   ]);
   if (!driver) return null;
-  const rank = ((driver as { rank?: string | null }).rank ?? "")?.trim() || null;
   const p = (prof ?? {}) as Record<string, unknown>;
-  const appt = pickAppointment(p.appointments);
+  const { current } = currentAssignment(p.appointments, kstTodayYmd());
   return {
     name: String((driver as { name: string }).name),
     birth_date: (p.birth_date as string | null) ?? null,
@@ -163,9 +146,9 @@ async function loadProfile(driverId: string): Promise<ProfileLite | null> {
     join_date: (p.join_date as string | null) ?? null,
     employment_status: p.employment_status === "resigned" ? "resigned" : "active",
     resignation_date: (p.resignation_date as string | null) ?? null,
-    // 발령 부서 없으면 직책(rank)으로 폴백 — 관장·부장 등은 근무부서 칸에 직책 표기.
-    department: appt.department ?? rank,
-    duty: appt.title ?? rank,
+    department: current?.department ?? null,
+    // 직위 및 담당업무 — title 기본, duty 있으면 "팀장(시설관리)".
+    duty: positionWithDuty(current),
   };
 }
 
@@ -379,6 +362,9 @@ export type CertEmployee = {
   joinDate: string | null;
   resignationDate: string | null;
   defaultDuty: string | null;
+  // 근무부서(현재 소속) — 발급 화면 미리보기·경고용. 발령기록이 없으면 hasAppointment=false.
+  department: string | null;
+  hasAppointment: boolean;
 };
 
 export async function listCertificateEmployees(): Promise<CertEmployee[]> {
@@ -393,12 +379,13 @@ export async function listCertificateEmployees(): Promise<CertEmployee[]> {
   for (const p of profs ?? [])
     pByD.set(String((p as Record<string, unknown>).driver_id), p as Record<string, unknown>);
 
+  const today = kstTodayYmd();
   const list: CertEmployee[] = [];
   for (const d of drivers ?? []) {
     const dd = d as Record<string, unknown>;
     const id = String(dd.id);
     const p = pByD.get(id);
-    const appt = pickAppointment(p?.appointments);
+    const { current } = currentAssignment(p?.appointments, today);
     list.push({
       driverId: id,
       name: String(dd.name ?? ""),
@@ -406,7 +393,9 @@ export async function listCertificateEmployees(): Promise<CertEmployee[]> {
       status: p?.employment_status === "resigned" ? "resigned" : "active",
       joinDate: (p?.join_date as string | null) ?? null,
       resignationDate: (p?.resignation_date as string | null) ?? null,
-      defaultDuty: appt.title,
+      defaultDuty: positionWithDuty(current),
+      department: current?.department ?? null,
+      hasAppointment: current !== null,
     });
   }
   // 퇴사자 우선 → 이름.

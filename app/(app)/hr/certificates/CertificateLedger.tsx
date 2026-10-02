@@ -493,6 +493,17 @@ function CareerModal({
             근무기간(자동): {periodPreview}
           </p>
         )}
+        {selected &&
+          (selected.hasAppointment ? (
+            <p className="mt-0.5 text-[11px] text-ink-hint">
+              근무부서(인사발령 기준): {selected.department ?? "부서 없음 → “-”"}
+            </p>
+          ) : (
+            <p className="mt-1.5 rounded-md border border-warning bg-warning-soft px-2 py-1 text-[11px] font-semibold text-warning">
+              발령기록 없음 — 근무부서가 “-”로 발급됩니다. 인사기록카드에서
+              인사발령을 먼저 입력해주세요.
+            </p>
+          ))}
 
         <div className="mt-3 grid grid-cols-2 gap-3">
           <div>

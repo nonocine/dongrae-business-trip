@@ -5,6 +5,7 @@ import { useMemo, useState } from "react";
 import EmployeeProfileForm from "@/app/(app)/hr/EmployeeProfileForm";
 import RecruitmentPostingsTab from "@/app/(app)/hr/RecruitmentPostingsTab";
 import PasswordMigrationCard from "@/app/(app)/hr/PasswordMigrationCard";
+import CurrentAssignment from "@/app/(app)/hr/CurrentAssignment";
 import RowChevron from "@/app/components/RowChevron";
 import type { Driver, EmployeeProfile } from "@/lib/supabase";
 import type { RecruitmentPostingAdmin } from "@/app/(app)/hr/actions";
@@ -29,10 +30,13 @@ export default function HrDashboard({
   initialTab = "records",
   canManageAuth,
   allowedTabs,
+  today,
 }: {
   drivers: Driver[];
   profiles: EmployeeProfile[];
   recruitmentPostings: RecruitmentPostingAdmin[];
+  // KST 오늘 "YYYY-MM-DD" — 현재 소속(발효된 발령) 판정 기준. 서버에서 계산.
+  today: string;
   initialTab?: TabKey;
   canManageAuth: boolean;
   // 이 사람에게 보일 탭 — 서버(app/hr/page.tsx)가 영역(scope)으로 정합니다.
@@ -53,6 +57,7 @@ export default function HrDashboard({
           drivers={drivers}
           profiles={profiles}
           canManageAuth={canManageAuth}
+          today={today}
         />
       )}
       {/* 계약서·증명서 탭은 "곧 제공될 예정입니다" 자리표시자였습니다.
@@ -198,10 +203,12 @@ function RecordsTab({
   drivers,
   profiles,
   canManageAuth,
+  today,
 }: {
   drivers: Driver[];
   profiles: EmployeeProfile[];
   canManageAuth: boolean;
+  today: string;
 }) {
   const [selectedId, setSelectedId] = useState("");
   // 재직/퇴사 필터 — 기본은 재직만 노출(퇴사자는 분리). 기록은 삭제하지 않고 보존.
@@ -308,6 +315,7 @@ function RecordsTab({
               profile={selectedProfile}
               canManageAuth={canManageAuth}
               knownDepartments={knownDepartments}
+              today={today}
               onDeleted={() => setSelectedId("")}
             />
           ) : (
@@ -335,6 +343,7 @@ function RecordsTab({
           statusOf={statusOf}
           selectedId={selectedId}
           onSelect={setSelectedId}
+          today={today}
         />
       </div>
     </div>
@@ -356,12 +365,14 @@ function EmployeeChecklistCard({
   statusOf,
   selectedId,
   onSelect,
+  today,
 }: {
   drivers: Driver[];
   profileMap: Map<string, EmployeeProfile>;
   statusOf: (driverId: string) => "active" | "resigned";
   selectedId: string;
   onSelect: (id: string) => void;
+  today: string;
 }) {
   const done = drivers.filter((d) => profileMap.has(d.id)).length;
   return (
@@ -394,17 +405,32 @@ function EmployeeChecklistCard({
                       : "hover:bg-surface"
                   } ${resigned ? "opacity-60" : ""}`}
                 >
-                  <span className="flex items-center gap-1.5">
+                  <span className="flex min-w-0 items-start gap-1.5">
                     <span aria-hidden>{has ? "✅" : "❌"}</span>
-                    <span className="font-medium text-ink">{d.name}</span>
-                    {d.rank && (
-                      <span className="text-xs text-ink-hint">{d.rank}</span>
-                    )}
-                    {resigned && (
-                      <span className="rounded-full bg-warning-soft px-1.5 py-0.5 text-[10px] font-semibold text-warning">
-                        퇴사
+                    <span className="min-w-0">
+                      <span className="flex items-center gap-1.5">
+                        <span className="font-medium text-ink">{d.name}</span>
+                        {d.rank && (
+                          <span
+                            className="text-xs text-ink-hint"
+                            title="계정 직급(drivers.rank) — 발령 직위와 별개"
+                          >
+                            {d.rank}
+                          </span>
+                        )}
+                        {resigned && (
+                          <span className="rounded-full bg-warning-soft px-1.5 py-0.5 text-[10px] font-semibold text-warning">
+                            퇴사
+                          </span>
+                        )}
                       </span>
-                    )}
+                      {/* 현재 소속(부서 · 직위 · 담당업무) — 인사발령 기준 */}
+                      <CurrentAssignment
+                        appointments={profileMap.get(d.id)?.appointments}
+                        today={today}
+                        variant="compact"
+                      />
+                    </span>
                   </span>
                   <span
                     className={`text-[10px] font-semibold ${

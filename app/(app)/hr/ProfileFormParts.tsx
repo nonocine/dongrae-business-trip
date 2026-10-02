@@ -939,6 +939,7 @@ function emptyAppointment(): EmployeeAppointment {
     type: "입사",
     title: "",
     department: "",
+    duty: "",
     effective_date: "",
     note: "",
   };
@@ -1045,6 +1046,20 @@ export function AppointmentTab({
                   placeholder="팀장"
                   className={`mt-0.5 font-semibold ${fieldCls}`}
                 />
+              </div>
+              <div>
+                <label className={subLabelCls}>담당업무 (선택)</label>
+                <input
+                  type="text"
+                  value={apt.duty}
+                  onChange={(e) => update(idx, { duty: e.target.value })}
+                  readOnly={readOnly}
+                  placeholder="시설관리, 회계, 청소년사업"
+                  className={`mt-0.5 ${fieldCls}`}
+                />
+                <p className="mt-0.5 text-[11px] text-ink-hint">
+                  증명서 「직위 및 담당업무」에 “팀장(시설관리)”처럼 함께 표기됩니다.
+                </p>
               </div>
               {/* DP-1. 부서 — 선택식 + 직접 입력 병행(오타·표기 흔들림 방지). */}
               <div>
