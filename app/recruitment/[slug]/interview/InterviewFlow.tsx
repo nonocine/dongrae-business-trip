@@ -27,6 +27,7 @@ import {
   type InterviewDoc,
 } from "./actions";
 import { INTERVIEW_ITEMS } from "@/lib/recruitmentScore";
+import { JudgeExitDone, type JudgeExit } from "./JudgeExit";
 
 // 태블릿 친화 — 큰 글씨, 큰 버튼, 터치 친화(나이 있는 심사위원 가독성 우선).
 const tabletInputCls =
@@ -66,10 +67,13 @@ type Step = "intro" | "list" | "score";
 export default function InterviewFlow({
   posting,
   internalJudge = null,
+  exit = { kind: "external" },
 }: {
   posting: InterviewPosting;
   // 서버에서 내부위원(로그인 직원)으로 인증된 경우의 신원. null 이면 외부위원 흐름.
   internalJudge?: { name: string } | null;
+  // 나가는 길(서버가 세션으로 판정). 기본은 외부위원 — 내부 링크 노출 없음.
+  exit?: JudgeExit;
 }) {
   const isInternal = internalJudge != null;
 
@@ -188,6 +192,7 @@ export default function InterviewFlow({
             candidates={candidates}
             allScored={allScored}
             onPick={pickCandidate}
+            exit={exit}
           />
         ))}
 
@@ -457,12 +462,14 @@ function ListStep({
   candidates,
   allScored,
   onPick,
+  exit,
 }: {
   posting: InterviewPosting;
   reviewerName: string;
   candidates: InterviewCandidate[];
   allScored: boolean;
   onPick: (c: InterviewCandidate) => void;
+  exit: JudgeExit;
 }) {
   return (
     <section className="rounded-2xl border-2 border-brand-blue bg-hr-bg p-5 shadow-sm sm:p-6 md:p-8">
@@ -538,6 +545,9 @@ function ListStep({
           ))}
         </ul>
       )}
+
+      {/* 전체 채점 완료 — 나가는 길(내부: 이동 버튼 / 외부: 창 닫기 안내). */}
+      {allScored && <JudgeExitDone exit={exit} />}
     </section>
   );
 }

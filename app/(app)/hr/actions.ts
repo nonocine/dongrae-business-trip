@@ -157,6 +157,14 @@ async function resolveHrAccess(): Promise<HrAccess | null> {
 
 // 페이지·액션 공용 게이트 — 미통과면 "/" 로 redirect.
 //   scope 를 주면 그 영역까지 확인합니다(인사 담당자가 채용 액션을 부르는 등).
+// 화면 분기용 — 해당 영역 접근 가능 여부만(redirect·throw 없음).
+//   예: 면접 채점 화면의 [채용 관리로] 버튼을 들어갈 수 있는 사람에게만 보이기.
+//   실제 차단은 그 화면의 requireHrAdmin(scope) 가 합니다.
+export async function hasHrScope(scope: HrScope): Promise<boolean> {
+  const ctx = await resolveHrAccess();
+  return !!ctx && ctx.scopes.includes(scope);
+}
+
 export async function requireHrAdmin(scope?: HrScope): Promise<HrAccess> {
   const ctx = await resolveHrAccess();
   if (!ctx) redirect("/");
