@@ -76,3 +76,36 @@ export async function loadTrainingRoster(): Promise<TrainingRosterEmployee[]> {
     resignationDate: r.resignationDate,
   }));
 }
+
+// =====================================================================
+// 개별 지정 대상자 — mandatory_training_targets 를 교육별 driver_id 집합으로.
+//   * target_scope='selected' 교육의 대상 판정(lib/trainings.trainingTargetState)
+//     에 실어 보내는 값입니다. 'all' 교육 id 를 섞어 넘겨도 무해합니다(행 없음).
+//   * 응답 1,000행 상한이 있어 range 로 끝까지 읽습니다(조용히 잘리면 지정자가
+//     대상에서 빠집니다).
+// =====================================================================
+export async function loadTrainingTargets(
+  trainingIds: readonly string[],
+): Promise<Map<string, Set<string>>> {
+  const out = new Map<string, Set<string>>();
+  const ids = [...new Set(trainingIds.filter(Boolean))];
+  if (ids.length === 0) return out;
+  const PAGE = 1000;
+  for (let from = 0; ; from += PAGE) {
+    const { data, error } = await supabaseAdmin
+      .from("mandatory_training_targets")
+      .select("training_id, driver_id")
+      .in("training_id", ids)
+      .order("id")
+      .range(from, from + PAGE - 1);
+    if (error) throw new Error(error.message);
+    for (const r of (data ?? []) as Record<string, unknown>[]) {
+      const tid = String(r.training_id ?? "");
+      const set = out.get(tid) ?? new Set<string>();
+      set.add(String(r.driver_id ?? ""));
+      out.set(tid, set);
+    }
+    if (!data || data.length < PAGE) break;
+  }
+  return out;
+}

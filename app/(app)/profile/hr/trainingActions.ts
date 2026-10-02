@@ -14,11 +14,12 @@ import {
   sortTrainings,
   daysUntil,
   kstTodayYmd,
-  isTargetOn,
-  trainingBaseYmd,
+  isTrainingTarget,
+  trainingTargetState,
   CERT_EXT,
   CERT_MAX_BYTES,
 } from "@/lib/trainings";
+import { loadTrainingTargets } from "@/lib/trainingRoster";
 
 // =====================================================================
 // 직원 본인(self) 의무교육 액션 — /profile/hr "내 의무교육" + 대시보드 카드.
@@ -84,10 +85,11 @@ export async function getMyTrainings(): Promise<MyTrainings | null> {
       .eq("driver_id", driver.id)
       .maybeSingle(),
   ]);
-  // 대상자 판정 — 실시일(held_on ?? due_date)에 재직 중이던 교육만 내 의무입니다.
-  //   판정 규칙은 lib/trainings 단일 출처(현황판·D-7 독촉과 동일).
+  // 대상자 판정 — 판정 규칙은 lib/trainings.trainingTargetState 단일 출처
+  //   (현황판·D-7 독촉과 동일). 개별 지정 교육은 지정된 경우에만 내 의무입니다.
   const p = (prof ?? {}) as Record<string, unknown>;
   const span = {
+    driver_id: driver.id,
     joinDate: (p.join_date as string | null) ?? null,
     resignationDate: (p.resignation_date as string | null) ?? null,
   };
@@ -96,14 +98,19 @@ export async function getMyTrainings(): Promise<MyTrainings | null> {
   );
   if (allTrainings.length === 0) return { year, today, items: [] };
 
-  const { data: comps } = await supabaseAdmin
-    .from("training_completions")
-    .select("training_id, completed_at, certificate_path")
-    .eq("driver_id", driver.id)
-    .in(
-      "training_id",
-      allTrainings.map((t) => t.id)
-    );
+  const [{ data: comps }, targetsByTraining] = await Promise.all([
+    supabaseAdmin
+      .from("training_completions")
+      .select("training_id, completed_at, certificate_path")
+      .eq("driver_id", driver.id)
+      .in(
+        "training_id",
+        allTrainings.map((t) => t.id)
+      ),
+    loadTrainingTargets(
+      allTrainings.filter((t) => t.target_scope === "selected").map((t) => t.id)
+    ),
+  ]);
   const doneMap = new Map<
     string,
     { completed_at: string | null; has_cert: boolean }
@@ -121,7 +128,9 @@ export async function getMyTrainings(): Promise<MyTrainings | null> {
   // 대상 아닌 교육은 목록에서 제외 — 다만 이미 이수 기록이 있으면 남겨서
   //   본인이 올린 수료증을 계속 열람할 수 있게 합니다(미이수로는 잡히지 않음).
   const trainings = allTrainings.filter(
-    (t) => isTargetOn(span, trainingBaseYmd(t)) || doneMap.has(t.id),
+    (t) =>
+      isTrainingTarget(t, span, targetsByTraining.get(t.id)) ||
+      doneMap.has(t.id),
   );
 
   const items: MyTrainingItem[] = trainings.map((t) => {
@@ -157,7 +166,7 @@ export async function uploadMyCertificate(
     const [{ data: tr }, { data: prof }, { data: prev }] = await Promise.all([
       supabaseAdmin
         .from("mandatory_trainings")
-        .select("id, held_on, due_date")
+        .select("id, held_on, due_date, target_scope")
         .eq("id", trainingId)
         .maybeSingle(),
       supabaseAdmin
@@ -173,23 +182,34 @@ export async function uploadMyCertificate(
         .maybeSingle(),
     ]);
     if (!tr) return { ok: false, message: "존재하지 않는 교육입니다." };
-    // 퇴사 후 실시된 교육만 막습니다(입사 전 교육은 대상 — before-join 제거).
-    //   이미 올린 기록이 있으면 재업로드는 허용하고, 새 이수 처리만 막습니다.
-    const p = (prof ?? {}) as Record<string, unknown>;
-    if (
-      !prev &&
-      !isTargetOn(
+    // 대상 아닌 교육(퇴사 후 교육 / 개별 지정 교육의 비지정자)은 새 이수
+    //   처리를 막습니다. 입사 전 교육은 대상입니다(before-join 제거).
+    //   이미 올린 기록이 있으면 재업로드는 허용합니다.
+    if (!prev) {
+      const p = (prof ?? {}) as Record<string, unknown>;
+      const rule = tr as Record<string, string | null>;
+      const targets =
+        rule.target_scope === "selected"
+          ? (await loadTrainingTargets([trainingId])).get(trainingId)
+          : undefined;
+      const state = trainingTargetState(
+        rule,
         {
+          driver_id: driver.id,
           joinDate: (p.join_date as string | null) ?? null,
           resignationDate: (p.resignation_date as string | null) ?? null,
         },
-        trainingBaseYmd(tr as Record<string, string | null>),
-      )
-    ) {
-      return {
-        ok: false,
-        message: "퇴사 후에 실시된 교육이라 이수 대상이 아닙니다. (퇴사 후 교육)",
-      };
+        targets,
+      );
+      if (!state.isTarget) {
+        return {
+          ok: false,
+          message:
+            state.reason === "not-selected"
+              ? "이 교육의 대상자로 지정되어 있지 않습니다. 담당자에게 문의해주세요."
+              : "퇴사 후에 실시된 교육이라 이수 대상이 아닙니다. (퇴사 후 교육)",
+        };
+      }
     }
 
     const file = formData.get("file");

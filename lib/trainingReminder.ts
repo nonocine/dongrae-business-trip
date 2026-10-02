@@ -20,11 +20,11 @@ import {
   daysUntil,
   toTraining,
   cellKey,
-  isTargetOn,
-  trainingBaseYmd,
+  isTrainingTarget,
 } from "@/lib/trainings";
 import {
   loadTrainingRoster,
+  loadTrainingTargets,
   type TrainingRosterEmployee,
 } from "@/lib/trainingRoster";
 import {
@@ -319,10 +319,18 @@ export async function runTrainingReminder(): Promise<TrainingReminderSummary> {
   if (roster.length === 0) return crimeOnly();
 
   const trainingIds = dueTrainings.map((x) => x.t.id);
-  const { data: comps, error: cErr } = await supabaseAdmin
-    .from("training_completions")
-    .select("training_id, driver_id")
-    .in("training_id", trainingIds);
+  const [{ data: comps, error: cErr }, targetsByTraining] = await Promise.all([
+    supabaseAdmin
+      .from("training_completions")
+      .select("training_id, driver_id")
+      .in("training_id", trainingIds),
+    // 개별 지정 교육(target_scope=selected)의 대상자 — 지정된 사람만 독촉합니다.
+    loadTrainingTargets(
+      dueTrainings
+        .filter((x) => x.t.target_scope === "selected")
+        .map((x) => x.t.id),
+    ),
+  ]);
   if (cErr) throw new Error(cErr.message);
   const done = new Set<string>();
   for (const c of comps ?? []) {
@@ -337,9 +345,9 @@ export async function runTrainingReminder(): Promise<TrainingReminderSummary> {
   const adminLines: string[] = [];
   for (const emp of roster) {
     for (const { t, dday } of dueTrainings) {
-      // 퇴사 후에 실시된 교육은 대상이 아닙니다.
+      // 대상 아님(퇴사 후 교육 / 개별 지정 교육의 비지정자)
       //   → DM·관리자 요약 어느 쪽에도 넣지 않습니다.
-      if (!isTargetOn(emp, trainingBaseYmd(t))) continue;
+      if (!isTrainingTarget(t, emp, targetsByTraining.get(t.id))) continue;
       if (done.has(cellKey(t.id, emp.driver_id))) continue;
 
       // 관리자 요약과 DM 을 분리합니다 — 목적이 다릅니다.

@@ -47,6 +47,7 @@ export const BACKUP_TABLES: readonly string[] = [
   // --- 교육 ---
   "mandatory_trainings",
   "training_completions",
+  "mandatory_training_targets",
   "staff_training_results",
   // --- 채용 ---
   "recruitment_postings",

@@ -17,14 +17,19 @@ import {
   sortTrainings,
   daysUntil,
   kstTodayYmd,
-  isTargetOn,
-  trainingBaseYmd,
+  isTrainingTarget,
+  trainingTargetState,
+  normalizeTargetScope,
   CERT_EXT,
   CERT_MAX_BYTES,
   cellKey,
   type MandatoryTraining,
+  type TargetScope,
 } from "@/lib/trainings";
-import { loadTrainingRoster } from "@/lib/trainingRoster";
+import {
+  loadTrainingRoster,
+  loadTrainingTargets,
+} from "@/lib/trainingRoster";
 import {
   runTrainingReminder,
   type TrainingReminderSummary,
@@ -91,7 +96,18 @@ export type TrainingInput = {
   location?: string | null;
   organizer?: string | null;
   hours?: string | null;
+  // 교육 대상 — all(재직자 전원, 기본) / selected(target_ids 만).
+  //   생략하면 all 로 저장합니다(기존 호출부 호환).
+  target_scope?: TargetScope;
+  target_ids?: string[] | null;
+  // 이수 기록이 있는 사람이 대상에서 빠지는 것을 담당자가 확인했는지.
+  //   false 면 서버가 저장하지 않고 excluded 명단을 돌려줍니다(화면에서 확인 후 재전송).
+  confirm_exclusion?: boolean;
 };
+
+export type SaveTrainingResult =
+  | { ok: true; id: string }
+  | { ok: false; message: string; excluded?: string[] };
 
 function cleanStr(v: string | null | undefined): string | null {
   const s = (v ?? "").trim();
@@ -100,9 +116,9 @@ function cleanStr(v: string | null | undefined): string | null {
 
 export async function saveTraining(
   input: TrainingInput
-): Promise<{ ok: true; id: string } | { ok: false; message: string }> {
+): Promise<SaveTrainingResult> {
   try {
-    await requireTrainingAccess();
+    const ctx = await requireTrainingAccess();
 
     const year = Number(input.year);
     if (!Number.isInteger(year) || year < 2000 || year > 2100) {
@@ -136,6 +152,38 @@ export async function saveTraining(
       order = max + 1;
     }
 
+    // 교육 대상 — 개별 지정이면 명단 검증(1명 이상, 실존 직원만).
+    const targetScope = normalizeTargetScope(input.target_scope);
+    const targetIds = [
+      ...new Set((input.target_ids ?? []).map((v) => String(v).trim()).filter(Boolean)),
+    ];
+    if (targetScope === "selected") {
+      if (targetIds.length === 0) {
+        return { ok: false, message: "교육 대상 직원을 1명 이상 선택해주세요." };
+      }
+      const { data: drv, error: dErr } = await supabaseAdmin
+        .from("drivers")
+        .select("id")
+        .in("id", targetIds);
+      if (dErr) throw new Error(dErr.message);
+      if ((drv ?? []).length !== targetIds.length) {
+        return { ok: false, message: "존재하지 않는 직원이 대상에 포함되어 있습니다." };
+      }
+    }
+
+    // 이수 기록이 있는 사람이 대상에서 빠지면 확인을 받습니다(막지는 않음).
+    //   기록 자체는 지우지 않습니다 — 현황판에 ✓(대상 아님·기록 보존)로 남습니다.
+    if (input.id && targetScope === "selected" && !input.confirm_exclusion) {
+      const excluded = await completedButExcluded(input.id, new Set(targetIds));
+      if (excluded.length > 0) {
+        return {
+          ok: false,
+          message: `이수 기록이 있는 ${excluded.length}명이 대상에서 제외됩니다.`,
+          excluded,
+        };
+      }
+    }
+
     const row = {
       year,
       name,
@@ -148,6 +196,7 @@ export async function saveTraining(
       location: cleanStr(input.location),
       organizer: cleanStr(input.organizer),
       hours: cleanStr(input.hours),
+      target_scope: targetScope,
     };
 
     if (input.id) {
@@ -156,6 +205,7 @@ export async function saveTraining(
         .update(row)
         .eq("id", input.id);
       if (error) throw new Error(error.message);
+      await syncTrainingTargets(input.id, targetScope, targetIds, ctx.name);
       revalidatePath("/hr/trainings");
       return { ok: true, id: input.id };
     }
@@ -166,14 +216,116 @@ export async function saveTraining(
       .select("id")
       .single();
     if (error) throw new Error(error.message);
+    const newId = String((data as { id: unknown }).id);
+    await syncTrainingTargets(newId, targetScope, targetIds, ctx.name);
     revalidatePath("/hr/trainings");
-    return { ok: true, id: String((data as { id: unknown }).id) };
+    return { ok: true, id: newId };
   } catch (e) {
     return {
       ok: false,
       message: e instanceof Error ? e.message : "저장 중 오류가 발생했습니다.",
     };
   }
+}
+
+// 지정 대상자 명단을 저장값과 맞춥니다.
+//   * all      → 지정 행을 모두 지웁니다(전원 자동 판정이라 명단이 무의미).
+//   * selected → 빠진 사람만 지우고 새로 든 사람만 넣습니다. 그대로 남는
+//     사람의 assigned_at·assigned_by 는 보존됩니다.
+async function syncTrainingTargets(
+  trainingId: string,
+  scope: TargetScope,
+  ids: string[],
+  by: string,
+): Promise<void> {
+  if (scope === "all") {
+    const { error } = await supabaseAdmin
+      .from("mandatory_training_targets")
+      .delete()
+      .eq("training_id", trainingId);
+    if (error) throw new Error(`대상자 정리 실패: ${error.message}`);
+    return;
+  }
+  const existing =
+    (await loadTrainingTargets([trainingId])).get(trainingId) ?? new Set();
+  const next = new Set(ids);
+  const toDel = [...existing].filter((d) => !next.has(d));
+  const toAdd = ids.filter((d) => !existing.has(d));
+  if (toDel.length > 0) {
+    const { error } = await supabaseAdmin
+      .from("mandatory_training_targets")
+      .delete()
+      .eq("training_id", trainingId)
+      .in("driver_id", toDel);
+    if (error) throw new Error(`대상자 저장 실패: ${error.message}`);
+  }
+  if (toAdd.length > 0) {
+    const { error } = await supabaseAdmin
+      .from("mandatory_training_targets")
+      .upsert(
+        toAdd.map((driver_id) => ({
+          training_id: trainingId,
+          driver_id,
+          assigned_by: by,
+        })),
+        { onConflict: "training_id,driver_id", ignoreDuplicates: true },
+      );
+    if (error) throw new Error(`대상자 저장 실패: ${error.message}`);
+  }
+}
+
+// 새 지정 명단(nextIds)으로 바꾸면 "지금 대상이면서 이수 기록이 있는데 빠지는"
+//   직원 이름 목록. 지금 대상 = 저장된 대상 범위 그대로의 판정(공용 함수).
+async function completedButExcluded(
+  trainingId: string,
+  nextIds: ReadonlySet<string>,
+): Promise<string[]> {
+  const [{ data: tr }, { data: comps, error: cErr }] = await Promise.all([
+    supabaseAdmin
+      .from("mandatory_trainings")
+      .select("held_on, due_date, target_scope")
+      .eq("id", trainingId)
+      .maybeSingle(),
+    supabaseAdmin
+      .from("training_completions")
+      .select("driver_id")
+      .eq("training_id", trainingId),
+  ]);
+  if (cErr) throw new Error(cErr.message);
+  if (!tr) return [];
+  const doneIds = [
+    ...new Set(
+      (comps ?? []).map((c) => String((c as { driver_id: unknown }).driver_id ?? "")),
+    ),
+  ].filter((d) => d && !nextIds.has(d));
+  if (doneIds.length === 0) return [];
+
+  const rule = tr as Record<string, string | null>;
+  const [roster, targets] = await Promise.all([
+    loadTrainingRoster(),
+    normalizeTargetScope(rule.target_scope) === "selected"
+      ? loadTrainingTargets([trainingId]).then((m) => m.get(trainingId))
+      : Promise.resolve(undefined),
+  ]);
+  const byId = new Map(roster.map((e) => [e.driver_id, e]));
+  const excluded = doneIds.filter((d) => {
+    // 지정 명단에 있었던 사람은 재직 명단과 무관하게 "지금 대상"입니다.
+    if (targets?.has(d)) return true;
+    const emp = byId.get(d);
+    return !!emp && isTrainingTarget(rule, emp, targets);
+  });
+  if (excluded.length === 0) return [];
+  const { data: drv } = await supabaseAdmin
+    .from("drivers")
+    .select("id, name")
+    .in("id", excluded);
+  const nameById = new Map(
+    (drv ?? []).map((d) => [
+      String((d as { id: unknown }).id),
+      String((d as { name: unknown }).name ?? ""),
+    ]),
+  );
+  return excluded.map((d) => nameById.get(d) || "(이름 없음)");
 }
 
 // 교육 삭제 — 이수기록(training_completions)은 FK CASCADE 로 함께 삭제됩니다.
@@ -216,7 +368,7 @@ export async function copyTrainingsFromYear(
   toYear: number
 ): Promise<{ ok: true; copied: number } | { ok: false; message: string }> {
   try {
-    await requireTrainingAccess();
+    const ctx = await requireTrainingAccess();
     const from = Number(fromYear);
     const to = Number(toYear);
     if (!Number.isInteger(to) || to < 2000 || to > 2100) {
@@ -256,14 +408,51 @@ export async function copyTrainingsFromYear(
         location: t.location,
         organizer: t.organizer,
         hours: t.hours,
+        // 대상 범위도 복사합니다 — 개별 지정 교육(소방안전관리자 등)은 해가
+        //   바뀌어도 대개 같은 사람이 대상이라, 아래에서 지정 명단도 함께 옮깁니다.
+        target_scope: t.target_scope,
       }));
     if (rows.length === 0) {
       return { ok: false, message: "복사할 새 교육이 없습니다(이미 모두 존재)." };
     }
-    const { error } = await supabaseAdmin
+    const { data: inserted, error } = await supabaseAdmin
       .from("mandatory_trainings")
-      .insert(rows);
+      .insert(rows)
+      .select("id, name");
     if (error) throw new Error(error.message);
+
+    // 개별 지정 교육의 대상자 명단 복사(이름으로 원본↔사본 매칭, UNIQUE(year,name)).
+    const srcByName = new Map(
+      src
+        .map((r) => toTraining(r as Record<string, unknown>))
+        .filter((t) => t.target_scope === "selected")
+        .map((t) => [t.name, t.id] as const),
+    );
+    if (srcByName.size > 0) {
+      const srcTargets = await loadTrainingTargets([...srcByName.values()]);
+      const targetRows: {
+        training_id: string;
+        driver_id: string;
+        assigned_by: string;
+      }[] = [];
+      for (const r of (inserted ?? []) as { id: unknown; name: unknown }[]) {
+        const srcId = srcByName.get(String(r.name ?? ""));
+        const ids = srcId ? srcTargets.get(srcId) : undefined;
+        for (const driver_id of ids ?? []) {
+          targetRows.push({
+            training_id: String(r.id),
+            driver_id,
+            assigned_by: ctx.name,
+          });
+        }
+      }
+      if (targetRows.length > 0) {
+        const { error: tErr } = await supabaseAdmin
+          .from("mandatory_training_targets")
+          .insert(targetRows);
+        if (tErr) throw new Error(`대상자 복사 실패: ${tErr.message}`);
+      }
+    }
     revalidatePath("/hr/trainings");
     return { ok: true, copied: rows.length };
   } catch (e) {
@@ -277,7 +466,7 @@ export async function copyTrainingsFromYear(
 // =====================================================================
 // 현황판 매트릭스 — 행=재직 직원, 열=활성 교육.
 // =====================================================================
-// 현황판 행 — 대상 판정을 클라이언트에서도 같은 규칙(lib/trainings.isTargetOn)으로
+// 현황판 행 — 대상 판정을 클라이언트에서도 같은 규칙(lib/trainings.trainingTargetState)으로
 //   할 수 있게 입사일·퇴사일을 함께 내려보냅니다(HR 전용 화면).
 export type RosterEmployee = {
   driver_id: string;
@@ -298,6 +487,9 @@ export type TrainingMatrix = {
   trainings: TrainingColumn[];
   employees: RosterEmployee[];
   completions: MatrixCompletion[];
+  // 개별 지정 교육(target_scope=selected)의 지정 대상자 — training_id → driver_id[].
+  //   활성·비활성 모두 실어 보냅니다(수정 폼이 비활성 교육의 명단도 채워야 함).
+  targets: Record<string, string[]>;
 };
 
 // 재직자 명단 — 규칙은 lib/trainingRoster 단일 출처(D-7 독촉과 공유).
@@ -316,15 +508,26 @@ export async function getTrainingMatrix(year: number): Promise<TrainingMatrix> {
   await requireTrainingAccess();
   const today = kstTodayYmd();
 
-  const [trainingsRaw, employees] = await Promise.all([
+  const [trainingsRaw, employees, selectedRaw] = await Promise.all([
     supabaseAdmin
       .from("mandatory_trainings")
       .select("*")
       .eq("year", year)
       .eq("is_active", true),
     listActiveRoster(),
+    supabaseAdmin
+      .from("mandatory_trainings")
+      .select("id")
+      .eq("year", year)
+      .eq("target_scope", "selected"),
   ]);
   if (trainingsRaw.error) throw new Error(trainingsRaw.error.message);
+  if (selectedRaw.error) throw new Error(selectedRaw.error.message);
+  const targetSets = await loadTrainingTargets(
+    (selectedRaw.data ?? []).map((r) => String((r as { id: unknown }).id)),
+  );
+  const targets: Record<string, string[]> = {};
+  for (const [tid, set] of targetSets) targets[tid] = [...set];
 
   const trainings = sortTrainings(
     (trainingsRaw.data ?? []).map((r) => toTraining(r as Record<string, unknown>))
@@ -350,12 +553,12 @@ export async function getTrainingMatrix(year: number): Promise<TrainingMatrix> {
     });
   }
 
-  return { today, trainings, employees, completions };
+  return { today, trainings, employees, completions, targets };
 }
 
 // 대시보드 관리 카드용 요약 — 올해 활성 교육 중 "대상"인 (교육×직원) 셀만 집계.
-//   * 대상 = 재직 직원 전원(lib/trainings). 입사일과 무관하며, 퇴사 후에
-//     실시된 교육만 분모에서 빠집니다.
+//   * 대상 = lib/trainings.trainingTargetState. 'all' 교육은 재직 직원 전원
+//     (퇴사 후 교육만 제외), 'selected' 교육은 지정된 사람만.
 //   * 접근 없으면 null(카드 미노출).
 export async function getTrainingsAdminSummary(): Promise<
   { year: number; totalNotMet: number } | null
@@ -367,29 +570,33 @@ export async function getTrainingsAdminSummary(): Promise<
   const [{ data: trs }, employees] = await Promise.all([
     supabaseAdmin
       .from("mandatory_trainings")
-      .select("id, held_on, due_date")
+      .select("id, held_on, due_date, target_scope")
       .eq("year", year)
       .eq("is_active", true),
     listActiveRoster(),
   ]);
   const trainings = ((trs ?? []) as Record<string, unknown>[]).map((r) => ({
     id: String(r.id ?? ""),
-    baseYmd: trainingBaseYmd({
-      held_on: (r.held_on as string | null) ?? null,
-      due_date: (r.due_date as string | null) ?? null,
-    }),
+    held_on: (r.held_on as string | null) ?? null,
+    due_date: (r.due_date as string | null) ?? null,
+    target_scope: normalizeTargetScope(r.target_scope),
   }));
   if (trainings.length === 0 || employees.length === 0) {
     return { year, totalNotMet: 0 };
   }
 
-  const { data: comps } = await supabaseAdmin
-    .from("training_completions")
-    .select("training_id, driver_id")
-    .in(
-      "training_id",
-      trainings.map((t) => t.id),
-    );
+  const [{ data: comps }, targetsByTraining] = await Promise.all([
+    supabaseAdmin
+      .from("training_completions")
+      .select("training_id, driver_id")
+      .in(
+        "training_id",
+        trainings.map((t) => t.id),
+      ),
+    loadTrainingTargets(
+      trainings.filter((t) => t.target_scope === "selected").map((t) => t.id),
+    ),
+  ]);
   const roster = new Set(employees.map((e) => e.driver_id));
   const done = new Set<string>();
   for (const c of comps ?? []) {
@@ -401,7 +608,8 @@ export async function getTrainingsAdminSummary(): Promise<
   let totalNotMet = 0;
   for (const t of trainings) {
     for (const e of employees) {
-      if (!isTargetOn(e, t.baseYmd)) continue; // 대상 아님 → 미이수로 세지 않음
+      // 대상 아님 → 미이수로 세지 않음
+      if (!isTrainingTarget(t, e, targetsByTraining.get(t.id))) continue;
       if (!done.has(cellKey(t.id, e.driver_id))) totalNotMet += 1;
     }
   }
@@ -430,7 +638,7 @@ export async function adminUploadCertificate(
       await Promise.all([
         supabaseAdmin
           .from("mandatory_trainings")
-          .select("id, held_on, due_date")
+          .select("id, held_on, due_date, target_scope")
           .eq("id", trainingId)
           .maybeSingle(),
         supabaseAdmin
@@ -453,26 +661,34 @@ export async function adminUploadCertificate(
     if (!tr) return { ok: false, message: "존재하지 않는 교육입니다." };
     if (!drv) return { ok: false, message: "존재하지 않는 직원입니다." };
 
-    // 대상자 판정 — 퇴사 후 실시된 교육만 "새" 이수 처리를 막습니다.
-    //   입사 전 교육은 이제 대상이므로 거부하지 않습니다(before-join 제거).
+    // 대상자 판정 — 대상 아닌 셀(퇴사 후 교육 / 개별 지정 교육의 비지정자)의
+    //   "새" 이수 처리를 막습니다. 입사 전 교육은 대상입니다(before-join 제거).
     //   이미 기록이 있는 셀(과거에 올린 수료증)의 재업로드는 그대로 허용합니다.
-    const p = (prof ?? {}) as Record<string, unknown>;
-    const baseYmd = trainingBaseYmd(tr as Record<string, string | null>);
-    if (
-      !prev &&
-      !isTargetOn(
+    if (!prev) {
+      const p = (prof ?? {}) as Record<string, unknown>;
+      const rule = tr as Record<string, string | null>;
+      const targets =
+        normalizeTargetScope(rule.target_scope) === "selected"
+          ? (await loadTrainingTargets([trainingId])).get(trainingId)
+          : undefined;
+      const state = trainingTargetState(
+        rule,
         {
+          driver_id: driverId,
           joinDate: (p.join_date as string | null) ?? null,
           resignationDate: (p.resignation_date as string | null) ?? null,
         },
-        baseYmd,
-      )
-    ) {
-      return {
-        ok: false,
-        message:
-          "퇴사 후에 실시된 교육이라 이수 처리할 수 없습니다. (퇴사 후 교육)",
-      };
+        targets,
+      );
+      if (!state.isTarget) {
+        return {
+          ok: false,
+          message:
+            state.reason === "not-selected"
+              ? "이 교육의 대상자로 지정되지 않은 직원입니다. 교육 수정에서 대상에 추가한 뒤 올려주세요."
+              : "퇴사 후에 실시된 교육이라 이수 처리할 수 없습니다. (퇴사 후 교육)",
+        };
+      }
     }
 
     const file = formData.get("file");

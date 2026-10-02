@@ -4,7 +4,8 @@
 //     단일 출처. 여기에는 DB 접근 코드를 두지 않습니다(순수 함수·상수만).
 //   * D-day 는 하이드레이션 불일치를 막기 위해 항상 "서버에서" 계산해
 //     숫자로 클라이언트에 내려보냅니다(kstTodayYmd 는 서버에서만 호출).
-//   * 테이블: mandatory_trainings / training_completions (RLS 0개 → service_role).
+//   * 테이블: mandatory_trainings / training_completions /
+//     mandatory_training_targets(개별 지정 대상자) — 모두 service_role 경유.
 // =====================================================================
 
 // mandatory_trainings 한 행.
@@ -23,7 +24,12 @@ export type MandatoryTraining = {
   location: string | null;
   organizer: string | null;
   hours: string | null;
+  // 교육 대상 범위 — 'all'(재직자 전원 자동 판정) / 'selected'(개별 지정자만).
+  //   selected 의 명단은 mandatory_training_targets 에 있습니다.
+  target_scope: TargetScope;
 };
+
+export type TargetScope = "all" | "selected";
 
 // training_completions 한 행.
 export type TrainingCompletion = {
@@ -107,6 +113,7 @@ export type EmploymentSpan = {
 // 'before-join'(입사 전 교육 → 대상 아님)은 제거했습니다. 위 주석 참고.
 export type TargetReason =
   | "target" // 대상
+  | "not-selected" // 개별 지정 교육인데 지정되지 않음 → 대상 아님
   | "after-resign" // 퇴사 후 교육 → 대상 아님
   | "no-join-date" // 입사일 미기재 → 대상(판정에는 영향 없음, 인사기록 보완 안내용)
   | "no-base-date"; // 실시일·이수기한 둘 다 없음 → 대상 유지(안전측)
@@ -144,6 +151,48 @@ export function isTargetOn(
   return targetStateOn(span, baseYmd).isTarget;
 }
 
+// =====================================================================
+// 교육 단위 대상 판정 — 대상 범위(target_scope)까지 반영한 "최종" 판정.
+//   * 현황판·대시보드 카드·D-7 독촉·마이페이지·업로드 가드가 전부 이 함수를
+//     호출합니다(위 targetStateOn 을 직접 부르지 마세요 — 개별 지정 교육에서
+//     숫자가 어긋납니다).
+//   * 'all'      → 종전 그대로(실시일 기준 재직자 판정, targetStateOn).
+//   * 'selected' → mandatory_training_targets 에 지정된 사람만. 담당자가 명시적
+//     으로 고른 명단이 곧 대상이므로 재직 구간 판정은 하지 않습니다.
+//   * selectedIds 는 그 교육의 지정자 driver_id 집합. 'selected' 인데 집합이
+//     없으면(로드 누락) 아무도 대상이 아닙니다 — 호출부가 반드시 실어야 합니다.
+// =====================================================================
+export type TrainingTargetRule = {
+  held_on?: string | null;
+  due_date?: string | null;
+  target_scope?: string | null;
+};
+
+export function normalizeTargetScope(v: unknown): TargetScope {
+  return v === "selected" ? "selected" : "all";
+}
+
+export function trainingTargetState(
+  t: TrainingTargetRule,
+  emp: EmploymentSpan & { driver_id: string },
+  selectedIds: ReadonlySet<string> | null | undefined,
+): { isTarget: boolean; reason: TargetReason } {
+  if (normalizeTargetScope(t.target_scope) === "selected") {
+    return selectedIds?.has(emp.driver_id)
+      ? { isTarget: true, reason: "target" }
+      : { isTarget: false, reason: "not-selected" };
+  }
+  return targetStateOn(emp, trainingBaseYmd(t));
+}
+
+export function isTrainingTarget(
+  t: TrainingTargetRule,
+  emp: EmploymentSpan & { driver_id: string },
+  selectedIds: ReadonlySet<string> | null | undefined,
+): boolean {
+  return trainingTargetState(t, emp, selectedIds).isTarget;
+}
+
 // 대상 아닌 셀에 붙일 짧은 사유 문구(현황판 툴팁).
 export function targetReasonLabel(
   reason: TargetReason,
@@ -153,6 +202,8 @@ export function targetReasonLabel(
   switch (reason) {
     case "after-resign":
       return `대상 아님 — 퇴사 후 교육(${on})`;
+    case "not-selected":
+      return "대상 아님 — 대상자로 지정되지 않은 교육";
     case "no-join-date":
       return "입사일 미기재 — 대상입니다(인사기록 확인 필요)";
     case "no-base-date":
@@ -186,6 +237,7 @@ export function toTraining(raw: Record<string, unknown>): MandatoryTraining {
     location: (raw.location as string | null) ?? null,
     organizer: (raw.organizer as string | null) ?? null,
     hours: (raw.hours as string | null) ?? null,
+    target_scope: normalizeTargetScope(raw.target_scope),
   };
 }
 

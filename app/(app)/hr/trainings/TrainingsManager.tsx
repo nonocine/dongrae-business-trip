@@ -13,12 +13,15 @@ import {
   runTrainingReminderNow,
   type TrainingMatrix,
   type MatrixCompletion,
+  type RosterEmployee,
+  type TrainingInput,
 } from "@/app/(app)/hr/trainings/actions";
-import type { MandatoryTraining } from "@/lib/trainings";
+import type { MandatoryTraining, TargetScope } from "@/lib/trainings";
 import {
   ddayLabel,
   cellKey,
   targetStateOn,
+  trainingTargetState,
   targetReasonLabel,
   trainingBaseYmd,
   CERT_ACCEPT,
@@ -33,6 +36,7 @@ import {
   noticeSuccess,
   badgeSuccess,
   badgeNeutral,
+  badgeNavy,
 } from "@/lib/ui";
 
 const inCls =
@@ -56,6 +60,10 @@ type EditFields = {
   location: string;
   organizer: string;
   hours: string;
+  target_scope: TargetScope;
+  // 개별 지정 대상자 driver_id. 재직 명단에 없는 기존 지정자(퇴사 등)도
+  //   그대로 들고 있다가 저장 시 함께 보냅니다(조용히 빠지지 않게).
+  target_ids: string[];
 };
 
 export default function TrainingsManager({
@@ -94,6 +102,9 @@ export default function TrainingsManager({
   const [addLocation, setAddLocation] = useState("");
   const [addOrganizer, setAddOrganizer] = useState("");
   const [addHours, setAddHours] = useState("");
+  // 교육 대상 — 기본은 전체 직원.
+  const [addScope, setAddScope] = useState<TargetScope>("all");
+  const [addTargets, setAddTargets] = useState<string[]>([]);
 
   // 수정 중인 교육.
   const [editId, setEditId] = useState<string | null>(null);
@@ -171,17 +182,25 @@ export default function TrainingsManager({
     return m;
   }, [matrix.completions]);
 
+  // 개별 지정 교육의 지정자 집합 — training_id → Set<driver_id>.
+  const targetSets = useMemo(() => {
+    const m = new Map<string, Set<string>>();
+    for (const [tid, ids] of Object.entries(matrix.targets ?? {}))
+      m.set(tid, new Set(ids));
+    return m;
+  }, [matrix.targets]);
+
   // 셀별 대상 여부 — 판정은 서버(대시보드·D-7)와 같은 lib/trainings 함수로.
   //   대상 아닌 셀은 "미이수"로 세지 않고 표에서도 "—" 로 표시합니다.
   const targetMap = useMemo(() => {
-    const m = new Map<string, ReturnType<typeof targetStateOn>>();
+    const m = new Map<string, ReturnType<typeof trainingTargetState>>();
     for (const t of matrix.trainings) {
-      const base = trainingBaseYmd(t);
+      const sel = targetSets.get(t.id);
       for (const e of matrix.employees)
-        m.set(cellKey(t.id, e.driver_id), targetStateOn(e, base));
+        m.set(cellKey(t.id, e.driver_id), trainingTargetState(t, e, sel));
     }
     return m;
-  }, [matrix.trainings, matrix.employees]);
+  }, [matrix.trainings, matrix.employees, targetSets]);
 
   // 교육별 대상 인원 / 미이수 인원.
   const statsByTraining = useMemo(() => {
@@ -223,14 +242,43 @@ export default function TrainingsManager({
     });
   }
 
+  // 저장 — 이수 기록이 있는 사람이 대상에서 빠지면 서버가 명단을 돌려주고,
+  //   확인을 받은 뒤 confirm_exclusion 으로 다시 보냅니다(막지는 않음).
+  async function saveWithConfirm(
+    input: TrainingInput
+  ): Promise<{ ok: true } | { ok: false; message: string | null }> {
+    let res = await saveTraining(input);
+    if (!res.ok && res.excluded && res.excluded.length > 0) {
+      const go = confirm(
+        `이수 기록이 있는 ${res.excluded.length}명이 대상에서 제외됩니다.\n(${res.excluded.join(", ")})\n\n이수 기록·수료증은 지워지지 않고 현황판에 “대상 아님(기록 보존)”으로 남습니다. 계속할까요?`
+      );
+      if (!go) return { ok: false, message: null };
+      res = await saveTraining({ ...input, confirm_exclusion: true });
+    }
+    return res.ok ? { ok: true } : { ok: false, message: res.message };
+  }
+
+  // 전체 → 직원 선택 전환 시 기본 선택 — 지금 그 교육의 대상인 재직자.
+  //   (전체 대상 시절 명단은 저장된 적이 없어, 현재 판정을 깔아주고 빼게 합니다)
+  function defaultTargetIds(t: MandatoryTraining | null): string[] {
+    const base = t ? trainingBaseYmd(t) : null;
+    return matrix.employees
+      .filter((e) => !t || targetStateOn(e, base).isTarget)
+      .map((e) => e.driver_id);
+  }
+
   function onAdd(e: React.FormEvent) {
     e.preventDefault();
     if (!addName.trim()) {
       setMsg({ kind: "err", text: "교육명을 입력해주세요." });
       return;
     }
+    if (addScope === "selected" && addTargets.length === 0) {
+      setMsg({ kind: "err", text: "교육 대상 직원을 1명 이상 선택해주세요." });
+      return;
+    }
     startBusy(async () => {
-      const res = await saveTraining({
+      const res = await saveWithConfirm({
         year,
         name: addName,
         held_on: addHeld || null,
@@ -242,11 +290,15 @@ export default function TrainingsManager({
         location: addLocation || null,
         organizer: addOrganizer || null,
         hours: addHours || null,
+        target_scope: addScope,
+        target_ids: addScope === "selected" ? addTargets : [],
       });
       if (!res.ok) {
-        setMsg({ kind: "err", text: res.message });
+        if (res.message) setMsg({ kind: "err", text: res.message });
         return;
       }
+      setAddScope("all");
+      setAddTargets([]);
       setAddName("");
       setAddHeld("");
       setAddDue("");
@@ -273,6 +325,8 @@ export default function TrainingsManager({
       location: t.location ?? "",
       organizer: t.organizer ?? "",
       hours: t.hours ?? "",
+      target_scope: t.target_scope,
+      target_ids: matrix.targets?.[t.id] ?? [],
     });
   }
 
@@ -282,8 +336,12 @@ export default function TrainingsManager({
       setMsg({ kind: "err", text: "교육명을 입력해주세요." });
       return;
     }
+    if (edit.target_scope === "selected" && edit.target_ids.length === 0) {
+      setMsg({ kind: "err", text: "교육 대상 직원을 1명 이상 선택해주세요." });
+      return;
+    }
     startBusy(async () => {
-      const res = await saveTraining({
+      const res = await saveWithConfirm({
         id: editId,
         year,
         name: edit.name,
@@ -296,9 +354,11 @@ export default function TrainingsManager({
         location: edit.location || null,
         organizer: edit.organizer || null,
         hours: edit.hours || null,
+        target_scope: edit.target_scope,
+        target_ids: edit.target_scope === "selected" ? edit.target_ids : [],
       });
       if (!res.ok) {
-        setMsg({ kind: "err", text: res.message });
+        if (res.message) setMsg({ kind: "err", text: res.message });
         return;
       }
       setEditId(null);
@@ -520,8 +580,10 @@ export default function TrainingsManager({
             />
           </div>
           <p className="text-[11px] leading-5 text-ink-hint sm:col-span-12">
-            <b>실시일</b>은 재직 직원 전원이 대상입니다 — 입사일과 무관하게 그
-            교육의 대상이 되고, 퇴사 후에 실시된 교육만 제외됩니다. 비워두면{" "}
+            <b>교육 대상</b>이 「전체 직원」이면 <b>실시일</b> 기준 재직 직원
+            전원이 대상입니다 — 입사일과 무관하게 그 교육의 대상이 되고, 퇴사 후에
+            실시된 교육만 제외됩니다. 「직원 선택」이면 고른 직원만 대상입니다
+            (소방안전관리자 교육 등). 실시일을 비워두면{" "}
             <b>이수기한</b>을 기준일로 씁니다.{" "}
             <b className="text-warning">
               실시일을 비우면 사업실적 「종사자 교육」 연계가 부정확해집니다
@@ -557,6 +619,20 @@ export default function TrainingsManager({
               placeholder="예) 1시간"
             />
           </div>
+          <div className="sm:col-span-12">
+            <TargetPicker
+              scope={addScope}
+              selected={addTargets}
+              employees={matrix.employees}
+              disabled={busy}
+              onScope={(next) => {
+                setAddScope(next);
+                if (next === "selected" && addTargets.length === 0)
+                  setAddTargets(defaultTargetIds(null));
+              }}
+              onSelected={setAddTargets}
+            />
+          </div>
         </form>
 
         {/* 교육 목록 */}
@@ -568,6 +644,7 @@ export default function TrainingsManager({
                 <th className="px-2 py-2 font-semibold">교육명</th>
                 <th className="px-2 py-2 font-semibold">실시일</th>
                 <th className="px-2 py-2 font-semibold">이수기한</th>
+                <th className="px-2 py-2 font-semibold">대상</th>
                 <th className="px-2 py-2 font-semibold">사이트</th>
                 <th className="px-2 py-2 font-semibold">비고</th>
                 <th className="px-2 py-2 font-semibold">상태</th>
@@ -578,7 +655,7 @@ export default function TrainingsManager({
               {trainings.length === 0 && (
                 <tr>
                   <td
-                    colSpan={8}
+                    colSpan={9}
                     className="px-2 py-6 text-center text-sm text-ink-hint"
                   >
                     등록된 교육이 없습니다. 위에서 교육을 추가하세요.
@@ -627,6 +704,14 @@ export default function TrainingsManager({
                           setEdit({ ...edit, due_date: e.target.value })
                         }
                       />
+                    </td>
+                    <td className="px-2 py-2 align-top text-xs text-ink-muted">
+                      {edit.target_scope === "selected"
+                        ? `${edit.target_ids.length}명 지정`
+                        : "전체 직원"}
+                      <span className="block text-[10px] text-ink-hint">
+                        아래에서 변경
+                      </span>
                     </td>
                     <td className="px-2 py-2 align-top">
                       <input
@@ -685,7 +770,7 @@ export default function TrainingsManager({
                   {/* 종사자 교육 반입용 3필드 — 열이 많아 별도 행으로 둡니다. */}
                   <tr className="border-b border-line bg-navy-soft/30">
                     <td />
-                    <td colSpan={7} className="px-2 pb-2">
+                    <td colSpan={8} className="px-2 pb-2">
                       <div className="grid gap-2 sm:grid-cols-3">
                         {(
                           [
@@ -706,6 +791,27 @@ export default function TrainingsManager({
                             />
                           </div>
                         ))}
+                      </div>
+                      <div className="mt-2">
+                        <TargetPicker
+                          scope={edit.target_scope}
+                          selected={edit.target_ids}
+                          employees={matrix.employees}
+                          disabled={busy}
+                          onScope={(next) =>
+                            setEdit({
+                              ...edit,
+                              target_scope: next,
+                              target_ids:
+                                next === "selected" && edit.target_ids.length === 0
+                                  ? defaultTargetIds(t)
+                                  : edit.target_ids,
+                            })
+                          }
+                          onSelected={(ids) =>
+                            setEdit({ ...edit, target_ids: ids })
+                          }
+                        />
                       </div>
                     </td>
                   </tr>
@@ -737,6 +843,18 @@ export default function TrainingsManager({
                     </td>
                     <td className="px-2 py-2 text-ink-body">
                       {fmtDue(t.due_date)}
+                    </td>
+                    <td className="px-2 py-2">
+                      {t.target_scope === "selected" ? (
+                        <span
+                          className={`${badgeNavy} whitespace-nowrap`}
+                          title="대상자를 개별 지정한 교육 — 지정된 직원만 대상입니다"
+                        >
+                          대상 {matrix.targets?.[t.id]?.length ?? 0}명
+                        </span>
+                      ) : (
+                        <span className="whitespace-nowrap text-xs text-ink-muted">전체 직원</span>
+                      )}
                     </td>
                     <td className="px-2 py-2">
                       {t.site_url ? (
@@ -854,12 +972,21 @@ export default function TrainingsManager({
                             <span className="text-[10px] text-ink-hint">
                               {fmtDue(t.due_date)}
                             </span>
-                            <span
-                              className="text-[10px] text-ink-hint"
-                              title={`대상 판정 기준일 ${trainingBaseYmd(t) ?? "없음"}`}
-                            >
-                              대상 {stat?.target ?? 0}명
-                            </span>
+                            {t.target_scope === "selected" ? (
+                              <span
+                                className={`${badgeNavy} self-start text-[10px]`}
+                                title="대상자를 개별 지정한 교육 — 지정된 직원만 대상입니다"
+                              >
+                                지정 대상 {stat?.target ?? 0}명
+                              </span>
+                            ) : (
+                              <span
+                                className="text-[10px] text-ink-hint"
+                                title={`전체 직원 대상 · 판정 기준일 ${trainingBaseYmd(t) ?? "없음"}`}
+                              >
+                                전원 대상 {stat?.target ?? 0}명
+                              </span>
+                            )}
                             <span
                               className={`text-[10px] font-semibold ${
                                 overdue ? "text-stamp" : "text-ink-muted"
@@ -896,7 +1023,7 @@ export default function TrainingsManager({
                         const done = compMap.get(key);
                         const state = targetMap.get(key);
                         const baseYmd = trainingBaseYmd(t);
-                        // 대상 아님 — 입사 전·퇴사 후 교육. 미이수로 세지 않고
+                        // 대상 아님 — 퇴사 후 교육 / 개별 지정 교육의 비지정자. 미이수로 세지 않고
                         //   대리 업로드도 막습니다(대상 아닌데 이수 처리 방지).
                         //   단 이미 이수 기록이 있으면 ✓ 를 남겨 열람·취소는 되게
                         //   합니다(기존 기록이 화면에서 사라지지 않도록).
@@ -969,8 +1096,9 @@ export default function TrainingsManager({
             <p className="mt-2 text-[11px] text-ink-hint">
               ✓ 클릭 → 상세(수료증 열람/재업로드/취소), 빈 칸 클릭 → 대리 업로드.
               붉은 칸은 기한이 지난 미이수입니다. <b>—</b> 는 퇴사 후에 실시된
-              교육이어서 <b>대상이 아닌</b> 칸입니다(미이수로 세지 않고 업로드도
-              막습니다). 입사 전에 실시된 교육도 대상이므로 수료증을 올릴 수
+              교육이거나, 대상자를 개별 지정한 교육(「지정 대상」 표시)에서
+              지정되지 않은 직원이어서 <b>대상이 아닌</b> 칸입니다(미이수로 세지
+              않고 업로드도 막습니다). 입사 전에 실시된 교육도 대상이므로 수료증을 올릴 수
               있습니다.
             </p>
             {missingJoinDate.length > 0 && (
@@ -1059,6 +1187,138 @@ export default function TrainingsManager({
           </div>
         )}
       </section>
+    </div>
+  );
+}
+
+// =====================================================================
+// 교육 대상 선택 — [전체 직원] / [직원 선택]. 직원 선택이면 재직 직원 체크박스.
+//   * selected 에 재직 명단 밖의 id(퇴사한 기존 지정자 등)가 있으면 건드리지
+//     않고 그대로 둡니다 — 개수 안내만 합니다.
+// =====================================================================
+function TargetPicker({
+  scope,
+  selected,
+  employees,
+  disabled,
+  onScope,
+  onSelected,
+}: {
+  scope: TargetScope;
+  selected: string[];
+  employees: RosterEmployee[];
+  disabled?: boolean;
+  onScope: (next: TargetScope) => void;
+  onSelected: (ids: string[]) => void;
+}) {
+  const set = new Set(selected);
+  const rosterIds = employees.map((e) => e.driver_id);
+  const rosterSet = new Set(rosterIds);
+  const outside = selected.filter((id) => !rosterSet.has(id)).length;
+
+  function toggle(id: string, on: boolean) {
+    if (on) onSelected(set.has(id) ? selected : [...selected, id]);
+    else onSelected(selected.filter((x) => x !== id));
+  }
+  function setAll(on: boolean) {
+    const keepOutside = selected.filter((id) => !rosterSet.has(id));
+    onSelected(on ? [...keepOutside, ...rosterIds] : keepOutside);
+  }
+
+  const radioCls = (on: boolean) =>
+    `inline-flex cursor-pointer items-center gap-1.5 rounded-md border px-2.5 py-1 text-xs ${
+      on
+        ? "border-navy bg-navy-soft font-semibold text-navy"
+        : "border-line bg-card text-ink-body hover:bg-surface"
+    }`;
+
+  return (
+    <div>
+      <div className="flex flex-wrap items-center gap-2">
+        <span className={lblCls}>교육 대상</span>
+        {(
+          [
+            ["all", "전체 직원"],
+            ["selected", "직원 선택"],
+          ] as const
+        ).map(([v, label]) => (
+          <label key={v} className={radioCls(scope === v)}>
+            <input
+              type="radio"
+              className="sr-only"
+              checked={scope === v}
+              disabled={disabled}
+              onChange={() => onScope(v)}
+            />
+            {label}
+          </label>
+        ))}
+        {scope === "selected" ? (
+          <span className="text-xs text-ink-muted">
+            선택 <b className="text-navy">{selected.length}명</b>
+            {employees.length > 0 && ` / 재직 ${employees.length}명`}
+          </span>
+        ) : (
+          <span className="text-[11px] text-ink-hint">
+            실시일 기준 재직 직원 전원이 자동으로 대상이 됩니다.
+          </span>
+        )}
+      </div>
+
+      {scope === "selected" && (
+        <div className="mt-2 rounded-md border border-line bg-card p-2">
+          <div className="mb-1.5 flex gap-2 text-[11px]">
+            <button
+              type="button"
+              className="text-brand-blue hover:underline"
+              disabled={disabled}
+              onClick={() => setAll(true)}
+            >
+              모두 선택
+            </button>
+            <button
+              type="button"
+              className="text-brand-blue hover:underline"
+              disabled={disabled}
+              onClick={() => setAll(false)}
+            >
+              모두 해제
+            </button>
+          </div>
+          {employees.length === 0 ? (
+            <p className="text-xs text-ink-hint">재직 중인 직원이 없습니다.</p>
+          ) : (
+            <div className="grid grid-cols-2 gap-x-3 gap-y-1 sm:grid-cols-4 lg:grid-cols-6">
+              {employees.map((e) => (
+                <label
+                  key={e.driver_id}
+                  className="flex cursor-pointer items-center gap-1.5 text-xs text-ink-body"
+                >
+                  <input
+                    type="checkbox"
+                    checked={set.has(e.driver_id)}
+                    disabled={disabled}
+                    onChange={(ev) => toggle(e.driver_id, ev.target.checked)}
+                  />
+                  <span className="truncate">
+                    {e.name}
+                    {e.rank && (
+                      <span className="ml-0.5 text-[10px] text-ink-hint">
+                        {e.rank}
+                      </span>
+                    )}
+                  </span>
+                </label>
+              ))}
+            </div>
+          )}
+          {outside > 0 && (
+            <p className="mt-1.5 text-[11px] text-ink-hint">
+              재직 명단에 없는 기존 지정자 {outside}명(퇴사 등)은 그대로 유지됩니다.
+            </p>
+          )}
+        </div>
+      )}
     </div>
   );
 }
