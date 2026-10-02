@@ -13,6 +13,8 @@ import {
   CERT_ORG,
   CERT_SEAL_PATH,
   calcServicePeriod,
+  calcCareerPeriod,
+  certMissingFields,
   formatIssueLabel,
   toCertificateIssue,
   toCertRequest,
@@ -169,7 +171,13 @@ function buildSnapshot(input: {
   issuedOn: string;
 }): CertSnapshot {
   const { certType, year, seq, prof, duty, from, to, purpose, issuedOn } = input;
-  const periodText = from ? calcServicePeriod(from, to, issuedOn) : "";
+  // 경력증명서는 종료일(퇴사일)까지 포함해 셉니다(lib/certificates.calcCareerPeriod).
+  //   재직증명서 계산은 종전 그대로.
+  const periodText = !from
+    ? ""
+    : certType === "career"
+      ? calcCareerPeriod(from, to, issuedOn)
+      : calcServicePeriod(from, to, issuedOn);
   return {
     certType,
     issueLabel: formatIssueLabel(year, seq),
@@ -301,6 +309,13 @@ export async function issueCareerCertificate(
 
     const prof = await loadProfile(driverId);
     if (!prof) return { ok: false, message: "인사기록을 찾을 수 없습니다." };
+    // 경력증명서는 퇴사자만 — 재직자는 재직증명서(승인제)로 발급합니다.
+    if (prof.employment_status !== "resigned")
+      return {
+        ok: false,
+        message:
+          "재직 중인 직원은 경력증명서 대상이 아닙니다. 재직증명서(마이페이지 신청 → 승인)로 발급해주세요.",
+      };
 
     const purpose = cleanStr(input.purpose) ?? "서류제출용";
     const duty = cleanStr(input.duty) ?? prof.duty;
@@ -365,6 +380,9 @@ export type CertEmployee = {
   // 근무부서(현재 소속) — 발급 화면 미리보기·경고용. 발령기록이 없으면 hasAppointment=false.
   department: string | null;
   hasAppointment: boolean;
+  // 증명서에 빈칸("-")으로 찍힐 항목 — 발급 전 경고용(막지 않음).
+  //   예: ["근무부서", "직위", "생년월일"]
+  missing: string[];
 };
 
 export async function listCertificateEmployees(): Promise<CertEmployee[]> {
@@ -373,7 +391,9 @@ export async function listCertificateEmployees(): Promise<CertEmployee[]> {
     supabaseAdmin.from("drivers").select("id, name, rank"),
     supabaseAdmin
       .from("employee_profiles")
-      .select("driver_id, join_date, employment_status, resignation_date, appointments"),
+      .select(
+        "driver_id, birth_date, address, join_date, employment_status, resignation_date, appointments"
+      ),
   ]);
   const pByD = new Map<string, Record<string, unknown>>();
   for (const p of profs ?? [])
@@ -386,6 +406,16 @@ export async function listCertificateEmployees(): Promise<CertEmployee[]> {
     const id = String(dd.id);
     const p = pByD.get(id);
     const { current } = currentAssignment(p?.appointments, today);
+    const resigned = p?.employment_status === "resigned";
+    const missing = certMissingFields({
+      department: current?.department ?? null,
+      title: current?.title ?? null,
+      birthDate: (p?.birth_date as string | null) ?? null,
+      address: (p?.address as string | null) ?? null,
+      joinDate: (p?.join_date as string | null) ?? null,
+      resignationDate: (p?.resignation_date as string | null) ?? null,
+      resigned,
+    });
     list.push({
       driverId: id,
       name: String(dd.name ?? ""),
@@ -396,6 +426,7 @@ export async function listCertificateEmployees(): Promise<CertEmployee[]> {
       defaultDuty: positionWithDuty(current),
       department: current?.department ?? null,
       hasAppointment: current !== null,
+      missing,
     });
   }
   // 퇴사자 우선 → 이름.

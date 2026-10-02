@@ -465,45 +465,45 @@ function CareerModal({
           onChange={(e) => onSelect(e.target.value)}
           className={`${inCls} mt-1`}
         >
-          <option value="">직원 선택…</option>
-          <optgroup label="퇴사자">
-            {employees
-              .filter((e) => e.status === "resigned")
-              .map((e) => (
-                <option key={e.driverId} value={e.driverId}>
-                  {e.name}
-                  {e.rank ? ` (${e.rank})` : ""} — 퇴사
-                </option>
-              ))}
-          </optgroup>
-          <optgroup label="재직자">
-            {employees
-              .filter((e) => e.status === "active")
-              .map((e) => (
-                <option key={e.driverId} value={e.driverId}>
-                  {e.name}
-                  {e.rank ? ` (${e.rank})` : ""}
-                </option>
-              ))}
-          </optgroup>
+          <option value="">퇴사자 선택…</option>
+          {/* 경력증명서는 퇴사자만. 재직자는 재직증명서(마이페이지 신청 → 승인). */}
+          {employees
+            .filter((e) => e.status === "resigned")
+            .map((e) => (
+              <option key={e.driverId} value={e.driverId}>
+                {e.name}
+                {e.resignationDate ? ` — ${e.resignationDate} 퇴사` : " — 퇴사"}
+              </option>
+            ))}
         </select>
+        <p className="mt-1 text-[11px] text-ink-hint">
+          재직 중인 직원은 재직증명서로 발급합니다(마이페이지 신청 → 승인).
+        </p>
 
         {selected && (
           <p className="mt-2 text-[11px] text-ink-hint">
             근무기간(자동): {periodPreview}
           </p>
         )}
-        {selected &&
-          (selected.hasAppointment ? (
-            <p className="mt-0.5 text-[11px] text-ink-hint">
-              근무부서(인사발령 기준): {selected.department ?? "부서 없음 → “-”"}
+        {selected && (
+          <p className="mt-0.5 text-[11px] text-ink-hint">
+            근무부서(마지막 발령 기준): {selected.department ?? "-"}
+          </p>
+        )}
+        {/* 빈칸 경고 — 막지 않고 어느 항목이 비는지 알려 줍니다. */}
+        {selected && selected.missing.length > 0 && (
+          <div className="mt-1.5 rounded-md border border-warning bg-warning-soft px-2.5 py-1.5 text-[11px] text-warning">
+            {!selected.hasAppointment && (
+              <p className="font-semibold">
+                발령기록이 없어 근무부서·직위가 빈칸으로 출력됩니다. 인사기록카드에서
+                먼저 입력해주세요.
+              </p>
+            )}
+            <p className={selected.hasAppointment ? "font-semibold" : "mt-0.5"}>
+              빈칸(“-”)으로 출력될 항목: {selected.missing.join(", ")}
             </p>
-          ) : (
-            <p className="mt-1.5 rounded-md border border-warning bg-warning-soft px-2 py-1 text-[11px] font-semibold text-warning">
-              발령기록 없음 — 근무부서가 “-”로 발급됩니다. 인사기록카드에서
-              인사발령을 먼저 입력해주세요.
-            </p>
-          ))}
+          </div>
+        )}
 
         <div className="mt-3 grid grid-cols-2 gap-3">
           <div>

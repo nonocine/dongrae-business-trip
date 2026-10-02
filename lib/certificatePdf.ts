@@ -2,7 +2,7 @@
 // 증명서(재직·경력) PDF 생성 — 명세서(salaryPayslip) 패턴 재사용.
 //   * pdf-lib + fontkit + 나눔고딕 통임베드(subset:false — Vercel 글리프 누락 대응).
 //   * 실물 양식 재현: 발급번호 / 큰 제목(자간 넓게) / 인적사항·재직기관 표 /
-//     재직사항 표(1행 + "- 이 하 여 백 -") / 용도 / 증명문구 / 발급일 /
+//     재직사항(경력증명서는 "경력사항") 표(1행 + "- 이 하 여 백 -") / 용도 / 증명문구 / 발급일 /
 //     "동래구청소년센터장" + 관인(글자 끝에 겹치게).
 //   * 관인은 storage 에서 service_role 로 읽어 전달(sealBytes). 없으면 자리 비우고 발급.
 //   * 계산 이원화 없음: snapshot 값을 그대로 렌더.
@@ -14,7 +14,9 @@ import { readFileSync } from "fs";
 import path from "path";
 import {
   formatIssuedDate,
+  formatPeriodYmd,
   periodToLabel,
+  CERT_SECTION_TITLE,
   type CertSnapshot,
 } from "./certificates";
 
@@ -202,9 +204,9 @@ export async function buildCertificatePdf(
   ]);
   y += rowH * 3;
 
-  // ---- 표2: 재직사항 ----
+  // ---- 표2: 재직사항(재직) / 경력사항(경력) ----
   y += 16;
-  sectionBar(y, rowH, "재직사항");
+  sectionBar(y, rowH, CERT_SECTION_TITLE[snap.certType] ?? "재직사항");
   y += rowH;
 
   const cols = [
@@ -223,7 +225,14 @@ export async function buildCertificatePdf(
   }
   y += rowH;
   // 데이터행(1행).
-  const periodStr = `${snap.periodFrom ?? "-"} ~ ${periodToLabel(snap.periodTo)}`;
+  // 경력증명서만 실물(고아린 제2026년-05호)처럼 "2025.11.01 ~ 2026.01.31".
+  //   재직증명서 표기는 종전 그대로 둡니다.
+  const periodStr =
+    snap.certType === "career"
+      ? `${formatPeriodYmd(snap.periodFrom) ?? "-"} ~ ${
+          formatPeriodYmd(snap.periodTo) ?? "현재"
+        }`
+      : `${snap.periodFrom ?? "-"} ~ ${periodToLabel(snap.periodTo)}`;
   const dataRowH = 34;
   const values = [
     snap.department ?? "-",

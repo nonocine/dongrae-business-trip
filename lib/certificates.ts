@@ -158,6 +158,65 @@ export function periodToLabel(to: string | null): string {
   return to ?? "현재";
 }
 
+// =====================================================================
+// 경력증명서 전용 — 재직증명서 출력은 건드리지 않기 위해 분리합니다.
+// =====================================================================
+
+// 표 제목 — 재직증명서 "재직사항", 경력증명서 "경력사항".
+export const CERT_SECTION_TITLE: Record<CertType, string> = {
+  employment: "재직사항",
+  career: "경력사항",
+};
+
+// 근무기간 날짜 표기 "YYYY.MM.DD" — 2026.02 수기 발급분(고아린, 제2026년-05호)
+//   "2025.11.01~2026.01.31" 과 같은 형식. 이미 점 형식이면 그대로 둡니다
+//   (수기 이관 snapshot 재발급 호환).
+export function formatPeriodYmd(ymd: string | null): string | null {
+  if (!ymd) return null;
+  const m = ymd.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  return m ? `${m[1]}.${m[2]}.${m[3]}` : ymd;
+}
+
+// 경력 기간 — 종료일(퇴사일)은 마지막 근무일이라 그날까지 포함해 셉니다.
+//   calcServicePeriod 는 종료일을 포함하지 않아(재직증명서는 종료=오늘이라 무해)
+//   2025-11-01 ~ 2026-01-31 을 "2개월"로 셉니다. 다음 날로 넘겨 "3개월"이 되게 합니다.
+export function calcCareerPeriod(
+  from: string,
+  to: string | null,
+  todayYmd: string
+): string {
+  const end = to ? nextDayYmd(to) : null;
+  return calcServicePeriod(from, end, todayYmd);
+}
+
+// 증명서에 빈칸("-")으로 찍힐 항목 — 발급 화면 사전 경고용(발급은 막지 않음).
+export function certMissingFields(input: {
+  department: string | null;
+  title: string | null;
+  birthDate: string | null;
+  address: string | null;
+  joinDate: string | null;
+  resignationDate: string | null;
+  resigned: boolean;
+}): string[] {
+  const out: string[] = [];
+  if (!input.department) out.push("근무부서");
+  if (!input.title) out.push("직위");
+  if (!input.birthDate) out.push("생년월일");
+  if (!(input.address ?? "").trim()) out.push("주소");
+  if (!input.joinDate) out.push("입사일(근무기간 시작)");
+  if (input.resigned && !input.resignationDate)
+    out.push("퇴사일(근무기간 종료)");
+  return out;
+}
+
+function nextDayYmd(ymd: string): string {
+  const p = parseYmd(ymd);
+  if (!p) return ymd;
+  const d = new Date(Date.UTC(p.y, p.m - 1, p.d + 1));
+  return d.toISOString().slice(0, 10);
+}
+
 // --- 정규화(DB row → 타입) --------------------------------------------
 export function toCertificateIssue(
   raw: Record<string, unknown>
