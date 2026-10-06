@@ -5,10 +5,11 @@ import { tabBarCls, tabNavCls, tabItemCls } from "@/lib/ui";
 
 // 마이페이지(내 인사기록) 탭 껍데기 — 데이터는 서버에서 받아 children 으로 꽂습니다
 // (프레젠테이션 전용, 서버 액션·조회 로직과 무관).
-export type MyHrTabKey = "info" | "certs" | "trainings" | "leave";
+export type MyHrTabKey = "info" | "contracts" | "certs" | "trainings" | "leave";
 
 const TABS: { key: MyHrTabKey; label: string }[] = [
   { key: "info", label: "내 정보" },
+  { key: "contracts", label: "내 계약서" },
   { key: "certs", label: "증명서" },
   { key: "trainings", label: "내 의무교육" },
   { key: "leave", label: "연차 사용계획서" },
@@ -20,6 +21,9 @@ const TABS: { key: MyHrTabKey; label: string }[] = [
 const HASH_TO_TAB: Record<string, MyHrTabKey> = {
   info: "info",
   profile: "info",
+  contracts: "contracts",
+  contract: "contracts",
+  "my-contracts": "contracts",
   certs: "certs",
   certificates: "certs",
   "my-certificates": "certs",
@@ -37,11 +41,13 @@ function tabFromHash(hash: string): MyHrTabKey | null {
 
 export default function MyHrTabs({
   info,
+  contracts,
   certs,
   trainings,
   leave,
 }: {
   info: ReactNode;
+  contracts: ReactNode;
   certs: ReactNode;
   trainings: ReactNode;
   leave: ReactNode;
@@ -69,6 +75,7 @@ export default function MyHrTabs({
 
   const panels: Record<MyHrTabKey, ReactNode> = {
     info,
+    contracts,
     certs,
     trainings,
     leave,

@@ -194,6 +194,15 @@ export const MENU_ITEMS: MenuItem[] = [
     desc: "재직증명서 즉시 발급 · 발급 이력",
     show: { kind: "everyone" },
   },
+  {
+    key: "common-my-contracts",
+    group: "common",
+    label: "내 계약서",
+    href: "/profile/hr#contracts",
+    icon: "📝",
+    desc: "근로계약서 열람·서명·내려받기 (본인 것만)",
+    show: { kind: "everyone" },
+  },
   // 공용 비밀번호 — 전 직원에게 보이되, 목록은 본인이 열람 가능한 항목만
   //   나옵니다(지정 안 된 항목은 존재 자체가 보이지 않음).
   //   문구가 열람 가능 건수 + 관리 권한에 따라 4갈래라 숫자 하나로 표현되지
@@ -319,6 +328,15 @@ export const MENU_ITEMS: MenuItem[] = [
     show: { kind: "role", role: "hr" },
   },
   {
+    key: "hr-contracts",
+    group: "hr",
+    label: "근로계약서",
+    href: "/hr/contracts",
+    icon: "📝",
+    desc: "근로계약서 작성·발송·서명 현황",
+    show: { kind: "role", role: "hr" },
+  },
+  {
     key: "hr-trainings",
     group: "hr",
     label: "의무교육 현황",
@@ -440,6 +458,15 @@ export const MENU_ITEMS: MenuItem[] = [
       n && n > 0
         ? `승인 대기 ${n}건 — 발급·기록`
         : "재직·경력증명서 발급·발급 기록",
+  },
+  {
+    key: "admin-contracts",
+    group: "admin",
+    label: "근로계약서",
+    href: "/hr/contracts",
+    icon: "📝",
+    desc: "근로계약서 작성·발송 · 센터장 서명",
+    show: { kind: "m0" },
   },
   {
     key: "admin-saems",

@@ -69,11 +69,12 @@ export default function HrDashboard({
         <WhereItLivesCard
           tone="blue"
           title="계약서"
-          lead="계약서 전용 관리 화면은 아직 없습니다. 다만 근로계약서는 이미 보관되고 있습니다."
-          body="근로계약서는 인사기록카드의 [첨부서류] 탭에 필수 항목으로 들어갑니다. 직원별로 올리고 내려받을 수 있습니다."
+          lead="근로계약서는 전용 화면에서 작성·발송하고, 직원이 폰으로 읽고 서명합니다."
+          body="근로계약서 화면에서 작성 → 직원에게 보내기 → 직원 서명 → 센터장 서명 순으로 체결되고 PDF 가 확정됩니다. 이전에 종이로 받은 계약서는 인사기록카드 [첨부서류] 탭에 그대로 보관됩니다. (연봉계약서는 다음 단계)"
           actions={[
+            { label: "근로계약서 화면 열기", href: "/hr/contracts" },
             { label: "인사기록카드로 이동", onClick: () => setTab("records") },
-            { label: "내 인사기록카드에서 내 계약서 보기", href: "/profile/hr" },
+            { label: "내 인사기록카드에서 내 계약서 보기", href: "/profile/hr#contracts" },
           ]}
         />
       )}
