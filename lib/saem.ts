@@ -3,7 +3,7 @@
 //   * 같은 Supabase 의 saem_* 테이블 공유. RLS 0개 → service_role 경유.
 // =====================================================================
 
-import { normalizeHolidays } from "@/lib/saemSchedule";
+import { normalizeHolidays, normalizeWeekdays } from "@/lib/saemSchedule";
 
 // 동래샘들 앱 베이스 URL(초대 링크용). env 우선, 기본값 배포 주소.
 export function saemAppUrl(): string {
@@ -151,8 +151,11 @@ export type SaemProgram = {
   sort_order: number;
   // 실제 스케줄(진실의 원천) — 이 값으로 saem_sessions 를 생성·재생성한다.
   session_start: string | null; // 1회차 날짜
-  session_weekday: number | null; // 0 일 ~ 6 토
-  session_weeks: number | null;
+  session_weekday: number | null; // 0 일 ~ 6 토 — 옛 단일 요일(하위호환용, 저장 시 첫 요일)
+  // 수업 요일들(2026-10 주 2회 지원). 회차 생성·표시는 이것을 씁니다.
+  //   DB 값이 비어 있으면 session_weekday 하나로 채웁니다(옛 행 호환).
+  session_weekdays: number[];
+  session_weeks: number | null; // 회차 수(이름은 옛 그대로)
   session_holidays: string[];
 };
 
@@ -247,6 +250,12 @@ export function toProgram(r: Record<string, unknown>): SaemProgram {
     sort_order: Number(r.sort_order ?? 0),
     session_start: s(r.session_start),
     session_weekday: nOrNull(r.session_weekday),
+    session_weekdays: (() => {
+      const many = normalizeWeekdays(r.session_weekdays);
+      if (many.length) return many;
+      const one = nOrNull(r.session_weekday);
+      return one == null ? [] : normalizeWeekdays([one]);
+    })(),
     session_weeks: nOrNull(r.session_weeks),
     session_holidays: normalizeHolidays(r.session_holidays),
   };

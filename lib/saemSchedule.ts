@@ -22,6 +22,32 @@ export function weekdayLabel(v: number | null | undefined): string {
   return WEEKDAY_LABELS[normalizeWeekday(v)];
 }
 
+// 여러 요일(2026-10 조유경 팀장 요청 — 방카 주 2회). 0 일 ~ 6 토, 중복 제거·오름차순.
+//   값이 하나도 없으면 빈 배열 — 호출부가 기본값을 정합니다.
+export function normalizeWeekdays(v: unknown): number[] {
+  const arr = Array.isArray(v) ? v : v == null || v === "" ? [] : [v];
+  const set = new Set<number>();
+  for (const x of arr) {
+    const n = Number(x);
+    if (Number.isFinite(n)) set.add(normalizeWeekday(n));
+  }
+  return [...set].sort((a, b) => a - b);
+}
+
+// [1,3] → "월·수"
+export function weekdaysLabel(v: number[] | null | undefined): string {
+  const w = normalizeWeekdays(v);
+  return w.length ? w.map((d) => WEEKDAY_LABELS[d]).join("·") : "-";
+}
+
+// "20회 · 매주 월·수(주 2회)" — 회차 수와 주당 횟수를 헷갈리지 않게.
+export function scheduleSummary(weekdays: number[] | null | undefined, sessions: number | null | undefined): string {
+  const w = normalizeWeekdays(weekdays);
+  const n = sessions != null && sessions > 0 ? `${sessions}회` : "";
+  if (!w.length) return n || "-";
+  return [n, `매주 ${weekdaysLabel(w)}(주 ${w.length}회)`].filter(Boolean).join(" · ");
+}
+
 const p2 = (n: number) => String(n).padStart(2, "0");
 
 export function msToYmd(ms: number): string {
@@ -56,30 +82,43 @@ export function firstWeekdayOnOrAfter(
 
 export type SessionScheduleInput = {
   start: string; // 1회차 기준일(YYYY-MM-DD)
-  weekday: number; // 0 일 ~ 6 토
-  weeks: number; // 만들 회차 수
-  holidays?: string[]; // 휴강일 — 이 날짜는 건너뛰고 다음 주로 밀린다
+  weekday?: number; // 0 일 ~ 6 토 — 단일 요일(옛 호출부 호환)
+  weekdays?: number[]; // 여러 요일. 있으면 이것을 씁니다.
+  weeks: number; // 만들 회차 수(이름은 옛 그대로지만 "주"가 아니라 "회차")
+  holidays?: string[]; // 휴강일 — 이 날짜는 건너뛰고 다음 수업일로 밀린다
 };
+
+// 시작일 이후(포함) 고른 요일 중 가장 이른 날.
+export function firstSessionOnOrAfter(startYmd: string, weekdays: number[]): string | null {
+  const w = normalizeWeekdays(weekdays);
+  const cands = (w.length ? w : [6]).map((d) => firstWeekdayOnOrAfter(startYmd, d)).filter(Boolean) as string[];
+  return cands.length ? cands.sort()[0] : null;
+}
 
 // 무한 밀림 방지 — 휴강일이 계속 겹쳐도 이 횟수 안에서 끝낸다(약 10년치).
 const MAX_STEPS = 520;
 
-// start 이후(포함) 첫 weekday 부터 주 단위로 진행하며 weeks 개를 채운다.
-//   휴강일에 걸리는 날은 회차로 세지 않고 다음 주로 밀린다(회차 수는 보장).
+// start 이후(포함) 고른 요일들에 날짜순으로 weeks 개를 채운다.
+//   예) 시작 3/2(월), [월,수], 20회 → 3/2, 3/4, 3/9, 3/11 … 20개.
+//   휴강일에 걸리는 날은 회차로 세지 않고 다음 수업일로 밀린다(회차 수는 보장).
+//   요일이 하나면 예전(주 단위 진행)과 결과가 같다 — 매일 걸으며 그 요일만 고르므로.
 //   weeks=1 이면 1회성(그 날짜 하나).
 export function buildSessionDates(input: SessionScheduleInput): string[] {
   const weeks = Math.max(0, Math.round(Number(input.weeks) || 0));
   if (weeks <= 0) return [];
-  const first = firstWeekdayOnOrAfter(input.start, input.weekday);
-  if (first == null) return [];
+  const wd = normalizeWeekdays(input.weekdays);
+  const days = new Set(wd.length ? wd : [normalizeWeekday(input.weekday ?? 6)]);
+  const startMs = ymdToMs(input.start);
+  if (startMs == null) return [];
   const holidays = new Set((input.holidays ?? []).filter(Boolean));
 
   const out: string[] = [];
-  let cur = ymdToMs(first) as number;
-  for (let step = 0; step < weeks + MAX_STEPS && out.length < weeks; step++) {
-    const d = msToYmd(cur);
+  const maxDays = (weeks + MAX_STEPS) * 7;
+  for (let i = 0; i < maxDays && out.length < weeks; i++) {
+    const ms = startMs + i * DAY;
+    if (!days.has(new Date(ms).getUTCDay())) continue;
+    const d = msToYmd(ms);
     if (!holidays.has(d)) out.push(d);
-    cur += 7 * DAY;
   }
   return out;
 }

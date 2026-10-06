@@ -19,6 +19,8 @@ import {
   lastSessionDate,
   normalizeHolidays,
   normalizeWeekday,
+  normalizeWeekdays,
+  weekdaysLabel,
 } from "@/lib/saemSchedule";
 
 const PROJ = "saem_projects";
@@ -32,11 +34,12 @@ function clean(v: string | null | undefined): string | null {
   return s.length ? s : null;
 }
 
-// 회차 스케줄 입력(차시 기본값·프로그램 실제값 공용).
+// 회차 스케줄 입력(프로그램 실제값). 2026-10 부터 요일은 여러 개(weekdays).
+//   단일 요일 컬럼(session_weekday)은 하위호환으로 "첫 요일"을 함께 저장합니다.
 export type SessionSchedule = {
   start: string | null;
-  weekday: number | null;
-  weeks: number | null;
+  weekdays: number[]; // 비면 회차 생성 시 토요일(옛 기본값)
+  weeks: number | null; // 회차 수
   holidays: string[];
 };
 
@@ -45,19 +48,31 @@ function scheduleDates(sc: SessionSchedule): string[] {
   if (!sc.start || !sc.weeks || sc.weeks <= 0) return [];
   return buildSessionDates({
     start: sc.start,
-    weekday: normalizeWeekday(sc.weekday ?? 6),
+    weekdays: sc.weekdays.length ? sc.weekdays : [6],
     weeks: sc.weeks,
     holidays: sc.holidays,
   });
 }
 
-function normSchedule(sc: Partial<SessionSchedule> | undefined): SessionSchedule {
+// weekdays 가 오면 그것을, 옛 호출부처럼 weekday 하나만 오면 그것을 씁니다.
+function normSchedule(
+  sc: (Partial<SessionSchedule> & { weekday?: number | null }) | undefined
+): SessionSchedule {
   const weeks = sc?.weeks == null ? null : Math.max(0, Math.round(Number(sc.weeks) || 0));
+  const many = normalizeWeekdays(sc?.weekdays);
   return {
     start: clean(sc?.start),
-    weekday: sc?.weekday == null ? null : normalizeWeekday(sc.weekday),
+    weekdays: many.length ? many : sc?.weekday == null ? [] : [normalizeWeekday(sc.weekday)],
     weeks: weeks && weeks > 0 ? weeks : null,
     holidays: normalizeHolidays(sc?.holidays),
+  };
+}
+
+// DB 저장값 — 배열 + 하위호환 단일 컬럼(첫 요일).
+function weekdayColumns(weekdays: number[]) {
+  return {
+    session_weekdays: weekdays.length ? weekdays : null,
+    session_weekday: weekdays.length ? weekdays[0] : null,
   };
 }
 
@@ -381,6 +396,14 @@ export async function copyTerm(input: {
     const src = (srcPrograms ?? []).map((r) => toProgram(r as Record<string, unknown>));
     let sessionCount = 0;
     for (const p of src) {
+      // 주 2회 이상 프로그램은 자기 요일을 유지합니다(차시 복사 요일 하나로 덮으면
+      //   월·수 수업이 토요일 1회로 바뀌어 버립니다). 회차 수는 "주 수 × 주당 횟수".
+      //   주 1회 프로그램은 예전처럼 복사 창의 요일을 따릅니다.
+      const multi = p.session_weekdays.length > 1;
+      const pWeekdays = multi ? p.session_weekdays : [weekday];
+      const pDates = multi
+        ? buildSessionDates({ start: input.startDate, weekdays: pWeekdays, weeks: weeks * pWeekdays.length, holidays })
+        : dates;
       const { data: np, error: pErr } = await supabaseAdmin
         .from(PROG)
         .insert({
@@ -401,16 +424,16 @@ export async function copyTerm(input: {
           status: "active",
           sort_order: p.sort_order,
           // 복제 프로그램도 자기 스케줄을 갖는다(이후 개별 수정 가능).
-          session_start: dates[0] ?? input.startDate,
-          session_weekday: weekday,
-          session_weeks: weeks,
+          session_start: pDates[0] ?? input.startDate,
+          ...weekdayColumns(pWeekdays),
+          session_weeks: pDates.length,
           session_holidays: holidays,
         })
         .select("id")
         .single();
       if (pErr) throw new Error(pErr.message);
       const newProgId = String((np as { id: string }).id);
-      const rows = dates.map((d, i) => ({
+      const rows = pDates.map((d, i) => ({
         program_id: newProgId,
         session_no: i + 1,
         session_date: d,
@@ -449,15 +472,18 @@ export type ProgramInput = {
   share_rate: number | null;
   // 실제 스케줄 — 저장 시 이 값으로 회차를 생성·재생성한다.
   session_start: string | null;
-  session_weekday: number | null;
-  session_weeks: number | null;
+  session_weekdays: number[]; // 0 일 ~ 6 토, 여러 개
+  session_weeks: number | null; // 회차 수
   session_holidays: string[];
+  // 스케줄 변경으로 계획서·작성 중 일지·출석이 있는 회차가 지워질 때, 화면에서
+  //   확인을 받았는지. 없으면 서버가 저장을 멈추고 확인을 요청합니다.
+  acceptDiscard?: boolean;
 };
 function progPayload(i: ProgramInput) {
   const num = (v: number | null) => (v == null || Number.isNaN(v) ? null : v);
   const sc = normSchedule({
     start: i.session_start,
-    weekday: i.session_weekday,
+    weekdays: i.session_weekdays,
     weeks: i.session_weeks,
     holidays: i.session_holidays,
   });
@@ -481,9 +507,18 @@ function progPayload(i: ProgramInput) {
         ? null
         : Math.min(100, Math.max(0, Number(i.share_rate))),
     session_start: sc.start,
-    session_weekday: sc.weekday,
+    ...weekdayColumns(sc.weekdays),
     session_weeks: sc.weeks,
     session_holidays: sc.holidays,
+  };
+}
+
+function scheduleOf(payload: ReturnType<typeof progPayload>): SessionSchedule {
+  return {
+    start: payload.session_start,
+    weekdays: payload.session_weekdays ?? [],
+    weeks: payload.session_weeks,
+    holidays: payload.session_holidays,
   };
 }
 
@@ -608,17 +643,91 @@ async function syncSessions(
   return { created, deleted: unlocked.length, kept: locked.length };
 }
 
+// =====================================================================
+// 스케줄 변경 전 안전 점검 (2026-10, 주 2회 도입과 함께)
+//   syncSessions 는 "잠긴 회차(일지 제출·직원 확정·정산 귀속)"만 보존하고 나머지를
+//   지운 뒤 새로 만듭니다. 그래서 두 가지를 먼저 봅니다.
+//   ① 잠긴 회차의 날짜가 새 스케줄에 없으면 막습니다. 보존된 회차가 엉뚱한 날짜에
+//      남아 회차 수가 늘고 번호가 섞입니다(예: 토요일 일지가 제출된 뒤 월·수로 변경).
+//   ② 잠기지 않았어도 내용이 있는 회차(강사 계획서·작성 중 일지·출석·동아리 지출
+//      연결)가 지워지면 확인을 받습니다. 출석은 CASCADE 로 함께 지워집니다.
+//   반환 null = 진행해도 됨.
+// =====================================================================
+async function checkSyncImpact(
+  programId: string,
+  sc: SessionSchedule,
+  acceptDiscard: boolean
+): Promise<{ ok: false; message: string; needsConfirm?: boolean } | null> {
+  const newDates = new Set(scheduleDates(sc));
+  const { data } = await supabaseAdmin
+    .from(SESS)
+    .select("id, session_no, session_date, plan_content, log_content, instructor_submitted_at, staff_confirmed_at, settlement_id")
+    .eq("program_id", programId);
+  const rows = (data ?? []) as {
+    id: string;
+    session_no: number;
+    session_date: string | null;
+    plan_content: string | null;
+    log_content: string | null;
+    instructor_submitted_at: string | null;
+    staff_confirmed_at: string | null;
+    settlement_id: string | null;
+  }[];
+  const isLocked = (r: (typeof rows)[number]) =>
+    r.instructor_submitted_at != null || r.staff_confirmed_at != null || r.settlement_id != null;
+
+  const strayLocked = rows.filter((r) => isLocked(r) && (!r.session_date || !newDates.has(r.session_date)));
+  if (strayLocked.length) {
+    const list = strayLocked
+      .slice(0, 5)
+      .map((r) => `${r.session_no}회차(${r.session_date ?? "날짜 없음"})`)
+      .join(", ");
+    return {
+      ok: false,
+      message:
+        `이미 제출·확정·정산된 회차 ${strayLocked.length}건(${list}${strayLocked.length > 5 ? " 등" : ""})이 새 스케줄(${weekdaysLabel(sc.weekdays.length ? sc.weekdays : [6])}) 날짜에 없어 바꿀 수 없습니다. ` +
+        "제출된 일지가 있는 날짜는 새 스케줄에도 들어가야 합니다(시작일·요일·회차 수를 맞추거나, 남은 회차는 새 프로그램으로 나누세요).",
+    };
+  }
+
+  const unlocked = rows.filter((r) => !isLocked(r));
+  if (!unlocked.length || acceptDiscard) return null;
+  const ids = unlocked.map((r) => r.id);
+  const [{ data: att }, { data: exp }] = await Promise.all([
+    supabaseAdmin.from("saem_attendance").select("session_id").in("session_id", ids),
+    supabaseAdmin.from("saem_club_expenses").select("session_id").in("session_id", ids),
+  ]);
+  const attIds = new Set((att ?? []).map((a) => String((a as { session_id: string }).session_id)));
+  const expIds = new Set((exp ?? []).map((a) => String((a as { session_id: string }).session_id)));
+  const plan = unlocked.filter((r) => (r.plan_content ?? "").trim()).length;
+  const log = unlocked.filter((r) => (r.log_content ?? "").trim()).length;
+  const attendance = unlocked.filter((r) => attIds.has(r.id)).length;
+  const expense = unlocked.filter((r) => expIds.has(r.id)).length;
+  if (plan + log + attendance + expense === 0) return null;
+  const parts = [
+    plan && `강사 계획서 ${plan}회차`,
+    log && `작성 중(미제출) 일지 ${log}회차`,
+    attendance && `출석 기록 ${attendance}회차`,
+    expense && `지출 연결 ${expense}회차`,
+  ].filter(Boolean);
+  return {
+    ok: false,
+    needsConfirm: true,
+    message: `스케줄을 바꾸면 회차를 다시 만들면서 ${parts.join(", ")}의 내용이 지워집니다(제출·확정된 회차는 보존). 계속하려면 확인란에 체크한 뒤 다시 저장하세요.`,
+  };
+}
+
 // 스케줄 필드가 실제로 바뀌었는지.
 function scheduleChanged(before: SaemProgram, after: SessionSchedule): boolean {
   const b = normSchedule({
     start: before.session_start,
-    weekday: before.session_weekday,
+    weekdays: before.session_weekdays,
     weeks: before.session_weeks,
     holidays: before.session_holidays,
   });
   return (
     b.start !== after.start ||
-    b.weekday !== after.weekday ||
+    b.weekdays.join(",") !== after.weekdays.join(",") ||
     b.weeks !== after.weeks ||
     b.holidays.join(",") !== after.holidays.join(",")
   );
@@ -635,12 +744,7 @@ export async function addProgram(
     const payload = progPayload(input);
     if (!termId || !payload.name)
       return { ok: false, message: "차시와 프로그램명을 확인하세요." };
-    const sc: SessionSchedule = {
-      start: payload.session_start,
-      weekday: payload.session_weekday,
-      weeks: payload.session_weeks,
-      holidays: payload.session_holidays,
-    };
+    const sc = scheduleOf(payload);
     if (sc.weeks && !sc.start)
       return { ok: false, message: "회차 수를 넣었으면 시작일도 지정하세요." };
     const dates = scheduleDates(sc);
@@ -684,18 +788,14 @@ export async function updateProgram(
   id: string,
   input: ProgramInput
 ): Promise<
-  { ok: true; sync: SessionSyncResult | null } | { ok: false; message: string }
+  | { ok: true; sync: SessionSyncResult | null }
+  | { ok: false; message: string; needsConfirm?: boolean }
 > {
   try {
     await requireSaemAccess();
     const payload = progPayload(input);
     if (!id || !payload.name) return { ok: false, message: "프로그램명을 확인하세요." };
-    const sc: SessionSchedule = {
-      start: payload.session_start,
-      weekday: payload.session_weekday,
-      weeks: payload.session_weeks,
-      holidays: payload.session_holidays,
-    };
+    const sc = scheduleOf(payload);
     if (sc.weeks && !sc.start)
       return { ok: false, message: "회차 수를 넣었으면 시작일도 지정하세요." };
 
@@ -708,11 +808,18 @@ export async function updateProgram(
     if (!beforeRow) return { ok: false, message: "프로그램을 찾을 수 없습니다." };
     const before = toProgram(beforeRow as Record<string, unknown>);
 
+    // 스케줄이 바뀌면 회차를 다시 맞춘다 — 그 전에 잃는 것이 없는지 먼저 본다.
+    const changed = scheduleChanged(before, sc);
+    if (changed) {
+      const guard = await checkSyncImpact(id, sc, !!input.acceptDiscard);
+      if (guard) return guard;
+    }
+
     const { error } = await supabaseAdmin.from(PROG).update(payload).eq("id", id);
     if (error) throw new Error(error.message);
 
     let sync: SessionSyncResult | null = null;
-    if (scheduleChanged(before, sc)) sync = await syncSessions(id, sc);
+    if (changed) sync = await syncSessions(id, sc);
 
     revalidatePath("/hr/saems/programs");
     return { ok: true, sync };
@@ -727,12 +834,14 @@ export async function generateProgramSessions(
   programId: string,
   schedule: {
     start: string;
-    weekday: number;
+    weekdays: number[];
     weeks: number;
     holidays: string[];
+    acceptDiscard?: boolean;
   }
 ): Promise<
-  { ok: true; sync: SessionSyncResult } | { ok: false; message: string }
+  | { ok: true; sync: SessionSyncResult }
+  | { ok: false; message: string; needsConfirm?: boolean }
 > {
   try {
     await requireSaemAccess();
@@ -742,13 +851,15 @@ export async function generateProgramSessions(
       return { ok: false, message: "시작일과 회차 수를 지정하세요." };
     if (scheduleDates(sc).length === 0)
       return { ok: false, message: "생성할 회차 날짜가 없습니다. 시작일·회차 수를 확인하세요." };
+    const guard = await checkSyncImpact(programId, sc, !!schedule.acceptDiscard);
+    if (guard) return guard;
 
     // 프로그램에도 스케줄을 기록(이후 수정 기준값).
     const { error: pErr } = await supabaseAdmin
       .from(PROG)
       .update({
         session_start: sc.start,
-        session_weekday: sc.weekday,
+        ...weekdayColumns(sc.weekdays),
         session_weeks: sc.weeks,
         session_holidays: sc.holidays,
       })

@@ -339,6 +339,7 @@ export type InstructorProgramRow = {
   period_no: number | null;
   time_start: string | null;
   time_end: string | null;
+  weekdays: number[]; // 수업 요일(여러 개) — 표시용
   termName: string;
   projectName: string;
   termStatus: string;
@@ -411,6 +412,7 @@ export async function getInstructorDetail(
       period_no: p.period_no,
       time_start: p.time_start,
       time_end: p.time_end,
+      weekdays: p.session_weekdays,
       termName: t?.name ?? "",
       projectName: t ? projMap.get(t.project_id) ?? "" : "",
       termStatus: t?.status ?? "",

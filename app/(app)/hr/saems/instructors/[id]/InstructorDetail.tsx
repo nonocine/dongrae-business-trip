@@ -20,6 +20,7 @@ import {
 } from "@/lib/saem";
 import PurgeAccountDialog from "@/app/(app)/hr/saems/PurgeAccountDialog";
 import type { InstructorProgramRow } from "@/app/(app)/hr/saems/instructorActions";
+import { weekdaysLabel } from "@/lib/saemSchedule";
 import {
   CRIME_CHECK_SLOT,
   crimeCheckState,
@@ -201,6 +202,7 @@ export default function InstructorDetail({
                   )}
                 </div>
                 <p className="mt-1 text-xs text-ink-hint">
+                  {p.weekdays.length > 0 ? `매주 ${weekdaysLabel(p.weekdays)} · ` : ""}
                   {p.period_no != null ? `${p.period_no}교시` : ""}
                   {p.time_start
                     ? ` · ${hhmm(p.time_start)}~${hhmm(p.time_end)}`

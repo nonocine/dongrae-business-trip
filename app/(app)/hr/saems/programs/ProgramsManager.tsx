@@ -35,6 +35,8 @@ import {
 import {
   buildSessionDates,
   firstWeekdayOnOrAfter,
+  scheduleSummary,
+  weekdaysLabel,
   weekdayOf,
   WEEKDAY_LABELS,
 } from "@/lib/saemSchedule";
@@ -80,11 +82,47 @@ type Modal =
 // 스케줄 입력 공용 — 차시(기본값)·프로그램(실제값)·차시 복사가 같이 쓴다.
 // =====================================================================
 type ScheduleForm = {
-  start: string; // 프로그램·복사에서만 사용(차시 기본값에는 없음)
-  weekday: string;
-  weeks: string;
+  start: string; // 1회차 기준일
+  weekdays: number[]; // 2026-10 — 여러 요일(주 2회 등). 0 일 ~ 6 토
+  weeks: string; // 회차 수
   holidays: string[];
 };
+
+// 수업 요일 — 여러 개 고를 수 있는 토글 7개(프로그램 스케줄용).
+//   최소 하나는 남깁니다(전부 끄면 회차를 만들 수 없음).
+function WeekdayToggles({
+  value,
+  onChange,
+}: {
+  value: number[];
+  onChange: (v: number[]) => void;
+}) {
+  return (
+    <div className="flex flex-wrap gap-1" role="group" aria-label="수업 요일">
+      {WEEKDAY_LABELS.map((label, i) => {
+        const on = value.includes(i);
+        return (
+          <button
+            key={i}
+            type="button"
+            aria-pressed={on}
+            onClick={() => {
+              if (on && value.length === 1) return;
+              onChange(on ? value.filter((d) => d !== i) : [...value, i].sort((a, b) => a - b));
+            }}
+            className={`h-8 w-8 rounded-md border text-xs font-semibold transition ${
+              on
+                ? "border-navy bg-navy text-white"
+                : "border-line bg-card text-ink-muted hover:bg-surface"
+            } ${i === 0 ? "text-stamp" : ""}`}
+          >
+            {label}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
 
 function WeekdaySelect({
   value,
@@ -158,12 +196,12 @@ function HolidayPicker({
 // 생성될 회차 날짜 실시간 미리보기(급여 미리보기 패턴).
 function SessionPreview({
   start,
-  weekday,
+  weekdays,
   weeks,
   holidays,
 }: {
   start: string;
-  weekday: string;
+  weekdays: number[];
   weeks: string;
   holidays: string[];
 }) {
@@ -172,15 +210,21 @@ function SessionPreview({
     start && Number.isFinite(n) && n > 0
       ? buildSessionDates({
           start,
-          weekday: Number(weekday),
+          weekdays,
           weeks: n,
           holidays,
         })
       : [];
   return (
-    <div className="mt-2 rounded-md border border-line bg-surface p-2.5">
+    <div className="mt-2 rounded-md border border-line bg-surface p-2.5" data-testid="session-preview">
       <p className="text-[11px] font-semibold text-navy">
         생성될 회차 {dates.length > 0 ? `${dates.length}건` : ""}
+        {weekdays.length > 0 && (
+          <span className="ml-1 font-normal text-ink-muted">
+            — {scheduleSummary(weekdays, null)}
+            {dates.length > 0 && ` · ${dates[0]} ~ ${dates[dates.length - 1]}`}
+          </span>
+        )}
       </p>
       {dates.length === 0 ? (
         <p className="mt-1 text-[11px] text-ink-hint">
@@ -191,13 +235,14 @@ function SessionPreview({
           {dates.map((d, i) => (
             <li key={d} className="font-mono text-[11px] text-ink-body">
               <span className="text-ink-hint">{i + 1}.</span> {d}
+              <span className="text-ink-hint">({WEEKDAY_LABELS[weekdayOf(d) ?? 0]})</span>
             </li>
           ))}
         </ol>
       )}
       {holidays.length > 0 && (
         <p className="mt-1.5 text-[11px] text-ink-hint">
-          휴강일 {holidays.length}건은 건너뛰고 다음 주로 밀려 회차 수를 채웁니다.
+          휴강일 {holidays.length}건은 건너뛰고 다음 수업일로 밀려 회차 수를 채웁니다.
         </p>
       )}
     </div>
@@ -544,8 +589,8 @@ export default function ProgramsManager({
                         )
                       ) : (
                         <span className="inline-flex items-center gap-1">
-                          <span className="text-xs text-ink-body">
-                            {p.sessionCount}회
+                          <span className="text-xs text-ink-body" title={`매주 ${weekdaysLabel(p.session_weekdays)}`}>
+                            {scheduleSummary(p.session_weekdays, p.sessionCount)}
                           </span>
                           {p.lockedCount > 0 && (
                             <span className={badgeNeutral} title="제출·확정·정산된 회차">
@@ -942,7 +987,7 @@ function TermModal({
         {previewStart && (
           <SessionPreview
             start={previewStart}
-            weekday={weekday}
+            weekdays={[Number(weekday)]}
             weeks={weeks}
             holidays={holidays}
           />
@@ -1036,10 +1081,13 @@ function CopyModal({
       </div>
       <SessionPreview
         start={startDate}
-        weekday={weekday}
+        weekdays={[Number(weekday)]}
         weeks={weeks}
         holidays={holidays}
       />
+      <p className="mt-1 text-[11px] text-ink-hint">
+        주 2회 이상 프로그램(예: 월·수)은 자기 요일을 그대로 유지하고, 회차 수는 위 회차 수 × 주당 횟수로 만듭니다.
+      </p>
       {err && <p className={`mt-3 ${noticeError}`}>{err}</p>}
       <div className="mt-4 flex gap-2">
         <button
@@ -1080,10 +1128,10 @@ function initialSchedule(
     // 자기 스케줄이 이미 있으면 그 값을 그대로 신뢰한다(휴강일을 비워 둔 것도 의도).
     const hasOwn =
       program.session_start != null || program.session_weeks != null;
-    const wd =
-      program.session_weekday ??
-      (program.firstSessionDate ? weekdayOf(program.firstSessionDate) : null) ??
-      termWeekday;
+    const fromDate = program.firstSessionDate ? weekdayOf(program.firstSessionDate) : null;
+    const wds = program.session_weekdays.length
+      ? program.session_weekdays
+      : [fromDate ?? termWeekday];
     const start =
       program.session_start ?? program.firstSessionDate ?? term?.start_date ?? "";
     const weeks =
@@ -1091,7 +1139,7 @@ function initialSchedule(
       (program.sessionCount > 0 ? program.sessionCount : term?.default_weeks ?? 8);
     return {
       start,
-      weekday: String(wd),
+      weekdays: wds,
       weeks: String(weeks),
       holidays: hasOwn
         ? program.session_holidays
@@ -1106,7 +1154,7 @@ function initialSchedule(
     : "";
   return {
     start,
-    weekday: String(termWeekday),
+    weekdays: [termWeekday],
     weeks: String(term?.default_weeks ?? 8),
     holidays: term?.default_holidays ?? [],
   };
@@ -1151,6 +1199,8 @@ function ProgramModal({
       program?.share_rate != null ? trimRate(program.share_rate) : "70",
   });
   const [err, setErr] = useState<string | null>(null);
+  const [needsConfirm, setNeedsConfirm] = useState(false);
+  const [acceptDiscard, setAcceptDiscard] = useState(false);
   const [pending, start] = useTransition();
   const set = (p: Partial<typeof f>) => setF((prev) => ({ ...prev, ...p }));
   const numOrNull = (v: string) => (v === "" ? null : Number(v));
@@ -1173,14 +1223,19 @@ function ProgramModal({
       pay_type: f.pay_type,
       share_rate: numOrNull(f.share_rate),
       session_start: sc.start || null,
-      session_weekday: sc.weekday === "" ? null : Number(sc.weekday),
+      session_weekdays: sc.weekdays,
       session_weeks: sc.weeks === "" ? null : Number(sc.weeks),
       session_holidays: sc.holidays,
+      acceptDiscard,
     };
     start(async () => {
       if (program) {
         const res = await updateProgram(program.id, input);
-        if (!res.ok) return setErr(res.message);
+        if (!res.ok) {
+          // 지워질 내용이 있으면 확인란을 띄웁니다(체크 후 다시 저장).
+          if ("needsConfirm" in res && res.needsConfirm) setNeedsConfirm(true);
+          return setErr(res.message);
+        }
         const s = res.sync;
         onDone(
           s
@@ -1307,12 +1362,11 @@ function ProgramModal({
             />
           </div>
           <div>
-            <label className="block text-[11px] font-semibold text-navy">요일</label>
+            <label className="block text-[11px] font-semibold text-navy">
+              요일 <span className="font-normal text-ink-hint">(여러 개 선택 가능)</span>
+            </label>
             <div className="mt-1">
-              <WeekdaySelect
-                value={sc.weekday}
-                onChange={(v) => setScf({ weekday: v })}
-              />
+              <WeekdayToggles value={sc.weekdays} onChange={(v) => setScf({ weekdays: v })} />
             </div>
           </div>
           <div>
@@ -1335,20 +1389,26 @@ function ProgramModal({
         </div>
         <SessionPreview
           start={sc.start}
-          weekday={sc.weekday}
+          weekdays={sc.weekdays}
           weeks={sc.weeks}
           holidays={sc.holidays}
         />
         {program && (
           <p className={`mt-2 ${noticeWarning}`}>
             {program.lockedCount > 0
-              ? `스케줄을 바꾸면 제출·확정된 회차 ${program.lockedCount}건은 그대로 보존하고, 나머지 회차만 새 스케줄로 다시 만듭니다. 회차 번호는 날짜순으로 재정렬됩니다.`
-              : `스케줄을 바꾸면 기존 회차 ${program.sessionCount}건을 모두 지우고 새로 만듭니다. (제출·확정된 회차가 없어 안전합니다)`}
+              ? `스케줄을 바꾸면 제출·확정된 회차 ${program.lockedCount}건은 그대로 보존하고, 나머지 회차만 새 스케줄로 다시 만듭니다. 보존되는 회차의 날짜가 새 스케줄에 없으면 저장되지 않습니다.`
+              : `스케줄을 바꾸면 기존 회차 ${program.sessionCount}건을 지우고 새로 만듭니다. 강사 계획서 등 지워질 내용이 있으면 저장 전에 한 번 더 확인합니다.`}
           </p>
         )}
       </div>
 
       {err && <p className={`mt-3 ${noticeError}`}>{err}</p>}
+      {needsConfirm && (
+        <label className="mt-2 flex items-center gap-2 text-xs text-stamp">
+          <input type="checkbox" checked={acceptDiscard} onChange={(e) => setAcceptDiscard(e.target.checked)} />
+          위 내용이 지워지는 것을 확인했습니다
+        </label>
+      )}
       <div className="mt-4 flex gap-2">
         <button type="button" onClick={submit} disabled={pending} className={btnPrimary}>
           {pending ? "저장 중…" : "저장"}
@@ -1374,6 +1434,8 @@ function SessionsModal({
   const [sc, setSc] = useState<ScheduleForm>(() => initialSchedule(program, term));
   const setScf = (p: Partial<ScheduleForm>) => setSc((prev) => ({ ...prev, ...p }));
   const [err, setErr] = useState<string | null>(null);
+  const [needsConfirm, setNeedsConfirm] = useState(false);
+  const [acceptDiscard, setAcceptDiscard] = useState(false);
   const [pending, start] = useTransition();
 
   return (
@@ -1395,9 +1457,11 @@ function SessionsModal({
           />
         </div>
         <div>
-          <label className="block text-[11px] font-semibold text-navy">요일</label>
+          <label className="block text-[11px] font-semibold text-navy">
+            요일 <span className="font-normal text-ink-hint">(여러 개 선택 가능)</span>
+          </label>
           <div className="mt-1">
-            <WeekdaySelect value={sc.weekday} onChange={(v) => setScf({ weekday: v })} />
+            <WeekdayToggles value={sc.weekdays} onChange={(v) => setScf({ weekdays: v })} />
           </div>
         </div>
         <div>
@@ -1417,7 +1481,7 @@ function SessionsModal({
       </div>
       <SessionPreview
         start={sc.start}
-        weekday={sc.weekday}
+        weekdays={sc.weekdays}
         weeks={sc.weeks}
         holidays={sc.holidays}
       />
@@ -1427,6 +1491,12 @@ function SessionsModal({
         </p>
       )}
       {err && <p className={`mt-3 ${noticeError}`}>{err}</p>}
+      {needsConfirm && (
+        <label className="mt-2 flex items-center gap-2 text-xs text-stamp">
+          <input type="checkbox" checked={acceptDiscard} onChange={(e) => setAcceptDiscard(e.target.checked)} />
+          위 내용이 지워지는 것을 확인했습니다
+        </label>
+      )}
       <div className="mt-4 flex gap-2">
         <button
           type="button"
@@ -1437,11 +1507,15 @@ function SessionsModal({
               setErr(null);
               const res = await generateProgramSessions(program.id, {
                 start: sc.start,
-                weekday: Number(sc.weekday),
+                weekdays: sc.weekdays,
                 weeks: Number(sc.weeks),
                 holidays: sc.holidays,
+                acceptDiscard,
               });
-              if (!res.ok) return setErr(res.message);
+              if (!res.ok) {
+                if ("needsConfirm" in res && res.needsConfirm) setNeedsConfirm(true);
+                return setErr(res.message);
+              }
               onDone(`회차 ${res.sync.created}건을 생성했습니다.`);
             })
           }
