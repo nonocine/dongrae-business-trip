@@ -7,6 +7,8 @@ import MyHrTabs from "@/app/(app)/profile/hr/MyHrTabs";
 import MyLeavePlanSection from "@/app/(app)/profile/hr/MyLeavePlanSection";
 import MyContractsSection from "@/app/(app)/profile/hr/MyContractsSection";
 import { listMyContracts } from "@/app/(app)/profile/hr/contractActions";
+import MyDisciplineSection from "@/app/(app)/profile/hr/MyDisciplineSection";
+import { getMyDisciplineReceipts } from "@/app/(app)/profile/hr/disciplineActions";
 import { getMyProfile } from "@/app/(app)/profile/hr/actions";
 import { getMyTrainings } from "@/app/(app)/profile/hr/trainingActions";
 import { getMyLeavePlan } from "@/app/(app)/profile/hr/leavePlanActions";
@@ -26,7 +28,7 @@ export default async function MyHrPage() {
   const session = await getSession();
   if (!session) redirect("/");
 
-  const [my, myTrainings, myCerts, myCertRequests, certPrefill, myLeavePlan, myContracts] =
+  const [my, myTrainings, myCerts, myCertRequests, certPrefill, myLeavePlan, myContracts, myDiscipline] =
     await Promise.all([
       getMyProfile(),
       getMyTrainings(),
@@ -35,6 +37,7 @@ export default async function MyHrPage() {
       getMyCertificatePrefill(),
       getMyLeavePlan(),
       listMyContracts(),
+      getMyDisciplineReceipts(),
     ]);
   if (!my) redirect("/");
 
@@ -60,6 +63,11 @@ export default async function MyHrPage() {
             driverId={my.driver.id}
             driverName={my.driver.name}
             profile={my.profile}
+          />
+        }
+        discipline={
+          <MyDisciplineSection
+            data={myDiscipline ?? { awards: [], reports: [], request: null }}
           />
         }
         contracts={

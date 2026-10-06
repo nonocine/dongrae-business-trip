@@ -5,7 +5,7 @@ import { tabBarCls, tabNavCls, tabItemCls } from "@/lib/ui";
 
 // 마이페이지(내 인사기록) 탭 껍데기 — 데이터는 서버에서 받아 children 으로 꽂습니다
 // (프레젠테이션 전용, 서버 액션·조회 로직과 무관).
-export type MyHrTabKey = "info" | "contracts" | "certs" | "trainings" | "leave";
+export type MyHrTabKey = "info" | "contracts" | "certs" | "trainings" | "leave" | "discipline";
 
 const TABS: { key: MyHrTabKey; label: string }[] = [
   { key: "info", label: "내 정보" },
@@ -13,6 +13,7 @@ const TABS: { key: MyHrTabKey; label: string }[] = [
   { key: "certs", label: "증명서" },
   { key: "trainings", label: "내 의무교육" },
   { key: "leave", label: "연차 사용계획서" },
+  { key: "discipline", label: "포상·경위서" },
 ];
 
 // 해시 → 탭 키. 새 해시(#info/#certs/#trainings)와 함께, 기존 북마크·대시보드
@@ -32,6 +33,9 @@ const HASH_TO_TAB: Record<string, MyHrTabKey> = {
   leave: "leave",
   "leave-plan": "leave",
   "my-leave-plan": "leave",
+  discipline: "discipline",
+  incident: "discipline",
+  award: "discipline",
 };
 
 function tabFromHash(hash: string): MyHrTabKey | null {
@@ -45,12 +49,14 @@ export default function MyHrTabs({
   certs,
   trainings,
   leave,
+  discipline,
 }: {
   info: ReactNode;
   contracts: ReactNode;
   certs: ReactNode;
   trainings: ReactNode;
   leave: ReactNode;
+  discipline: ReactNode;
 }) {
   // 첫 렌더는 SSR 과 동일하게 기본 탭으로 두고, 마운트 후 해시를 반영합니다
   // (초기값에서 window 를 읽으면 하이드레이션 불일치가 납니다).
@@ -79,6 +85,7 @@ export default function MyHrTabs({
     certs,
     trainings,
     leave,
+    discipline,
   };
 
   return (

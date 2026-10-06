@@ -328,6 +328,16 @@ export const MENU_ITEMS: MenuItem[] = [
     show: { kind: "role", role: "hr" },
   },
   {
+    key: "hr-discipline",
+    group: "hr",
+    label: "상벌·인사위원회",
+    href: "/hr/discipline",
+    icon: "⚖️",
+    desc: "포상·징계·경위서·인사위원회 (관장·부장 전용)",
+    // ★ 관장 지시 — hr 직무도 아닌 M0 만. 가드(lib/hrDisciplineServer)와 같은 기준.
+    show: { kind: "m0" },
+  },
+  {
     key: "hr-contracts",
     group: "hr",
     label: "계약서",

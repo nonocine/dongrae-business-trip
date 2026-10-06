@@ -1,5 +1,6 @@
 "use client";
 
+import DisciplineSummaryPanel from "@/app/(app)/hr/discipline/DisciplineSummaryPanel";
 import { useEffect, useMemo, useState, useTransition } from "react";
 import {
   saveEmployeeProfile,
@@ -716,6 +717,9 @@ export default function EmployeeProfileForm({
           )}
         </form>
       </section>
+
+      {/* 상벌 — 관장·부장(M0)에게만. 인사 담당(hr 직무)은 이 구역을 받지 않습니다. */}
+      {canManageAuth && <DisciplineSummaryPanel driverId={driver.id} />}
     </div>
   );
 }
