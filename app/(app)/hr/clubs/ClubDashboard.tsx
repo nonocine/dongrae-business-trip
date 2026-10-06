@@ -26,6 +26,9 @@ import {
   type InstructorPickRow,
 } from "@/app/(app)/hr/clubs/actions";
 import ClubPlanEditor from "@/app/(app)/hr/clubs/ClubPlanEditor";
+import PurgeAccountDialog, {
+  AccountActionsGuide,
+} from "@/app/(app)/hr/saems/PurgeAccountDialog";
 import {
   panelCls,
   panelToneCls,
@@ -52,10 +55,12 @@ export default function ClubDashboard({
   year,
   month,
   data,
+  canPurge = false,
 }: {
   year: number;
   month: number;
   data: ClubDashboardData;
+  canPurge?: boolean; // 계정 완전 삭제 — M0 만
 }) {
   const router = useRouter();
   const [pending, start] = useTransition();
@@ -184,6 +189,11 @@ export default function ClubDashboard({
       <TeacherList
         teachers={data.teachers}
         pending={pending}
+        canPurge={canPurge}
+        onPurged={(text) => {
+          setMessage({ ok: true, text });
+          router.refresh();
+        }}
         onRemove={(teacher) =>
           run(
             () => removeClubTeacher({ instructorId: teacher.id }),
@@ -378,24 +388,42 @@ function deactivationNote(teacher: ClubTeacherRow): string {
 function TeacherList({
   teachers,
   pending,
+  canPurge,
+  onPurged,
   onRemove,
   onDeactivate,
   onReactivate,
 }: {
   teachers: ClubTeacherRow[];
   pending: boolean;
+  canPurge: boolean;
+  onPurged: (message: string) => void;
   onRemove: (teacher: ClubTeacherRow) => void;
   onDeactivate: (teacher: ClubTeacherRow, reason: string) => void;
   onReactivate: (teacher: ClubTeacherRow) => void;
 }) {
+  const [purgeTarget, setPurgeTarget] = useState<ClubTeacherRow | null>(null);
   return (
     <section className={panelToneCls("green")}>
+      {purgeTarget && (
+        <PurgeAccountDialog
+          instructorId={purgeTarget.id}
+          name={purgeTarget.name}
+          onClose={() => setPurgeTarget(null)}
+          onDone={(text) => {
+            setPurgeTarget(null);
+            onPurged(text);
+          }}
+        />
+      )}
       <h2 className={sectionTitleCls("green")}>동아리샘 목록</h2>
-      <p className="mt-1 text-xs text-ink-muted">
-        <b>중지</b>는 동아리샘 역할만 잠시 끄는 것이라 언제든 되돌릴 수 있고,{" "}
-        <b>제거</b>는 역할 자체를 지웁니다(다시 등록해야 함). 둘 다 계정과 강사
-        역할은 건드리지 않습니다.
-      </p>
+      <AccountActionsGuide omit={canPurge ? [] : ["완전 삭제"]} />
+      {canPurge && (
+        <p className="mt-1 text-xs text-ink-hint">
+          이미 [제거]해서 이 목록에서 사라진 계정은 강사관리 목록(역할 없는 계정도
+          표시)의 상세 화면에서 완전 삭제할 수 있습니다.
+        </p>
+      )}
       <p className="mt-1 text-xs text-ink-hint">
         “계정” 배지는 동래샘들 로그인 상태, “동아리샘” 배지는 역할 상태입니다.
         이 화면에서는 역할만 바뀝니다.
@@ -487,6 +515,16 @@ function TeacherList({
                   >
                     {teacher.alsoInstructor ? "동아리샘 역할 해제" : "제거"}
                   </button>
+                  {canPurge && (
+                    <button
+                      type="button"
+                      disabled={pending}
+                      onClick={() => setPurgeTarget(teacher)}
+                      className={btnDanger}
+                    >
+                      완전 삭제
+                    </button>
+                  )}
                 </div>
               </li>
             );

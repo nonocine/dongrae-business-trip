@@ -49,7 +49,12 @@ export default async function ClubsPage({
           ← 홈
         </Link>
       </div>
-      <ClubDashboard year={year} month={month} data={data} />
+      <ClubDashboard
+        year={year}
+        month={month}
+        data={data}
+        canPurge={access.isM0}
+      />
     </div>
   );
 }

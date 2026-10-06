@@ -633,7 +633,7 @@ export async function addClubRoleToInstructor(input: {
 
 // 동아리샘 제거 = 역할 해제. 계정(saem_instructors)은 절대 건드리지 않는다.
 //   겸직자면 강사 자격·서류가 그대로 남고, 순수 동아리샘도 계정은 남는다.
-//   (계정 완전 삭제는 강사관리의 M0 전용 deleteInstructor 경로)
+//   (계정 완전 삭제는 M0 전용 purgeActions — 강사관리 상세·이 화면 양쪽에서 호출)
 export async function removeClubTeacher(input: {
   instructorId: string;
 }): Promise<ActionResult> {

@@ -9,11 +9,7 @@ import {
   uploadInstructorDoc,
   getInstructorDocUrl,
   deleteInstructorDoc,
-  checkInstructorDeletable,
-  deleteInstructor,
   saveInstructorRrn,
-  type InstructorInput,
-  type InstructorDeletability,
 } from "@/app/(app)/hr/saems/instructorActions";
 import {
   TERM_STATUS_LABEL,
@@ -22,6 +18,7 @@ import {
   type SaemInstructorDoc,
   type TermStatus,
 } from "@/lib/saem";
+import PurgeAccountDialog from "@/app/(app)/hr/saems/PurgeAccountDialog";
 import type { InstructorProgramRow } from "@/app/(app)/hr/saems/instructorActions";
 import {
   CRIME_CHECK_SLOT,
@@ -215,190 +212,62 @@ export default function InstructorDetail({
         )}
       </section>
 
-      {/* 강사 삭제 — M0 전용. 기록 있으면 삭제 불가·비활성 유도. */}
+      {/* 계정 완전 삭제 — M0 전용. 사전 점검 후 삭제(PurgeAccountDialog). */}
       {isM0 && (
-        <DeleteSection
-          instructorId={instructor.id}
-          instructorName={instructor.name}
-          alreadyInactive={f.status === "inactive"}
-          form={f}
-        />
+        <DeleteSection instructorId={instructor.id} instructorName={instructor.name} />
       )}
     </div>
   );
 }
 
-// --- 강사 삭제 구역(M0 전용) ---
+// --- 계정 완전 삭제 구역(M0 전용) ---
+//   2026-10 관장 요청으로 SA-12 '강사 삭제'(기록 있으면 무조건 거부)를 바꿨습니다.
+//   이제 정산·강의확인증·직원 계정만 막고, 담당 프로그램은 경고 후 담당자를 비웁니다.
+//   판정은 lib/saemAccountPurge(서버) 한 곳.
 function DeleteSection({
   instructorId,
   instructorName,
-  alreadyInactive,
-  form,
 }: {
   instructorId: string;
   instructorName: string;
-  alreadyInactive: boolean;
-  form: InstructorInput & { status: "active" | "inactive" };
 }) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
-  const [d, setD] = useState<InstructorDeletability | null>(null);
-  const [nameInput, setNameInput] = useState("");
-  const [err, setErr] = useState<string | null>(null);
-  const [pending, start] = useTransition();
-
-  function openModal() {
-    setErr(null);
-    setNameInput("");
-    setD(null);
-    setOpen(true);
-    start(async () => {
-      const res = await checkInstructorDeletable(instructorId);
-      setD(res);
-    });
-  }
-  function confirmDelete() {
-    setErr(null);
-    start(async () => {
-      const res = await deleteInstructor(instructorId, nameInput.trim());
-      if (!res.ok) {
-        setErr(res.message);
-        if (res.deletability) setD(res.deletability);
-        return;
-      }
-      router.push("/hr/saems/instructors");
-      router.refresh();
-    });
-  }
-  function deactivate() {
-    setErr(null);
-    start(async () => {
-      const res = await updateInstructor(instructorId, {
-        ...form,
-        status: "inactive",
-      });
-      if (!res.ok) {
-        setErr(res.message);
-        return;
-      }
-      setOpen(false);
-      router.refresh();
-    });
-  }
-
-  const nameOk = nameInput.trim() === instructorName.trim();
 
   return (
     <section className={cardCls}>
-      <h3 className="text-base font-bold text-stamp">강사 삭제</h3>
+      <h3 className="text-base font-bold text-stamp">계정 완전 삭제</h3>
+      <ul className="mt-1 space-y-0.5 text-xs text-ink-muted">
+        <li>
+          <b className="text-ink-body">비활성</b> = 위 [상태]를 비활성으로 — 로그인만 막고 계정은 남습니다(되돌릴 수 있음).
+        </li>
+        <li>
+          <b className="text-ink-body">중지·제거</b> = 동아리샘 역할만 끄거나 지움(동아리관리) — 계정은 남습니다.
+        </li>
+        <li>
+          <b className="text-stamp">완전 삭제</b> = 계정까지 삭제 — 전화번호가 풀려 재가입할 수 있습니다. 되돌릴 수 없습니다.
+        </li>
+      </ul>
       <p className="mt-1 text-xs text-ink-hint">
-        배정 프로그램·서류·제출한 근무일지가 하나도 없는 강사만 완전히 삭제할 수
-        있습니다. 기록이 있으면 삭제 대신 비활성 처리하세요. 동아리샘 역할이
-        있으면 동아리관리에서 역할을 먼저 해제해야 합니다.
+        정산 내역·강의확인증이 있거나 직원 계정이면 삭제할 수 없습니다. 누르면 먼저 걸린 기록을 보여 줍니다.
       </p>
       <div className="mt-3">
-        <button type="button" onClick={openModal} className={btnDanger}>
-          강사 삭제
+        <button type="button" onClick={() => setOpen(true)} className={btnDanger}>
+          완전 삭제
         </button>
       </div>
-
       {open && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
-          <div className="w-full max-w-md rounded-xl border border-line bg-card p-5 shadow-lg">
-            <div className="mb-3 flex items-center justify-between">
-              <h3 className="text-base font-bold text-ink">강사 삭제</h3>
-              <button
-                type="button"
-                onClick={() => setOpen(false)}
-                className="text-sm text-ink-muted hover:underline"
-              >
-                닫기
-              </button>
-            </div>
-
-            {d === null ? (
-              <p className="py-4 text-center text-sm text-ink-muted">
-                삭제 가능 여부 확인 중…
-              </p>
-            ) : d.deletable ? (
-              <>
-                <p className={noticeWarning}>
-                  {instructorName} 선생님을 완전히 삭제합니다. 되돌릴 수 없습니다.
-                </p>
-                <label className="mt-3 block text-[11px] font-semibold text-navy">
-                  확인을 위해 이름(<b>{instructorName}</b>)을 입력하세요
-                </label>
-                <input
-                  value={nameInput}
-                  onChange={(e) => setNameInput(e.target.value)}
-                  className={`${inCls} mt-1`}
-                  placeholder={instructorName}
-                />
-                {err && <p className={`mt-3 ${noticeError}`}>{err}</p>}
-                <div className="mt-4 flex gap-2">
-                  <button
-                    type="button"
-                    onClick={confirmDelete}
-                    disabled={pending || !nameOk}
-                    className={btnDanger}
-                  >
-                    {pending ? "삭제 중…" : "완전히 삭제"}
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setOpen(false)}
-                    className={btnSecondary}
-                  >
-                    취소
-                  </button>
-                </div>
-              </>
-            ) : (
-              <>
-                {(d.programs > 0 || d.docs > 0 || d.submittedLogs > 0) && (
-                  <p className={noticeError}>
-                    배정 프로그램 {d.programs}건 / 서류 {d.docs}건 / 제출 일지{" "}
-                    {d.submittedLogs}건 이 있어 삭제할 수 없습니다.
-                  </p>
-                )}
-                {d.clubTeacher && (
-                  <p className={`mt-2 ${noticeError}`}>
-                    동아리샘 역할이 있습니다. 동아리관리에서 역할을 먼저
-                    해제해주세요.
-                  </p>
-                )}
-                <p className="mt-3 text-sm text-ink-body">
-                  기록 보존을 위해 삭제 대신 <b>비활성 처리</b>하세요. 비활성
-                  강사는 목록에서 기본 숨김됩니다.
-                </p>
-                {err && <p className={`mt-3 ${noticeError}`}>{err}</p>}
-                <div className="mt-4 flex gap-2">
-                  {alreadyInactive ? (
-                    <span className={`${badgeNeutral} self-center`}>
-                      이미 비활성
-                    </span>
-                  ) : (
-                    <button
-                      type="button"
-                      onClick={deactivate}
-                      disabled={pending}
-                      className={btnPrimary}
-                    >
-                      {pending ? "처리 중…" : "비활성으로 전환"}
-                    </button>
-                  )}
-                  <button
-                    type="button"
-                    onClick={() => setOpen(false)}
-                    className={btnSecondary}
-                  >
-                    닫기
-                  </button>
-                </div>
-              </>
-            )}
-          </div>
-        </div>
+        <PurgeAccountDialog
+          instructorId={instructorId}
+          name={instructorName}
+          onClose={() => setOpen(false)}
+          onDone={(message) => {
+            setOpen(false);
+            alert(message);
+            router.push("/hr/saems/instructors");
+            router.refresh();
+          }}
+        />
       )}
     </section>
   );
