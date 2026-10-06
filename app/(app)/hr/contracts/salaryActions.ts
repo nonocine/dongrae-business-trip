@@ -77,7 +77,6 @@ export type SalaryEmployee = {
   driverId: string;
   name: string;
   defaultSegments: SegmentInput[];
-  familyHint: string | null; // 급여설정의 가족수당(참고). 계약서에는 자동으로 넣지 않습니다.
   contract: { id: string; status: string } | null;
 };
 
@@ -115,15 +114,11 @@ export async function getSalaryWorkspace(year: number): Promise<SalaryWorkspace>
   const contractBy = new Map((existing ?? []).map((c) => [String((c as { driver_id: string }).driver_id), c as { id: string; status: string }]));
   const employees: SalaryEmployee[] = [...byDriver.entries()]
     .map(([driverId, rows]) => {
-      const fam = rows
-        .filter((r) => Number(r.extra?.family_allowance ?? 0) > 0)
-        .map((r) => `${r.start_month}~${r.end_month}월 월 ${Number(r.extra?.family_allowance).toLocaleString("ko-KR")}원`);
       const c = contractBy.get(driverId);
       return {
         driverId,
         name: nameById.get(driverId) ?? "(알 수 없음)",
         defaultSegments: mergeProfileSegments(rows.map((r) => ({ ...r, step: Number(r.step), extra: r.extra as never }))),
-        familyHint: fam.length ? `급여설정 가족수당: ${fam.join(", ")}` : null,
         contract: c ? { id: String(c.id), status: String(c.status) } : null,
       };
     })
@@ -140,6 +135,7 @@ function cleanSegments(input: SegmentInput[]): SegmentInput[] {
     cert_level: (["1", "2", "3"].includes(String(s.cert_level)) ? String(s.cert_level) : "") as SegmentInput["cert_level"],
     meal: s.meal !== false,
     transport: s.transport !== false,
+    mgmt_target: s.mgmt_target == null ? undefined : !!s.mgmt_target,
     family_monthly: Math.max(0, Math.trunc(Number(s.family_monthly) || 0)),
   }));
 }
@@ -210,7 +206,7 @@ export async function saveSalaryContract(input: SalaryContractInput): Promise<Re
 }
 
 // 선택한 직원들을 급여설정 기본 구간으로 한꺼번에 '작성 중' 저장(연말 일괄).
-//   가족수당은 자동 근거가 없어 0 — 해당 직원은 저장 뒤 [수정]에서 넣습니다.
+//   가족수당·관리업무수당도 급여설정(extra) 기준으로 자동 계산됩니다.
 export async function bulkCreateSalaryDrafts(
   year: number,
   driverIds: string[]
@@ -264,6 +260,7 @@ export async function getSalaryContractForEdit(
         cert_level: s.cert_level,
         meal: s.meal,
         transport: s.transport,
+        mgmt_target: s.mgmt_target,
         family_monthly: s.family_monthly,
       })),
     };

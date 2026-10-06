@@ -83,7 +83,7 @@ export default function SalaryContractsManager({
   function bulkCreate() {
     const ids = [...picked].filter((id) => pickable.includes(id));
     if (!ids.length) return;
-    if (!confirm(`${ids.length}명의 연봉계약서를 급여설정 기본 구간으로 '작성 중' 저장할까요?\n가족수당은 0으로 들어갑니다 — 해당 직원은 저장 뒤 [수정]에서 넣어주세요.`)) return;
+    if (!confirm(`${ids.length}명의 연봉계약서를 급여설정 기준으로 '작성 중' 저장할까요?\n연중 변동(승급·가족수당 등)도 그대로 들어가니, 계약 시점과 다른 직원은 저장 뒤 [수정]에서 고쳐주세요.`)) return;
     setMsg(null);
     start(async () => {
       const res = await bulkCreateSalaryDrafts(ws.year, ids);
@@ -108,7 +108,7 @@ export default function SalaryContractsManager({
       }
       const emp =
         ws.employees.find((e) => e.driverId === res.driverId) ??
-        ({ driverId: res.driverId, name: item.employee_name, defaultSegments: res.segments, familyHint: null, contract: { id: item.id, status: res.status } } as SalaryEmployee);
+        ({ driverId: res.driverId, name: item.employee_name, defaultSegments: res.segments, contract: { id: item.id, status: res.status } } as SalaryEmployee);
       setEditor({ emp, id: item.id, segments: res.segments });
     });
   }
@@ -122,9 +122,9 @@ export default function SalaryContractsManager({
       <section className={panelToneCls("yellow")}>
         <h3 className={sectionTitleCls("yellow")}>{ws.year}년 연봉계약서 작성</h3>
         <p className="mt-1 text-xs text-ink-muted">
-          급여설정(직원별 급여 구간)·호봉표·급여 설정값으로 계산합니다. 금액이 0 인 수당은 표에서 빠지고, 구간이 둘
-          이상이면 비고에 개월 수가 들어갑니다. 계약 당시와 급여설정이 다르면(예: 계약 후 승급) [미리보기·작성]에서
-          구간을 고치세요.
+          급여설정(직원별 급여 구간·수당)·호봉표·급여 설정값으로 계산합니다. 금액이 0 인 수당은 표에서 빠지고, 구간이
+          둘 이상이면 비고에 개월 수가 들어갑니다. 연중 변동분이 반영되므로 계약 시점 기준과 다르면(예: 계약 후 승급·
+          가족수당) [미리보기·작성]에서 구간을 고치세요.
         </p>
         {holidayMissing && <p className={`mt-2 ${noticeWarning}`}>{ws.year}년 설·추석 날짜를 먼저 넣어야 명절휴가비를 계산할 수 있습니다.</p>}
         {msg && <p className={`mt-3 ${msg.ok ? noticeSuccess : noticeError}`}>{msg.text}</p>}
@@ -180,7 +180,6 @@ export default function SalaryContractsManager({
                         </td>
                         <td className="px-2 py-2 font-medium text-ink">
                           {e.name}
-                          {e.familyHint && <span className="block text-[11px] font-normal text-warning">가족수당 확인 필요</span>}
                         </td>
                         <td className="px-2 py-2 text-xs text-ink-muted">{segSummary(e.defaultSegments)}</td>
                         <td className="px-2 py-2 text-right tabular-nums">
@@ -350,12 +349,9 @@ function SegmentEditor({
 
   return (
     <Modal title={`${emp.name} — ${ws.year}년 연봉계약서`} onClose={onClose} wide>
-      {emp.familyHint && (
-        <p className={`mb-3 ${noticeWarning}`}>
-          {emp.familyHint}. 계약서 가족수당은 자동으로 넣지 않습니다 — 계약 당시 지급 대상이면 아래 &lsquo;가족수당 월액&rsquo;에
-          입력하세요.
-        </p>
-      )}
+      <p className={`mb-3 ${segs.length > 1 ? noticeWarning : "text-xs text-ink-muted"}`}>
+        급여설정 기준으로 계산했습니다. 연중 변동분(승급·가족수당 등)이 반영됩니다 — 계약 시점 기준과 다르면 아래 구간을 수정하세요.
+      </p>
       <div className="overflow-x-auto">
         <table className="w-full min-w-[720px] text-xs" data-testid="segment-editor">
           <thead>
@@ -367,6 +363,7 @@ function SegmentEditor({
               <th className="px-1 py-1.5">자격수당</th>
               <th className="px-1 py-1.5">급식</th>
               <th className="px-1 py-1.5">교통</th>
+              <th className="px-1 py-1.5">관리업무</th>
               <th className="px-1 py-1.5">가족수당 월액</th>
               <th className="px-1 py-1.5 text-right">구간 합계</th>
               <th className="px-1 py-1.5" />
@@ -406,6 +403,14 @@ function SegmentEditor({
                 </td>
                 <td className="px-1 py-1 text-center">
                   <input type="checkbox" checked={s.transport} onChange={(e) => upd(i, { transport: e.target.checked })} />
+                </td>
+                <td className="px-1 py-1 text-center">
+                  <input
+                    type="checkbox"
+                    aria-label="관리업무수당 대상"
+                    checked={s.mgmt_target ?? false}
+                    onChange={(e) => upd(i, { mgmt_target: e.target.checked })}
+                  />
                 </td>
                 <td className="px-1 py-1">
                   <input className={cellIn} type="number" min={0} step={10000} value={s.family_monthly} onChange={(e) => upd(i, { family_monthly: Number(e.target.value) })} />

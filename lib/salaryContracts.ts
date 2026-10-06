@@ -10,16 +10,22 @@
 //     · 기본급 단가 = 계약 시작일 기준 유효한 호봉표 발효분(pickEffectiveBase).
 //       계약은 시작일에 맺으므로 8월 인상분 같은 연중 인상은 반영하지 않습니다
 //       (실제 발급분이 12개월 내내 01-01 단가).
-//     · 구간 = employee_salary_profiles 의 월 구간. 호봉·자격·급식/교통 대상이 같고
-//       이어진 구간은 하나로 합칩니다(급여대장용으로 8월에 쪼갠 행 등).
+//     · 구간 = employee_salary_profiles 의 월 구간. 호봉·자격·급식/교통·관리업무
+//       대상·가족수당이 같고 이어진 구간은 하나로 합칩니다(급여대장용으로 8월에 쪼갠 행 등).
+//       수당 대상·금액은 급여 계산(lib/salary.calcMonthlyPayroll)과 같은 extra 에서 읽습니다.
 //     · 급식비 = meal_allowance × 개월, 교통보조비 = transport_allowance × 개월
 //       (급수별 transport_allowance_12/34/56/7 은 쓰지 않음 — 실제 계약서가 전부 5만원)
 //     · 자격수당 = cert_allowance_{extra.cert_level} × 개월
-//     · 관리업무수당 = 기본급(구간 합) × mgmt_allowance_rate, 1~4급만, 10원 미만 절사
+//     · 관리업무수당 = 기본급(구간 합) × mgmt_allowance_rate, extra.mgmt_target 인 구간만,
+//       10원 미만 절사. (2026-10: 처음엔 "1~4급"으로 판정했으나 급여 계산과 같은
+//       mgmt_target 으로 맞춤 — 현재 데이터에선 대상자 같음: 노미현·허일수)
 //     · 명절휴가비 = 설·추석 각각 월기본급 × (holiday_bonus_rate ÷ 2), 10원 미만 절사.
 //       그 명절이 속한 달이 구간에 들어갈 때만 그 구간에 더합니다.
 //       명절 날짜는 settings(SALARY_HOLIDAYS_KEY)에 연도별로 둡니다.
-//     · 가족수당 = 화면에서 입력한 월액 × 개월(자동 근거 없음)
+//     · 가족수당 = extra.family_allowance(월액) × 구간 개월 (2026-10 정정 — 처음엔
+//       근거가 없다고 보고 화면 입력으로 뒀으나 급여설정에 구간별로 들어 있음).
+//       연중에 생긴 가족수당(예: 9월부터)도 그대로 반영되므로, 계약 시점과 다르면
+//       화면에서 구간을 고칩니다(김준호 호봉 건과 같은 성격).
 //   ※ 비율 곱은 정수로 계산합니다 — 2,054,600 × 0.6 같은 부동소수 오차가 10원
 //     절사에서 10원 차이를 만들기 때문입니다.
 // =====================================================================
@@ -49,6 +55,7 @@ export type SegmentInput = {
   cert_level: CertLevel;
   meal: boolean;
   transport: boolean;
+  mgmt_target?: boolean; // 관리업무수당 대상(extra.mgmt_target). 옛 저장분엔 없을 수 있음
   family_monthly: number;
 };
 
@@ -114,7 +121,13 @@ export function mergeProfileSegments(
     end_month: number;
     grade: string;
     step: number;
-    extra?: { cert_level?: string | null; meal_target?: boolean | null; transport_target?: boolean | null } | null;
+    extra?: {
+      cert_level?: string | null;
+      meal_target?: boolean | null;
+      transport_target?: boolean | null;
+      mgmt_target?: boolean | null;
+      family_allowance?: number | string | null;
+    } | null;
   }[]
 ): SegmentInput[] {
   const sorted = [...rows].sort((a, b) => a.start_month - b.start_month);
@@ -129,7 +142,8 @@ export function mergeProfileSegments(
       cert_level: cert,
       meal: r.extra?.meal_target !== false,
       transport: r.extra?.transport_target !== false,
-      family_monthly: 0,
+      mgmt_target: r.extra?.mgmt_target === true,
+      family_monthly: Math.max(0, Math.round(Number(r.extra?.family_allowance) || 0)),
     };
     const prev = out[out.length - 1];
     if (
@@ -139,7 +153,9 @@ export function mergeProfileSegments(
       prev.step === seg.step &&
       prev.cert_level === seg.cert_level &&
       prev.meal === seg.meal &&
-      prev.transport === seg.transport
+      prev.transport === seg.transport &&
+      prev.mgmt_target === seg.mgmt_target &&
+      prev.family_monthly === seg.family_monthly
     ) {
       prev.end_month = seg.end_month;
     } else {
@@ -213,8 +229,10 @@ export function computeSalaryContract(input: {
     const cert = certKey ? need(certKey) * months : 0;
     const inSeg = holidayMonths.filter((h) => h.month >= s.start_month && h.month <= s.end_month);
     const holiday = inSeg.reduce((acc) => acc + floor10Rate(monthly_base, holidayRate), 0);
+    // 대상 여부가 없는 옛 저장분만 예전 규칙(1~4급)으로 대신합니다.
     const gn = gradeNumber(s.grade);
-    const mgmt = gn != null && gn >= 1 && gn <= 4 ? floor10Rate(base, mgmtRate) : 0;
+    const mgmtOn = s.mgmt_target ?? (gn != null && gn >= 1 && gn <= 4);
+    const mgmt = mgmtOn ? floor10Rate(base, mgmtRate) : 0;
     const family = Math.max(0, Math.round(Number(s.family_monthly) || 0)) * months;
     const meal_amt = s.meal ? meal * months : 0;
     const transport_amt = s.transport ? transport * months : 0;
