@@ -67,7 +67,7 @@ export default async function MyHrPage() {
         }
         discipline={
           <MyDisciplineSection
-            data={myDiscipline ?? { awards: [], reports: [], request: null }}
+            data={myDiscipline ?? { reports: [], request: null }}
           />
         }
         contracts={

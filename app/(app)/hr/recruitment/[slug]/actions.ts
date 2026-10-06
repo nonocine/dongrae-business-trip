@@ -15,6 +15,7 @@ import {
   parseLicenseInput,
   parseCareerInput,
   parseAwardInput,
+  normalizeAwardList,
   parseTrainingInput,
   normalizeJudge,
   normalizeExternalJudge,
@@ -625,7 +626,8 @@ export async function convertApplicantToEmployee(
       family: [],
       licenses: applicant.licenses ?? [],
       career: applicant.career ?? [],
-      awards: applicant.awards ?? [],
+      // awards: 2026-10 부터 employee_profiles.awards 에 넣지 않습니다.
+      //   지원서 수상은 아래 7) 에서 hr_awards(외부 수상)로 옮깁니다.
       trainings: applicant.trainings ?? [],
       appointments: [],
       auth_level: null, // 기본 팀원 권한
@@ -674,6 +676,29 @@ export async function convertApplicantToEmployee(
           ? `전환 기록 실패: ${linkErr.message}`
           : "이미 전환된 합격자입니다.",
       };
+    }
+
+    // 7) 지원서 수상 → hr_awards(외부 수상). 전환 자체는 이미 끝났으므로 실패해도
+    //    롤백하지 않고 경고만 남깁니다(인사기록카드 수상·포상 탭에서 다시 넣을 수 있음).
+    try {
+      const awardRows = normalizeAwardList(applicant.awards ?? [])
+        .map((w) => ({ w, on: looseYmd(w.date) }))
+        .filter(({ w, on }) => w.name && on)
+        .map(({ w, on }) => ({
+          driver_id: newDriverId,
+          award_source: "external",
+          awarded_on: on,
+          title: w.name,
+          awarding_body: w.issuer || null,
+          merit_summary: [w.reason, w.note].filter(Boolean).join(" / ") || null,
+          created_by: "채용 지원서에서 이관",
+        }));
+      if (awardRows.length) {
+        const { error: awErr } = await supabaseAdmin.from("hr_awards").insert(awardRows);
+        if (awErr) console.warn("[convert] 지원서 수상 이관 실패:", awErr.message);
+      }
+    } catch (e) {
+      console.warn("[convert] 지원서 수상 이관 실패:", e instanceof Error ? e.message : e);
     }
 
     const slug = await slugFromPostingId(String(a.posting_id ?? ""));
@@ -2222,4 +2247,18 @@ export async function assignInternalJudgeToPosting(
         e instanceof Error ? e.message : "위원 배정 중 오류가 발생했습니다.",
     };
   }
+}
+
+// 지원서 수상일("2015-05-01", "2015.05", "2015" 등) → "YYYY-MM-DD". 못 읽으면 null.
+//   월·일이 없으면 1일·1월로 둡니다(관장 이관 때와 같은 규칙).
+function looseYmd(v: string | null | undefined): string | null {
+  const m = String(v ?? "").trim().match(/^(d{4})(?:[.-/s]+(d{1,2}))?(?:[.-/s]+(d{1,2}))?/);
+  if (!m) return null;
+  const y = Number(m[1]);
+  const mo = m[2] ? Number(m[2]) : 1;
+  const d = m[3] ? Number(m[3]) : 1;
+  if (mo < 1 || mo > 12 || d < 1 || d > 31) return null;
+  const dt = new Date(Date.UTC(y, mo - 1, d));
+  if (dt.getUTCMonth() !== mo - 1) return null;
+  return dt.toISOString().slice(0, 10);
 }

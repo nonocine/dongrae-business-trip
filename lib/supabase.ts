@@ -582,7 +582,7 @@ export type EmployeeProfile = {
   family: EmployeeFamily[];
   licenses: EmployeeLicense[];
   career: EmployeeCareer[];
-  awards: EmployeeAward[];
+  // awards: 2026-10 hr_awards 로 일원화 — 더 이상 읽지 않습니다(컬럼은 관장이 정리 예정).
   trainings: EmployeeTraining[];
   appointments: EmployeeAppointment[];
   military_service: string | null;
@@ -717,7 +717,6 @@ export function normalizeEmployeeProfile(
     family: toJsonbArray<EmployeeFamily>(raw.family),
     licenses: toJsonbArray<EmployeeLicense>(raw.licenses),
     career: toJsonbArray<EmployeeCareer>(raw.career),
-    awards: toJsonbArray<EmployeeAward>(raw.awards),
     trainings: toJsonbArray<EmployeeTraining>(raw.trainings),
     appointments: toJsonbArray<EmployeeAppointment>(raw.appointments),
     military_service: (raw.military_service as string | null) ?? null,

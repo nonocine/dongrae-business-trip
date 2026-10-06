@@ -41,7 +41,7 @@ export const PROFILE_TABS: { key: ProfileTabKey; label: string }[] = [
   { key: "family", label: "가족" },
   { key: "license", label: "자격증" },
   { key: "career", label: "경력" },
-  { key: "award", label: "수상" },
+  { key: "award", label: "수상·포상" },
   { key: "training", label: "교육이수" },
   { key: "appointment", label: "인사발령" },
   { key: "documents", label: "첨부서류" },

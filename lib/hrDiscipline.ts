@@ -43,7 +43,20 @@ export const WARNING_THRESHOLD = 3;
 // 정직 상한(3월).
 export const SUSPENSION_MAX_MONTHS = 3;
 
+// 운영규정 30조 포상 종류 — 센터 포상(internal)에서 고릅니다.
 export const AWARD_KINDS = ["상장", "상패", "부상", "특별휴가", "위로금"] as const;
+
+// 포상 출처(hr_awards.award_source, 2026-10 인사기록카드 '수상' 탭 일원화).
+//   internal = 센터가 수여한 포상(운영규정 30조, 인사고과 반영 대상) — 관장·부장 전용 열람
+//   external = 외부 기관 수상(입사 전 포함) — 본인 경력이라 본인·인사 담당도 열람·수정
+export type AwardSource = "internal" | "external";
+export const AWARD_SOURCE_LABEL: Record<AwardSource, string> = {
+  internal: "센터 포상",
+  external: "외부 수상",
+};
+export function toAwardSource(v: unknown): AwardSource {
+  return v === "internal" ? "internal" : "external";
+}
 export const COMMITTEE_AGENDAS = ["징계", "표창", "승진", "기타"] as const;
 
 // --- 날짜 -----------------------------------------------------------------
@@ -158,6 +171,7 @@ export function validateDiscipline(d: {
 export type AwardRow = {
   id: string;
   driver_id: string;
+  award_source: AwardSource;
   awarded_on: string;
   title: string;
   awarding_body: string | null;

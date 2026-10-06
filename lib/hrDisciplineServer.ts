@@ -15,6 +15,7 @@ import { HR_DOCUMENTS_BUCKET } from "@/lib/supabase";
 import { isM0Grant } from "@/lib/authLevels";
 import {
   isDisciplineKind,
+  toAwardSource,
   type AwardRow,
   type CommitteeRow,
   type DisciplineRow,
@@ -61,6 +62,7 @@ export function toAward(r: Record<string, unknown>): AwardRow {
   return {
     id: String(r.id),
     driver_id: String(r.driver_id),
+    award_source: toAwardSource(r.award_source),
     awarded_on: String(r.awarded_on ?? ""),
     title: String(r.title ?? ""),
     awarding_body: str(r.awarding_body),

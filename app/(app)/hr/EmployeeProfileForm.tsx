@@ -1,5 +1,6 @@
 "use client";
 
+import CardAwardsTab from "@/app/(app)/hr/CardAwardsTab";
 import DisciplineSummaryPanel from "@/app/(app)/hr/discipline/DisciplineSummaryPanel";
 import { useEffect, useMemo, useState, useTransition } from "react";
 import {
@@ -25,7 +26,6 @@ import {
   normalizeFamilyList,
   normalizeLicenseList,
   normalizeCareerList,
-  normalizeAwardList,
   normalizeTrainingList,
   normalizeAppointmentList,
   type Driver,
@@ -34,7 +34,6 @@ import {
   type EmployeeFamily,
   type EmployeeLicense,
   type EmployeeCareer,
-  type EmployeeAward,
   type EmployeeTraining,
   type EmployeeAppointment,
 } from "@/lib/supabase";
@@ -44,7 +43,6 @@ import {
   FamilyTab,
   LicenseTab,
   CareerTab,
-  AwardTab,
   TrainingTab,
   AppointmentTab,
   EmployeeDocumentsSection,
@@ -196,9 +194,6 @@ export default function EmployeeProfileForm({
   const [careers, setCareers] = useState<EmployeeCareer[]>(() =>
     normalizeCareerList(profile?.career ?? [])
   );
-  const [awards, setAwards] = useState<EmployeeAward[]>(() =>
-    normalizeAwardList(profile?.awards ?? [])
-  );
   const [trainings, setTrainings] = useState<EmployeeTraining[]>(() =>
     normalizeTrainingList(profile?.trainings ?? [])
   );
@@ -308,7 +303,6 @@ export default function EmployeeProfileForm({
             value={JSON.stringify(licenses)}
           />
           <input type="hidden" name="career" value={JSON.stringify(careers)} />
-          <input type="hidden" name="awards" value={JSON.stringify(awards)} />
           <input
             type="hidden"
             name="trainings"
@@ -629,7 +623,8 @@ export default function EmployeeProfileForm({
 
           {/* 수상 탭 */}
           <div className={tab === "award" ? "" : "hidden"}>
-            <AwardTab awards={awards} onChange={setAwards} readOnly={locked} />
+            {/* 2026-10 — 옛 '수상'(employee_profiles.awards) 대신 hr_awards. 열람 범위는 서버가 정함. */}
+            <CardAwardsTab driverId={driver.id} />
           </div>
 
           {/* 교육이수 탭 */}

@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useEffect, useState } from "react";
 import { getEmployeeRecord, type EmployeeRecord } from "@/app/(app)/hr/discipline/actions";
-import { DISCIPLINE_LABEL, fmtDotPlain } from "@/lib/hrDiscipline";
+import { AWARD_SOURCE_LABEL, DISCIPLINE_LABEL, fmtDotPlain } from "@/lib/hrDiscipline";
 import { panelToneCls, sectionTitleCls, badgeDanger, badgeNavy, badgeNeutral, badgeSuccess, badgeWarning, noticeError, linkCls } from "@/lib/ui";
 
 // =====================================================================
@@ -54,7 +54,7 @@ export default function DisciplineSummaryPanel({ driverId }: { driverId: string 
               {record.timeline.slice(0, 8).map((t) =>
                 t.type === "award" ? (
                   <li key={`a-${t.award.id}`}>
-                    <span className="text-xs text-ink-muted">{fmtDotPlain(t.date)}</span> <span className={badgeSuccess}>포상</span>{" "}
+                    <span className="text-xs text-ink-muted">{fmtDotPlain(t.date)}</span> <span className={badgeSuccess}>{AWARD_SOURCE_LABEL[t.award.award_source]}</span>{" "}
                     {t.award.title}
                   </li>
                 ) : (

@@ -21,6 +21,7 @@ import {
 } from "@/app/(app)/hr/discipline/actions";
 import {
   AWARD_KINDS,
+  AWARD_SOURCE_LABEL,
   COMMITTEE_AGENDAS,
   DISCIPLINE_KINDS,
   DISCIPLINE_LABEL,
@@ -291,7 +292,10 @@ function RecordsTab({
                       <tr key={`a-${t.award.id}`} className={tableRowCls}>
                         <td className="px-2 py-2 text-xs">{fmtDotPlain(t.date)}</td>
                         <td className="px-2 py-2">
-                          <span className={badgeSuccess}>포상{t.award.award_kind ? `·${t.award.award_kind}` : ""}</span>
+                          <span className={t.award.award_source === "internal" ? badgeSuccess : badgeNeutral}>
+                            {AWARD_SOURCE_LABEL[t.award.award_source]}
+                            {t.award.award_kind ? `·${t.award.award_kind}` : ""}
+                          </span>
                         </td>
                         <td className="px-2 py-2">
                           <p className="font-medium text-ink">{t.award.title}</p>
@@ -571,10 +575,16 @@ function AwardForm({
 export function AwardFields({ row }: { row?: AwardRow | null }) {
   return (
     <div className="grid gap-3 sm:grid-cols-2">
+      <Field label="출처 *">
+        <select name="awardSource" className={inputCls} defaultValue={row?.award_source ?? "external"}>
+          <option value="external">외부 수상</option>
+          <option value="internal">센터 포상(운영규정 30조)</option>
+        </select>
+      </Field>
       <Field label="포상일 *">
         <input type="date" name="awardedOn" className={inputCls} defaultValue={row?.awarded_on ?? ""} />
       </Field>
-      <Field label="종류">
+      <Field label="종류(센터 포상만)">
         <select name="awardKind" className={inputCls} defaultValue={row?.award_kind ?? ""}>
           <option value="">선택</option>
           {AWARD_KINDS.map((k) => (

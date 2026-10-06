@@ -13,6 +13,7 @@ import {
   isDisciplineKind,
   isYmd,
   promotionBlockUntil,
+  toAwardSource,
   validateDiscipline,
   warningAlert,
   type AwardRow,
@@ -314,11 +315,14 @@ function awardRowFrom(fd: FormData) {
   if (!isYmd(awarded_on)) return "포상일을 확인해주세요.";
   if (!title) return "포상명을 적어주세요.";
   const kind = s(fd, "awardKind");
+  const source = toAwardSource(s(fd, "awardSource"));
   return {
+    award_source: source,
     awarded_on,
     title,
     awarding_body: s(fd, "awardingBody"),
-    award_kind: kind && (AWARD_KINDS as readonly string[]).includes(kind) ? kind : null,
+    // 포상 종류(운영규정 30조)는 센터 포상에만.
+    award_kind: source === "internal" && kind && (AWARD_KINDS as readonly string[]).includes(kind) ? kind : null,
     merit_summary: s(fd, "meritSummary"),
   };
 }

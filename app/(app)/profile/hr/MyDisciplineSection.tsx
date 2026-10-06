@@ -3,11 +3,9 @@
 import { useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import {
-  submitMyAward,
   submitMyIncidentReport,
   type MyDisciplineReceipts,
 } from "@/app/(app)/profile/hr/disciplineActions";
-import { AWARD_KINDS } from "@/lib/hrDiscipline";
 import {
   panelToneCls,
   sectionTitleCls,
@@ -21,8 +19,8 @@ import {
 } from "@/lib/ui";
 
 // =====================================================================
-// 마이페이지 '포상·경위서' — 본인은 등록·제출만 합니다.
-//   · 포상: 내가 받은 상을 기록. 등록 뒤 수정·삭제는 관장·부장이 합니다.
+// 마이페이지 '경위서' — 본인은 제출만 합니다.
+//   · 포상·수상은 2026-10 부터 '내 정보 › 수상·포상' 탭(인사기록카드)에서 등록합니다.
 //   · 경위서: 제출하면 본인도 내용을 다시 볼 수 없습니다(관장 지시). "제출함" 날짜만.
 //   · 징계는 이 화면에 없습니다(본인에게 조회 경로 자체가 없음).
 // =====================================================================
@@ -34,102 +32,8 @@ export default function MyDisciplineSection({ data }: { data: MyDisciplineReceip
   return (
     <div className="space-y-5" id="discipline">
       <IncidentPanel data={data} />
-      <AwardPanel data={data} />
+      <p className="text-xs text-ink-muted">포상·수상 기록은 &lsquo;내 정보 › 수상·포상&rsquo; 탭에서 등록합니다.</p>
     </div>
-  );
-}
-
-function AwardPanel({ data }: { data: MyDisciplineReceipts }) {
-  const router = useRouter();
-  const formRef = useRef<HTMLFormElement>(null);
-  const [open, setOpen] = useState(false);
-  const [msg, setMsg] = useState<Msg>(null);
-  const [pending, start] = useTransition();
-  return (
-    <section className={panelToneCls("green")}>
-      <div className="flex flex-wrap items-center justify-between gap-2">
-        <h3 className={sectionTitleCls("green")}>포상 등록</h3>
-        {!open && (
-          <button type="button" className={btnSecondary} onClick={() => setOpen(true)}>
-            포상 등록
-          </button>
-        )}
-      </div>
-      <p className="mt-1 text-xs text-ink-muted">
-        받은 상을 직접 기록합니다. 등록한 내용의 열람·수정은 관장·부장이 합니다. 이 화면에는 등록한 날짜와 포상명만 남습니다.
-      </p>
-      {open && (
-        <form
-          ref={formRef}
-          className="mt-3 space-y-3"
-          onSubmit={(e) => {
-            e.preventDefault();
-            const fd = new FormData(e.currentTarget);
-            setMsg(null);
-            start(async () => {
-              const res = await submitMyAward(fd);
-              if (!res.ok) return setMsg({ ok: false, text: res.message });
-              formRef.current?.reset();
-              setOpen(false);
-              setMsg({ ok: true, text: "포상을 등록했습니다." });
-              router.refresh();
-            });
-          }}
-        >
-          <div className="grid gap-3 sm:grid-cols-2">
-            <div>
-              <label className={labelCls}>포상일 *</label>
-              <input type="date" name="awardedOn" className={inputCls} required />
-            </div>
-            <div>
-              <label className={labelCls}>종류</label>
-              <select name="awardKind" className={inputCls} defaultValue="">
-                <option value="">선택</option>
-                {AWARD_KINDS.map((k) => (
-                  <option key={k} value={k}>
-                    {k}
-                  </option>
-                ))}
-              </select>
-            </div>
-            <div className="sm:col-span-2">
-              <label className={labelCls}>포상명 *</label>
-              <input name="title" className={inputCls} required placeholder="예: 청소년육성 유공 표창" />
-            </div>
-            <div className="sm:col-span-2">
-              <label className={labelCls}>수여기관</label>
-              <input name="awardingBody" className={inputCls} placeholder="예: 동래구청장" />
-            </div>
-            <div className="sm:col-span-2">
-              <label className={labelCls}>공적 요약</label>
-              <textarea name="meritSummary" className={inputCls} rows={3} />
-            </div>
-            <div className="sm:col-span-2">
-              <label className={labelCls}>증빙 첨부(PDF·JPG·PNG, 16MB 이하)</label>
-              <input type="file" name="file" accept="application/pdf,image/jpeg,image/png" className="mt-1 text-xs" />
-            </div>
-          </div>
-          <div className="flex gap-2">
-            <button type="submit" className={btnPrimary} disabled={pending}>
-              {pending ? "등록 중…" : "등록"}
-            </button>
-            <button type="button" className={btnSecondary} onClick={() => setOpen(false)}>
-              취소
-            </button>
-          </div>
-        </form>
-      )}
-      {msg && <p className={`mt-3 ${msg.ok ? noticeSuccess : noticeError}`}>{msg.text}</p>}
-      {data.awards.length > 0 && (
-        <ul className="mt-3 space-y-1 text-sm" data-testid="my-award-receipts">
-          {data.awards.map((a, i) => (
-            <li key={i} className="text-ink-body">
-              {ymdOf(a.created_at)} 등록함 — {a.title} <span className="text-xs text-ink-muted">({a.awarded_on})</span>
-            </li>
-          ))}
-        </ul>
-      )}
-    </section>
   );
 }
 

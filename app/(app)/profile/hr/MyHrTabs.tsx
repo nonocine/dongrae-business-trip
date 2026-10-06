@@ -13,7 +13,7 @@ const TABS: { key: MyHrTabKey; label: string }[] = [
   { key: "certs", label: "증명서" },
   { key: "trainings", label: "내 의무교육" },
   { key: "leave", label: "연차 사용계획서" },
-  { key: "discipline", label: "포상·경위서" },
+  { key: "discipline", label: "경위서" },
 ];
 
 // 해시 → 탭 키. 새 해시(#info/#certs/#trainings)와 함께, 기존 북마크·대시보드

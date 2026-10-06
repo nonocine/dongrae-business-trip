@@ -12,7 +12,6 @@ import {
   parseFamilyInput,
   parseLicenseInput,
   parseCareerInput,
-  parseAwardInput,
   parseTrainingInput,
   parseAppointmentInput,
   signHrDocument,
@@ -306,7 +305,6 @@ export async function saveEmployeeProfile(formData: FormData) {
   const family = parseFamilyInput(str("family"));
   const licenses = parseLicenseInput(str("licenses"));
   const career = parseCareerInput(str("career"));
-  const awards = parseAwardInput(str("awards"));
   const trainings = parseTrainingInput(str("trainings"));
   const appointments = parseAppointmentInput(str("appointments"));
 
@@ -326,7 +324,7 @@ export async function saveEmployeeProfile(formData: FormData) {
     family,
     licenses,
     career,
-    awards,
+    // awards: 2026-10 부터 쓰지 않음 — 수상·포상은 hr_awards(app/(app)/hr/awardActions).
     trainings,
     appointments,
     updated_at: new Date().toISOString(),
