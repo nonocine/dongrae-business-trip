@@ -168,8 +168,8 @@ function validate(input: ContractInput): string | null {
     if (input.contractEnd < input.contractStart) return "종료일이 시작일보다 빠릅니다.";
   }
   if (input.probation) {
-    if (!isYmd(input.probationStart) || !isYmd(input.probationEnd)) return "수습기간 날짜를 확인해주세요.";
-    if (input.probationEnd < input.probationStart) return "수습 종료일이 시작일보다 빠릅니다.";
+    if (!isYmd(input.probationStart) || !isYmd(input.probationEnd)) return "시용기간 날짜를 확인해주세요.";
+    if (input.probationEnd < input.probationStart) return "시용 종료일이 시작일보다 빠릅니다.";
   }
   if (input.weeklyHours != null && (!Number.isFinite(input.weeklyHours) || input.weeklyHours < 0 || input.weeklyHours > 52)) {
     return "주 근로시간을 확인해주세요.";

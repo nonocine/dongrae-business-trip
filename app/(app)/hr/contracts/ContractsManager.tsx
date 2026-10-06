@@ -181,7 +181,7 @@ export default function ContractsManager({
     }));
   }
 
-  // 시작일이 바뀌면 수습(시작일부터 3개월, 취업규칙 7조)을 다시 깝니다 — 직접 고친 뒤엔 그대로.
+  // 시작일이 바뀌면 시용기간(시작일부터 3개월, 취업규칙 7조 수습기간 기준)을 다시 깝니다 — 직접 고친 뒤엔 그대로.
   function changeStart(v: string) {
     setForm((f) => ({
       ...f,
@@ -338,12 +338,12 @@ export default function ContractsManager({
           <div className="sm:col-span-2 rounded-lg border border-rule p-3">
             <label className="flex items-center gap-2 text-sm text-ink-body">
               <input type="checkbox" checked={form.probation} onChange={(e) => set("probation", e.target.checked)} />
-              수습기간 두기 <span className="text-xs text-ink-muted">(취업규칙 7조 — 시작일부터 3개월이 기본)</span>
+              시용기간 두기 <span className="text-xs text-ink-muted">(시작일부터 3개월이 기본 — 취업규칙 7조)</span>
             </label>
             {form.probation && (
               <div className="mt-2 grid grid-cols-2 gap-2">
                 <div>
-                  <label className={labelCls}>수습 시작</label>
+                  <label className={labelCls}>시용 시작</label>
                   <input
                     type="date"
                     className={inputCls}
@@ -353,7 +353,7 @@ export default function ContractsManager({
                 </div>
                 <div>
                   <label className={labelCls}>
-                    수습 종료{" "}
+                    시용 종료{" "}
                     {form.probationStart && form.probationEnd && (
                       <span className="text-navy">({periodLabel(form.probationStart, form.probationEnd)})</span>
                     )}
@@ -769,7 +769,7 @@ function ClauseEditor({ initial }: { initial: ContractClauses }) {
       {open && (
         <div className="mt-4 space-y-3">
           {field("1조 리드문 ({근로자} 자리에 성명이 들어갑니다)", c.lead, (v) => setC({ ...c, lead: v }))}
-          {field("2조 수습 문장 (기간 뒤에 붙는 말)", c.probationNote, (v) => setC({ ...c, probationNote: v }))}
+          {field("2조 시용 문장 (기간 뒤에 붙는 말)", c.probationNote, (v) => setC({ ...c, probationNote: v }))}
           {field("3조 ④ 근무장소 단서 (괄호 안)", c.workplaceNote, (v) => setC({ ...c, workplaceNote: v }))}
           {field("3조 ⑥ 임금의 구성", c.wageComposition, (v) => setC({ ...c, wageComposition: v }), 1)}
           {field("3조 ⑦ 임금 지급 단서 (괄호 안)", c.paymentNote, (v) => setC({ ...c, paymentNote: v }))}

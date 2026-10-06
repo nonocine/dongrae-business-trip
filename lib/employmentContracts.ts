@@ -47,7 +47,9 @@ export const CONTRACT_DEFAULTS = {
   payment_day: "매월 25일",
 } as const;
 
-// 취업규칙 7조 — 수습기간 기본 3개월.
+// 시용기간 기본 3개월 — 취업규칙 7조(현행 표기는 "수습기간") 기준.
+//   계약서 화면·PDF 표현은 "시용"(관장 지시 2026-10: 내용이 해약권 유보부 근로계약).
+//   DB 컬럼명은 probation_* 그대로.
 export const PROBATION_MONTHS = 3;
 
 // settings 키. 조항 본문(현행)과, 보낸 계약서별 고정본.
@@ -70,7 +72,7 @@ export type ContractArticle = { title: string; items: string[] };
 export type ContractClauses = {
   // 1조 리드문. {근로자} 자리에 성명이 들어갑니다.
   lead: string;
-  // 2조 수습 문장 뒷부분("사용기간을 두며 …").
+  // 2조 시용 문장 뒷부분("사용기간을 두며 …").
   probationNote: string;
   // 3조 ④·⑦ 괄호 안 단서, ⑥ 임금의 구성.
   workplaceNote: string;
@@ -441,7 +443,7 @@ export function buildContractBlocks(input: {
   if (t.probation_start && t.probation_end) {
     b.push({
       kind: "note",
-      text: `※ 수습기간은 ${fmtDot(t.probation_start)} ~ ${fmtDot(t.probation_end)} (${periodLabel(
+      text: `※ 시용기간은 ${fmtDot(t.probation_start)} ~ ${fmtDot(t.probation_end)} (${periodLabel(
         t.probation_start,
         t.probation_end
       )}) ${c.probationNote}`,
