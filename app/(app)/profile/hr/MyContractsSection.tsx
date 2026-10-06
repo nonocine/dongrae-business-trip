@@ -7,10 +7,9 @@ import InkSignaturePad, { SignaturePreview } from "@/app/components/InkSignature
 import {
   signMyContract,
   downloadMyContractPdf,
-  type MyContract,
   type MyContractsData,
 } from "@/app/(app)/profile/hr/contractActions";
-import { contractStateLabel, fmtDot, isFinalized, kstYmd } from "@/lib/employmentContracts";
+import { CONTRACT_KINDS, contractStateLabel, isFinalized, kstYmd, type MyContract } from "@/lib/contractCore";
 import {
   panelToneCls,
   sectionTitleCls,
@@ -24,7 +23,7 @@ import {
 } from "@/lib/ui";
 
 // =====================================================================
-// 마이페이지 '내 계약서' — 열람·서명·다운로드(교부).
+// 마이페이지 '내 계약서' — 근로계약서·연봉계약서 열람·서명·다운로드(교부).
 //   * 서명은 내용을 끝까지 내려야 열립니다: 본문 스크롤 상자를 바닥까지
 //     내리면 [끝까지 읽었습니다] 확인란이 풀리고, 그걸 체크해야 [서명하기].
 //   * 저장된 서명이 있어도 자동 적용하지 않습니다 — 서명 창에서 미리보기를 보고
@@ -58,7 +57,7 @@ export default function MyContractsSection({ data }: { data: MyContractsData }) 
       ) : (
         <div className="mt-4 space-y-4">
           {contracts.map((c) => (
-            <ContractCard key={c.id} contract={c} savedSignature={savedSignature} />
+            <ContractCard key={`${c.kind}:${c.id}`} contract={c} savedSignature={savedSignature} />
           ))}
         </div>
       )}
@@ -101,7 +100,7 @@ function ContractCard({ contract: c, savedSignature }: { contract: MyContract; s
   function download() {
     setMsg(null);
     start(async () => {
-      const res = await downloadMyContractPdf(c.id);
+      const res = await downloadMyContractPdf(c.kind, c.id);
       if (!res.ok) {
         setMsg({ ok: false, text: res.message });
         return;
@@ -112,15 +111,15 @@ function ContractCard({ contract: c, savedSignature }: { contract: MyContract; s
   }
 
   const badge = finalized ? badgeSuccess : needsSign ? badgeWarning : badgeNavy;
-  const period = c.contract_end
-    ? `${fmtDot(c.contract_start)} ~ ${fmtDot(c.contract_end)}`
-    : `${fmtDot(c.contract_start)} ~`;
 
   return (
     <article className="rounded-lg border border-rule bg-card" data-testid="my-contract">
       <div className="flex flex-wrap items-center justify-between gap-2 border-b border-rule px-3 py-2.5">
         <div className="min-w-0">
-          <p className="text-sm font-semibold text-ink">근로계약서 · {period}</p>
+          <p className="text-sm font-semibold text-ink">
+            {CONTRACT_KINDS[c.kind].label} · {c.period}
+            {c.note && <span className="ml-1 font-normal text-ink-muted">({c.note})</span>}
+          </p>
           <p className="mt-0.5 text-xs text-ink-muted">
             {c.employee_signed_at ? `서명 ${kstYmd(c.employee_signed_at)}` : `받은 날 ${kstYmd(c.sent_at) ?? "-"}`}
             {c.delivered_at ? ` · 내려받음 ${kstYmd(c.delivered_at)}` : ""}
@@ -204,7 +203,7 @@ function ContractCard({ contract: c, savedSignature }: { contract: MyContract; s
           onClose={() => setDialog(false)}
           onConfirm={(choice) => {
             start(async () => {
-              const res = await signMyContract(c.id, {
+              const res = await signMyContract(c.kind, c.id, {
                 readConfirmed,
                 mode: choice.mode,
                 dataUrl: choice.mode === "drawn" ? choice.dataUrl : null,

@@ -200,7 +200,7 @@ export const MENU_ITEMS: MenuItem[] = [
     label: "내 계약서",
     href: "/profile/hr#contracts",
     icon: "📝",
-    desc: "근로계약서 열람·서명·내려받기 (본인 것만)",
+    desc: "근로·연봉계약서 열람·서명·내려받기 (본인 것만)",
     show: { kind: "everyone" },
   },
   // 공용 비밀번호 — 전 직원에게 보이되, 목록은 본인이 열람 가능한 항목만
@@ -330,10 +330,10 @@ export const MENU_ITEMS: MenuItem[] = [
   {
     key: "hr-contracts",
     group: "hr",
-    label: "근로계약서",
+    label: "계약서",
     href: "/hr/contracts",
     icon: "📝",
-    desc: "근로계약서 작성·발송·서명 현황",
+    desc: "근로·연봉계약서 작성·발송·서명 현황",
     show: { kind: "role", role: "hr" },
   },
   {
@@ -462,10 +462,10 @@ export const MENU_ITEMS: MenuItem[] = [
   {
     key: "admin-contracts",
     group: "admin",
-    label: "근로계약서",
+    label: "계약서",
     href: "/hr/contracts",
     icon: "📝",
-    desc: "근로계약서 작성·발송 · 센터장 서명",
+    desc: "근로·연봉계약서 작성·발송 · 센터장 서명",
     show: { kind: "m0" },
   },
   {

@@ -33,7 +33,7 @@ test.describe("낡은 자리표시자", () => {
     await page.goto("/hr?tab=contracts");
     await page.waitForLoadState("domcontentloaded");
 
-    const panel = page.locator("section", { hasText: "근로계약서는 전용 화면에서" });
+    const panel = page.locator("section", { hasText: "연봉계약서는 전용 화면에서" });
     await expect(panel).toBeVisible();
     await expect(panel).not.toHaveText(STALE);
     // 갈 곳이 있어야 안내입니다 — 없으면 그냥 자리표시자입니다.
@@ -44,7 +44,7 @@ test.describe("낡은 자리표시자", () => {
       panel.getByRole("link", { name: /내 인사기록카드/ }),
     ).toHaveAttribute("href", "/profile/hr#contracts");
     await expect(
-      panel.getByRole("link", { name: "근로계약서 화면 열기" }),
+      panel.getByRole("link", { name: "계약서 화면 열기" }),
     ).toHaveAttribute("href", "/hr/contracts");
     await ctx.close();
   });

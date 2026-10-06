@@ -1,7 +1,7 @@
-import { CONTRACT_ORG, circled, type ContractBlock } from "@/lib/employmentContracts";
+import { CONTRACT_ORG, circled, type ContractBlock } from "@/lib/contractCore";
 
 // =====================================================================
-// 근로계약서 본문 — 화면용. PDF(lib/employmentContractPdf)와 같은 블록 배열을
+// 계약서 본문(근로·연봉 공용) — 화면용. PDF(lib/contractPdf)와 같은 블록 배열을
 //   그립니다(문장 조립은 lib/employmentContracts.buildContractBlocks 한 곳).
 //   프레젠테이션 전용 — 서버·클라이언트 어디서든 렌더 가능.
 // =====================================================================
@@ -49,6 +49,44 @@ export default function ContractView({
                 <span className="shrink-0">{circled(b.no)}</span>
                 <span>{b.text}</span>
               </p>
+            );
+          case "bullet":
+            return (
+              <p key={i} className="flex gap-1.5 pl-2">
+                <span className="shrink-0">○</span>
+                <span>{b.text}</span>
+              </p>
+            );
+          case "table":
+            return (
+              <div key={i} className="my-1 overflow-x-auto">
+                {b.caption && <p className="text-right text-[11px] text-ink-muted">{b.caption}</p>}
+                <table className="w-full min-w-[480px] border-collapse text-[12px]">
+                  <thead>
+                    <tr>
+                      {b.headers.map((h, hi) => (
+                        <th key={hi} className="whitespace-pre-line border border-ink/60 bg-surface px-1.5 py-1 text-center font-semibold">
+                          {h}
+                        </th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {b.rows.map((r, ri) => (
+                      <tr key={ri}>
+                        {r.map((v, ci) => (
+                          <td
+                            key={ci}
+                            className={`border border-ink/60 px-1.5 py-1 tabular-nums ${b.align[ci] === "right" ? "text-right" : "text-center"}`}
+                          >
+                            {v}
+                          </td>
+                        ))}
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
             );
           case "sub":
             return (

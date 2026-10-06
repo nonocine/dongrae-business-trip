@@ -1,38 +1,35 @@
 // =====================================================================
-// 근로계약서 — 타입·조항 기본 문구·날짜 계산·서명 검증 (순수 모듈)
-//   * 노미현 부장 요청 / 관장 설계 확정 (2026-10). 연봉계약서는 다음 건.
+// 근로계약서 서식 — 조항 기본 문구·계약 행·문장 조립 (순수 모듈)
+//   * 노미현 부장 요청 / 관장 설계 확정 (2026-10).
 //   * 서식 = 2026년 실제 근로계약서(1~9조). 사람마다 달라지는 값(2·3조)만
 //     employment_contracts 컬럼에 담고, 나머지 조항 본문은 settings 테이블의
-//     CONTRACT_CLAUSES_KEY 에 JSON 으로 둡니다 → 규정이 바뀌어도 코드 수정 없이
-//     /hr/contracts 의 [조항 문구] 에서 고칩니다.
-//   * 보낸 계약서는 보낸 시점의 문구로 고정합니다(clauseSnapshotKey). 직원이
-//     읽고 서명하는 사이에 문구가 바뀌면 "무엇에 서명했는가" 가 흐려집니다.
-//     최종본은 양쪽 서명 후 만든 PDF(contract_pdf_url) 입니다.
-//   * 화면(ContractView)과 PDF(employmentContractPdf)가 같은 블록 배열
-//     (buildContractBlocks)을 그립니다 — 둘이 따로 문장을 조립하면 어긋납니다.
+//     CONTRACT_KINDS.employment.clausesKey 에 JSON 으로 둡니다 → 규정이 바뀌어도
+//     코드 수정 없이 /hr/contracts 의 [조항 문구] 에서 고칩니다.
+//   * 보낸 계약서는 보낸 시점의 문구로 고정합니다(clauseSnapshotKey).
+//   * 상태·날짜·서명 검증·블록 타입은 lib/contractCore(연봉계약서와 공용),
+//     보내기·서명·PDF 확정 흐름은 lib/contractServer 에 있습니다.
 // =====================================================================
 
-export type ContractStatus = "draft" | "sent" | "signed" | "void";
-export type ContractType = "fixed_term" | "permanent";
+import {
+  addDays,
+  addMonths,
+  clauseLines as lines,
+  clauseText as s,
+  fmtDot,
+  fmtKoreanDate,
+  periodLabel,
+  workflowFields,
+  type ContractBlock,
+  type ContractParty,
+  type ContractStatus,
+} from "./contractCore";
 
-export const CONTRACT_STATUS_LABEL: Record<ContractStatus, string> = {
-  draft: "작성 중",
-  sent: "서명 대기",
-  signed: "직원 서명 완료",
-  void: "무효",
-};
+export type ContractType = "fixed_term" | "permanent";
 
 export const CONTRACT_TYPE_LABEL: Record<ContractType, string> = {
   fixed_term: "기간제",
   permanent: "기간의 정함 없음",
 };
-
-// 서식 머리 — 계약당사자 표의 사용자 칸.
-export const CONTRACT_ORG = {
-  name: "동래구청소년센터",
-  representative: "허일수",
-  employerTitle: "동래구청소년센터장",
-} as const;
 
 // 3조 근로조건 기본값(서식 값). 화면에서 사람마다 고칠 수 있습니다.
 export const CONTRACT_DEFAULTS = {
@@ -51,18 +48,6 @@ export const CONTRACT_DEFAULTS = {
 //   계약서 화면·PDF 표현은 "시용"(관장 지시 2026-10: 내용이 해약권 유보부 근로계약).
 //   DB 컬럼명은 probation_* 그대로.
 export const PROBATION_MONTHS = 3;
-
-// settings 키. 조항 본문(현행)과, 보낸 계약서별 고정본.
-export const CONTRACT_CLAUSES_KEY = "employment_contract_clauses";
-export function clauseSnapshotKey(contractId: string): string {
-  return `${CONTRACT_CLAUSES_KEY}:${contractId}`;
-}
-
-// hr-documents(비공개) 안 최종 PDF 경로. contract_pdf_url 에는 이 경로를 넣습니다
-//   (공개 URL 아님 — 열람은 서버가 권한 확인 후 바이트로 내려줍니다).
-export function contractPdfPath(driverId: string, contractId: string): string {
-  return `contracts/${driverId}/${contractId}.pdf`;
-}
 
 // ---------------------------------------------------------------------
 // 조항 문구
@@ -156,14 +141,6 @@ export const DEFAULT_CONTRACT_CLAUSES: ContractClauses = {
   deliveryConfirm: `"근로자"는 본 계약서와 동일한 계약서 1부를 교부 받았음을 확인한다.`,
 };
 
-const s = (v: unknown, fb: string): string =>
-  typeof v === "string" && v.trim() ? v.trim() : fb;
-const lines = (v: unknown, fb: string[]): string[] => {
-  if (!Array.isArray(v)) return fb;
-  const out = v.map((x) => (typeof x === "string" ? x.trim() : "")).filter(Boolean);
-  return out.length > 0 ? out : fb;
-};
-
 // settings 값(JSON 문자열) → 조항. 깨졌거나 빈 칸은 기본 문구로 메웁니다.
 export function parseClauses(raw: string | null | undefined): ContractClauses {
   const d = DEFAULT_CONTRACT_CLAUSES;
@@ -238,10 +215,9 @@ export function toContract(
   employeeName: string
 ): EmploymentContract {
   const str = (v: unknown) => (v == null || v === "" ? null : String(v));
-  const status = String(raw.status ?? "draft");
+  const w = workflowFields(raw);
   return {
-    id: String(raw.id),
-    driver_id: String(raw.driver_id),
+    ...w,
     employee_name: employeeName,
     contract_type: raw.contract_type === "permanent" ? "permanent" : "fixed_term",
     contract_start: String(raw.contract_start ?? ""),
@@ -257,66 +233,7 @@ export function toContract(
     workplace: str(raw.workplace),
     break_time: str(raw.break_time),
     payment_day: str(raw.payment_day),
-    status: (["draft", "sent", "signed", "void"].includes(status)
-      ? status
-      : "draft") as ContractStatus,
-    sent_at: str(raw.sent_at),
-    employee_signed_at: str(raw.employee_signed_at),
-    employer_signed_at: str(raw.employer_signed_at),
-    delivered_at: str(raw.delivered_at),
-    has_pdf: !!str(raw.contract_pdf_url),
-    created_by: str(raw.created_by),
-    created_at: String(raw.created_at ?? ""),
   };
-}
-
-// 양쪽 서명 + PDF 까지 끝난 상태.
-export function isFinalized(c: Pick<EmploymentContract, "status" | "employer_signed_at" | "has_pdf">): boolean {
-  return c.status === "signed" && !!c.employer_signed_at && c.has_pdf;
-}
-
-// 화면 표시용 상태(서명 완료 뒤 센터장 서명 대기/확정 구분).
-export function contractStateLabel(
-  c: Pick<EmploymentContract, "status" | "employer_signed_at" | "has_pdf">
-): string {
-  if (c.status === "signed") return isFinalized(c) ? "체결 완료" : "센터장 서명 대기";
-  return CONTRACT_STATUS_LABEL[c.status];
-}
-
-// ---------------------------------------------------------------------
-// 날짜
-// ---------------------------------------------------------------------
-const YMD = /^(\d{4})-(\d{2})-(\d{2})$/;
-
-export function isYmd(v: unknown): v is string {
-  if (typeof v !== "string") return false;
-  const m = v.match(YMD);
-  if (!m) return false;
-  const d = new Date(Date.UTC(+m[1], +m[2] - 1, +m[3]));
-  return d.getUTCFullYear() === +m[1] && d.getUTCMonth() === +m[2] - 1 && d.getUTCDate() === +m[3];
-}
-
-function toUtc(ymd: string): Date {
-  const [y, m, d] = ymd.split("-").map(Number);
-  return new Date(Date.UTC(y, m - 1, d));
-}
-function fromUtc(d: Date): string {
-  return d.toISOString().slice(0, 10);
-}
-
-export function addDays(ymd: string, n: number): string {
-  const d = toUtc(ymd);
-  d.setUTCDate(d.getUTCDate() + n);
-  return fromUtc(d);
-}
-
-// 월 더하기 — 말일을 넘기면 그 달 말일로 맞춥니다(1/31 + 1개월 = 2/28).
-export function addMonths(ymd: string, n: number): string {
-  const [y, m, d] = ymd.split("-").map(Number);
-  const target = new Date(Date.UTC(y, m - 1 + n, 1));
-  const last = new Date(Date.UTC(target.getUTCFullYear(), target.getUTCMonth() + 1, 0)).getUTCDate();
-  target.setUTCDate(Math.min(d, last));
-  return fromUtc(target);
 }
 
 // 취업규칙 7조 — 시작일부터 3개월(마지막 날 포함). 3/1 → 5/31.
@@ -324,81 +241,6 @@ export function defaultProbationEnd(start: string): string {
   return addDays(addMonths(start, PROBATION_MONTHS), -1);
 }
 
-// "2026. 03. 01."
-export function fmtDot(ymd: string | null | undefined): string {
-  if (!ymd || !isYmd(ymd)) return "";
-  const [y, m, d] = ymd.split("-");
-  return `${y}. ${m}. ${d}.`;
-}
-
-// 양 끝 포함 기간 → "10개월" / "3개월 15일".
-export function periodLabel(from: string, to: string): string {
-  if (!isYmd(from) || !isYmd(to) || to < from) return "";
-  const end1 = addDays(to, 1); // 마지막 날 포함
-  const [fy, fm] = from.split("-").map(Number);
-  const [ty, tm] = end1.split("-").map(Number);
-  let months = (ty - fy) * 12 + (tm - fm);
-  let anchor = addMonths(from, months);
-  if (anchor > end1) {
-    months -= 1;
-    anchor = addMonths(from, months);
-  }
-  const days = Math.round((toUtc(end1).getTime() - toUtc(anchor).getTime()) / 86400000);
-  if (months <= 0) return `${days}일`;
-  return days === 0 ? `${months}개월` : `${months}개월 ${days}일`;
-}
-
-// ISO 시각 → KST "YYYY-MM-DD".
-export function kstYmd(iso: string | null | undefined): string | null {
-  if (!iso) return null;
-  const t = Date.parse(iso);
-  if (Number.isNaN(t)) return null;
-  return new Date(t + 9 * 3600 * 1000).toISOString().slice(0, 10);
-}
-
-// 서명일 표기 "2026년 10월 06일".
-export function fmtKoreanDate(ymd: string | null): string {
-  if (!ymd || !isYmd(ymd)) return "        년      월      일";
-  const [y, m, d] = ymd.split("-");
-  return `${y}년 ${m}월 ${d}일`;
-}
-
-// 주민등록번호 화면 표기 — 뒤 6자리 가립니다(전체는 PDF 에만).
-export function maskRrn(rrn: string | null | undefined): string {
-  const digits = (rrn ?? "").replace(/\D/g, "");
-  if (digits.length !== 13) return rrn ? "형식 확인 필요" : "";
-  return `${digits.slice(0, 6)}-${digits.charAt(6)}******`;
-}
-export function hyphenRrn(rrn: string | null | undefined): string {
-  const digits = (rrn ?? "").replace(/\D/g, "");
-  if (digits.length !== 13) return (rrn ?? "").trim();
-  return `${digits.slice(0, 6)}-${digits.slice(6)}`;
-}
-
-// ---------------------------------------------------------------------
-// 문서 블록 — 화면·PDF 공용
-// ---------------------------------------------------------------------
-export type ContractParty = {
-  name: string;
-  rrn: string; // 화면은 maskRrn, PDF 는 hyphenRrn 값을 넣어 호출
-  address: string;
-};
-
-export type ContractBlock =
-  | { kind: "title"; text: string }
-  | { kind: "party"; party: ContractParty }
-  | { kind: "heading"; text: string }
-  | { kind: "para"; text: string }
-  | { kind: "note"; text: string } // ※ 들여쓴 단서
-  | { kind: "item"; no: number; text: string } // ① …
-  | { kind: "sub"; text: string } // - 기타사항 줄
-  | { kind: "confirm"; no: number; text: string } // 교부 확인 (인)
-  | { kind: "sign"; date: string; employeeName: string };
-
-// 원문자 — 화면용(나눔고딕엔 글리프가 없어 PDF 는 원을 직접 그립니다).
-export function circled(n: number): string {
-  return n >= 1 && n <= 20 ? String.fromCodePoint(0x2460 + n - 1) : `(${n})`;
-}
 
 export type ContractTerms = Pick<
   EmploymentContract,
@@ -493,33 +335,4 @@ export function buildContractBlocks(input: {
 
   b.push({ kind: "sign", date: fmtKoreanDate(input.signDate), employeeName: party.name });
   return b;
-}
-
-// ---------------------------------------------------------------------
-// 서명 이미지 검증 — 동래샘들 lib/signature.ts 와 같은 규칙(245건 검증된 패턴).
-// ---------------------------------------------------------------------
-const PNG_PREFIX = "data:image/png;base64,";
-export const SIGNATURE_MAX_CHARS = 200 * 1024;
-const B64_BODY = /^[A-Za-z0-9+/]+={0,2}$/;
-
-export function isPngDataUrl(v: unknown): v is string {
-  if (typeof v !== "string" || !v.startsWith(PNG_PREFIX)) return false;
-  const body = v.slice(PNG_PREFIX.length);
-  if (body.length === 0 || body.length % 4 !== 0) return false;
-  return B64_BODY.test(body);
-}
-
-export function checkSignature(
-  v: unknown
-): { ok: true; dataUrl: string } | { ok: false; message: string } {
-  if (!isPngDataUrl(v)) return { ok: false, message: "서명 이미지를 인식하지 못했습니다." };
-  if (v.length > SIGNATURE_MAX_CHARS) {
-    return { ok: false, message: "서명 이미지가 너무 큽니다. 다시 그려주세요." };
-  }
-  return { ok: true, dataUrl: v };
-}
-
-export function contractPdfFilename(name: string, start: string): string {
-  const safe = (name || "직원").replace(/[\\/:*?"<>|\r\n\t]/g, "").trim() || "직원";
-  return `근로계약서_${safe}_${start.slice(0, 4)}.pdf`;
 }

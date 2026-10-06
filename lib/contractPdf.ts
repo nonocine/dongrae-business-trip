@@ -1,7 +1,8 @@
 // =====================================================================
-// 근로계약서 PDF — pdf-lib + 나눔고딕 통임베드(subset:false, 증명서와 같은 방식).
-//   * 내용은 lib/employmentContracts.buildContractBlocks 가 만든 블록을 그대로
-//     그립니다. 화면(ContractView)과 같은 배열이라 문장이 어긋나지 않습니다.
+// 계약서 PDF(근로·연봉 공용) — pdf-lib + 나눔고딕 통임베드(subset:false).
+//   * 내용은 각 서식 모듈(buildContractBlocks / buildSalaryContractBlocks)이 만든
+//     블록을 그대로 그립니다. 화면(ContractView)과 같은 배열이라 문장이 어긋나지 않습니다.
+//   * 연봉계약서용으로 표(table)·○ 줄(bullet) 블록을 그릴 수 있습니다.
 //   * 나눔고딕에는 ①②③ 글리프가 없어(pdf-lib 는 말없이 빈칸을 찍음) 항 번호는
 //     원을 직접 그리고 숫자를 넣습니다.
 //   * 서명: 근로자 = 직원이 그린 PNG(employee_signature), 사용자 = 관장 도장
@@ -12,7 +13,7 @@
 import { PDFDocument, rgb, type PDFFont, type PDFImage, type PDFPage } from "pdf-lib";
 import fontkit from "@pdf-lib/fontkit";
 import { regularFont, boldFont, fkFont, fitToFont } from "./pdfFont";
-import { CONTRACT_ORG, type ContractBlock } from "./employmentContracts";
+import { CONTRACT_ORG, type ContractBlock } from "./contractCore";
 
 const INK = rgb(0.1, 0.1, 0.1);
 const LINE = rgb(0.1, 0.1, 0.1);
@@ -68,7 +69,7 @@ function wrap(text: string, font: PDFFont, size: number, maxW: number): string[]
   return out;
 }
 
-export async function buildEmploymentContractPdf(
+export async function buildContractPdf(
   blocks: ContractBlock[],
   images: ContractSignImages
 ): Promise<Uint8Array> {
@@ -174,6 +175,61 @@ export async function buildEmploymentContractPdf(
       case "sub":
         paragraph(b.text, M + 28, M + 36);
         break;
+      case "bullet":
+        paragraph(`○ ${b.text}`, M + 8, M + 20);
+        break;
+      case "table": {
+        // 열 폭: 마지막이 "비고" 면 좁게, 나머지는 글자 폭에 맞춰 비례 배분.
+        const cols = b.headers.length;
+        const hs = 8.5;
+        const vs = 9;
+        const pad = 4;
+        const need = b.headers.map((h, i) =>
+          Math.max(
+            ...h.split("\n").map((t) => widthOf(t, hs, true)),
+            ...b.rows.map((r) => widthOf(r[i] ?? "", vs))
+          ) + pad * 2
+        );
+        const sum = need.reduce((a, c) => a + c, 0);
+        const scale = CW / sum;
+        const widths = need.map((w) => w * scale);
+        const headLines = Math.max(...b.headers.map((h) => h.split("\n").length));
+        const headH = 10 + headLines * 11;
+        const rowH = 20;
+        if (b.caption) {
+          ensure(LH + headH + rowH);
+          const cw = widthOf(b.caption, 9);
+          draw(W - M - cw, y, b.caption, { size: 9 });
+          y += LH - 2;
+        }
+        ensure(headH + rowH * b.rows.length);
+        let x = M;
+        b.headers.forEach((h, i) => {
+          page.drawRectangle({ x, y: H - y - headH, width: widths[i], height: headH, color: LABEL_BG, borderColor: LINE, borderWidth: 0.8 });
+          const parts = h.split("\n");
+          parts.forEach((t, li) => {
+            const tw = widthOf(t, hs, true);
+            const top = y + (headH - parts.length * 11) / 2 + li * 11 + 1;
+            draw(x + (widths[i] - tw) / 2, top, t, { size: hs, bold: true });
+          });
+          x += widths[i];
+        });
+        y += headH;
+        for (const r of b.rows) {
+          x = M;
+          for (let i = 0; i < cols; i++) {
+            page.drawRectangle({ x, y: H - y - rowH, width: widths[i], height: rowH, borderColor: LINE, borderWidth: 0.8 });
+            const t = r[i] ?? "";
+            const tw = widthOf(t, vs);
+            const tx = b.align[i] === "right" ? x + widths[i] - pad - tw : x + (widths[i] - tw) / 2;
+            draw(tx, y + (rowH - vs) / 2, t, { size: vs });
+            x += widths[i];
+          }
+          y += rowH;
+        }
+        y += 6;
+        break;
+      }
       case "confirm": {
         ensure(LH * 2);
         circledNo(M + 8, y, b.no);
