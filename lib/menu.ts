@@ -338,6 +338,16 @@ export const MENU_ITEMS: MenuItem[] = [
     show: { kind: "m0" },
   },
   {
+    key: "hr-evaluations",
+    group: "hr",
+    label: "인사평가",
+    href: "/hr/evaluations",
+    icon: "📊",
+    desc: "근무성적평정(운영규정 33조) — 관장·부장 전용",
+    // ★ 관장 지시 — 본인·인사 담당 불가. 가드(lib/hrEvaluationServer)와 같은 M0 기준.
+    show: { kind: "m0" },
+  },
+  {
     key: "hr-contracts",
     group: "hr",
     label: "계약서",
