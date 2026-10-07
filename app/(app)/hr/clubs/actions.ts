@@ -21,6 +21,13 @@ import {
   clubExpensesQuery,
   clubBudgetPlansQuery,
 } from "@/lib/clubData";
+import {
+  loadClubLogs,
+  loadClubSessionLock,
+  writeClubLog,
+  type ClubLogData,
+  type ClubLogInput,
+} from "@/lib/clubLogData";
 
 const CLUB_PROJECT = "청소년동아리 Do Go Do Go 동아리";
 const CLUB_ROLE = "club_teacher";
@@ -924,6 +931,8 @@ export async function addClubSession(input: {
 }
 
 // 활동계획 수정(날짜·내용·장소). 이미 제출된 활동일지의 기록(log_content)은 건드리지 않는다.
+//   활동시간·참여인원은 활동일지(saveClubLog)에서 고칩니다 — 하고 나서 쓰는 값이라.
+//   직원 확정·정산·월간보고 확정된 회차는 일지와 같은 규칙(lib/clubLog)으로 막습니다.
 export async function updateClubSession(input: {
   sessionId: string;
   date: string;
@@ -935,6 +944,8 @@ export async function updateClubSession(input: {
     if (!/^\d{4}-\d{2}-\d{2}$/.test(input.date)) {
       return { ok: false, message: "활동일을 선택하세요." };
     }
+    const { lock } = await loadClubSessionLock(input.sessionId, input.date);
+    if (lock.locked) return { ok: false, message: lock.message };
     const { error } = await supabaseAdmin
       .from("saem_sessions")
       .update({
@@ -983,6 +994,37 @@ export async function deleteClubSession(input: {
     return {
       ok: false,
       message: error instanceof Error ? error.message : "삭제하지 못했습니다.",
+    };
+  }
+}
+
+// =====================================================================
+// 활동일지 — 직원이 동업자씨에서 작성·수정·제출 (김준호 선생님 요청 2026-10-07)
+//   조회·저장·잠금은 lib/clubLogData(동래샘들과 같은 saem_sessions).
+//   담당자가 강사든 직원이든 로그인 직원이면 대신 입력할 수 있습니다
+//   (동아리관리 권한 = lib/clubAccess, 여기서 재검증).
+// =====================================================================
+export type { ClubLogSession, ClubLogData } from "@/lib/clubLogData";
+
+export async function getClubLogs(
+  programId: string,
+  year: number
+): Promise<ClubLogData | null> {
+  await requireClubAccess();
+  return loadClubLogs(programId, year);
+}
+
+export async function saveClubLog(input: ClubLogInput): Promise<ActionResult> {
+  try {
+    await requireClubAccess();
+    const result = await writeClubLog(input);
+    if (result.ok) revalidatePath("/hr/clubs");
+    return result;
+  } catch (error) {
+    return {
+      ok: false,
+      message:
+        error instanceof Error ? error.message : "활동일지를 저장하지 못했습니다.",
     };
   }
 }

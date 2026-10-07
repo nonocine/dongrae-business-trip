@@ -26,6 +26,7 @@ import {
   type InstructorPickRow,
 } from "@/app/(app)/hr/clubs/actions";
 import ClubPlanEditor from "@/app/(app)/hr/clubs/ClubPlanEditor";
+import ClubLogEditor from "@/app/(app)/hr/clubs/ClubLogEditor";
 import PurgeAccountDialog, {
   AccountActionsGuide,
 } from "@/app/(app)/hr/saems/PurgeAccountDialog";
@@ -794,6 +795,8 @@ function ClubCard({
   // 계획서 패널 — 열었을 때만 서버에서 읽어옵니다(동아리 12개를 한꺼번에
   //   불러오지 않게).
   const [planOpen, setPlanOpen] = useState(false);
+  // 활동일지 패널 — 계획서와 같은 방식(열었을 때만 읽음).
+  const [logOpen, setLogOpen] = useState(false);
   const executionRate =
     club.budgetPlanTotal > 0
       ? Math.round((club.expenseTotal / club.budgetPlanTotal) * 100)
@@ -871,7 +874,7 @@ function ClubCard({
             한 해 전체를 쓰는 곳입니다. 둘 다 같은 saem_sessions 를 보므로
             여기서 회차를 추가하면 그 달이 오면 아래에도 나타납니다. */}
         <details
-          className="mt-3 rounded-lg border border-brand-blue/30 bg-brand-blue-soft/20 p-3"
+          className={`mt-3 ${panelToneCls("blue")}`}
           open={planOpen}
           onToggle={(e) => setPlanOpen((e.target as HTMLDetailsElement).open)}
         >
@@ -887,6 +890,31 @@ function ClubCard({
           {planOpen && (
             <div className="mt-3">
               <ClubPlanEditor
+                programId={club.id}
+                year={year}
+                onChanged={onPlanChanged}
+              />
+            </div>
+          )}
+        </details>
+
+        {/* 활동일지 (연간) — 계획(미리 쓰는 것)과 다른 칸입니다. 활동을 마친 뒤
+            일지·활동시간·참여인원을 쓰고 제출합니다. 동래샘들 앱과 같은
+            saem_sessions 에 쌓입니다. 계획서=파랑(조회·계획), 일지=초록(쌓인 결과). */}
+        <details
+          className={`mt-3 ${panelToneCls("green")}`}
+          open={logOpen}
+          onToggle={(e) => setLogOpen((e.target as HTMLDetailsElement).open)}
+        >
+          <summary className="flex cursor-pointer flex-wrap items-center gap-2 text-sm font-semibold text-navy">
+            활동일지 작성·제출
+            <span className="text-xs font-normal text-ink-muted">
+              활동 후 기록 · 시간·인원 입력
+            </span>
+          </summary>
+          {logOpen && (
+            <div className="mt-3">
+              <ClubLogEditor
                 programId={club.id}
                 year={year}
                 onChanged={onPlanChanged}

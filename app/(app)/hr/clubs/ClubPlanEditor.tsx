@@ -235,6 +235,10 @@ export default function ClubPlanEditor({
             ({plan.sessions.length}회)
           </span>
         </p>
+        <p className="mt-0.5 text-xs text-ink-muted">
+          미리 세우는 계획입니다. 활동을 마친 뒤의 일지·활동시간·참여인원은 아래
+          &lsquo;활동일지 작성·제출&rsquo; 에서 입력합니다.
+        </p>
         {plan.sessions.length === 0 ? (
           <p className="mt-2 text-xs text-ink-muted">
             아직 활동계획이 없습니다. 아래에서 회차를 추가해주세요.
