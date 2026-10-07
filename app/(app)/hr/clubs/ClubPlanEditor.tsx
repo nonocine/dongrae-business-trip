@@ -48,10 +48,13 @@ const won = (n: number) => `${n.toLocaleString("ko-KR")}원`;
 export default function ClubPlanEditor({
   programId,
   year,
+  reloadToken = 0,
   onChanged,
 }: {
   programId: string;
   year: number;
+  // 예산 집행이 바뀌면 부모가 값을 올립니다 → '계획 대비 실적' 을 다시 읽음.
+  reloadToken?: number;
   // 저장 뒤 목록(제출 현황)을 새로 읽게 하려고 부모에게 알립니다.
   onChanged: () => void;
 }) {
@@ -98,7 +101,7 @@ export default function ClubPlanEditor({
     return () => {
       alive = false;
     };
-  }, [programId, year]);
+  }, [programId, year, reloadToken]);
 
   // 저장 뒤 다시 읽기.
   async function load() {

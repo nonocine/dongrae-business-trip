@@ -22,6 +22,10 @@ export function clubProgramsQuery() {
     .order("name");
 }
 
+// 집행 내역 목록(수정·삭제 화면)까지 같은 쿼리를 쓰도록 열을 넉넉히 둡니다.
+export const CLUB_EXPENSE_COLUMNS =
+  "id,program_id,session_id,expense_date,funding_source,budget_category,description,amount,created_by,created_at,updated_at";
+
 // 동아리 지출 — [start, endExclusive) 지출일 범위.
 export function clubExpensesQuery(
   programIds: string[],
@@ -30,7 +34,7 @@ export function clubExpensesQuery(
 ) {
   return supabaseAdmin
     .from("saem_club_expenses")
-    .select("program_id,amount,expense_date,funding_source")
+    .select(CLUB_EXPENSE_COLUMNS)
     .in("program_id", programIds)
     .gte("expense_date", start)
     .lt("expense_date", endExclusive);

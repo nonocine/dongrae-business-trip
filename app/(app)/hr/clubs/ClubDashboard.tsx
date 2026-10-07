@@ -27,6 +27,7 @@ import {
 } from "@/app/(app)/hr/clubs/actions";
 import ClubPlanEditor from "@/app/(app)/hr/clubs/ClubPlanEditor";
 import ClubLogEditor from "@/app/(app)/hr/clubs/ClubLogEditor";
+import ClubExpenseEditor from "@/app/(app)/hr/clubs/ClubExpenseEditor";
 import PurgeAccountDialog, {
   AccountActionsGuide,
 } from "@/app/(app)/hr/saems/PurgeAccountDialog";
@@ -797,6 +798,14 @@ function ClubCard({
   const [planOpen, setPlanOpen] = useState(false);
   // 활동일지 패널 — 계획서와 같은 방식(열었을 때만 읽음).
   const [logOpen, setLogOpen] = useState(false);
+  // 집행 내역 패널 — 수정·삭제(2026-10). 집행이 바뀌면 값을 올려 계획서의
+  //   '계획 대비 실적' 과 이 패널이 같은 숫자로 다시 읽게 합니다.
+  const [expenseOpen, setExpenseOpen] = useState(false);
+  const [expenseVersion, setExpenseVersion] = useState(0);
+  const expenseChanged = () => {
+    setExpenseVersion((v) => v + 1);
+    onPlanChanged();
+  };
   const executionRate =
     club.budgetPlanTotal > 0
       ? Math.round((club.expenseTotal / club.budgetPlanTotal) * 100)
@@ -892,6 +901,7 @@ function ClubCard({
               <ClubPlanEditor
                 programId={club.id}
                 year={year}
+                reloadToken={expenseVersion}
                 onChanged={onPlanChanged}
               />
             </div>
@@ -918,6 +928,31 @@ function ClubCard({
                 programId={club.id}
                 year={year}
                 onChanged={onPlanChanged}
+              />
+            </div>
+          )}
+        </details>
+
+        {/* 예산 집행 내역 (연간) — 실제로 쓴 돈. 계획(예산 사용 계획)과 다른 표입니다.
+            수정·삭제는 여기서, 새 건 등록은 아래 '활동·예산 추가' 에서 합니다. */}
+        <details
+          className={`mt-3 ${panelToneCls("yellow")}`}
+          open={expenseOpen}
+          onToggle={(e) => setExpenseOpen((e.target as HTMLDetailsElement).open)}
+        >
+          <summary className="flex cursor-pointer flex-wrap items-center gap-2 text-sm font-semibold text-navy">
+            예산 집행 내역 ({year}년)
+            <span className="text-xs font-normal text-ink-muted">
+              실제 사용액 · 수정·삭제
+            </span>
+          </summary>
+          {expenseOpen && (
+            <div className="mt-3">
+              <ClubExpenseEditor
+                programId={club.id}
+                year={year}
+                reloadToken={expenseVersion}
+                onChanged={expenseChanged}
               />
             </div>
           )}
@@ -1258,17 +1293,17 @@ function ClubCard({
                 type="button"
                 disabled={pending}
                 onClick={() =>
-                  run(
-                    () =>
-                      addClubExpense({
-                        programId: club.id,
-                        date: expenseDate,
-                        budgetCategory: category,
-                        description,
-                        amount: Number(amount),
-                      }),
-                    "예산 내역을 추가했습니다."
-                  )
+                  run(async () => {
+                    const result = await addClubExpense({
+                      programId: club.id,
+                      date: expenseDate,
+                      budgetCategory: category,
+                      description,
+                      amount: Number(amount),
+                    });
+                    if (result.ok) setExpenseVersion((v) => v + 1);
+                    return result;
+                  }, "예산 내역을 추가했습니다.")
                 }
                 className={`${btnSecondary} col-span-2`}
               >

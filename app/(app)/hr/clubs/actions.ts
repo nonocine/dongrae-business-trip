@@ -28,6 +28,13 @@ import {
   type ClubLogData,
   type ClubLogInput,
 } from "@/lib/clubLogData";
+import {
+  loadClubExpenses,
+  updateClubExpenseRow,
+  deleteClubExpenseRow,
+  type ClubExpenseData,
+  type ClubExpenseInput,
+} from "@/lib/clubExpenseData";
 
 const CLUB_PROJECT = "청소년동아리 Do Go Do Go 동아리";
 const CLUB_ROLE = "club_teacher";
@@ -1060,6 +1067,55 @@ export async function addClubExpense(input: {
     return {
       ok: false,
       message: error instanceof Error ? error.message : "지출을 저장하지 못했습니다.",
+    };
+  }
+}
+
+// =====================================================================
+// 예산 집행 내역 — 수정·삭제 (김준호 선생님 요청 2026-10-07)
+//   조회·저장은 lib/clubExpenseData. 직원이면 누구나 고칠 수 있고(담당 교체·
+//   대신 처리), 대신 화면에 최초 입력자(created_by)를 보여 줍니다.
+// =====================================================================
+export type { ClubExpenseRow, ClubExpenseData } from "@/lib/clubExpenseData";
+
+export async function getClubExpenses(
+  programId: string,
+  year: number
+): Promise<ClubExpenseData | null> {
+  await requireClubAccess();
+  if (!programId) return null;
+  return loadClubExpenses(programId, year);
+}
+
+export async function updateClubExpense(
+  input: ClubExpenseInput
+): Promise<ActionResult> {
+  try {
+    await requireClubAccess();
+    const result = await updateClubExpenseRow(input);
+    if (result.ok) revalidatePath("/hr/clubs");
+    return result;
+  } catch (error) {
+    return {
+      ok: false,
+      message: error instanceof Error ? error.message : "집행 내역을 수정하지 못했습니다.",
+    };
+  }
+}
+
+export async function deleteClubExpense(input: {
+  id: string;
+  confirmReport?: boolean;
+}): Promise<ActionResult> {
+  try {
+    await requireClubAccess();
+    const result = await deleteClubExpenseRow(input);
+    if (result.ok) revalidatePath("/hr/clubs");
+    return result;
+  } catch (error) {
+    return {
+      ok: false,
+      message: error instanceof Error ? error.message : "집행 내역을 삭제하지 못했습니다.",
     };
   }
 }
