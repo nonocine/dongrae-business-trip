@@ -6,13 +6,13 @@ import {
   requireFacilityAccess,
 } from "@/lib/facilityAccess";
 import {
-  toFacilityAsset,
   toFacilityLocation,
   type FacilityAsset,
   type FacilityLocation,
   type AssetInput,
   type AssetFilters,
 } from "@/lib/facility";
+import { loadAllAssets } from "@/lib/facilityData";
 
 // =====================================================================
 // 시설관리(비품관리) 서버 액션 — /hr/facility
@@ -35,13 +35,8 @@ export async function listAssets(
   filters?: AssetFilters
 ): Promise<FacilityAsset[]> {
   await requireFacilityAccess();
-  const { data, error } = await supabaseAdmin
-    .from(ASSETS)
-    .select("*")
-    .order("acquired_on", { ascending: false, nullsFirst: false })
-    .order("created_at", { ascending: false });
-  if (error) throw new Error(error.message);
-  let rows = (data ?? []).map((r) => toFacilityAsset(r as Record<string, unknown>));
+  // 대장 전체 조회는 lib/facilityData 단일 출처(MCP 와 공유).
+  let rows = await loadAllAssets();
 
   if (filters) {
     const f = filters;

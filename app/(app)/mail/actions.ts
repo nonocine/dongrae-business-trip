@@ -20,7 +20,6 @@ import {
 import {
   MAIL_BUCKET,
   MAIL_CATEGORY_ETC,
-  MAIL_CATEGORY_INDEX,
   MAIL_SEND_MAX_BYTES,
   MAIL_SENT_FILTER,
   MAIL_TRASH_FILTER,
@@ -28,14 +27,12 @@ import {
   canAttachToOutgoing,
   formatBytes,
   isMailCategory,
-  isMailFetchStale,
   isMailReplyKind,
   isMailStatus,
   sendAttachmentTotal,
   toAttachments,
   toReplyAttachments,
   type MailAttachmentMeta,
-  type MailCategory,
   type MailDetail,
   type MailListItem,
   type MailListView,
@@ -55,6 +52,7 @@ import {
   type OutgoingAttachment,
 } from "@/lib/mailReply";
 import { readAttachmentBytes } from "@/lib/mailAttachment";
+import { ETC_OR_FILTER, loadMailStats } from "@/lib/mailStats";
 
 const LIST_LIMIT = 300;
 
@@ -123,24 +121,8 @@ async function loadActiveStaff(): Promise<string[]> {
     .sort((a, b) => a.localeCompare(b, "ko"));
 }
 
-// "기타" = 분류가 기타이거나 아직 분류되지 않은(NULL) 메일.
-const ETC_OR_FILTER = `ai_category.is.null,ai_category.eq.${MAIL_CATEGORY_ETC}`;
-
-// 분류 인덱스 배지용 — "안읽음(opened_at IS NULL)" 건수를 세는 쿼리.
-//   ★ 상태·담당자·검색은 일부러 넣지 않습니다. 인덱스 숫자는 어떤 필터를
-//     걸어도 같아야 "그 분류에 몇 건 남았나" 로 읽힙니다.
-//   ★ 삭제된 메일은 목록과 마찬가지로 제외합니다(deleted_at IS NULL).
-//   category 를 주지 않으면 분류 무관 전체("전체" 칸) 건수입니다.
-function unopenedCountQuery(category: MailCategory | null) {
-  const q = supabaseAdmin
-    .from("mail_messages")
-    .select("id", { count: "exact", head: true })
-    .is("deleted_at", null)
-    .is("opened_at", null);
-  if (!category) return q;
-  // 목록 필터와 같은 조건을 써야 배지 숫자와 실제 목록이 어긋나지 않습니다.
-  return category === MAIL_CATEGORY_ETC ? q.or(ETC_OR_FILTER) : q.eq("ai_category", category);
-}
+// 분류 배지·미처리·수집 시각 통계는 lib/mailStats 단일 출처(MCP 와 공유).
+//   "기타" 필터(ETC_OR_FILTER)도 배지와 목록이 같은 조건을 쓰도록 거기서 가져옵니다.
 
 // mail_replies 행 → 보낸메일함 한 줄.
 //   원본 메일 정보는 조인해서 붙입니다(PostgREST 의 FK 임베드).
@@ -240,56 +222,19 @@ export async function getMailList(filters?: {
       );
   }
 
-  const [
-    listQuery,
-    unreadQuery,
-    assignedQuery,
-    lastFetchQuery,
-    lastMailQuery,
-    staff,
-    categoryCounts,
-    sentItems,
-  ] = await Promise.all([
+  const [listQuery, assignedQuery, staff, stats, sentItems] =
+    await Promise.all([
       // 보낸메일함에서는 받은 메일 쿼리를 돌리지 않습니다(빈 결과로 대체).
       sentView
         ? Promise.resolve({ data: [], error: null, count: null })
         : query,
       supabaseAdmin
         .from("mail_messages")
-        .select("id", { count: "exact", head: true })
-        .eq("status", "unread")
-        .is("deleted_at", null),
-      supabaseAdmin
-        .from("mail_messages")
         .select("assignee_name")
         .is("deleted_at", null),
-      // 마지막 수집 시각 = settings.mail_last_fetch_at.
-      //   ★ 2026-09 이전에는 MAX(mail_messages.fetched_at) 을 썼는데, 그건
-      //     "마지막으로 메일을 저장한 시각" 이라 새 메일이 없는 밤·주말에는
-      //     갱신되지 않았고, Cron 이 10분마다 멀쩡히 돌아도 경고가 떴습니다.
-      //     지금 값은 수집기가 네이버에 접속·인증까지 성공할 때마다 갱신됩니다
-      //     (가져온 메일이 0건이어도 — lib/mailCollector.ts markLastFetch).
-      supabaseAdmin
-        .from("settings")
-        .select("value")
-        .eq("key", "mail_last_fetch_at")
-        .maybeSingle(),
-      // 마지막으로 새 메일이 들어온 시각 = MAX(fetched_at). 표시 전용입니다 —
-      //   지연 판정에 쓰면 위의 오작동이 그대로 재발합니다. 휴지통·삭제 여부와
-      //   무관하게 봅니다(목록 상태가 아니라 수집 이력이므로).
-      supabaseAdmin
-        .from("mail_messages")
-        .select("fetched_at")
-        .not("fetched_at", "is", null)
-        .order("fetched_at", { ascending: false })
-        .limit(1)
-        .maybeSingle(),
       loadActiveStaff(),
-      // 분류 인덱스 배지 — 각 분류 + 마지막 하나는 "전체"(분류 무관).
-      Promise.all([
-        ...MAIL_CATEGORY_INDEX.map((c) => unopenedCountQuery(c)),
-        unopenedCountQuery(null),
-      ]),
+      // 미처리 건수·분류 배지·수집 시각 — lib/mailStats(MCP 와 같은 쿼리).
+      loadMailStats(),
       // 보낸메일함일 때만 실제로 읽습니다.
       sentView ? loadSentList(filters?.q ?? "") : Promise.resolve([]),
     ]);
@@ -317,33 +262,19 @@ export async function getMailList(filters?: {
     if (n) used.add(n);
   }
 
-  // settings 행이 없으면 null — 신규 배포 직후 첫 Cron 전까지가 그렇습니다.
-  //   isMailFetchStale 이 null 을 "경고 없음" 으로 보므로 별도 처리가 없습니다.
-  const lastFetchedAt =
-    ((lastFetchQuery.data as { value?: string | null } | null)?.value) ?? null;
-  const lastMailAt =
-    ((lastMailQuery.data as { fetched_at?: string | null } | null)
-      ?.fetched_at) ?? null;
-
-  const categoryUnopened: Record<string, number> = {};
-  MAIL_CATEGORY_INDEX.forEach((c, i) => {
-    categoryUnopened[c] = categoryCounts[i]?.count ?? 0;
-  });
-
   return {
     configured: true,
     items: ((listQuery.data ?? []) as Record<string, unknown>[]).map(toListItem),
     sent: sentItems,
-    unreadCount: unreadQuery.count ?? 0,
-    categoryUnopened,
-    unopenedCount: categoryCounts[MAIL_CATEGORY_INDEX.length]?.count ?? 0,
+    unreadCount: stats.unreadCount,
+    categoryUnopened: stats.categoryUnopened,
+    unopenedCount: stats.unopenedCount,
     assignees: staff,
     usedAssignees: [...used].sort((a, b) => a.localeCompare(b, "ko")),
-    lastFetchedAt,
-    lastMailAt,
-    // 지연 판정은 서버에서 — 클라이언트에서 계산하면 하이드레이션이 어긋납니다.
-    //   판정 입력은 반드시 lastFetchedAt(접속 시각). lastMailAt 이 아닙니다.
-    fetchStale: isMailFetchStale(lastFetchedAt, Date.now()),
+    lastFetchedAt: stats.lastFetchedAt,
+    lastMailAt: stats.lastMailAt,
+    // 지연 판정(fetchStale)은 lib/mailStats 가 서버에서 합니다.
+    fetchStale: stats.fetchStale,
   };
 }
 

@@ -256,3 +256,48 @@ export function toCompletion(raw: Record<string, unknown>): TrainingCompletion {
 export function cellKey(trainingId: string, driverId: string): string {
   return `${trainingId}:${driverId}`;
 }
+
+// 교육별 대상 인원 / 미이수 인원 — 현황판(TrainingsManager)과 MCP 공용.
+//   대상 판정은 trainingTargetState 하나로(대상 아닌 셀은 미이수로 세지 않음).
+//   completed: 이수 기록이 있는 cellKey 집합.
+export function trainingStatsByTraining(
+  trainings: (TrainingTargetRule & { id: string })[],
+  employees: (EmploymentSpan & { driver_id: string })[],
+  completed: { has(key: string): boolean },
+  targetSets: ReadonlyMap<string, ReadonlySet<string>>,
+): Map<string, { target: number; notMet: number }> {
+  const m = new Map<string, { target: number; notMet: number }>();
+  for (const t of trainings) {
+    const sel = targetSets.get(t.id);
+    let target = 0;
+    let notMet = 0;
+    for (const e of employees) {
+      if (!trainingTargetState(t, e, sel).isTarget) continue;
+      target += 1;
+      if (!completed.has(cellKey(t.id, e.driver_id))) notMet += 1;
+    }
+    m.set(t.id, { target, notMet });
+  }
+  return m;
+}
+
+// 직원별 대상 교육 수 / 이수 수 — 같은 판정 규칙(MCP 직원별 현황용).
+export function trainingStatsByEmployee(
+  trainings: (TrainingTargetRule & { id: string })[],
+  employees: (EmploymentSpan & { driver_id: string })[],
+  completed: { has(key: string): boolean },
+  targetSets: ReadonlyMap<string, ReadonlySet<string>>,
+): Map<string, { target: number; done: number }> {
+  const m = new Map<string, { target: number; done: number }>();
+  for (const e of employees) {
+    let target = 0;
+    let done = 0;
+    for (const t of trainings) {
+      if (!trainingTargetState(t, e, targetSets.get(t.id)).isTarget) continue;
+      target += 1;
+      if (completed.has(cellKey(t.id, e.driver_id))) done += 1;
+    }
+    m.set(e.driver_id, { target, done });
+  }
+  return m;
+}

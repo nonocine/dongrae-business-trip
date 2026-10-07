@@ -24,6 +24,7 @@ import {
   trainingTargetState,
   targetReasonLabel,
   trainingBaseYmd,
+  trainingStatsByTraining,
   CERT_ACCEPT,
 } from "@/lib/trainings";
 import { fmtKstDate } from "@/lib/datetime";
@@ -202,22 +203,17 @@ export default function TrainingsManager({
     return m;
   }, [matrix.trainings, matrix.employees, targetSets]);
 
-  // 교육별 대상 인원 / 미이수 인원.
-  const statsByTraining = useMemo(() => {
-    const m = new Map<string, { target: number; notMet: number }>();
-    for (const t of matrix.trainings) {
-      let target = 0;
-      let notMet = 0;
-      for (const e of matrix.employees) {
-        const key = cellKey(t.id, e.driver_id);
-        if (!targetMap.get(key)?.isTarget) continue;
-        target += 1;
-        if (!compMap.has(key)) notMet += 1;
-      }
-      m.set(t.id, { target, notMet });
-    }
-    return m;
-  }, [matrix.trainings, matrix.employees, targetMap, compMap]);
+  // 교육별 대상 인원 / 미이수 인원 — lib/trainings 단일 출처(MCP 와 공유).
+  const statsByTraining = useMemo(
+    () =>
+      trainingStatsByTraining(
+        matrix.trainings,
+        matrix.employees,
+        compMap,
+        targetSets
+      ),
+    [matrix.trainings, matrix.employees, compMap, targetSets]
+  );
 
   const totalNotMet = useMemo(
     () =>

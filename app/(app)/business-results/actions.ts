@@ -15,6 +15,7 @@ import {
   isTrainingPeriodValid,
   resolveTrainingEnd,
 } from "@/lib/staffTraining";
+import { loadBusinessResultRows } from "@/lib/businessResultsData";
 
 export type BusinessResult = {
   id: string;
@@ -182,37 +183,7 @@ async function requireAdmin() {
   return user;
 }
 
-// 신규 컬럼이 아직 적용되지 않은 DB 에서도 화면이 죽지 않도록 행을 정규화합니다.
-function toResult(raw: Record<string, unknown>): BusinessResult {
-  const num = (v: unknown) => {
-    const n = Number(v);
-    return Number.isFinite(n) ? n : 0;
-  };
-  return {
-    id: String(raw.id ?? ""),
-    report_year: num(raw.report_year),
-    report_month: num(raw.report_month),
-    category: String(raw.category ?? "기타"),
-    program_id: (raw.program_id as string | null) ?? null,
-    program_name: String(raw.program_name ?? ""),
-    manager_name: String(raw.manager_name ?? ""),
-    sessions: num(raw.sessions),
-    operating_days: num(raw.operating_days),
-    participants: num(raw.participants),
-    participants_youth: num(raw.participants_youth),
-    participants_other: num(raw.participants_other),
-    attendance: num(raw.attendance),
-    attendance_youth: num(raw.attendance_youth),
-    attendance_other: num(raw.attendance_other),
-    youth_uses: num(raw.youth_uses),
-    other_uses: num(raw.other_uses),
-    summary: String(raw.summary ?? ""),
-    evaluation: String(raw.evaluation ?? ""),
-    status: raw.status === "submitted" ? "submitted" : "draft",
-    author_name: String(raw.author_name ?? ""),
-    updated_at: String(raw.updated_at ?? ""),
-  };
-}
+// 실적 행 정규화(toBusinessResult)·기간 조회는 lib/businessResultsData 단일 출처(MCP 와 공유).
 
 // 레지스트리 조회 — 미적용(42P01)이면 configured=false 로 우아하게 폴백합니다.
 async function loadRegistry(): Promise<ProgramRegistry> {
@@ -335,31 +306,15 @@ export async function getBusinessResultsData(
     };
   const isAdmin = await isManagerAdmin();
 
-  const [resultQuery, promotionQuery, registry, coinPay, staff] =
+  const [rows, registry, coinPay, staff] =
     await Promise.all([
-    supabaseAdmin
-      .from("business_results")
-      .select("*")
-      .eq("report_year", year)
-      .gte("report_month", startMonth)
-      .lte("report_month", endMonth)
-      .order("report_month")
-      .order("category")
-      .order("program_name"),
-    supabaseAdmin
-      .from("business_promotions")
-      .select("*")
-      .eq("report_year", year)
-      .gte("report_month", startMonth)
-      .lte("report_month", endMonth)
-      .order("report_month", { ascending: false })
-      .order("activity_date", { ascending: false }),
+      loadBusinessResultRows(year, startMonth, endMonth),
       loadRegistry(),
       loadCoinPay(year, startMonth, endMonth),
       loadStaffTrainings(year, startMonth, endMonth),
     ]);
 
-  if (tableMissing(resultQuery.error) || tableMissing(promotionQuery.error)) {
+  if (!rows.configured) {
     return {
       configured: false,
       isAdmin,
@@ -375,19 +330,14 @@ export async function getBusinessResultsData(
       staffTrainings: staff.rows,
     };
   }
-  if (resultQuery.error) throw new Error(resultQuery.error.message);
-  if (promotionQuery.error) throw new Error(promotionQuery.error.message);
-
-  const results = ((resultQuery.data ?? []) as Record<string, unknown>[]).map(
-    toResult,
-  );
+  const results = rows.results;
   const detailData = await loadDetails(results.map((r) => r.id));
 
   return {
     configured: true,
     isAdmin,
     results,
-    promotions: (promotionQuery.data ?? []) as PromotionResult[],
+    promotions: rows.promotions,
     registry,
     detailsConfigured: detailData.configured,
     details: detailData.details,

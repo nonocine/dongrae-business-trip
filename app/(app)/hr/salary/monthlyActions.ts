@@ -26,6 +26,7 @@ import {
   type EdiUpdateKey,
 } from "@/lib/salaryEdi";
 import { buildPayslipPdf } from "@/lib/salaryPayslip";
+import { loadPayrollRecords, toPayrollRecord } from "@/lib/payrollData";
 import { isMailerConfigured, sendMailWithAttachment } from "@/lib/mailer";
 
 // =====================================================================
@@ -37,36 +38,7 @@ import { isMailerConfigured, sendMailWithAttachment } from "@/lib/mailer";
 // =====================================================================
 
 // --- 정규화 ---
-function toPayItems(v: unknown): PayItem[] {
-  if (!Array.isArray(v)) return [];
-  return v
-    .map((x) => {
-      const o = (x ?? {}) as Record<string, unknown>;
-      return {
-        key: String(o.key ?? ""),
-        label: String(o.label ?? ""),
-        amount: Number(o.amount ?? 0),
-      };
-    })
-    .filter((i) => i.key && Number.isFinite(i.amount));
-}
-
-function toPayrollRecord(raw: Record<string, unknown>): PayrollRecord {
-  return {
-    id: String(raw.id ?? ""),
-    driver_id: String(raw.driver_id ?? ""),
-    year: Number(raw.year ?? 0),
-    month: Number(raw.month ?? 0),
-    pay_items: toPayItems(raw.pay_items),
-    deduct_items: toPayItems(raw.deduct_items),
-    total_pay: Number(raw.total_pay ?? 0),
-    total_deduct: Number(raw.total_deduct ?? 0),
-    net_pay: Number(raw.net_pay ?? 0),
-    confirmed_at: (raw.confirmed_at as string | null) ?? null,
-    confirmed_by: (raw.confirmed_by as string | null) ?? null,
-    emailed_at: (raw.emailed_at as string | null) ?? null,
-  };
-}
+// 레코드 정규화·월 조회는 lib/payrollData 단일 출처(MCP 와 공유).
 
 // --- 생성 컨텍스트(연도 기준 데이터 일괄 로드) ---
 type EmpMeta = {
@@ -389,15 +361,7 @@ export async function listMonthlyPayroll(input: {
   const month = Number(input.month);
   const ctx = await loadContext(year);
 
-  const { data, error } = await supabaseAdmin
-    .from("payroll_records")
-    .select("*")
-    .eq("year", year)
-    .eq("month", month);
-  if (error) throw new Error(error.message);
-  const records = (data ?? []).map((r) =>
-    toPayrollRecord(r as Record<string, unknown>)
-  );
+  const records = await loadPayrollRecords(year, month);
   const recByDriver = new Map(records.map((r) => [r.driver_id, r]));
 
   const rows: MonthlyRow[] = [];

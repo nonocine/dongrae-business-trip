@@ -15,6 +15,12 @@ import {
 } from "@/lib/saemRoles";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
 import { sendSlack, siteBaseUrl, slackLink } from "@/lib/slack";
+// 동아리 프로그램·예산계획·지출 조회는 lib/clubData 단일 출처(MCP 와 공유).
+import {
+  clubProgramsQuery,
+  clubExpensesQuery,
+  clubBudgetPlansQuery,
+} from "@/lib/clubData";
 
 const CLUB_PROJECT = "청소년동아리 Do Go Do Go 동아리";
 const CLUB_ROLE = "club_teacher";
@@ -224,18 +230,13 @@ export async function getClubDashboard(
     });
 
   // 3) 동아리 프로그램 조회
-  const programQuery = await supabaseAdmin
-    .from("saem_programs")
-    .select("id,name,instructor_id,target,capacity,room,goal,plan_submitted_at,status")
-    .eq("program_type", "club")
-    .eq("status", "active")
-    .order("name");
+  const programQuery = await clubProgramsQuery();
   if (missingSchema(programQuery.error)) {
     return { configured: false, teachers, instructors, clubs: [] };
   }
   if (programQuery.error) throw new Error(programQuery.error.message);
 
-  const programs = (programQuery.data ?? []) as Array<{
+  const programs = (programQuery.data ?? []) as unknown as Array<{
     id: string;
     name: string;
     instructor_id: string | null;
@@ -265,12 +266,7 @@ export async function getClubDashboard(
         .in("program_id", ids)
         .gte("session_date", range.start)
         .lt("session_date", range.endExclusive),
-      supabaseAdmin
-        .from("saem_club_expenses")
-        .select("program_id,amount")
-        .in("program_id", ids)
-        .gte("expense_date", range.start)
-        .lt("expense_date", range.endExclusive),
+      clubExpensesQuery(ids, range.start, range.endExclusive),
       supabaseAdmin
         .from("saem_club_monthly_reports")
         .select("program_id,status")
@@ -282,13 +278,7 @@ export async function getClubDashboard(
         .select("program_id,status")
         .in("program_id", ids)
         .eq("status", "active"),
-      supabaseAdmin
-        .from("saem_club_budget_plans")
-        .select("id,program_id,budget_category,description,amount,sort_order")
-        .in("program_id", ids)
-        .eq("plan_year", year)
-        .order("sort_order")
-        .order("created_at"),
+      clubBudgetPlansQuery(ids, year),
     ]);
   for (const query of [
     sessionsQuery,
@@ -1403,19 +1393,8 @@ export async function getClubPlan(
         .gte("session_date", yearStart)
         .lt("session_date", yearEnd)
         .order("session_date"),
-      supabaseAdmin
-        .from("saem_club_budget_plans")
-        .select("id,budget_category,description,amount,sort_order,created_at")
-        .eq("program_id", programId)
-        .eq("plan_year", year)
-        .order("sort_order")
-        .order("created_at"),
-      supabaseAdmin
-        .from("saem_club_expenses")
-        .select("amount")
-        .eq("program_id", programId)
-        .gte("expense_date", yearStart)
-        .lt("expense_date", yearEnd),
+      clubBudgetPlansQuery([programId], year),
+      clubExpensesQuery([programId], yearStart, yearEnd),
       p.instructor_id
         ? supabaseAdmin
             .from("saem_instructors")

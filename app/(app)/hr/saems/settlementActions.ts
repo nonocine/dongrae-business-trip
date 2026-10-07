@@ -18,6 +18,13 @@ import {
   type LedgerInstructorInput,
   type PayrollLedgerData,
 } from "@/lib/payrollLedger";
+import {
+  loadSettlementList,
+  loadSettlementCore,
+  parseSettlementDetail,
+  type SettlementStatus,
+  type SettlementListRow,
+} from "@/lib/settlementData";
 
 const PROJ = "saem_projects";
 const TERM = "saem_terms";
@@ -28,7 +35,11 @@ const ITEM = "saem_settlement_items";
 const INSTR = "saem_instructors";
 const ENROLL = "saem_enrollments";
 
-export type SettlementStatus = "draft" | "confirmed";
+// 목록·상세의 금액 조회는 lib/settlementData 단일 출처(MCP 와 공유).
+export type {
+  SettlementStatus,
+  SettlementListRow,
+} from "@/lib/settlementData";
 
 // 담당자 조정값 — (강사, 프로그램) 단위. 둘 다 null 이면 조정 해제.
 export type SettlementAdjustment = {
@@ -372,66 +383,9 @@ export async function listSettlementProjects(): Promise<
   }));
 }
 
-export type SettlementListRow = {
-  id: string;
-  projectName: string;
-  title: string;
-  period_start: string | null;
-  period_end: string | null;
-  status: SettlementStatus;
-  instructorCount: number;
-  totalNet: number;
-};
-
 export async function listSettlements(): Promise<SettlementListRow[]> {
   await requireSaemAccess();
-  const { data: setts } = await supabaseAdmin
-    .from(SETT)
-    .select("*")
-    .order("created_at", { ascending: false });
-  const rows = (setts ?? []) as Record<string, unknown>[];
-  if (!rows.length) return [];
-
-  const projIds = [...new Set(rows.map((r) => String(r.project_id)))];
-  const { data: projs } = await supabaseAdmin
-    .from(PROJ)
-    .select("id, name")
-    .in("id", projIds);
-  const projName = new Map(
-    (projs ?? []).map((p) => [
-      String((p as { id: string }).id),
-      String((p as { name: string }).name ?? ""),
-    ])
-  );
-
-  const settIds = rows.map((r) => String(r.id));
-  const { data: items } = await supabaseAdmin
-    .from(ITEM)
-    .select("settlement_id, net_amount")
-    .in("settlement_id", settIds);
-  const agg = new Map<string, { count: number; net: number }>();
-  for (const it of items ?? []) {
-    const sid = String((it as { settlement_id: string }).settlement_id);
-    const a = agg.get(sid) ?? { count: 0, net: 0 };
-    a.count += 1;
-    a.net += Number((it as { net_amount: number }).net_amount ?? 0);
-    agg.set(sid, a);
-  }
-
-  return rows.map((r) => {
-    const id = String(r.id);
-    const a = agg.get(id) ?? { count: 0, net: 0 };
-    return {
-      id,
-      projectName: projName.get(String(r.project_id)) ?? "",
-      title: String(r.title ?? ""),
-      period_start: (r.period_start as string | null) ?? null,
-      period_end: (r.period_end as string | null) ?? null,
-      status: r.status === "confirmed" ? "confirmed" : "draft",
-      instructorCount: a.count,
-      totalNet: a.net,
-    };
-  });
+  return loadSettlementList();
 }
 
 // =====================================================================
@@ -652,65 +606,36 @@ export type SettlementDetail = {
   isM0: boolean;
 };
 
-function parseDetail(v: unknown): SettlementProgramDetail[] {
-  if (Array.isArray(v)) return v as SettlementProgramDetail[];
-  if (typeof v === "string") {
-    try {
-      const p = JSON.parse(v);
-      return Array.isArray(p) ? (p as SettlementProgramDetail[]) : [];
-    } catch {
-      return [];
-    }
-  }
-  return [];
-}
+const parseDetail = parseSettlementDetail;
 
 export async function getSettlement(
   id: string
 ): Promise<SettlementDetail | null> {
   const ctx = await requireSaemAccess();
-  if (!id) return null;
-  const { data: sett } = await supabaseAdmin
-    .from(SETT)
-    .select("*")
-    .eq("id", id)
-    .maybeSingle();
-  if (!sett) return null;
-  const r = sett as Record<string, unknown>;
+  const core = await loadSettlementCore(id);
+  if (!core) return null;
 
-  const { data: proj } = await supabaseAdmin
-    .from(PROJ)
-    .select("name")
-    .eq("id", String(r.project_id))
-    .maybeSingle();
-
-  const { data: itemRows } = await supabaseAdmin
-    .from(ITEM)
-    .select("*")
-    .eq("settlement_id", id);
-  const rawItems = (itemRows ?? []) as Record<string, unknown>[];
+  // 강사 표시 정보는 화면 전용 — 금액 로더(lib/settlementData)는 읽지 않는다.
   const insMap = await loadInstructorInfo(
-    rawItems.map((it) => String(it.instructor_id))
+    core.items.map((it) => it.instructor_id)
   );
 
-  const items: SettlementDetailItem[] = rawItems.map((it) => {
-    const info = insMap.get(String(it.instructor_id));
-    const detail = parseDetail(it.detail);
+  const items: SettlementDetailItem[] = core.items.map((it) => {
+    const info = insMap.get(it.instructor_id);
     return {
-      instructor_id: String(it.instructor_id),
+      instructor_id: it.instructor_id,
       instructorName: info?.name ?? "(이름 없음)",
       phone: info?.phone ?? null,
       bank_name: info?.bank_name ?? null,
       bank_account: info?.bank_account ?? null,
       account_holder: info?.account_holder ?? null,
       rrnMask: info?.rrnMask ?? null,
-      detail,
-      gross_amount: Number(it.gross_amount ?? 0),
-      deduction_rate: Number(it.deduction_rate ?? 0),
-      deduction_amount: Number(it.deduction_amount ?? 0),
-      net_amount: Number(it.net_amount ?? 0),
-      // adjusted 컬럼이 없던 시기 대비 — detail 로도 판정한다.
-      adjusted: it.adjusted === true || detail.some((d) => d.adjusted === true),
+      detail: it.detail,
+      gross_amount: it.gross_amount,
+      deduction_rate: it.deduction_rate,
+      deduction_amount: it.deduction_amount,
+      net_amount: it.net_amount,
+      adjusted: it.adjusted,
     };
   });
   items.sort((a, b) => a.instructorName.localeCompare(b.instructorName, "ko"));
@@ -729,14 +654,14 @@ export async function getSettlement(
   );
 
   return {
-    id: String(r.id),
-    projectName: (proj as { name?: string } | null)?.name ?? "",
-    title: String(r.title ?? ""),
-    period_start: (r.period_start as string | null) ?? null,
-    period_end: (r.period_end as string | null) ?? null,
-    status: r.status === "confirmed" ? "confirmed" : "draft",
-    confirmed_at: (r.confirmed_at as string | null) ?? null,
-    confirmed_by: (r.confirmed_by as string | null) ?? null,
+    id: core.id,
+    projectName: core.projectName,
+    title: core.title,
+    period_start: core.period_start,
+    period_end: core.period_end,
+    status: core.status,
+    confirmed_at: core.confirmed_at,
+    confirmed_by: core.confirmed_by,
     items,
     ...totals,
     adjustedCount,
