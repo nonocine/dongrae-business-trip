@@ -18,7 +18,14 @@ import {
   type SaemInstructorDoc,
   type TermStatus,
 } from "@/lib/saem";
-import PurgeAccountDialog from "@/app/(app)/hr/saems/PurgeAccountDialog";
+import PurgeAccountDialog, {
+  InviteInsteadNotice,
+} from "@/app/(app)/hr/saems/PurgeAccountDialog";
+import {
+  InviteReissueButton,
+  InviteStatusBadge,
+} from "@/app/(app)/hr/saems/InviteReissue";
+import type { InviteState } from "@/lib/saemInvite";
 import type { InstructorProgramRow } from "@/app/(app)/hr/saems/instructorActions";
 import { weekdaysLabel } from "@/lib/saemSchedule";
 import {
@@ -52,12 +59,14 @@ export default function InstructorDetail({
   docs,
   isM0,
   today,
+  invite,
 }: {
   instructor: SaemInstructor;
   programs: InstructorProgramRow[];
   docs: SaemInstructorDoc[];
   isM0: boolean;
   today: string; // KST 오늘(서버 계산) — 만료 판정 기준
+  invite: InviteState; // 초대 링크 상태(서버 계산)
 }) {
   const router = useRouter();
   const [f, setF] = useState({
@@ -166,7 +175,7 @@ export default function InstructorDetail({
       <InviteSection
         instructorId={instructor.id}
         name={instructor.name}
-        alreadyRegistered={!!instructor.password_set_at}
+        invite={invite}
       />
 
       {/* 서류함 */}
@@ -253,6 +262,7 @@ function DeleteSection({
       <p className="mt-1 text-xs text-ink-hint">
         정산 내역·강의확인증이 있거나 직원 계정이면 삭제할 수 없습니다. 누르면 먼저 걸린 기록을 보여 줍니다.
       </p>
+      <InviteInsteadNotice />
       <div className="mt-3">
         <button type="button" onClick={() => setOpen(true)} className={btnDanger}>
           완전 삭제
@@ -276,15 +286,19 @@ function DeleteSection({
 }
 
 // --- 초대 링크 / 임시비밀번호 발급 ---
+//   미가입자: [초대 링크 (재)발급] — 목록·동아리관리와 같은 InviteReissue(기간 선택).
+//   가입자: 기존 generateInvite 를 '비밀번호 재설정 링크'로만 노출(동작은 그대로).
+//     가입자에게 '초대' 버튼이 보이면 헷갈린다는 관장 지적(2026-10)으로 이름만 나눴습니다.
 function InviteSection({
   instructorId,
   name,
-  alreadyRegistered,
+  invite,
 }: {
   instructorId: string;
   name: string;
-  alreadyRegistered: boolean;
+  invite: InviteState;
 }) {
+  const alreadyRegistered = invite.kind === "registered";
   const router = useRouter();
   const [url, setUrl] = useState<string | null>(null);
   const [reset, setReset] = useState(false);
@@ -310,11 +324,17 @@ function InviteSection({
   return (
     <section className={cardCls}>
       <div className="flex flex-wrap items-center justify-between gap-2">
-        <h3 className="text-base font-bold text-ink">온보딩(로그인 준비)</h3>
+        <h3 className="flex flex-wrap items-center gap-2 text-base font-bold text-ink">
+          온보딩(로그인 준비) <InviteStatusBadge state={invite} />
+        </h3>
         <div className="flex flex-wrap gap-2">
-          <button type="button" onClick={issue} disabled={pending} className={btnPrimary}>
-            {pending ? "발급 중…" : "초대 링크 발급"}
-          </button>
+          {alreadyRegistered ? (
+            <button type="button" onClick={issue} disabled={pending} className={btnSecondary}>
+              {pending ? "발급 중…" : "비밀번호 재설정 링크"}
+            </button>
+          ) : (
+            <InviteReissueButton instructorId={instructorId} name={name} state={invite} />
+          )}
           <button
             type="button"
             onClick={() => {
@@ -328,13 +348,13 @@ function InviteSection({
         </div>
       </div>
       <p className="mt-1 text-xs text-ink-hint">
-        초대 링크: 강사가 직접 비번 설정(유효 7일). 임시비밀번호: 직원이 임시비번을
+        초대 링크: 강사가 직접 비번 설정(유효기간은 발급 때 선택, 기본 14일 — 만료되면 [재발급]). 임시비밀번호: 직원이 임시비번을
         걸어주고 전화번호+임시비번으로 로그인하게 안내(첫 로그인 시 비번 변경 강제).
       </p>
 
       {(alreadyRegistered || reset) && (
         <p className={`mt-3 ${noticeWarning}`}>
-          이미 가입한 강사입니다 — 초대 링크는 <b>비밀번호 재설정</b> 링크로 동작합니다.
+          이미 가입한 강사입니다 — 재설정 링크(유효 7일)로 강사가 비밀번호를 다시 정합니다.
         </p>
       )}
 

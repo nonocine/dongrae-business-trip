@@ -28,6 +28,10 @@ import {
 import ClubPlanEditor from "@/app/(app)/hr/clubs/ClubPlanEditor";
 import ClubLogEditor from "@/app/(app)/hr/clubs/ClubLogEditor";
 import ClubExpenseEditor from "@/app/(app)/hr/clubs/ClubExpenseEditor";
+import {
+  InviteReissueButton,
+  InviteStatusBadge,
+} from "@/app/(app)/hr/saems/InviteReissue";
 import PurgeAccountDialog, {
   AccountActionsGuide,
 } from "@/app/(app)/hr/saems/PurgeAccountDialog";
@@ -48,6 +52,7 @@ import {
   badgeDanger,
   noticeError,
   noticeSuccess,
+  noticeWarning,
 } from "@/lib/ui";
 
 const inputCls =
@@ -405,6 +410,9 @@ function TeacherList({
   onReactivate: (teacher: ClubTeacherRow) => void;
 }) {
   const [purgeTarget, setPurgeTarget] = useState<ClubTeacherRow | null>(null);
+  const inviteAlert = teachers.filter(
+    (t) => t.invite.kind === "expired" || t.invite.kind === "none"
+  ).length;
   return (
     <section className={panelToneCls("green")}>
       {purgeTarget && (
@@ -420,6 +428,12 @@ function TeacherList({
       )}
       <h2 className={sectionTitleCls("green")}>동아리샘 목록</h2>
       <AccountActionsGuide omit={canPurge ? [] : ["완전 삭제"]} />
+      {inviteAlert > 0 && (
+        <p className={`mt-2 ${noticeWarning}`}>
+          아직 가입하지 않았고 초대 링크가 만료됐거나 없는 동아리샘이 {inviteAlert}명 있습니다.
+          계정을 지우지 말고 <b>[초대 링크 재발급]</b>으로 새 링크를 보내세요.
+        </p>
+      )}
       {canPurge && (
         <p className="mt-1 text-xs text-ink-hint">
           이미 [제거]해서 이 목록에서 사라진 계정은 강사관리 목록(역할 없는 계정도
@@ -468,6 +482,8 @@ function TeacherList({
                 >
                   계정 {teacher.status === "active" ? "활성" : teacher.status}
                 </span>
+                {/* 동래샘들 가입·초대 링크 상태 — 만료면 아래 [재발급] */}
+                <InviteStatusBadge state={teacher.invite} />
                 <span className="text-xs text-ink-muted">
                   {teacher.phone ?? "연락처 없음"}
                 </span>
@@ -476,7 +492,12 @@ function TeacherList({
                     {deactivationNote(teacher)}
                   </span>
                 )}
-                <div className="ml-auto flex shrink-0 gap-2">
+                <div className="ml-auto flex shrink-0 flex-wrap gap-2">
+                  <InviteReissueButton
+                    instructorId={teacher.id}
+                    name={teacher.name}
+                    state={teacher.invite}
+                  />
                   {roleActive ? (
                     <button
                       type="button"

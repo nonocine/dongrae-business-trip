@@ -5,6 +5,12 @@ import { revalidatePath } from "next/cache";
 import { requireClubAccess } from "@/lib/clubAccess";
 import { normalizePhone, saemAppUrl } from "@/lib/saem";
 import {
+  INVITE_DAYS_DEFAULT,
+  inviteExpiresAt,
+  inviteState,
+  type InviteState,
+} from "@/lib/saemInvite";
+import {
   getInstructorIdsWithRole,
   getRoleRowsWithRole,
   addRole,
@@ -53,6 +59,7 @@ export type ClubTeacherRow = {
   email: string | null;
   status: string; // 계정(로그인) 상태 — 표시 전용
   password_set_at: string | null;
+  invite: InviteState; // 초대 링크 상태(가입 완료/유효/만료/없음) — 토큰은 내려보내지 않음
   alsoInstructor: boolean; // 강사 역할 겸직 여부 (배지 표시용)
   roleStatus: SaemRoleStatus; // 동아리샘 역할 상태
   roleDeactivatedAt: string | null;
@@ -187,7 +194,7 @@ export async function getClubDashboard(
   const teacherQuery = teacherIds.length
     ? await supabaseAdmin
         .from("saem_instructors")
-        .select("id,name,phone,email,status,password_set_at")
+        .select("id,name,phone,email,status,password_set_at,invite_expires_at")
         .in("id", teacherIds)
         .order("name")
     : { data: [], error: null };
@@ -200,15 +207,17 @@ export async function getClubDashboard(
   const instructorRoleIds = new Set(
     await getInstructorIdsWithRole("instructor")
   );
+  const nowMs = Date.now();
   const teachers: ClubTeacherRow[] = (teacherQuery.data ?? [])
     .map((r) => {
-      const row = r as Pick<
+      const { invite_expires_at, ...row } = r as Pick<
         ClubTeacherRow,
         "id" | "name" | "phone" | "email" | "status" | "password_set_at"
-      >;
+      > & { invite_expires_at: string | null };
       const role = roleById.get(row.id);
       return {
         ...row,
+        invite: inviteState({ ...row, invite_expires_at }, nowMs),
         alsoInstructor: instructorRoleIds.has(row.id),
         roleStatus: role?.status ?? "active",
         roleDeactivatedAt: role?.deactivatedAt ?? null,
@@ -574,9 +583,7 @@ export async function createClubTeacher(input: {
 
     // 신규 계정 + 동아리 역할 + 초대링크
     const token = randomUUID();
-    const expires = new Date(
-      Date.now() + 7 * 24 * 60 * 60 * 1000
-    ).toISOString();
+    const expires = inviteExpiresAt(INVITE_DAYS_DEFAULT); // 만료되면 [초대 링크 재발급]
     const { data, error } = await supabaseAdmin
       .from("saem_instructors")
       .insert({

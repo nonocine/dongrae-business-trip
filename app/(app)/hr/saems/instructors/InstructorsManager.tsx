@@ -15,6 +15,10 @@ import {
   isCrimeCheckOverdue,
   needsCrimeCheckAction,
 } from "@/lib/saemDocExpiry";
+import {
+  InviteReissueButton,
+  InviteStatusBadge,
+} from "@/app/(app)/hr/saems/InviteReissue";
 import Button from "@/app/components/Button";
 import RowChevron from "@/app/components/RowChevron";
 import {
@@ -35,6 +39,8 @@ const inCls =
 const thCls = "px-2 py-2 text-left text-xs font-semibold text-navy whitespace-nowrap";
 const tdCls = "px-2 py-2 align-middle text-sm text-ink-body";
 const TOTAL_SLOTS = SAEM_DOC_SLOTS.length;
+const btnSmall =
+  "rounded-md border border-navy bg-card px-2 py-0.5 text-xs font-semibold text-navy hover:bg-navy-soft";
 // 다운로드 라우트(페이지 아님) — 변수로 두어 next 페이지링크 규칙 회피(전체 내비게이션 필요).
 const EXPORT_HREF = "/hr/saems/instructors/export";
 const BACKUP_HREF = "/hr/saems/instructors/backup-zip";
@@ -56,6 +62,8 @@ export default function InstructorsManager({
   const [showInactive, setShowInactive] = useState(false);
   // 성범죄경력조회 만료·임박만 보기(상단 요약 클릭 토글).
   const [onlyCrime, setOnlyCrime] = useState(false);
+  // 초대 링크 만료·없음(미가입)만 보기.
+  const [onlyInvite, setOnlyInvite] = useState(false);
 
   const inactiveCount = useMemo(
     () => instructors.filter((i) => i.status === "inactive").length,
@@ -71,6 +79,13 @@ export default function InstructorsManager({
     [instructors]
   );
 
+  // 가입 못 한 채 링크가 만료됐거나 없는 사람 — 재발급이 필요한 사람.
+  //   (링크 만료를 몰라 계정 삭제까지 가는 일을 막으려고 위에 띄웁니다.)
+  const inviteAlertCount = useMemo(
+    () => instructors.filter((i) => i.status !== "inactive" && needsInvite(i)).length,
+    [instructors]
+  );
+
   const filtered = useMemo(() => {
     const kw = q.trim().toLowerCase();
     const digits = kw.replace(/\D/g, "");
@@ -81,13 +96,15 @@ export default function InstructorsManager({
       base = base.filter(
         (i) => i.status !== "inactive" && needsCrimeCheckAction(i.crimeCheck.status)
       );
+    if (onlyInvite)
+      base = base.filter((i) => i.status !== "inactive" && needsInvite(i));
     if (!kw) return base;
     return base.filter(
       (i) =>
         i.name.toLowerCase().includes(kw) ||
         (digits && (i.phone ?? "").includes(digits))
     );
-  }, [instructors, q, showInactive, onlyCrime]);
+  }, [instructors, q, showInactive, onlyCrime, onlyInvite]);
 
   return (
     <div className="space-y-5">
@@ -134,6 +151,27 @@ export default function InstructorsManager({
         </div>
       </section>
 
+      {/* 초대 링크 만료·없음 요약 — 대상 있을 때만. 클릭 시 해당 강사만. */}
+      {inviteAlertCount > 0 && (
+        <button
+          type="button"
+          onClick={() => setOnlyInvite((v) => !v)}
+          className={`flex w-full items-center justify-between gap-2 rounded-lg border px-3 py-2.5 text-left text-sm transition-colors ${
+            onlyInvite
+              ? "border-edge-yellow bg-warning-soft"
+              : "border-edge-yellow bg-card hover:bg-warning-soft"
+          }`}
+          aria-pressed={onlyInvite}
+        >
+          <span className="font-semibold text-warning">
+            미가입 · 초대 링크 만료/없음 {inviteAlertCount}명 — [초대 링크 재발급]으로 새 링크를 보내세요
+          </span>
+          <span className="shrink-0 text-xs text-ink-muted">
+            {onlyInvite ? "전체 보기" : "해당 강사만 보기"}
+          </span>
+        </button>
+      )}
+
       {/* 성범죄경력조회 만료·임박 요약 — 대상 있을 때만. 클릭 시 해당 강사만. */}
       {crimeAlertCount > 0 && (
         <button
@@ -168,7 +206,7 @@ export default function InstructorsManager({
                   <th className={thCls}>이름</th>
                   <th className={thCls}>전화</th>
                   <th className={thCls}>상태</th>
-                  <th className={thCls}>가입</th>
+                  <th className={thCls}>가입·초대 링크</th>
                   <th className={thCls} title="성범죄경력조회 — 발급일+1년">
                     성범죄경력
                   </th>
@@ -204,13 +242,21 @@ export default function InstructorsManager({
                       </span>
                     </td>
                     <td className={tdCls}>
-                      {!i.password_set_at ? (
-                        <span className={badgeNeutral}>미가입</span>
-                      ) : i.must_change_password ? (
-                        <span className={badgeWarning}>임시비번</span>
-                      ) : (
-                        <span className={badgeSuccess}>가입완료</span>
-                      )}
+                      {/* 가입·초대 링크 상태. 미가입자는 여기서 바로 재발급
+                          (열람 직원도 가능 — 상세는 관리 권한이라 목록에 둠). */}
+                      <div className="flex flex-wrap items-center gap-1.5">
+                        {i.invite.kind === "registered" && i.must_change_password ? (
+                          <span className={badgeWarning}>임시비번</span>
+                        ) : (
+                          <InviteStatusBadge state={i.invite} />
+                        )}
+                        <InviteReissueButton
+                          instructorId={i.id}
+                          name={i.name}
+                          state={i.invite}
+                          className={btnSmall}
+                        />
+                      </div>
                     </td>
                     <td className={tdCls}>
                       {isCrimeCheckOverdue(i.crimeCheck.status) ? (
@@ -437,4 +483,8 @@ function Field({
       <div className="mt-1">{children}</div>
     </div>
   );
+}
+
+function needsInvite(i: InstructorListRow): boolean {
+  return i.invite.kind === "expired" || i.invite.kind === "none";
 }

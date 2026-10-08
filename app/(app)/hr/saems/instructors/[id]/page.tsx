@@ -4,6 +4,7 @@ import { getInstructorDetail } from "@/app/(app)/hr/saems/instructorActions";
 import { resolveSaemAccess } from "@/lib/saemAccess";
 import InstructorDetail from "@/app/(app)/hr/saems/instructors/[id]/InstructorDetail";
 import { kstTodayYmd } from "@/lib/trainings";
+import { inviteState } from "@/lib/saemInvite";
 
 export const dynamic = "force-dynamic";
 
@@ -36,6 +37,7 @@ export default async function InstructorDetailPage({
         docs={detail.docs}
         isM0={detail.isM0}
         today={kstTodayYmd()}
+        invite={inviteState(detail.instructor)}
       />
     </div>
   );

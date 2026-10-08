@@ -42,6 +42,18 @@ export function AccountActionsGuide({ omit }: { omit?: string[] }) {
   );
 }
 
+// 삭제 전에 꼭 보이는 안내 (2026-10 관장 요청).
+//   실제로 "초대 링크가 만료돼 가입을 못 한다"를 계정 삭제로 풀려던 일이 있었습니다.
+//   링크는 [초대 링크 재발급]으로 되살릴 수 있으니 삭제할 이유가 아닙니다.
+export function InviteInsteadNotice() {
+  return (
+    <p className={`mt-2 ${noticeWarning}`} data-testid="purge-invite-hint">
+      <b>초대 링크가 만료돼 가입을 못 하는 경우라면 삭제하지 마세요.</b> 목록이나 상세의{" "}
+      <b>[초대 링크 재발급]</b>으로 새 링크를 만들어 보내면 됩니다(기존 계정·기록 그대로).
+    </p>
+  );
+}
+
 const TYPE_LABEL: Record<string, string> = { club: "동아리" };
 
 export default function PurgeAccountDialog({
@@ -137,7 +149,8 @@ export default function PurgeAccountDialog({
           <p className="py-6 text-center text-sm text-ink-muted">이 계정에 걸린 기록을 확인하는 중…</p>
         ) : (
           <>
-            <p className="text-xs text-ink-muted">
+            <InviteInsteadNotice />
+            <p className="mt-3 text-xs text-ink-muted">
               삭제 전 점검 결과입니다. 역할({insp.roles.length ? insp.roles.join(", ") : "없음"})은 계정과 함께 사라집니다.
             </p>
             <table className="mt-2 w-full text-sm" data-testid="purge-inspection">

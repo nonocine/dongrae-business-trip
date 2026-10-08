@@ -29,6 +29,7 @@ import {
 } from "@/lib/saemDocExpiry";
 import { kstTodayYmd } from "@/lib/trainings";
 import { addRole } from "@/lib/saemRoles";
+import { inviteState, type InviteState } from "@/lib/saemInvite";
 
 const DOC_EXT: Record<string, string> = {
   "application/pdf": "pdf",
@@ -51,6 +52,7 @@ export type InstructorListRow = SaemInstructor & {
   docCount: number;
   programCount: number;
   crimeCheck: CrimeCheckState; // 성범죄경력조회 만료 상태(오늘 기준)
+  invite: InviteState; // 초대 링크 상태(가입 완료/유효/만료/없음) — 서버 기준
 };
 
 // --- 목록(서류·프로그램 수 집계) ---
@@ -83,6 +85,7 @@ export async function listInstructors(): Promise<InstructorListRow[]> {
       supabaseAdmin.from(ROLES).select("instructor_id, role"),
     ]);
   const today = kstTodayYmd();
+  const nowMs = Date.now();
   const slotsByInstr = new Map<string, Set<string>>();
   const crimeIssued = new Map<string, string | null>();
   for (const d of docs ?? []) {
@@ -128,6 +131,7 @@ export async function listInstructors(): Promise<InstructorListRow[]> {
         docCount: slotsByInstr.get(i.id)?.size ?? 0,
         programCount: progCount.get(i.id) ?? 0,
         crimeCheck: crimeCheckState(crimeIssued.get(i.id) ?? null, today),
+        invite: inviteState(i, nowMs),
       };
     })
     .sort((a, b) => a.name.localeCompare(b.name, "ko"));
