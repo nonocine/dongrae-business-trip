@@ -1,4 +1,5 @@
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
+import { supabaseAdmin } from "@/lib/supabaseAdmin";
 
 let _client: SupabaseClient | null = null;
 
@@ -1190,6 +1191,8 @@ export function getOrgInfoAt(
 //   * Private 버킷이므로 photo_url 등에는 path 만 저장하고,
 //     열람 시 signHrDocument() 로 1시간 임시 URL 을 발급합니다.
 //   * getPublicUrl 은 Private 버킷에서 동작하지 않으므로 사용 금지.
+//   * 업로드·삭제·서명 URL 은 전부 service_role(supabaseAdmin) — 2026-10 Storage 공개 정책
+//     제거 대비. RLS 를 우회하므로 이 헬퍼를 부르는 서버 액션이 로그인·권한을 먼저 확인해야 합니다.
 // =====================================================================
 export const HR_DOCUMENTS_BUCKET = "hr-documents";
 
@@ -1211,7 +1214,7 @@ export async function uploadProfilePhoto(
     throw new Error("JPG, PNG, WEBP 이미지만 업로드할 수 있습니다.");
   }
   const path = `employees/${driverId}/profile-photo.${ext}`;
-  const { error } = await supabase.storage
+  const { error } = await supabaseAdmin.storage
     .from(HR_DOCUMENTS_BUCKET)
     .upload(path, file, { contentType: file.type, upsert: true });
   if (error) throw new Error(`사진 업로드 실패: ${error.message}`);
@@ -1221,7 +1224,7 @@ export async function uploadProfilePhoto(
 // hr-documents 버킷의 객체 삭제
 export async function removeHrDocuments(paths: string[]): Promise<void> {
   if (paths.length === 0) return;
-  await supabase.storage.from(HR_DOCUMENTS_BUCKET).remove(paths);
+  await supabaseAdmin.storage.from(HR_DOCUMENTS_BUCKET).remove(paths);
 }
 
 // 도장(서명) 이미지 허용 형식 — png/jpg 만. webp 는 docx(ImageRun) 삽입 불가라 금지.
@@ -1237,7 +1240,7 @@ export async function uploadStampImage(
   data: Blob | ArrayBuffer | Uint8Array,
   contentType: string
 ): Promise<string> {
-  const { error } = await supabase.storage
+  const { error } = await supabaseAdmin.storage
     .from(HR_DOCUMENTS_BUCKET)
     .upload(path, data, { contentType, upsert: true });
   if (error) throw new Error(`도장 업로드 실패: ${error.message}`);
@@ -1249,7 +1252,7 @@ export async function signHrDocument(
   path: string | null | undefined
 ): Promise<string | null> {
   if (!path) return null;
-  const { data, error } = await supabase.storage
+  const { data, error } = await supabaseAdmin.storage
     .from(HR_DOCUMENTS_BUCKET)
     .createSignedUrl(path, 3600);
   if (error || !data) return null;

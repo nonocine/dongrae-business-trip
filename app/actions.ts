@@ -141,14 +141,14 @@ async function uploadFiles(
     const ext = file.name.split(".").pop()?.toLowerCase() || "bin";
     const safeExt = ext.replace(/[^a-z0-9]/g, "") || "bin";
     const key = `${Date.now()}_${Math.random().toString(36).slice(2, 10)}.${safeExt}`;
-    const { error } = await supabase.storage
+    const { error } = await supabaseAdmin.storage
       .from(bucket)
       .upload(key, file, {
         contentType: file.type || undefined,
         upsert: false,
       });
     if (error) throw new Error(`파일 업로드 실패: ${error.message}`);
-    const { data } = supabase.storage.from(bucket).getPublicUrl(key);
+    const { data } = supabaseAdmin.storage.from(bucket).getPublicUrl(key);
     urls.push(data.publicUrl);
   }
   return urls;
@@ -266,10 +266,10 @@ export async function deleteBusinessTrip(formData: FormData) {
       .filter((k): k is string => !!k);
 
     if (photoKeys.length > 0) {
-      await supabase.storage.from(STORAGE_BUCKET_PHOTOS).remove(photoKeys);
+      await supabaseAdmin.storage.from(STORAGE_BUCKET_PHOTOS).remove(photoKeys);
     }
     if (receiptKeys.length > 0) {
-      await supabase.storage.from(STORAGE_BUCKET_RECEIPTS).remove(receiptKeys);
+      await supabaseAdmin.storage.from(STORAGE_BUCKET_RECEIPTS).remove(receiptKeys);
     }
   }
 
@@ -1340,10 +1340,10 @@ async function removeUploaded(
     .map((u) => extractStorageKey(u, STORAGE_BUCKET_RECEIPTS))
     .filter((k): k is string => !!k);
   if (photoKeys.length > 0) {
-    await supabase.storage.from(STORAGE_BUCKET_PHOTOS).remove(photoKeys);
+    await supabaseAdmin.storage.from(STORAGE_BUCKET_PHOTOS).remove(photoKeys);
   }
   if (receiptKeys.length > 0) {
-    await supabase.storage.from(STORAGE_BUCKET_RECEIPTS).remove(receiptKeys);
+    await supabaseAdmin.storage.from(STORAGE_BUCKET_RECEIPTS).remove(receiptKeys);
   }
 }
 
@@ -1433,10 +1433,10 @@ export async function deleteActivity(formData: FormData) {
     .filter((k): k is string => !!k);
 
   if (photoKeys.length > 0) {
-    await supabase.storage.from(STORAGE_BUCKET_PHOTOS).remove(photoKeys);
+    await supabaseAdmin.storage.from(STORAGE_BUCKET_PHOTOS).remove(photoKeys);
   }
   if (receiptKeys.length > 0) {
-    await supabase.storage.from(STORAGE_BUCKET_RECEIPTS).remove(receiptKeys);
+    await supabaseAdmin.storage.from(STORAGE_BUCKET_RECEIPTS).remove(receiptKeys);
   }
 
   const { error } = await supabaseAdmin.from("activities").delete().eq("id", id);

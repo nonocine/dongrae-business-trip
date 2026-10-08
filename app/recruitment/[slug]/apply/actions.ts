@@ -23,6 +23,18 @@ import { supabaseAdmin } from "@/lib/supabaseAdmin";
 import { verifyPayload } from "@/lib/signedCookie";
 import { applicantNumberLast4 } from "@/lib/applicantNumber";
 import { sendPlainMail, isMailerConfigured } from "@/lib/mailer";
+import {
+  APPLICANT_DOC_MAX,
+  APPLICANT_DOC_TYPES,
+  APPLICANT_PHOTO_MAX,
+  APPLICANT_PHOTO_TYPES,
+  applicantStoragePath,
+  canSignApplicantPath,
+  checkApplicantFile,
+  isSafeSlot,
+  resolveOwnApplicant,
+  type ApplicantFileKind,
+} from "@/lib/applicantUpload";
 
 // =====================================================================
 // 채용 지원 — 외부 지원자가 채용 공고에 직접 접수하는 흐름
@@ -780,70 +792,96 @@ export async function submitApplication(
 }
 
 // =====================================================================
-// 증명사진 업로드 — 첫 임시저장 이후(applicant_id 확보 후) 사용.
-//   * formData: slug, applicant_id, photo
+// 지원자 첨부(사진·서류) — 업로드·삭제·열람
+//   * 2026-10: Storage 접근을 service_role 로 옮겼습니다(공개 정책 제거 대비).
+//     Storage 가 더 이상 막아 주지 않으므로 모든 액션이 requireOwnDraft 를
+//     먼저 통과해야 합니다:
+//       · 접수 기간 안의 게시된 공고
+//       · 카카오 세션(서명 쿠키) — 지원자 행은 세션의 kakao_id 로만 찾습니다
+//       · 폼의 applicant_id 는 세션 지원자와 같은지 대조만(다르면 거부)
+//       · 그 공고의 지원서(application)가 실제로 있고 아직 draft
+//   * 저장 경로는 서버가 만듭니다 — lib/applicantUpload applicantStoragePath.
+//   * 파일은 MIME 과 실제 바이트 시그니처가 모두 맞아야 합니다.
 // =====================================================================
-const APPLICANT_PHOTO_EXT: Record<string, string> = {
-  "image/jpeg": "jpg",
-  "image/png": "png",
-  "image/webp": "webp",
+
+type OwnDraft = {
+  posting: ApplyPosting;
+  applicantId: string;
+  photoPath: string | null;
+  documents: Record<string, string>;
 };
 
-const APPLICANT_DOC_EXT: Record<string, string> = {
-  "image/jpeg": "jpg",
-  "image/png": "png",
-  "image/webp": "webp",
-  "application/pdf": "pdf",
-};
+async function requireOwnDraft(
+  slug: string | null,
+  clientApplicantId: string | null
+): Promise<OwnDraft> {
+  if (!slug) throw new Error("공고 정보가 누락되었습니다.");
+  const posting = await loadOpenPosting(slug);
+  const kakaoId = await requireKakaoId();
 
+  const { data: me, error } = await supabaseAdmin
+    .from("recruitment_applicants")
+    .select("id, photo_url, documents")
+    .eq("kakao_id", kakaoId)
+    .maybeSingle();
+  if (error) throw new Error(error.message);
+  const row = me as { id?: unknown; photo_url?: unknown; documents?: unknown } | null;
+  const own = resolveOwnApplicant(row?.id ? String(row.id) : null, clientApplicantId);
+  if (!own.ok) throw new Error(own.message);
+
+  const application = await findExistingApplication(posting.id, own.applicantId);
+  if (!application)
+    throw new Error("먼저 임시저장으로 이 공고의 지원서를 만들어주세요.");
+  if (application.status !== "draft")
+    throw new Error("이미 접수 완료된 지원서는 수정할 수 없습니다.");
+
+  return {
+    posting,
+    applicantId: own.applicantId,
+    photoPath: typeof row?.photo_url === "string" ? row.photo_url : null,
+    documents: normalizeDocuments(row?.documents),
+  };
+}
+
+async function readApplicantFile(
+  formData: FormData,
+  field: string,
+  allowed: Record<string, ApplicantFileKind>,
+  maxBytes: number
+): Promise<{ bytes: Uint8Array; type: string; ext: ApplicantFileKind }> {
+  const file = formData.get(field);
+  if (!(file instanceof File) || file.size === 0) throw new Error("업로드할 파일을 선택해주세요.");
+  // 크기를 먼저 본 뒤에 읽습니다(큰 파일을 메모리에 올리지 않게).
+  if (file.size > maxBytes)
+    throw new Error(`파일 용량은 ${Math.round(maxBytes / 1024 / 1024)}MB 이하여야 합니다.`);
+  const bytes = new Uint8Array(await file.arrayBuffer());
+  const checked = checkApplicantFile(
+    { type: file.type, size: bytes.byteLength, head: bytes.subarray(0, 16) },
+    allowed,
+    maxBytes
+  );
+  if (!checked.ok) throw new Error(checked.message);
+  return { bytes, type: file.type, ext: checked.ext };
+}
+
+// 증명사진 업로드 — formData: slug, applicant_id(대조용), photo
 export async function uploadApplicantPhoto(
   formData: FormData
 ): Promise<
   { ok: true; photoUrl: string | null } | { ok: false; message: string }
 > {
   try {
-    const slug = strOrNull(formData, "slug");
-    const applicantId = strOrNull(formData, "applicant_id");
-    if (!slug) throw new Error("공고 정보가 누락되었습니다.");
-    if (!applicantId)
-      throw new Error(
-        "사진을 업로드하려면 먼저 임시저장으로 지원자 정보를 등록해주세요."
-      );
+    const own = await requireOwnDraft(
+      strOrNull(formData, "slug"),
+      strOrNull(formData, "applicant_id")
+    );
+    const f = await readApplicantFile(formData, "photo", APPLICANT_PHOTO_TYPES, APPLICANT_PHOTO_MAX);
 
-    const posting = await loadOpenPosting(slug);
-
-    const file = formData.get("photo");
-    if (!(file instanceof File) || file.size === 0) {
-      throw new Error("업로드할 사진을 선택해주세요.");
-    }
-    if (file.size > 8 * 1024 * 1024) {
-      throw new Error("사진 용량은 8MB 이하여야 합니다.");
-    }
-    const ext = APPLICANT_PHOTO_EXT[file.type];
-    if (!ext) throw new Error("JPG, PNG, WEBP 이미지만 업로드할 수 있습니다.");
-
-    // 이미 제출 완료된 지원서는 수정 불가.
-    const existing = await findExistingApplication(posting.id, applicantId);
-    if (existing && existing.status !== "draft") {
-      throw new Error("이미 접수 완료된 지원서는 수정할 수 없습니다.");
-    }
-
-    // 기존 사진 경로 보관(삭제용).
-    const { data: prev, error: pErr } = await supabaseAdmin
-      .from("recruitment_applicants")
-      .select("photo_url")
-      .eq("id", applicantId)
-      .maybeSingle();
-    if (pErr) throw new Error(pErr.message);
-    const oldPath =
-      ((prev as { photo_url?: unknown } | null)?.photo_url as
-        | string
-        | null) ?? null;
-
-    const newPath = `recruitment/${posting.id}/${applicantId}/photo.${ext}`;
-    const { error: upErr } = await supabase.storage
+    const oldPath = own.photoPath;
+    const newPath = applicantStoragePath(own.posting.id, own.applicantId, "photo", f.ext);
+    const { error: upErr } = await supabaseAdmin.storage
       .from(HR_DOCUMENTS_BUCKET)
-      .upload(newPath, file, { contentType: file.type, upsert: true });
+      .upload(newPath, f.bytes, { contentType: f.type, upsert: true });
     if (upErr) throw new Error(`사진 업로드 실패: ${upErr.message}`);
 
     const { error: dbErr } = await supabaseAdmin
@@ -852,14 +890,15 @@ export async function uploadApplicantPhoto(
         photo_url: newPath,
         updated_at: new Date().toISOString(),
       })
-      .eq("id", applicantId);
+      .eq("id", own.applicantId);
     if (dbErr) throw new Error(dbErr.message);
 
-    if (oldPath && oldPath !== newPath) {
+    // 옛 파일 정리 — 본인 폴더의 파일일 때만.
+    if (oldPath && oldPath !== newPath && canSignApplicantPath(oldPath, own)) {
       await removeHrDocuments([oldPath]);
     }
 
-    revalidatePath(`/recruitment/${slug}/apply`);
+    revalidatePath(`/recruitment/${own.posting.slug}/apply`);
     return { ok: true, photoUrl: await signHrDocument(newPath) };
   } catch (e) {
     return {
@@ -877,23 +916,8 @@ export async function deleteApplicantPhoto(
   applicantId: string
 ): Promise<{ ok: true } | { ok: false; message: string }> {
   try {
-    if (!slug || !applicantId) throw new Error("요청 정보가 누락되었습니다.");
-    const posting = await loadOpenPosting(slug);
-    const existing = await findExistingApplication(posting.id, applicantId);
-    if (existing && existing.status !== "draft") {
-      throw new Error("이미 접수 완료된 지원서는 수정할 수 없습니다.");
-    }
-
-    const { data: prev, error: pErr } = await supabaseAdmin
-      .from("recruitment_applicants")
-      .select("photo_url")
-      .eq("id", applicantId)
-      .maybeSingle();
-    if (pErr) throw new Error(pErr.message);
-    const oldPath =
-      ((prev as { photo_url?: unknown } | null)?.photo_url as
-        | string
-        | null) ?? null;
+    const own = await requireOwnDraft(slug || null, applicantId || null);
+    const oldPath = own.photoPath;
 
     const { error: dbErr } = await supabaseAdmin
       .from("recruitment_applicants")
@@ -901,11 +925,11 @@ export async function deleteApplicantPhoto(
         photo_url: null,
         updated_at: new Date().toISOString(),
       })
-      .eq("id", applicantId);
+      .eq("id", own.applicantId);
     if (dbErr) throw new Error(dbErr.message);
 
-    if (oldPath) await removeHrDocuments([oldPath]);
-    revalidatePath(`/recruitment/${slug}/apply`);
+    if (oldPath && canSignApplicantPath(oldPath, own)) await removeHrDocuments([oldPath]);
+    revalidatePath(`/recruitment/${own.posting.slug}/apply`);
     return { ok: true };
   } catch (e) {
     return {
@@ -917,7 +941,7 @@ export async function deleteApplicantPhoto(
 }
 
 // =====================================================================
-// 첨부서류 업로드 — formData: slug, applicant_id, doc_key, file
+// 첨부서류 업로드 — formData: slug, applicant_id(대조용), doc_key, file
 //   * documents jsonb 의 {doc_key: path} 매핑을 갱신합니다.
 // =====================================================================
 export async function uploadApplicantDocument(
@@ -927,71 +951,40 @@ export async function uploadApplicantDocument(
   | { ok: false; message: string }
 > {
   try {
-    const slug = strOrNull(formData, "slug");
-    const applicantId = strOrNull(formData, "applicant_id");
-    const docKey = strOrNull(formData, "doc_key");
-    if (!slug) throw new Error("공고 정보가 누락되었습니다.");
-    if (!applicantId)
-      throw new Error(
-        "서류를 업로드하려면 먼저 임시저장으로 지원자 정보를 등록해주세요."
-      );
-    if (!docKey) throw new Error("서류 종류가 지정되지 않았습니다.");
-
-    const posting = await loadOpenPosting(slug);
-
-    // docKey 가 공고의 required_documents 에 정의된 항목인지 확인.
-    const validKey = posting.required_documents.some((d) => d.key === docKey);
-    if (!validKey) throw new Error("허용되지 않은 서류 종류입니다.");
-
-    const file = formData.get("file");
-    if (!(file instanceof File) || file.size === 0) {
-      throw new Error("업로드할 파일을 선택해주세요.");
-    }
-    if (file.size > 16 * 1024 * 1024) {
-      throw new Error("파일 용량은 16MB 이하여야 합니다.");
-    }
-    const ext = APPLICANT_DOC_EXT[file.type];
-    if (!ext)
-      throw new Error("PDF, JPG, PNG, WEBP 형식만 업로드할 수 있습니다.");
-
-    const existing = await findExistingApplication(posting.id, applicantId);
-    if (existing && existing.status !== "draft") {
-      throw new Error("이미 접수 완료된 지원서는 수정할 수 없습니다.");
-    }
-
-    // 기존 path 확보(확장자가 다르면 새 경로로 교체되므로 옛 파일 정리).
-    const { data: prev, error: pErr } = await supabaseAdmin
-      .from("recruitment_applicants")
-      .select("documents")
-      .eq("id", applicantId)
-      .maybeSingle();
-    if (pErr) throw new Error(pErr.message);
-    const prevDocs = normalizeDocuments(
-      (prev as { documents?: unknown } | null)?.documents
+    const own = await requireOwnDraft(
+      strOrNull(formData, "slug"),
+      strOrNull(formData, "applicant_id")
     );
-    const oldPath = prevDocs[docKey] ?? null;
+    const docKey = strOrNull(formData, "doc_key");
+    if (!docKey) throw new Error("서류 종류가 지정되지 않았습니다.");
+    // 공고의 required_documents 에 정의된 항목이고, 경로에 써도 안전한 글자인지.
+    if (!own.posting.required_documents.some((d) => d.key === docKey) || !isSafeSlot(docKey))
+      throw new Error("허용되지 않은 서류 종류입니다.");
 
-    const newPath = `recruitment/${posting.id}/${applicantId}/${docKey}.${ext}`;
-    const { error: upErr } = await supabase.storage
+    const f = await readApplicantFile(formData, "file", APPLICANT_DOC_TYPES, APPLICANT_DOC_MAX);
+
+    const oldPath = own.documents[docKey] ?? null;
+    const newPath = applicantStoragePath(own.posting.id, own.applicantId, docKey, f.ext);
+    const { error: upErr } = await supabaseAdmin.storage
       .from(HR_DOCUMENTS_BUCKET)
-      .upload(newPath, file, { contentType: file.type, upsert: true });
+      .upload(newPath, f.bytes, { contentType: f.type, upsert: true });
     if (upErr) throw new Error(`업로드 실패: ${upErr.message}`);
 
-    const nextDocs = { ...prevDocs, [docKey]: newPath };
+    const nextDocs = { ...own.documents, [docKey]: newPath };
     const { error: dbErr } = await supabaseAdmin
       .from("recruitment_applicants")
       .update({
         documents: nextDocs,
         updated_at: new Date().toISOString(),
       })
-      .eq("id", applicantId);
+      .eq("id", own.applicantId);
     if (dbErr) throw new Error(dbErr.message);
 
-    if (oldPath && oldPath !== newPath) {
+    if (oldPath && oldPath !== newPath && canSignApplicantPath(oldPath, own)) {
       await removeHrDocuments([oldPath]);
     }
 
-    revalidatePath(`/recruitment/${slug}/apply`);
+    revalidatePath(`/recruitment/${own.posting.slug}/apply`);
     return {
       ok: true,
       docKey,
@@ -1012,28 +1005,12 @@ export async function deleteApplicantDocument(
   docKey: string
 ): Promise<{ ok: true } | { ok: false; message: string }> {
   try {
-    if (!slug || !applicantId || !docKey)
-      throw new Error("요청 정보가 누락되었습니다.");
-    const posting = await loadOpenPosting(slug);
-
-    const existing = await findExistingApplication(posting.id, applicantId);
-    if (existing && existing.status !== "draft") {
-      throw new Error("이미 접수 완료된 지원서는 수정할 수 없습니다.");
-    }
-
-    const { data: prev, error: pErr } = await supabaseAdmin
-      .from("recruitment_applicants")
-      .select("documents")
-      .eq("id", applicantId)
-      .maybeSingle();
-    if (pErr) throw new Error(pErr.message);
-    const prevDocs = normalizeDocuments(
-      (prev as { documents?: unknown } | null)?.documents
-    );
-    const oldPath = prevDocs[docKey] ?? null;
+    if (!docKey) throw new Error("요청 정보가 누락되었습니다.");
+    const own = await requireOwnDraft(slug || null, applicantId || null);
+    const oldPath = own.documents[docKey] ?? null;
     if (!oldPath) return { ok: true };
 
-    const nextDocs = { ...prevDocs };
+    const nextDocs = { ...own.documents };
     delete nextDocs[docKey];
 
     const { error: dbErr } = await supabaseAdmin
@@ -1042,11 +1019,11 @@ export async function deleteApplicantDocument(
         documents: nextDocs,
         updated_at: new Date().toISOString(),
       })
-      .eq("id", applicantId);
+      .eq("id", own.applicantId);
     if (dbErr) throw new Error(dbErr.message);
 
-    await removeHrDocuments([oldPath]);
-    revalidatePath(`/recruitment/${slug}/apply`);
+    if (canSignApplicantPath(oldPath, own)) await removeHrDocuments([oldPath]);
+    revalidatePath(`/recruitment/${own.posting.slug}/apply`);
     return { ok: true };
   } catch (e) {
     return {
@@ -1057,9 +1034,27 @@ export async function deleteApplicantDocument(
   }
 }
 
-// 임시 열람 URL 발급 — 클라이언트에서 photo/documents 미리보기에 사용.
+// 임시 열람 URL 발급 — 지원 화면의 사진·서류 미리보기용.
+//   카카오 세션의 본인 지원자 행에 기록된 경로만 서명합니다(다른 지원자·직원 서류 차단).
+//   접수 완료 뒤 다시 열어볼 수 있어야 하므로 기간·draft 조건은 걸지 않습니다.
 export async function signApplicantStoragePath(
   path: string | null
 ): Promise<string | null> {
+  if (!path) return null;
+  const session = await getKakaoSession();
+  if (!session) return null;
+  const { data } = await supabaseAdmin
+    .from("recruitment_applicants")
+    .select("id, photo_url, documents")
+    .eq("kakao_id", session.kakaoId)
+    .maybeSingle();
+  const row = data as { id?: unknown; photo_url?: unknown; documents?: unknown } | null;
+  if (!row?.id) return null;
+  const own = {
+    applicantId: String(row.id),
+    photoPath: typeof row.photo_url === "string" ? row.photo_url : null,
+    documents: normalizeDocuments(row.documents),
+  };
+  if (!canSignApplicantPath(path, own)) return null;
   return signHrDocument(path);
 }

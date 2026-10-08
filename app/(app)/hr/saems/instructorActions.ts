@@ -561,7 +561,7 @@ export async function uploadInstructorDoc(
       .filter(Boolean) as string[];
 
     const path = `instructors/${instructorId}/${slot}_${Date.now()}.${ext}`;
-    const { error: upErr } = await supabase.storage
+    const { error: upErr } = await supabaseAdmin.storage
       .from(HR_DOCUMENTS_BUCKET)
       .upload(path, file, { contentType: file.type, upsert: true });
     if (upErr) return { ok: false, message: `업로드 실패: ${upErr.message}` };

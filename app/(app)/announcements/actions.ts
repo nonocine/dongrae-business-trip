@@ -227,7 +227,7 @@ export async function signAnnouncementAttachment(
   const session = await getSession();
   if (!session || !path) return null;
   // announcements/ 경로만 허용(다른 버킷 경로 서명 방지).
-  if (!path.startsWith("announcements/")) return null;
+  if (!path.startsWith("announcements/") || path.includes("..")) return null;
   return signHrDocument(path);
 }
 

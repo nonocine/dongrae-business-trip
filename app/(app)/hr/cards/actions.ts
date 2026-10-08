@@ -217,7 +217,7 @@ export type SaveCardInput = Partial<CardFields> & {
 async function uploadCardImage(decoded: DecodedImage): Promise<string> {
   const path = `business-cards/${randomUUID()}.${decoded.ext}`;
   const bytes = Buffer.from(decoded.base64, "base64");
-  const { error } = await supabase.storage
+  const { error } = await supabaseAdmin.storage
     .from(HR_DOCUMENTS_BUCKET)
     .upload(path, bytes, { contentType: decoded.mediaType, upsert: false });
   if (error) throw new Error(`이미지 업로드 실패: ${error.message}`);

@@ -35,7 +35,9 @@
     "reclassify:mail": "node --import tsx scripts/reclassify-mail.ts",
     "test:rental": "node --import tsx scripts/test-rental-sync.ts",
     "test:rental-view": "node --import tsx scripts/test-rental-view.ts",
-    "test:trip-pdf": "node --import tsx scripts/test-trip-pdf-render.ts"
+    "test:trip-pdf": "node --import tsx scripts/test-trip-pdf-render.ts",
+    "test:applicant-upload": "node --import tsx scripts/test-applicant-upload.ts",
+    "test:applicant-upload-actions": "node --experimental-test-module-mocks --import tsx scripts/test-applicant-upload-actions.mts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.116.0",
