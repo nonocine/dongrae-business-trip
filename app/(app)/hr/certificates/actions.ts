@@ -11,7 +11,6 @@ import {
   CERT_TYPES,
   CERT_STATEMENT,
   CERT_ORG,
-  CERT_SEAL_PATH,
   calcServicePeriod,
   calcCareerPeriod,
   certMissingFields,
@@ -24,7 +23,7 @@ import {
   type CertRequest,
 } from "@/lib/certificates";
 import { buildCertificatePdf } from "@/lib/certificatePdf";
-import { downloadHrImage } from "@/lib/recruitmentApplicantDocData";
+import { loadOrgSeal } from "@/lib/orgSeal";
 import { kstTodayYmd } from "@/lib/trainings";
 import { currentAssignment, positionWithDuty } from "@/lib/appointments";
 import {
@@ -93,9 +92,10 @@ async function notifyRequester(
   }
 }
 
-// 관인 바이트 로드(비공개 hr-documents, service_role). 없으면 null(발급은 계속).
+// 관인(기관 직인) 바이트 — 비공개 hr-documents, settings.organization_seal_path(lib/orgSeal).
+//   없으면 null(발급은 계속).
 async function loadSeal(): Promise<Uint8Array | null> {
-  return downloadHrImage(CERT_SEAL_PATH);
+  return loadOrgSeal();
 }
 
 // =====================================================================

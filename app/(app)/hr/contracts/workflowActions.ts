@@ -12,13 +12,13 @@ import {
   employerSignCore,
   adminPdfCore,
   bulkPreviewPdfCore,
-  loadEmployerStamp,
   bytesToDataUrl,
   readSavedSignature,
   fail,
   type EmployerSignInput,
   type Result,
 } from "@/lib/contractServer";
+import { loadOrgSeal } from "@/lib/orgSeal";
 
 // =====================================================================
 // 계약서 공용 관리자 액션 — 근로계약서·연봉계약서가 함께 씁니다(kind 로 구분).
@@ -121,15 +121,15 @@ export async function deleteDraftContract(kind: ContractKind, id: string): Promi
 }
 
 export async function getEmployerSignOptions(): Promise<
-  Result<{ stamp: string | null; mySignature: string | null; canSign: boolean }>
+  Result<{ seal: string | null; mySignature: string | null; canSign: boolean }>
 > {
   try {
     const me = await requireContractAdmin();
-    const [stamp, mySignature] = await Promise.all([
-      loadEmployerStamp(),
+    const [seal, mySignature] = await Promise.all([
+      loadOrgSeal(),
       me.driverId ? readSavedSignature(me.driverId) : Promise.resolve(null),
     ]);
-    return { ok: true, stamp: bytesToDataUrl(stamp), mySignature, canSign: me.isM0 };
+    return { ok: true, seal: bytesToDataUrl(seal), mySignature, canSign: me.isM0 };
   } catch (e) {
     return fail(e);
   }

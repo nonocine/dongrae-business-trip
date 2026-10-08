@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState, useTransition, type ReactNode } from "react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import ContractView from "@/app/components/ContractView";
 import InkSignaturePad, { SignaturePreview } from "@/app/components/InkSignaturePad";
@@ -405,7 +406,8 @@ export function ContractList({
   );
 }
 
-// 센터장 서명 — 관장 도장(stamp_path) 우선, 없거나 원하면 직접 서명.
+// 센터장 서명 — 기관 직인(기본). 고용자는 '동래구청소년센터장' 직위라 관장 개인 도장은
+//   계약서에 쓰지 않습니다(2026-10 관장 지시). 개인 서명이 필요할 때를 위해 저장 서명·직접 서명은 남깁니다.
 function EmployerSignDialog({
   kind,
   contract,
@@ -417,9 +419,10 @@ function EmployerSignDialog({
   onClose: () => void;
   onDone: (text: string) => void;
 }) {
-  const [stamp, setStamp] = useState<string | null>(null);
+  const [seal, setSeal] = useState<string | null>(null);
   const [mySig, setMySig] = useState<string | null>(null);
-  const [mode, setMode] = useState<"stamp" | "saved" | "drawn">("stamp");
+  const [loaded, setLoaded] = useState(false);
+  const [mode, setMode] = useState<"seal" | "saved" | "drawn">("seal");
   const [drawn, setDrawn] = useState<string | null>(null);
   const [save, setSave] = useState(true);
   const [err, setErr] = useState<string | null>(null);
@@ -433,16 +436,18 @@ function EmployerSignDialog({
         setErr(res.message);
         return;
       }
-      setStamp(res.stamp);
+      setSeal(res.seal);
       setMySig(res.mySignature);
-      setMode(res.stamp ? "stamp" : res.mySignature ? "saved" : "drawn");
+      setLoaded(true);
+      // 직인이 없으면 기본 선택을 옮기지 않습니다 — '먼저 등록하세요' 안내를 보게 합니다.
+      setMode("seal");
     });
     return () => {
       alive = false;
     };
   }, []);
 
-  const canConfirm = mode === "stamp" ? !!stamp : mode === "saved" ? !!mySig : !!drawn;
+  const canConfirm = mode === "seal" ? !!seal : mode === "saved" ? !!mySig : !!drawn;
 
   function confirmSign() {
     setErr(null);
@@ -474,12 +479,21 @@ function EmployerSignDialog({
         확정되어 직원 마이페이지에서 내려받을 수 있게 됩니다.
       </p>
       <div className="mt-3 space-y-2">
-        {opt("stamp", stamp ? "관장 도장으로 서명" : "관장 도장 (등록 안 됨)", !!stamp)}
+        {opt("seal", seal || !loaded ? "기관 직인으로 서명" : "기관 직인으로 서명 (등록 안 됨)", !!seal)}
         {opt("saved", mySig ? "내 저장 서명 사용" : "내 저장 서명 (없음)", !!mySig)}
         {opt("drawn", "직접 그려 서명", true)}
       </div>
       <div className="mt-3">
-        {mode === "stamp" && stamp && <SignaturePreview src={stamp} alt="관장 도장" />}
+        {mode === "seal" && seal && <SignaturePreview src={seal} alt="기관 직인" />}
+        {mode === "seal" && loaded && !seal && (
+          <p className={noticeError}>
+            기관 직인을 먼저 등록하세요.{" "}
+            <Link href="/hr/seal" className="font-semibold underline">
+              기관 직인 등록 →
+            </Link>{" "}
+            (지금 개인 서명으로 하려면 아래 다른 방식을 고르세요)
+          </p>
+        )}
         {mode === "saved" && mySig && <SignaturePreview src={mySig} alt="내 저장 서명" />}
         {mode === "drawn" && (
           <>

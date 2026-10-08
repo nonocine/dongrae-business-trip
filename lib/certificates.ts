@@ -28,8 +28,7 @@ export const CERT_ORG = {
   certifierTitle: "동래구청소년센터장",
 } as const;
 
-// 관인 이미지 비공개 경로(hr-documents 버킷). 공개 URL 금지 — service_role 로만 열람.
-export const CERT_SEAL_PATH = "org/center_seal.png";
+// 관인(기관 직인) 이미지는 lib/orgSeal 이 관리합니다(settings.organization_seal_path, /hr/seal).
 
 // 발급 시점 스냅샷 — 이 값만으로 동일 PDF 재생성 가능해야 함.
 //   * ⚠️ 신청서의 '제출처(submit_to)' 는 여기에 넣지 않습니다. 제출처는 관리자

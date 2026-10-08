@@ -18,7 +18,8 @@ import { PDFDocument, rgb, type PDFFont, type PDFImage } from "pdf-lib";
 import fontkit from "@pdf-lib/fontkit";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
 import { downloadHrImage, safeFileBase } from "@/lib/recruitmentApplicantDocData";
-import { CERT_ORG, CERT_SEAL_PATH } from "@/lib/certificates";
+import { CERT_ORG } from "@/lib/certificates";
+import { loadOrgSeal } from "@/lib/orgSeal";
 import { regularFont, boldFont, fkFont, fitToFont, spaced } from "@/lib/pdfFont";
 import { CERT_NO_UNISSUED, certNoLabel } from "@/lib/saem";
 
@@ -34,7 +35,7 @@ export type LectureCertData = {
 
 export type LectureCertStamps = {
   directorStamp: Uint8Array | null; // 관장 개인 도장(employee_profiles.stamp_path)
-  orgSeal: Uint8Array | null; // 기관 직인(org/center_seal.png)
+  orgSeal: Uint8Array | null; // 기관 직인(lib/orgSeal — settings.organization_seal_path)
 };
 
 const INK = rgb(0.1, 0.1, 0.1);
@@ -114,7 +115,7 @@ async function loadDirectorStamp(name: string): Promise<Uint8Array | null> {
 export async function loadLectureCertStamps(): Promise<LectureCertStamps> {
   const [directorStamp, orgSeal] = await Promise.all([
     loadDirectorStamp(director().name),
-    downloadHrImage(CERT_SEAL_PATH),
+    loadOrgSeal(),
   ]);
   return { directorStamp, orgSeal };
 }

@@ -5,8 +5,10 @@
 //   * 연봉계약서용으로 표(table)·○ 줄(bullet) 블록을 그릴 수 있습니다.
 //   * 나눔고딕에는 ①②③ 글리프가 없어(pdf-lib 는 말없이 빈칸을 찍음) 항 번호는
 //     원을 직접 그리고 숫자를 넣습니다.
-//   * 서명: 근로자 = 직원이 그린 PNG(employee_signature), 사용자 = 관장 도장
-//     (employee_profiles.stamp_path) 또는 서명 그림. 둘 다 '(인)' 위에 겹칩니다.
+//   * 서명: 근로자 = 직원이 그린 PNG(employee_signature), 사용자 = 기관 직인
+//     (lib/orgSeal, 기본) 또는 서명 그림. 둘 다 '(인)' 위에 겹칩니다.
+//     직인은 서명보다 크게(정사각 42pt) 찍습니다 — 서명용 70×34 틀에 넣으면 34pt 로 작아지고,
+//     42pt 는 윗줄(근로자, 38pt 간격·최대 34pt) 서명과 겹치지 않는 최대치입니다.
 //     교부 확인 항의 (인) 에도 근로자 서명을 한 번 더 넣습니다(원문 양식).
 // =====================================================================
 
@@ -29,7 +31,8 @@ const LH = 15.5;
 
 export type ContractSignImages = {
   employee: Uint8Array | null; // PNG
-  employer: Uint8Array | null; // PNG/JPG (도장) — 없으면 빈 (인)
+  employer: Uint8Array | null; // PNG/JPG (직인 또는 서명) — 없으면 빈 (인)
+  employerIsSeal?: boolean; // 기관 직인이면 더 크게 찍습니다.
 };
 
 async function embedImage(pdf: PDFDocument, bytes: Uint8Array | null): Promise<PDFImage | null> {
@@ -316,14 +319,14 @@ export async function buildContractPdf(
         const xLabel = W / 2 - 10;
         const mark = "(인)";
         const markX = W - M - widthOf(mark, 11);
-        const rowsSign: { label: string; img: PDFImage | null }[] = [
-          { label: `근로자 : ${b.employeeName}`, img: empImg },
-          { label: `고용자 : ${CONTRACT_ORG.employerTitle}`, img: bossImg },
+        const rowsSign: { label: string; img: PDFImage | null; seal: boolean }[] = [
+          { label: `근로자 : ${b.employeeName}`, img: empImg, seal: false },
+          { label: `고용자 : ${CONTRACT_ORG.employerTitle}`, img: bossImg, seal: !!images.employerIsSeal },
         ];
         for (const r of rowsSign) {
           draw(xLabel, y, r.label, { size: 11 });
           draw(markX, y, mark, { size: 11 });
-          stampOver(r.img, markX + widthOf(mark, 11) / 2, y, 70, 34);
+          stampOver(r.img, markX + widthOf(mark, 11) / 2, y, r.seal ? 42 : 70, r.seal ? 42 : 34);
           y += 38;
         }
         break;

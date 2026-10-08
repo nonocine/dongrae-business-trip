@@ -17,7 +17,7 @@ import { supabaseAdmin } from "@/lib/supabaseAdmin";
 import { HR_DOCUMENTS_BUCKET } from "@/lib/supabase";
 import { isM0Grant } from "@/lib/authLevels";
 import { listRolesForDriver } from "@/lib/employeeRolesServer";
-import { downloadHrImage, decodeDataUrl } from "@/lib/recruitmentApplicantDocData";
+import { decodeDataUrl } from "@/lib/recruitmentApplicantDocData";
 import { sendSlack, sendSlackDMDetailed, siteBaseUrl, slackLink } from "@/lib/slack";
 import {
   CONTRACT_KINDS,
@@ -52,6 +52,7 @@ import {
   won,
 } from "@/lib/salaryContracts";
 import { buildContractPdf } from "@/lib/contractPdf";
+import { loadOrgSeal } from "@/lib/orgSeal";
 
 export type Result<T = object> = ({ ok: true } & T) | { ok: false; message: string };
 
@@ -345,27 +346,6 @@ export async function deleteDraftCore(kind: ContractKind, id: string): Promise<R
 }
 
 // --- 센터장 서명 → PDF 확정 -------------------------------------------------
-// 관장(대표자) 도장 — 이름 → drivers.id → employee_profiles.stamp_path → Storage.
-export async function loadEmployerStamp(): Promise<Uint8Array | null> {
-  try {
-    const { data: drv } = await supabaseAdmin
-      .from("drivers")
-      .select("id")
-      .eq("name", CONTRACT_ORG.representative)
-      .maybeSingle();
-    const id = (drv as { id?: string } | null)?.id;
-    if (!id) return null;
-    const { data: prof } = await supabaseAdmin
-      .from("employee_profiles")
-      .select("stamp_path")
-      .eq("driver_id", String(id))
-      .maybeSingle();
-    return await downloadHrImage((prof as { stamp_path?: string | null } | null)?.stamp_path ?? null);
-  } catch {
-    return null;
-  }
-}
-
 export function bytesToDataUrl(bytes: Uint8Array | null): string | null {
   if (!bytes || bytes.length < 8) return null;
   const isPng = bytes[0] === 0x89 && bytes[1] === 0x50;
@@ -383,8 +363,10 @@ export async function readSavedSignature(driverId: string): Promise<string | nul
   return isPngDataUrl(raw) ? raw : null;
 }
 
+// 센터장 서명 방식 — 기관 직인(기본) / 서명하는 사람의 저장 서명 / 직접 그린 서명.
+//   관장 개인 도장은 계약서에 쓰지 않습니다(고용자는 '동래구청소년센터장' 직위 — 2026-10 관장 지시).
 export type EmployerSignInput =
-  | { mode: "stamp" }
+  | { mode: "seal" }
   | { mode: "saved" }
   | { mode: "drawn"; dataUrl: string; save: boolean };
 
@@ -403,14 +385,14 @@ export async function employerSignCore(
   if (w.employer_signed_at) return { ok: false, message: "이미 센터장 서명이 끝났습니다." };
 
   let employerImage: Uint8Array | null = null;
-  if (input.mode === "stamp") {
-    employerImage = await loadEmployerStamp();
-    if (!employerImage) return { ok: false, message: "관장 도장이 등록되어 있지 않습니다. 직접 서명해주세요." };
+  if (input.mode === "seal") {
+    employerImage = await loadOrgSeal();
+    if (!employerImage) return { ok: false, message: "기관 직인이 등록되어 있지 않습니다. 기관 직인을 먼저 등록하세요(/hr/seal)." };
   } else if (input.mode === "saved") {
     const saved = me.driverId ? await readSavedSignature(me.driverId) : null;
     if (!saved) return { ok: false, message: "저장된 서명이 없습니다. 직접 그려주세요." };
     employerImage = decodeDataUrl(saved);
-  } else {
+  } else if (input.mode === "drawn") {
     const checked = checkSignature(input.dataUrl);
     if (!checked.ok) return { ok: false, message: checked.message };
     employerImage = decodeDataUrl(checked.dataUrl);
@@ -420,12 +402,16 @@ export async function employerSignCore(
         .update({ signature_data: checked.dataUrl, signature_updated_at: new Date().toISOString() })
         .eq("driver_id", me.driverId);
     }
+  } else {
+    // 예전 화면에 남아 있던 '관장 도장' 등, 더 이상 받지 않는 방식.
+    return { ok: false, message: "서명 방식을 다시 선택해주세요. (새로고침 후 다시 시도)" };
   }
 
   const blocks = await blocksFor(kind, raw, true);
   const bytes = await buildContractPdf(blocks, {
     employee: decodeDataUrl(typeof raw.employee_signature === "string" ? raw.employee_signature : null),
     employer: employerImage,
+    employerIsSeal: input.mode === "seal",
   });
   const path = contractPdfPath(kind, w.driver_id, w.id);
   const { error: upErr } = await supabaseAdmin.storage

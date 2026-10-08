@@ -489,6 +489,16 @@ export const MENU_ITEMS: MenuItem[] = [
     show: { kind: "m0" },
   },
   {
+    // 가드(lib/orgSeal resolveSealAccess)도 M0 전용.
+    key: "admin-seal",
+    group: "admin",
+    label: "기관 직인",
+    href: "/hr/seal",
+    icon: "🔴",
+    desc: "증명서·계약서에 찍히는 센터장 직인 등록·교체",
+    show: { kind: "m0" },
+  },
+  {
     key: "admin-saems",
     group: "admin",
     label: "강사·프로그램 관리",
