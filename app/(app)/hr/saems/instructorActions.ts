@@ -30,6 +30,7 @@ import {
 import { kstTodayYmd } from "@/lib/trainings";
 import { addRole } from "@/lib/saemRoles";
 import { inviteState, type InviteState } from "@/lib/saemInvite";
+import { sendSlack } from "@/lib/slack";
 
 const DOC_EXT: Record<string, string> = {
   "application/pdf": "pdf",
@@ -435,36 +436,75 @@ export async function getInstructorDetail(
 // =====================================================================
 
 // 초대(비밀번호 설정) 링크 발급 — 토큰 생성 + 7일 만료. 가입자면 재설정 링크.
+//   강사 상세와 동아리관리(가입한 동아리샘의 [비밀번호 재설정 링크])가 같이 씁니다.
+//   재설정 경로는 이 함수 하나입니다 — 따로 만들지 마세요.
+//
+//   · 권한: 로그인 직원 누구나(2026-10 관장 요청). 동아리를 맡은 직원이 saem
+//     직무가 없어도 지도자 비밀번호를 되살릴 수 있어야 해서 reissueInvite 와
+//     같은 범위로 풀었습니다. 링크를 열어도 전화번호 뒤 4자리를 대조합니다.
+//   · 기존 비밀번호는 건드리지 않습니다. 링크로 새 비밀번호를 정하기 전까지는
+//     옛 비밀번호로 계속 로그인됩니다(실수로 눌러도 막히지 않게).
+//     동래샘들 로그인은 password_hash 만 보고 invite_token 은 보지 않습니다.
+//   · 가입자 대상 발급은 계정 탈취 경로가 될 수 있어 누가 발급했는지 남깁니다
+//     (감사 테이블이 없어 saemAccountPurge 와 같이 서버 로그 + 관리자 슬랙).
 export async function generateInvite(
   instructorId: string
 ): Promise<
-  | { ok: true; url: string; alreadyRegistered: boolean }
+  | { ok: true; url: string; expiresAt: string; alreadyRegistered: boolean }
   | { ok: false; message: string }
 > {
   try {
-    await requireSaemAccess();
+    const actor = await requireSaemView();
     if (!instructorId) return { ok: false, message: "대상이 없습니다." };
 
     const { data: ins } = await supabaseAdmin
       .from(INSTR)
-      .select("id, password_set_at, status")
+      .select("id, name, phone, password_set_at, status")
       .eq("id", instructorId)
       .maybeSingle();
     if (!ins) return { ok: false, message: "강사를 찾을 수 없습니다." };
+    const row = ins as {
+      name: string | null;
+      phone: string | null;
+      password_set_at: string | null;
+    };
+    const tail = normalizePhone(row.phone ?? "").slice(-4);
+    // 동래샘들 링크 화면은 전화번호 뒤 4자리로 본인 확인을 합니다.
+    if (tail.length < 4)
+      return {
+        ok: false,
+        message:
+          "전화번호가 없어 링크를 써도 본인 확인이 안 됩니다. 전화번호를 먼저 입력한 뒤 발급하세요.",
+      };
 
     const token = randomUUID().replace(/-/g, "");
-    const expires = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString();
+    const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString();
     const { error } = await supabaseAdmin
       .from(INSTR)
-      .update({ invite_token: token, invite_expires_at: expires })
+      .update({ invite_token: token, invite_expires_at: expiresAt })
       .eq("id", instructorId);
     if (error) throw new Error(error.message);
 
+    const alreadyRegistered = !!row.password_set_at;
+    if (alreadyRegistered) {
+      const line =
+        `🔑 동래샘들 비밀번호 재설정 링크 발급 — ${row.name ?? ""}(…${tail}) · 발급자 ${actor.name} · ` +
+        `${new Date().toLocaleString("ko-KR", { timeZone: "Asia/Seoul" })} · 7일 유효(기존 비밀번호는 새로 정할 때까지 유지)`;
+      console.info(`[saem-reset] ${line}`);
+      try {
+        await sendSlack("SLACK_WEBHOOK_ADMIN", line);
+      } catch {
+        /* 알림 격리 — 발급 결과에 영향 없음 */
+      }
+    }
+
     revalidatePath(`/hr/saems/instructors/${instructorId}`);
+    revalidatePath("/hr/clubs");
     return {
       ok: true,
       url: `${saemAppUrl()}/invite/${token}`,
-      alreadyRegistered: !!(ins as { password_set_at?: string | null }).password_set_at,
+      expiresAt,
+      alreadyRegistered,
     };
   } catch (e) {
     return {

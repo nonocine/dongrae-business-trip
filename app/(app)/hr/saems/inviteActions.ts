@@ -17,7 +17,7 @@ import { inviteExpiresAt, normalizeInviteDays } from "@/lib/saemInvite";
 //     (lib/clubAccess)와 같은 범위입니다. 가입자에게는 거부하므로 남의 계정
 //     비밀번호를 바꾸는 데 쓸 수 없고, 가입 때 전화번호 뒤 4자리도 대조합니다.
 //   · 이미 가입한 계정의 비밀번호 재설정은 별개 기능입니다
-//     (강사 상세의 generateInvite / 임시비밀번호 — 관리 권한).
+//     (instructorActions.generateInvite — 강사 상세·동아리관리 [비밀번호 재설정 링크]).
 // =====================================================================
 export async function reissueInvite(input: {
   instructorId: string;
@@ -41,7 +41,7 @@ export async function reissueInvite(input: {
       return {
         ok: false,
         message:
-          "이미 가입한 계정입니다. 비밀번호를 잊은 경우는 강사 상세의 비밀번호 재설정을 쓰세요.",
+          "이미 가입한 계정입니다. 비밀번호를 잊은 경우는 [비밀번호 재설정 링크]를 쓰세요.",
       };
 
     // 동래샘들 가입 화면은 전화번호 뒤 4자리로 본인 확인을 합니다.

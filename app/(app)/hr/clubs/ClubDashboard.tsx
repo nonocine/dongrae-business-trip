@@ -31,6 +31,7 @@ import ClubExpenseEditor from "@/app/(app)/hr/clubs/ClubExpenseEditor";
 import {
   InviteReissueButton,
   InviteStatusBadge,
+  PasswordResetButton,
 } from "@/app/(app)/hr/saems/InviteReissue";
 import PurgeAccountDialog, {
   AccountActionsGuide,
@@ -494,6 +495,12 @@ function TeacherList({
                 )}
                 <div className="ml-auto flex shrink-0 flex-wrap gap-2">
                   <InviteReissueButton
+                    instructorId={teacher.id}
+                    name={teacher.name}
+                    state={teacher.invite}
+                  />
+                  {/* 가입자 — 비밀번호를 잊었을 때(강사 상세와 같은 generateInvite) */}
+                  <PasswordResetButton
                     instructorId={teacher.id}
                     name={teacher.name}
                     state={teacher.invite}
