@@ -1,4 +1,10 @@
 import { runRentalSync } from "@/lib/rentalSync";
+import {
+  formatRentalSyncSummary,
+  kstCurrentAndPreviousMonth,
+  syncRentalToBusinessResults,
+  type RentalResultSyncSummary,
+} from "@/lib/businessRentalSync";
 
 // Vercel Cron 전용 — 1일 1회 호출(vercel.json).
 //   * 인증: Authorization === `Bearer ${CRON_SECRET}` (기존 Cron 과 동일 패턴).
@@ -47,5 +53,36 @@ export async function GET(request: Request) {
   }
 
   console.log(line);
-  return Response.json(summary);
+
+  // 대관 동기화가 성공했을 때만 이어서 사업실적 자동 반입을 돌립니다.
+  //   이번 달 + 지난달(한국시간) — 확정 후 취소된 예약을 지난달 실적에도
+  //   반영합니다(업체 권고). 실패해도 대관 동기화 결과는 그대로 돌려주되,
+  //   오류는 로그와 응답에 남깁니다.
+  const businessResults: RentalResultSyncSummary[] = [];
+  for (const { year, month } of kstCurrentAndPreviousMonth()) {
+    let result: RentalResultSyncSummary;
+    try {
+      result = await syncRentalToBusinessResults({ year, month });
+    } catch (e) {
+      result = {
+        year,
+        month,
+        dryRun: false,
+        created: 0,
+        updated: 0,
+        snapshotOnly: 0,
+        deleted: 0,
+        skippedExistingManual: 0,
+        skippedEmpty: 0,
+        errors: [e instanceof Error ? e.message : String(e)],
+        items: [],
+      };
+    }
+    businessResults.push(result);
+    const resultLine = `[rental-sync → 사업실적] ${formatRentalSyncSummary(result)}`;
+    if (result.errors.length > 0) console.error(resultLine);
+    else console.log(resultLine);
+  }
+
+  return Response.json({ ...summary, businessResults });
 }

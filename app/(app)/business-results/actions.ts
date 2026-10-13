@@ -16,6 +16,26 @@ import {
   resolveTrainingEnd,
 } from "@/lib/staffTraining";
 import { loadBusinessResultRows } from "@/lib/businessResultsData";
+import {
+  RESULT_NUMBER_FIELDS,
+  deleteBusinessResultRow,
+  normalizeDetailRows,
+  replaceResultDetailRows,
+  writeBusinessResultRow,
+  type ResultDetailInput,
+} from "@/lib/businessResultsWrite";
+import {
+  RENTAL_LINK_TABLE,
+  RENTAL_SOURCE_TYPE,
+  formatRentalSyncSummary,
+  parseRentalSourceKey,
+  syncRentalToBusinessResults,
+  type RentalLink,
+  type RentalResultSyncSummary,
+  type RentalSnapshot,
+} from "@/lib/businessRentalSync";
+import { RENTAL_TABLE } from "@/lib/rental";
+
 
 export type BusinessResult = {
   id: string;
@@ -42,6 +62,13 @@ export type BusinessResult = {
   status: "draft" | "submitted";
   author_name: string;
   updated_at: string;
+  // 홈페이지 대관 자동 반입 — source_type='rental' 이면 자동 행.
+  //   manual_override=true 면 사람이 숫자를 고친 행이라 동기화가 덮지 않고,
+  //   source_snapshot 에 홈페이지 기준 값만 남깁니다(lib/businessRentalSync).
+  source_type: string | null;
+  manual_override: boolean;
+  source_snapshot: RentalSnapshot | null;
+  source_synced_at: string | null;
 };
 
 export type PromotionResult = {
@@ -146,6 +173,8 @@ export type BusinessResultsData = {
   coinPayCumulative: number; // 센터 전체 누적(조회 기간과 무관)
   staffTrainingConfigured: boolean;
   staffTrainings: StaffTrainingResult[];
+  // 홈페이지 대관 연결 — 사업 관리 화면(관리자)에서만 읽습니다.
+  rentalLinks?: RentalLink[];
   // 인스타그램 가져오기 버튼을 띄울지 — 토큰이 있을 때만 true.
   //   선택 필드라 옛 응답 경로(테이블 미적용 등)에서는 버튼이 나오지 않습니다.
   instagramConfigured?: boolean;
@@ -331,7 +360,10 @@ export async function getBusinessResultsData(
     };
   }
   const results = rows.results;
-  const detailData = await loadDetails(results.map((r) => r.id));
+  const [detailData, rentalLinks] = await Promise.all([
+    loadDetails(results.map((r) => r.id)),
+    isAdmin ? loadRentalLinks() : Promise.resolve([] as RentalLink[]),
+  ]);
 
   return {
     configured: true,
@@ -346,6 +378,7 @@ export async function getBusinessResultsData(
     coinPayCumulative: coinPay.cumulative,
     staffTrainingConfigured: staff.configured,
     staffTrainings: staff.rows,
+    rentalLinks,
     instagramConfigured: isInstagramConfigured(),
   };
 }
@@ -416,24 +449,45 @@ export async function saveBusinessResult(
       //     남깁니다(savePromotion 과 같은 방식).
       const patch: Record<string, unknown> = { ...payload };
       delete patch.author_name;
-      const { data, error } = await supabaseAdmin
+
+      // 홈페이지 대관 자동 행 — 숫자가 바뀌면 수기 수정으로 표시해 다음
+      //   동기화가 덮지 않게 합니다. 연·월·사업은 자동 행의 키(source_key)와
+      //   묶여 있어 바꾸지 않습니다(바꾸면 원래 달에 자동 행이 또 생깁니다).
+      const { data: before, error: beforeError } = await supabaseAdmin
         .from("business_results")
-        .update(patch)
+        .select(
+          `source_type,report_year,report_month,program_id,program_name,category,${RESULT_NUMBER_FIELDS.join(",")}`,
+        )
         .eq("id", id)
-        .select("id")
         .maybeSingle();
-      if (error) throw new Error(error.message);
-      if (!data)
+      if (beforeError) throw new Error(beforeError.message);
+      const prev = before as Record<string, unknown> | null;
+      if (prev?.source_type === RENTAL_SOURCE_TYPE) {
+        for (const key of [
+          "report_year",
+          "report_month",
+          "program_id",
+          "program_name",
+          "category",
+        ])
+          patch[key] = prev[key];
+        if (
+          RESULT_NUMBER_FIELDS.some(
+            (f) => Number(prev[f] ?? 0) !== Number(patch[f] ?? 0),
+          )
+        )
+          patch.manual_override = true;
+      }
+
+      const saved = await writeBusinessResultRow(id, patch);
+      if (!saved)
         return {
           ok: false,
           message:
             "실적을 찾을 수 없습니다. 목록을 새로 고친 뒤 다시 시도해주세요.",
         };
     } else {
-      const { error } = await supabaseAdmin
-        .from("business_results")
-        .insert(payload);
-      if (error) throw new Error(error.message);
+      await writeBusinessResultRow(null, payload);
     }
 
     revalidatePath("/business-results");
@@ -450,11 +504,20 @@ export async function deleteBusinessResult(id: string): Promise<ActionResult> {
   try {
     const user = await requireUser();
     if (!id) return { ok: false, message: "대상이 없습니다." };
-    let query = supabaseAdmin.from("business_results").delete().eq("id", id);
-    if (!user.isAdmin) query = query.eq("author_name", user.name);
-    const { data, error } = await query.select("id").maybeSingle();
-    if (error) throw new Error(error.message);
-    if (!data)
+    // 홈페이지 대관 자동 행은 지워도 다음 날 새벽 다시 생깁니다 — 연결이
+    //   살아 있는 동안은 삭제 대신 [수기로 전환]을 쓰게 합니다. 연결이 꺼졌거나
+    //   지워진 행은 다시 생기지 않으므로 일반 행처럼 지울 수 있습니다.
+    if (await isLiveRentalRow(id))
+      return {
+        ok: false,
+        message:
+          "홈페이지 대관 자동 행은 삭제할 수 없습니다. [수기로 전환] 후 값을 고쳐주세요.",
+      };
+    const deleted = await deleteBusinessResultRow(
+      id,
+      user.isAdmin ? undefined : user.name,
+    );
+    if (!deleted)
       return {
         ok: false,
         message: "본인이 작성한 실적만 삭제할 수 있습니다.",
@@ -469,19 +532,8 @@ export async function deleteBusinessResult(id: string): Promise<ActionResult> {
 // =====================================================================
 // 작업 5. 사업별 세부입력 — 저장은 delete-then-insert 로 행 전체를 교체합니다.
 //   권한 규칙은 saveBusinessResult 와 동일: 로그인 직원이면 누구나 수정.
+//   (쓰기는 lib/businessResultsWrite — 대관 자동 반입과 같은 경로)
 // =====================================================================
-export type ResultDetailInput = {
-  entry_type: "date" | "session";
-  entry_date: string | null;
-  session_no: number | null;
-  session_days: number | null;
-  content: string;
-  participants_youth: number;
-  participants_other: number;
-  room_youth: number;
-  room_other: number;
-};
-
 export async function saveResultDetails(
   resultId: string,
   rows: ResultDetailInput[],
@@ -494,41 +546,38 @@ export async function saveResultDetails(
     //   (수정은 로그인 직원이면 누구나. saveBusinessResult 주석 참고).
     const { data: owner, error: ownerError } = await supabaseAdmin
       .from("business_results")
-      .select("id")
+      .select("id,source_type")
       .eq("id", resultId)
       .maybeSingle();
     if (ownerError) throw new Error(ownerError.message);
     if (!owner) return { ok: false, message: "실적을 찾을 수 없습니다." };
 
-    const del = await supabaseAdmin
-      .from("business_result_details")
-      .delete()
-      .eq("result_id", resultId);
-    if (del.error) {
-      if (tableMissing(del.error))
-        return { ok: false, message: "세부입력 테이블이 아직 적용되지 않았습니다." };
-      throw new Error(del.error.message);
+    // 홈페이지 대관 자동 행 — 세부행이 바뀌면 수기 수정으로 표시합니다
+    //   (다음 동기화가 사람이 고친 세부행을 덮지 않게).
+    let markManual = false;
+    if ((owner as { source_type: string | null }).source_type === RENTAL_SOURCE_TYPE) {
+      const { data: current, error: currentError } = await supabaseAdmin
+        .from("business_result_details")
+        .select(
+          "entry_type,entry_date,session_no,session_days,content,participants_youth,participants_other,room_youth,room_other,sort_order",
+        )
+        .eq("result_id", resultId)
+        .order("sort_order");
+      if (currentError) throw new Error(currentError.message);
+      const next = normalizeDetailRows(rows);
+      const cols = Object.keys(next[0] ?? {}) as (keyof (typeof next)[number])[];
+      const prev = (current ?? []) as Record<string, unknown>[];
+      markManual =
+        prev.length !== next.length ||
+        next.some((r, i) =>
+          cols.some((c) => String(prev[i]?.[c] ?? "") !== String(r[c] ?? "")),
+        );
     }
 
-    const payload = rows.map((r, index) => ({
-      result_id: resultId,
-      entry_type: r.entry_type === "session" ? "session" : "date",
-      entry_date: r.entry_type === "date" ? r.entry_date || null : null,
-      session_no: r.entry_type === "session" ? r.session_no : null,
-      session_days: r.entry_type === "session" ? r.session_days : null,
-      content: r.content.trim(),
-      participants_youth: Math.max(0, r.participants_youth),
-      participants_other: Math.max(0, r.participants_other),
-      room_youth: Math.max(0, r.room_youth),
-      room_other: Math.max(0, r.room_other),
-      sort_order: index + 1,
-    }));
-    if (payload.length > 0) {
-      const { error } = await supabaseAdmin
-        .from("business_result_details")
-        .insert(payload);
-      if (error) throw new Error(error.message);
-    }
+    if (!(await replaceResultDetailRows(resultId, rows)))
+      return { ok: false, message: "세부입력 테이블이 아직 적용되지 않았습니다." };
+    if (markManual)
+      await writeBusinessResultRow(resultId, { manual_override: true });
     revalidatePath("/business-results");
     return { ok: true };
   } catch (e) {
@@ -1341,4 +1390,295 @@ export async function importHomepageNewsPromotions(): Promise<PromotionImportRes
     HOMEPAGE_NEWS_CATEGORY,
     user.name,
   );
+}
+
+// =====================================================================
+// 홈페이지 대관 → 사업실적 자동 반입 (김혜지 팀장 요청 2026-10)
+//   동기화 규칙은 lib/businessRentalSync 머리말 참고. 여기는 화면 버튼과
+//   사업 관리(연결 등록)만 둡니다.
+// =====================================================================
+
+// 연결이 살아 있는(=다음 동기화 때 다시 생기는) 자동 행인지.
+async function isLiveRentalRow(id: string): Promise<boolean> {
+  const { data, error } = await supabaseAdmin
+    .from("business_results")
+    .select("source_type,source_key")
+    .eq("id", id)
+    .maybeSingle();
+  if (error) throw new Error(error.message);
+  const row = data as {
+    source_type: string | null;
+    source_key: string | null;
+  } | null;
+  if (row?.source_type !== RENTAL_SOURCE_TYPE) return false;
+  const key = parseRentalSourceKey(row.source_key);
+  if (!key) return false;
+  const { data: link, error: linkError } = await supabaseAdmin
+    .from(RENTAL_LINK_TABLE)
+    .select("id")
+    .eq("id", key.linkId)
+    .eq("is_active", true)
+    .maybeSingle();
+  if (linkError) throw new Error(linkError.message);
+  return Boolean(link);
+}
+
+async function loadRentalLinks(): Promise<RentalLink[]> {
+  const { data, error } = await supabaseAdmin
+    .from(RENTAL_LINK_TABLE)
+    .select("*")
+    .order("created_at");
+  if (tableMissing(error)) return [];
+  if (error) throw new Error(error.message);
+  return (data ?? []) as RentalLink[];
+}
+
+export type RentalSyncActionResult =
+  | { ok: true; summary: RentalResultSyncSummary; text: string }
+  | { ok: false; message: string };
+
+// [홈페이지 대관 다시 불러오기] — 직원 누구나. 수기 수정·제출 행은 숫자를
+//   덮지 않으므로(규칙 d·e) 아무나 눌러도 안전합니다.
+export async function resyncRentalResults(
+  year: number,
+  month: number,
+): Promise<RentalSyncActionResult> {
+  try {
+    await requireUser();
+    const summary = await syncRentalToBusinessResults({ year, month });
+    revalidatePath("/business-results");
+    return { ok: true, summary, text: formatRentalSyncSummary(summary) };
+  } catch (e) {
+    return actionError(e, "홈페이지 대관을 불러오지 못했습니다.");
+  }
+}
+
+// [수기로 전환] — 자동 행의 삭제 대신. 숫자는 그대로 두고 동기화만 멈춥니다.
+export async function convertRentalResultToManual(
+  id: string,
+): Promise<ActionResult> {
+  try {
+    const user = await requireUser();
+    const { data, error } = await supabaseAdmin
+      .from("business_results")
+      .select("source_type")
+      .eq("id", id)
+      .maybeSingle();
+    if (error) throw new Error(error.message);
+    if (
+      (data as { source_type: string | null } | null)?.source_type !==
+      RENTAL_SOURCE_TYPE
+    )
+      return { ok: false, message: "홈페이지 대관 자동 행이 아닙니다." };
+    await writeBusinessResultRow(id, {
+      manual_override: true,
+      updated_by: user.name,
+      updated_at: new Date().toISOString(),
+    });
+    revalidatePath("/business-results");
+    return { ok: true };
+  } catch (e) {
+    return actionError(e, "수기로 전환하지 못했습니다.");
+  }
+}
+
+// [홈페이지 값으로 되돌리기] — manual_override 를 내리고 그 행만 즉시 재동기화.
+//   제출된 행은 동기화가 숫자를 덮지 않으므로(규칙 d) 되돌릴 수 없습니다.
+export async function revertRentalResult(
+  id: string,
+): Promise<RentalSyncActionResult> {
+  try {
+    await requireUser();
+    const { data, error } = await supabaseAdmin
+      .from("business_results")
+      .select("source_type,source_key,status")
+      .eq("id", id)
+      .maybeSingle();
+    if (error) throw new Error(error.message);
+    const row = data as {
+      source_type: string | null;
+      source_key: string | null;
+      status: string;
+    } | null;
+    const key = parseRentalSourceKey(row?.source_key);
+    if (!row || row.source_type !== RENTAL_SOURCE_TYPE || !key)
+      return { ok: false, message: "홈페이지 대관 자동 행이 아닙니다." };
+    if (row.status === "submitted")
+      return { ok: false, message: "제출된 실적은 되돌릴 수 없습니다." };
+    if (!(await isLiveRentalRow(id)))
+      return {
+        ok: false,
+        message:
+          "대관 연결이 꺼져 있거나 삭제되어 홈페이지 값을 불러올 수 없습니다.",
+      };
+
+    await writeBusinessResultRow(id, { manual_override: false });
+    // 행이 이미 있으므로 시작 월 제한은 보지 않습니다.
+    const summary = await syncRentalToBusinessResults({
+      year: key.year,
+      month: key.month,
+      linkId: key.linkId,
+      ignoreStartMonth: true,
+    });
+    revalidatePath("/business-results");
+    if (summary.errors.length > 0)
+      return { ok: false, message: summary.errors.join(" / ") };
+    return { ok: true, summary, text: formatRentalSyncSummary(summary) };
+  } catch (e) {
+    return actionError(e, "홈페이지 값으로 되돌리지 못했습니다.");
+  }
+}
+
+// --- 사업 관리: 홈페이지 대관 연결 (관리자 — 사업 등록 관리와 같은 권한) ---
+
+export type RentalProgramOption = {
+  name: string;
+  count: number;
+  spaces: { name: string; count: number }[];
+};
+
+// 최근 6개월 대관 프로그램명 목록(확정 건수 포함) — 직접 입력 대신 고르게 해
+//   오타로 연결이 0건이 되는 일을 막습니다.
+export async function loadRentalProgramOptions(): Promise<
+  { ok: true; options: RentalProgramOption[] } | { ok: false; message: string }
+> {
+  try {
+    await requireAdmin();
+    const today = kstTodayYmd();
+    const [y, m] = today.split("-").map(Number);
+    const from = new Date(Date.UTC(y, m - 1 - 6, 1)).toISOString().slice(0, 10);
+    const PAGE = 1000;
+    const rows: { program_name: string | null; space_name: string | null }[] =
+      [];
+    for (let offset = 0; offset < 200_000; offset += PAGE) {
+      const { data, error } = await supabaseAdmin
+        .from(RENTAL_TABLE)
+        .select("program_name,space_name")
+        .eq("status", "Y")
+        .gte("reservation_date", from)
+        .lte("reservation_date", today)
+        .not("program_name", "is", null)
+        .order("reservation_no")
+        .range(offset, offset + PAGE - 1);
+      if (error) throw new Error(error.message);
+      rows.push(...((data ?? []) as typeof rows));
+      if ((data ?? []).length < PAGE) break;
+    }
+    const byName = new Map<
+      string,
+      { count: number; spaces: Map<string, number> }
+    >();
+    for (const r of rows) {
+      const name = (r.program_name ?? "").trim();
+      if (!name) continue;
+      const entry = byName.get(name) ?? { count: 0, spaces: new Map() };
+      entry.count += 1;
+      const space = (r.space_name ?? "").trim();
+      if (space) entry.spaces.set(space, (entry.spaces.get(space) ?? 0) + 1);
+      byName.set(name, entry);
+    }
+    const options = [...byName.entries()]
+      .map(([name, v]) => ({
+        name,
+        count: v.count,
+        spaces: [...v.spaces.entries()]
+          .map(([s, c]) => ({ name: s, count: c }))
+          .sort((a, b) => b.count - a.count),
+      }))
+      .sort((a, b) => a.name.localeCompare(b.name, "ko"));
+    return { ok: true, options };
+  } catch (e) {
+    return actionError(e, "대관 프로그램 목록을 불러오지 못했습니다.");
+  }
+}
+
+export async function createRentalLink(input: {
+  program_id: string;
+  rental_program_name: string;
+  rental_space_name: string | null;
+  count_mode: "date" | "session";
+  default_audience: "youth" | "other";
+  start_month: string; // "YYYY-MM"
+}): Promise<ActionResult> {
+  try {
+    const user = await requireAdmin();
+    const name = input.rental_program_name.trim();
+    if (!input.program_id) return { ok: false, message: "사업이 없습니다." };
+    if (!name) return { ok: false, message: "대관 프로그램을 선택하세요." };
+    if (!/^\d{4}-\d{2}$/.test(input.start_month))
+      return { ok: false, message: "시작 월을 선택하세요." };
+    const { error } = await supabaseAdmin.from(RENTAL_LINK_TABLE).insert({
+      program_id: input.program_id,
+      rental_program_name: name,
+      rental_space_name: input.rental_space_name?.trim() || null,
+      count_mode: input.count_mode === "session" ? "session" : "date",
+      default_audience: input.default_audience === "other" ? "other" : "youth",
+      start_month: `${input.start_month}-01`,
+      created_by: user.name,
+    });
+    if (error) {
+      if (error.code === "23505")
+        return {
+          ok: false,
+          message: "이미 이 사업에 연결된 대관 프로그램입니다.",
+        };
+      throw new Error(error.message);
+    }
+    revalidatePath("/business-results");
+    return { ok: true };
+  } catch (e) {
+    return actionError(e, "대관 연결을 추가하지 못했습니다.");
+  }
+}
+
+export async function updateRentalLink(
+  id: string,
+  patch: { is_active: boolean },
+): Promise<ActionResult> {
+  try {
+    await requireAdmin();
+    const { data, error } = await supabaseAdmin
+      .from(RENTAL_LINK_TABLE)
+      .update({
+        is_active: patch.is_active,
+        updated_at: new Date().toISOString(),
+      })
+      .eq("id", id)
+      .select("id")
+      .maybeSingle();
+    if (error) throw new Error(error.message);
+    if (!data)
+      return {
+        ok: false,
+        message: "연결을 찾을 수 없습니다. 화면을 새로 고쳐주세요.",
+      };
+    revalidatePath("/business-results");
+    return { ok: true };
+  } catch (e) {
+    return actionError(e, "대관 연결을 수정하지 못했습니다.");
+  }
+}
+
+// 연결 삭제 — 이미 만들어진 실적 행은 그대로 둡니다(더 이상 동기화되지 않고,
+//   일반 행처럼 삭제할 수 있게 됩니다 — deleteBusinessResult 참고).
+export async function deleteRentalLink(id: string): Promise<ActionResult> {
+  try {
+    await requireAdmin();
+    const { data, error } = await supabaseAdmin
+      .from(RENTAL_LINK_TABLE)
+      .delete()
+      .eq("id", id)
+      .select("id")
+      .maybeSingle();
+    if (error) throw new Error(error.message);
+    if (!data)
+      return {
+        ok: false,
+        message: "이미 삭제된 연결입니다. 화면을 새로 고쳐주세요.",
+      };
+    revalidatePath("/business-results");
+    return { ok: true };
+  } catch (e) {
+    return actionError(e, "대관 연결을 삭제하지 못했습니다.");
+  }
 }

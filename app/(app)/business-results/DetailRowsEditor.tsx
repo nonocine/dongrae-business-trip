@@ -5,9 +5,9 @@ import { useRouter } from "next/navigation";
 import {
   saveResultDetails,
   type ResultDetail,
-  type ResultDetailInput,
 } from "./actions";
 import { btnPrimary, btnSecondary, noticeError, noticeSuccess } from "@/lib/ui";
+import type { ResultDetailInput } from "@/lib/businessResultsWrite";
 
 // 사업 한 건의 세부 실적(일자형/회차형) 편집기 — 수정 모드에서만 노출됩니다.
 //   세부 합계와 본 행 수치의 불일치는 막지 않습니다(본 행이 집계 원본).

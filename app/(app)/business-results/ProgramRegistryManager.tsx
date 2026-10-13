@@ -5,12 +5,16 @@ import { useRouter } from "next/navigation";
 import {
   createBusinessCategory,
   createBusinessProgram,
+  loadRentalProgramOptions,
   updateBusinessCategory,
   updateBusinessProgram,
   type BusinessCategory,
   type BusinessProgram,
   type ProgramRegistry,
+  type RentalProgramOption,
 } from "./actions";
+import type { RentalLink } from "@/lib/businessRentalSync";
+import RentalLinkPanel from "./RentalLinkPanel";
 import {
   badgeNeutral,
   badgeSuccess,
@@ -30,8 +34,10 @@ type Editing = { kind: "category" | "program"; id: string; name: string };
 
 export default function ProgramRegistryManager({
   registry,
+  rentalLinks,
 }: {
   registry: ProgramRegistry;
+  rentalLinks: RentalLink[];
 }) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
@@ -41,6 +47,33 @@ export default function ProgramRegistryManager({
   const [editing, setEditing] = useState<Editing | null>(null);
   const [pending, start] = useTransition();
   const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
+  // 홈페이지 대관 연결 — 펼친 사업 id. 대관 프로그램 목록은 처음 펼칠 때 한 번만 읽습니다.
+  const [rentalOpen, setRentalOpen] = useState<string | null>(null);
+  const [rentalOptions, setRentalOptions] = useState<
+    RentalProgramOption[] | null
+  >(null);
+  const [rentalOptionsError, setRentalOptionsError] = useState("");
+
+  function toggleRental(programId: string) {
+    const next = rentalOpen === programId ? null : programId;
+    setRentalOpen(next);
+    if (next && rentalOptions === null && !rentalOptionsError) {
+      loadRentalProgramOptions()
+        .then((res) => {
+          if (res.ok) setRentalOptions(res.options);
+          else {
+            setRentalOptions([]);
+            setRentalOptionsError(res.message);
+          }
+        })
+        .catch(() => {
+          setRentalOptions([]);
+          setRentalOptionsError("대관 프로그램 목록을 불러오지 못했습니다.");
+        });
+    }
+  }
+  const linksOf = (programId: string) =>
+    rentalLinks.filter((l) => l.program_id === programId);
 
   function run(
     task: () => Promise<{ ok: boolean; message?: string }>,
@@ -64,8 +97,8 @@ export default function ProgramRegistryManager({
       <section className={cardCls}>
         <h3 className="font-bold text-ink">사업 등록 관리</h3>
         <p className="mt-2 text-sm leading-6 text-ink-muted">
-          레지스트리 테이블을 아직 적용하지 않았습니다. 적용 전까지는 분야·사업명을
-          직접 입력해 저장할 수 있습니다.
+          레지스트리 테이블을 아직 적용하지 않았습니다. 적용 전까지는
+          분야·사업명을 직접 입력해 저장할 수 있습니다.
         </p>
       </section>
     );
@@ -73,7 +106,10 @@ export default function ProgramRegistryManager({
   const programsOf = (categoryId: string) =>
     registry.programs.filter((p) => p.category_id === categoryId);
 
-  function saveName(item: BusinessCategory | BusinessProgram, kind: Editing["kind"]) {
+  function saveName(
+    item: BusinessCategory | BusinessProgram,
+    kind: Editing["kind"],
+  ) {
     if (!editing) return;
     const nm = editing.name.trim();
     if (!nm || nm === item.name) {
@@ -320,99 +356,118 @@ export default function ProgramRegistryManager({
                 </div>
                 <ul className="mt-2 space-y-1 border-t border-line/60 pt-2">
                   {programsOf(c.id).map((p) => (
-                    <li
-                      key={p.id}
-                      className="flex flex-wrap items-center gap-2 text-sm"
-                    >
-                      <span className="w-8 text-center text-xs text-ink-hint">
-                        {p.sort_order}
-                      </span>
-                      {editing?.kind === "program" && editing.id === p.id ? (
-                        <input
-                          autoFocus
-                          value={editing.name}
-                          onChange={(e) =>
-                            setEditing({ ...editing, name: e.target.value })
-                          }
-                          onKeyDown={(e) => {
-                            if (e.key === "Enter") saveName(p, "program");
-                            if (e.key === "Escape") setEditing(null);
-                          }}
-                          className={`${inCls} max-w-[320px]`}
-                        />
-                      ) : (
-                        <span
-                          className={
-                            p.is_active ? "text-ink-body" : "text-ink-hint"
-                          }
-                        >
-                          {p.name}
+                    <li key={p.id}>
+                      <div className="flex flex-wrap items-center gap-2 text-sm">
+                        <span className="w-8 text-center text-xs text-ink-hint">
+                          {p.sort_order}
                         </span>
-                      )}
-                      {!p.is_active && (
-                        <span className={badgeNeutral}>비활성</span>
-                      )}
-                      <div className="ml-auto flex gap-1">
                         {editing?.kind === "program" && editing.id === p.id ? (
-                          <>
-                            <button
-                              type="button"
-                              className={rowBtn}
-                              disabled={pending}
-                              onClick={() => saveName(p, "program")}
-                            >
-                              저장
-                            </button>
-                            <button
-                              type="button"
-                              className={rowBtn}
-                              onClick={() => setEditing(null)}
-                            >
-                              취소
-                            </button>
-                          </>
+                          <input
+                            autoFocus
+                            value={editing.name}
+                            onChange={(e) =>
+                              setEditing({ ...editing, name: e.target.value })
+                            }
+                            onKeyDown={(e) => {
+                              if (e.key === "Enter") saveName(p, "program");
+                              if (e.key === "Escape") setEditing(null);
+                            }}
+                            className={`${inCls} max-w-[320px]`}
+                          />
                         ) : (
-                          <>
-                            <button
-                              type="button"
-                              className={rowBtn}
-                              disabled={pending}
-                              onClick={() => move(p, "program", -1)}
-                            >
-                              ↑
-                            </button>
-                            <button
-                              type="button"
-                              className={rowBtn}
-                              disabled={pending}
-                              onClick={() => move(p, "program", 1)}
-                            >
-                              ↓
-                            </button>
-                            <button
-                              type="button"
-                              className={rowBtn}
-                              onClick={() =>
-                                setEditing({
-                                  kind: "program",
-                                  id: p.id,
-                                  name: p.name,
-                                })
-                              }
-                            >
-                              이름변경
-                            </button>
-                            <button
-                              type="button"
-                              className={rowBtn}
-                              disabled={pending}
-                              onClick={() => toggle(p, "program")}
-                            >
-                              {p.is_active ? "비활성화" : "활성화"}
-                            </button>
-                          </>
+                          <span
+                            className={
+                              p.is_active ? "text-ink-body" : "text-ink-hint"
+                            }
+                          >
+                            {p.name}
+                          </span>
                         )}
+                        {!p.is_active && (
+                          <span className={badgeNeutral}>비활성</span>
+                        )}
+                        <div className="ml-auto flex gap-1">
+                          {editing?.kind === "program" &&
+                          editing.id === p.id ? (
+                            <>
+                              <button
+                                type="button"
+                                className={rowBtn}
+                                disabled={pending}
+                                onClick={() => saveName(p, "program")}
+                              >
+                                저장
+                              </button>
+                              <button
+                                type="button"
+                                className={rowBtn}
+                                onClick={() => setEditing(null)}
+                              >
+                                취소
+                              </button>
+                            </>
+                          ) : (
+                            <>
+                              <button
+                                type="button"
+                                className={rowBtn}
+                                disabled={pending}
+                                onClick={() => move(p, "program", -1)}
+                              >
+                                ↑
+                              </button>
+                              <button
+                                type="button"
+                                className={rowBtn}
+                                disabled={pending}
+                                onClick={() => move(p, "program", 1)}
+                              >
+                                ↓
+                              </button>
+                              <button
+                                type="button"
+                                className={rowBtn}
+                                onClick={() =>
+                                  setEditing({
+                                    kind: "program",
+                                    id: p.id,
+                                    name: p.name,
+                                  })
+                                }
+                              >
+                                이름변경
+                              </button>
+                              <button
+                                type="button"
+                                className={rowBtn}
+                                disabled={pending}
+                                onClick={() => toggle(p, "program")}
+                              >
+                                {p.is_active ? "비활성화" : "활성화"}
+                              </button>
+                              <button
+                                type="button"
+                                className={rowBtn}
+                                onClick={() => toggleRental(p.id)}
+                                title="홈페이지 대관 기록으로 이 사업의 월 실적을 자동으로 채웁니다"
+                              >
+                                대관 연결
+                                {linksOf(p.id).length > 0
+                                  ? ` (${linksOf(p.id).length})`
+                                  : ""}
+                              </button>
+                            </>
+                          )}
+                        </div>
                       </div>
+                      {rentalOpen === p.id && (
+                        <RentalLinkPanel
+                          programId={p.id}
+                          links={linksOf(p.id)}
+                          options={rentalOptions}
+                          optionsError={rentalOptionsError}
+                        />
+                      )}
                     </li>
                   ))}
                   {programsOf(c.id).length === 0 && (

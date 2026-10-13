@@ -17,11 +17,14 @@ import {
   noticeSuccess,
 } from "@/lib/ui";
 import {
+  convertRentalResultToManual,
   deleteBusinessResult,
   deletePromotion,
   importBlogPromotions,
   importHomepageNewsPromotions,
   importInstagramPromotions,
+  resyncRentalResults,
+  revertRentalResult,
   savePromotion,
   type BusinessResult,
   type BusinessResultsData,
@@ -32,6 +35,7 @@ import DetailRowsEditor from "./DetailRowsEditor";
 import ProgramRegistryManager from "./ProgramRegistryManager";
 import StaffTrainingTab from "./StaffTrainingTab";
 import ProgramResultForm, { type CarryOver } from "./ProgramResultForm";
+import { fmtKstDateTime } from "@/lib/datetime";
 
 type Tab =
   | "overview"
@@ -69,6 +73,30 @@ const promotionCategories = [
   "기타",
 ];
 const number = new Intl.NumberFormat("ko-KR");
+
+// 홈페이지 대관 자동 행(source_type='rental') 표기.
+const RENTAL_SOURCE = "rental";
+const badgeAuto =
+  "rounded-full bg-brand-blue-soft px-2 py-0.5 text-[11px] font-bold text-brand-blue-strong";
+const badgeManual =
+  "rounded-full bg-warning-soft px-2 py-0.5 text-[11px] font-bold text-warning";
+
+// 수기로 고친 자동 행 — 홈페이지 값과 지금 값이 다를 때만 비교 문구를 냅니다.
+function rentalSnapshotNote(row: BusinessResult): string | null {
+  const snap = row.source_snapshot;
+  if (!row.manual_override || !snap) return null;
+  const same =
+    snap.operating_days === row.operating_days &&
+    snap.sessions === row.sessions &&
+    snap.participants === row.participants &&
+    snap.participants === row.attendance;
+  if (same) return null;
+  // "MM.DD HH:mm" → "MM/DD HH:mm"
+  const at = fmtKstDateTime(snap.synced_at ?? row.source_synced_at, {
+    year: false,
+  }).replace(".", "/");
+  return `홈페이지 값: ${number.format(snap.operating_days)}일 · ${number.format(snap.participants)}명 (${at} 기준)`;
+}
 
 // 홍보내용은 여러 줄입니다(제목·설명 통합, 김민정 9/16). 목록에서는 첫 줄만 보여
 //   주고 뒤에 더 있으면 말줄임표를 붙입니다 — 전체는 수정 폼에서 봅니다.
@@ -321,6 +349,80 @@ export default function BusinessResultsDashboard({
     });
   }
 
+  // [홈페이지 대관 다시 불러오기] — 수기 수정·제출 행은 숫자를 덮지 않습니다.
+  function resyncRental() {
+    setNotice(null);
+    startTransition(async () => {
+      const res = await resyncRentalResults(year, month);
+      if (!res.ok) {
+        setNotice({ ok: false, text: res.message });
+        return;
+      }
+      const s = res.summary;
+      const parts = [
+        s.created && `새로 ${s.created}건`,
+        s.updated && `갱신 ${s.updated}건`,
+        s.deleted && `삭제 ${s.deleted}건(예약 전부 취소)`,
+        s.snapshotOnly && `수기·제출 행 ${s.snapshotOnly}건은 값 유지`,
+        s.skippedExistingManual &&
+          `이미 수기 실적이 있는 ${s.skippedExistingManual}건 건너뜀`,
+      ].filter(Boolean);
+      setNotice({
+        ok: s.errors.length === 0,
+        text:
+          `홈페이지 대관 불러오기: ${parts.length ? parts.join(" · ") : "바뀐 내용 없음"}` +
+          (s.errors.length ? ` · 오류: ${s.errors.join(" / ")}` : ""),
+      });
+      router.refresh();
+    });
+  }
+
+  // 자동 행은 삭제 대신 수기로 전환합니다 — 지우면 다음 날 새벽 다시 생깁니다.
+  function convertToManual(row: BusinessResult) {
+    if (
+      !confirm(
+        `'${row.program_name}' ${row.report_month}월 실적을 수기로 전환할까요?\n이후 홈페이지 대관이 바뀌어도 숫자를 덮지 않습니다.`,
+      )
+    )
+      return;
+    setNotice(null);
+    startTransition(async () => {
+      const res = await convertRentalResultToManual(row.id);
+      if (!res.ok) {
+        setNotice({ ok: false, text: res.message });
+        return;
+      }
+      setNotice({ ok: true, text: "수기로 전환했습니다." });
+      router.refresh();
+    });
+  }
+
+  function revertToRental(row: BusinessResult) {
+    if (
+      !confirm(
+        `'${row.program_name}' ${row.report_month}월 실적을 홈페이지 대관 값으로 되돌릴까요?\n수기로 고친 숫자와 세부 실적이 홈페이지 값으로 바뀝니다.`,
+      )
+    )
+      return;
+    setNotice(null);
+    startTransition(async () => {
+      const res = await revertRentalResult(row.id);
+      if (!res.ok) {
+        setNotice({ ok: false, text: res.message });
+        return;
+      }
+      if (editing?.id === row.id) setEditing(null);
+      setNotice({
+        ok: true,
+        text:
+          res.summary.deleted > 0
+            ? "홈페이지 예약이 모두 취소되어 실적 행을 지웠습니다."
+            : "홈페이지 대관 값으로 되돌렸습니다.",
+      });
+      router.refresh();
+    });
+  }
+
   function togglePromoChannel(name: string) {
     setPromoChannels((prev) =>
       prev.includes(name) ? prev.filter((v) => v !== name) : [...prev, name],
@@ -488,7 +590,20 @@ export default function BusinessResultsDashboard({
               </label>
             )}
           </div>
-          <span className={badgeNeutral}>공동 저장</span>
+          <div className="flex flex-wrap items-center gap-2">
+            {period === "month" && (
+              <button
+                type="button"
+                disabled={pending}
+                className={btnSecondary}
+                onClick={resyncRental}
+                title="홈페이지 대관 기록으로 이 달 자동 실적을 다시 계산합니다. 수기로 고친 행과 제출된 행의 숫자는 바꾸지 않습니다."
+              >
+                홈페이지 대관 다시 불러오기
+              </button>
+            )}
+            <span className={badgeNeutral}>공동 저장</span>
+          </div>
         </div>
       </section>
       <nav
@@ -893,6 +1008,14 @@ export default function BusinessResultsDashboard({
                         {r.report_month}월 ·{" "}
                         {r.status === "submitted" ? "제출" : "작성 중"}
                       </span>
+                      {r.source_type === RENTAL_SOURCE && (
+                        <span className={`ml-2 ${badgeAuto}`}>
+                          자동 · 홈페이지 대관
+                        </span>
+                      )}
+                      {r.source_type === RENTAL_SOURCE && r.manual_override && (
+                        <span className={`ml-1 ${badgeManual}`}>수기 수정됨</span>
+                      )}
                     </div>
                     <div className="flex shrink-0 gap-1">
                       <button
@@ -905,15 +1028,40 @@ export default function BusinessResultsDashboard({
                       >
                         수정
                       </button>
-                      {canManage(r) && (
-                        <button
-                          type="button"
-                          disabled={pending}
-                          className="rounded-lg border border-line px-3 py-1.5 text-xs font-bold text-ink-muted hover:bg-surface"
-                          onClick={() => removeResult(r)}
-                        >
-                          삭제
-                        </button>
+                      {r.source_type === RENTAL_SOURCE ? (
+                        // 자동 행 — 삭제 대신 [수기로 전환] / [홈페이지 값으로 되돌리기].
+                        r.manual_override ? (
+                          r.status !== "submitted" && (
+                            <button
+                              type="button"
+                              disabled={pending}
+                              className="rounded-lg border border-line px-3 py-1.5 text-xs font-bold text-ink-muted hover:bg-surface"
+                              onClick={() => revertToRental(r)}
+                            >
+                              홈페이지 값으로 되돌리기
+                            </button>
+                          )
+                        ) : (
+                          <button
+                            type="button"
+                            disabled={pending}
+                            className="rounded-lg border border-line px-3 py-1.5 text-xs font-bold text-ink-muted hover:bg-surface"
+                            onClick={() => convertToManual(r)}
+                          >
+                            수기로 전환
+                          </button>
+                        )
+                      ) : (
+                        canManage(r) && (
+                          <button
+                            type="button"
+                            disabled={pending}
+                            className="rounded-lg border border-line px-3 py-1.5 text-xs font-bold text-ink-muted hover:bg-surface"
+                            onClick={() => removeResult(r)}
+                          >
+                            삭제
+                          </button>
+                        )
                       )}
                     </div>
                   </div>
@@ -922,11 +1070,21 @@ export default function BusinessResultsDashboard({
                     연인원 {r.attendance}명 · 작성 {r.author_name}
                     {r.manager_name ? ` · 담당 ${r.manager_name}` : ""}
                   </p>
+                  {rentalSnapshotNote(r) && (
+                    <p className="mt-0.5 text-xs text-ink-hint">
+                      {rentalSnapshotNote(r)}
+                    </p>
+                  )}
                 </div>
               ))}
             </div>
           </section>
-          {data.isAdmin && <ProgramRegistryManager registry={data.registry} />}
+          {data.isAdmin && (
+            <ProgramRegistryManager
+              registry={data.registry}
+              rentalLinks={data.rentalLinks ?? []}
+            />
+          )}
         </div>
       )}
       {tab === "promotions" && (

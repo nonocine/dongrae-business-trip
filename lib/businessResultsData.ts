@@ -44,6 +44,11 @@ export function toBusinessResult(raw: Record<string, unknown>): BusinessResult {
     status: raw.status === "submitted" ? "submitted" : "draft",
     author_name: String(raw.author_name ?? ""),
     updated_at: String(raw.updated_at ?? ""),
+    source_type: (raw.source_type as string | null) ?? null,
+    manual_override: raw.manual_override === true,
+    source_snapshot:
+      (raw.source_snapshot as BusinessResult["source_snapshot"]) ?? null,
+    source_synced_at: (raw.source_synced_at as string | null) ?? null,
   };
 }
 
