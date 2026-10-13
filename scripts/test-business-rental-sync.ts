@@ -50,6 +50,15 @@ async function main() {
       item?.operating_days === e.days && item?.participants === e.persons,
       `실제 ${item?.operating_days}일·${item?.participants}명 (횟수 ${item?.sessions})`,
     );
+    // 실인원(청소년)·세부행 실별인원(청소년) 합계 = 참가인원(수기 실적과 같은 방식).
+    chk(
+      `2026-${month} youth_uses = room_youth 합계 = ${e.persons}`,
+      item?.youth_uses === e.persons &&
+        item?.room_youth === e.persons &&
+        item?.other_uses === 0 &&
+        item?.room_other === 0,
+      `youth_uses ${item?.youth_uses} · room_youth 합계 ${item?.room_youth} · other_uses ${item?.other_uses} · room_other ${item?.room_other}`,
+    );
     chk(
       `2026-${month} 규칙 a(skippedExistingManual)`,
       item?.action === "skippedExistingManual",

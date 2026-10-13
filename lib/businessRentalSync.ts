@@ -74,6 +74,11 @@ export type RentalSyncItem = {
   sessions: number;
   operating_days: number;
   participants: number;
+  youth_uses: number;
+  other_uses: number;
+  // 세부행 실별인원 합계 — 본 행 실인원과 같아야 합니다(검증용).
+  room_youth: number;
+  room_other: number;
 };
 
 export type RentalResultSyncSummary = {
@@ -174,11 +179,13 @@ function aggregate(link: RentalLink, rows: Reservation[]): Aggregate {
   const label = [link.rental_program_name.trim(), link.rental_space_name?.trim()]
     .filter(Boolean)
     .join(" · ");
+  // 실별인원도 참가인원과 같은 값 — 김혜지 수기 실적과 같은 방식이고, 비워 두면
+  //   청소년 이용 비율 집계가 자동 행에서만 어긋납니다(관장 결정 2026-10).
   const persons = (n: number) => ({
     participants_youth: youth ? n : 0,
     participants_other: youth ? 0 : n,
-    room_youth: 0,
-    room_other: 0,
+    room_youth: youth ? n : 0,
+    room_other: youth ? 0 : n,
   });
 
   const byDate = new Map<string, number>();
@@ -222,7 +229,8 @@ function aggregate(link: RentalLink, rows: Reservation[]): Aggregate {
   };
 }
 
-// 숫자 칸 — participants = attendance, 기본 구분(청소년/기타)에 전부 넣습니다.
+// 숫자 칸 — participants = attendance = 실인원(youth_uses/other_uses).
+//   기본 구분(청소년/기타)에 전부 넣습니다.
 function numberFields(link: RentalLink, agg: Aggregate) {
   const youth = link.default_audience !== "other";
   const n = agg.participants;
@@ -235,6 +243,8 @@ function numberFields(link: RentalLink, agg: Aggregate) {
     attendance: n,
     attendance_youth: youth ? n : 0,
     attendance_other: youth ? 0 : n,
+    youth_uses: youth ? n : 0,
+    other_uses: youth ? 0 : n,
   };
 }
 
@@ -322,6 +332,10 @@ export async function syncRentalToBusinessResults(opts: {
       sessions: 0,
       operating_days: 0,
       participants: 0,
+      youth_uses: 0,
+      other_uses: 0,
+      room_youth: 0,
+      room_other: 0,
     };
     summary.items.push(item);
     const fail = (reason: string) => {
@@ -344,6 +358,11 @@ export async function syncRentalToBusinessResults(opts: {
       item.sessions = agg.sessions;
       item.operating_days = agg.operating_days;
       item.participants = agg.participants;
+      const nums = numberFields(link, agg);
+      item.youth_uses = nums.youth_uses;
+      item.other_uses = nums.other_uses;
+      item.room_youth = agg.details.reduce((a, d) => a + d.room_youth, 0);
+      item.room_other = agg.details.reduce((a, d) => a + d.room_other, 0);
 
       const now = new Date().toISOString();
       const snapshot: RentalSnapshot = {
@@ -398,8 +417,6 @@ export async function syncRentalToBusinessResults(opts: {
           program_name: program.name,
           manager_name: "",
           ...numberFields(link, agg),
-          youth_uses: 0,
-          other_uses: 0,
           status: "draft",
           author_name: RENTAL_AUTHOR_NAME,
           updated_by: RENTAL_AUTHOR_NAME,
