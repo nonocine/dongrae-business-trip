@@ -19,10 +19,14 @@
 import {
   MENU_GROUPS,
   MENU_GROUP_LABEL,
+  MENU_HOME,
   menuItemsFor,
   type MenuContext,
   type MenuGroup,
 } from "@/lib/menu";
+
+// 정의는 lib/menu.ts 에 있습니다 — 사이드바·드로어가 여기서 가져가던 경로 유지.
+export { MENU_HOME };
 
 export type MenuNavItem = {
   key: string;
@@ -45,18 +49,6 @@ export type MenuTree = {
   // 맨 아래 별도 구역에 그릴 항목들.
   legacy: MenuNavItem[];
 };
-
-// 사이드바·드로어가 쓰는 '메인' 링크.
-//   ★ lib/menu.ts 배열에는 일부러 넣지 않습니다. 그 배열은 대시보드 카드도
-//     함께 만들기 때문에, 넣는 순간 대시보드에 '메인' 카드가 생깁니다
-//     (자기 화면으로 가는 카드라 이상합니다). 네비게이션에만 필요한 항목이라
-//     여기 상수로 두고 화면이 맨 위에 따로 그립니다.
-export const MENU_HOME = {
-  key: "__home__",
-  label: "메인",
-  href: "/",
-  icon: "🏠",
-} as const;
 
 export function buildMenuTree(
   ctx: MenuContext,
@@ -83,7 +75,8 @@ export function buildMenuTree(
   const groups: MenuNavGroup[] = [];
 
   for (const group of MENU_GROUPS as readonly MenuGroup[]) {
-    const visible = menuItemsFor(group, ctx);
+    // sidebar:false 인 항목은 여기서 빠집니다(lib/menu.ts 의 표시 여부).
+    const visible = menuItemsFor(group, ctx, "sidebar");
     const normal = [];
     for (const item of visible) {
       if (item.legacy) legacy.push(toNav(item));

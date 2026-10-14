@@ -93,24 +93,25 @@ assert(sees(ctx(true, []), "admin-records"), "M0 는 관리자 영역을 봅니�
 //   공통만 보이고 '담당 업무'·'관리자 영역' 은 비어 있어야 합니다.
 const plain = ctx(false, []);
 assert(
-  roleMenuGroupsFor(plain).length === 0,
+  roleMenuGroupsFor(plain, "card").length === 0,
   "직무가 없으면 '담당 업무' 그룹이 하나도 없어야 합니다.",
 );
 assert(
-  menuItemsFor("admin", plain).length === 0,
+  menuItemsFor("admin", plain, "card").length === 0,
   "직무가 없으면 관리자 영역이 비어야 합니다.",
 );
 assert(
-  menuItemsFor("common", plain).length > 0,
+  menuItemsFor("common", plain, "card").length > 0,
   "공통은 누구에게나 있어야 합니다.",
 );
 
 // --- 5) 직무 없는 M0 가 보는 '담당 업무' -------------------------------
-//   시설·회계만 나오고(가드가 isM0 를 받아주므로), 인사·채용은 관리자 영역이
-//   맡으므로 나오지 않습니다.
-const m0NoRole = roleMenuGroupsFor(ctx(true, [])).map((g) => g.group);
+//   시설·회계가 나오고(가드가 isM0 를 받아주므로), 채용은 관리자 영역이 맡아
+//   나오지 않습니다. 인사 그룹은 상벌·인사위원회·인사평가(M0 전용, 관장 지시)
+//   때문에 나옵니다 — 그 두 항목이 생기며 이 기대값이 낡아 있었습니다.
+const m0NoRole = roleMenuGroupsFor(ctx(true, []), "card").map((g) => g.group);
 assert(
-  JSON.stringify(m0NoRole) === JSON.stringify(["facility", "accounting"]),
+  JSON.stringify(m0NoRole) === JSON.stringify(["facility", "accounting", "hr"]),
   `직무 없는 M0 의 담당 업무 그룹이 예상과 다릅니다: ${m0NoRole.join(",")}`,
 );
 
@@ -128,8 +129,41 @@ for (const i of MENU_ITEMS) {
   );
 }
 
+// --- 7) 사이드바·메인 카드 표시 여부 (2026-10 단일화) --------------------
+//   두 화면이 같은 배열을 읽으므로, 차이는 항목의 sidebar / card 값뿐이어야 합니다.
+const sideOnly = MENU_ITEMS.filter((i) => i.sidebar !== false && i.card === false).map((i) => i.key);
+const cardOnly = MENU_ITEMS.filter((i) => i.card !== false && i.sidebar === false).map((i) => i.key);
+assert(
+  JSON.stringify(sideOnly) === JSON.stringify(["legacy-activities", "legacy-new"]),
+  `사이드바 전용 항목이 예상과 다릅니다: ${sideOnly.join(",")}`,
+);
+assert(cardOnly.length === 0, `메인 카드 전용 항목이 생겼습니다: ${cardOnly.join(",")}`);
+for (const [isM0, roles] of [[true, []], [false, ["hr"]], [false, []]] as const) {
+  const c = { ...ctx(isM0, [...roles]), hasMyTrainings: true };
+  for (const g of ["common", "admin"] as const) {
+    const a = menuItemsFor(g, c, "sidebar").map((i) => i.key).join(",");
+    const b = menuItemsFor(g, c, "card").map((i) => i.key).join(",");
+    assert(a === b, `${g}: 사이드바와 메인 카드의 항목·순서가 다릅니다.\n  ${a}\n  ${b}`);
+  }
+}
+
+// --- 8) 내 의무교육 — 교육이 있을 때만, 거래처관리 바로 다음 -------------------
+const withT = { ...ctx(false, []), hasMyTrainings: true };
+const commonKeys = menuItemsFor("common", withT, "sidebar").map((i) => i.key);
+assert(
+  commonKeys[commonKeys.indexOf("common-partners") + 1] === "common-my-trainings",
+  "내 의무교육은 거래처관리 바로 다음이어야 합니다.",
+);
+assert(!sees(ctx(false, []), "common-my-trainings"), "교육 정보가 없으면(undefined) 내 의무교육을 숨겨야 합니다.");
+assert(
+  !sees({ ...ctx(false, []), hasMyTrainings: false }, "common-my-trainings"),
+  "올해 교육이 없으면 내 의무교육을 숨겨야 합니다.",
+);
+
 console.log(`✓ isM0 || 직무 항목 ${M0_OR_ROLE.length}개 — 직무 없는 M0 도 보임`);
 console.log("✓ 직무 전용 항목은 M0 의 담당 업무에 끼어들지 않음");
 console.log("✓ 직무 없는 일반 직원 — 공통만, 담당 업무·관리자 영역 없음");
 console.log(`✓ key 중복 없음(${keys.length}개) · 경로 누락 없음`);
+console.log("✓ 사이드바·메인 카드 — 차이는 표시 여부(활동일지 계열 사이드바 전용)뿐");
+console.log("✓ 내 의무교육 — 교육 있을 때만, 거래처관리 다음");
 console.log("\n메뉴 노출 조건 검증 통과");

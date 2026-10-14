@@ -1,7 +1,6 @@
-import { Fragment, type ReactNode } from "react";
+import type { ReactNode } from "react";
 import Link from "next/link";
 import { getMyProfile, getMyPhotoUrl } from "@/app/(app)/profile/hr/actions";
-import { getMyTrainingSummary } from "@/app/(app)/profile/hr/trainingActions";
 import { getMyLeavePlanNotice } from "@/app/(app)/profile/hr/leavePlanActions";
 import { listAnnouncements } from "@/app/(app)/announcements/actions";
 import { getMyJudgeAssignments } from "@/app/(app)/hr/recruitment/[slug]/actions";
@@ -184,35 +183,29 @@ function MenuItemCard({
 }
 
 // 한 그룹의 카드들 — 대시보드 전역에서 같은 2열 격자를 씁니다.
-//   * after: "이 항목 바로 뒤에 끼워 넣을 카드" (키는 MenuItem.key).
-//     데이터가 있을 때만 나타나는 알림은 메뉴가 아니라 화면이 넣는데, 그렇다고
-//     격자 끝으로 몰면 안 됩니다 — '내 의무교육' 은 원래 거래처관리 다음
-//     자리입니다. 끝에 붙이면 카드 구성은 같아도 순서가 바뀝니다.
-//   * children: 격자 맨 뒤(연차 사용계획서 알림).
+//   * '내 의무교육' 도 이제 lib/menu.ts 의 항목이라 배열 순서(거래처관리 다음)
+//     그대로 나옵니다. 화면이 따로 끼워 넣지 않습니다.
+//   * children: 격자 맨 뒤(연차 사용계획서 알림 — 메뉴가 아니라 할 일).
 function MenuGrid({
   items,
   badges,
   descOverrides,
-  after,
   children,
 }: {
   items: MenuItem[];
   badges?: Record<string, number | undefined>;
   descOverrides?: Record<string, string>;
-  after?: Record<string, ReactNode>;
   children?: ReactNode;
 }) {
   return (
     <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
       {items.map((item) => (
-        <Fragment key={item.key}>
-          <MenuItemCard
-            item={item}
-            badges={badges}
-            descOverrides={descOverrides}
-          />
-          {after?.[item.key]}
-        </Fragment>
+        <MenuItemCard
+          key={item.key}
+          item={item}
+          badges={badges}
+          descOverrides={descOverrides}
+        />
       ))}
       {children}
     </div>
@@ -236,7 +229,6 @@ export default async function EmployeeDashboard({
     photoUrl,
     recentAnnouncements,
     judgeAssignments,
-    trainingSummary,
     leavePlanNotice,
   ] = await Promise.all([
     getShellData(),
@@ -244,7 +236,6 @@ export default async function EmployeeDashboard({
     getMyPhotoUrl(),
     listAnnouncements(3),
     getMyJudgeAssignments(),
-    getMyTrainingSummary(),
     getMyLeavePlanNotice(),
   ]);
 
@@ -262,9 +253,10 @@ export default async function EmployeeDashboard({
   // --- 메뉴 구성 (lib/menu.ts 단일 출처) ---
   //   메뉴 '정의' 는 menu.ts 가, '데이터' 는 getShellData 가 담당합니다.
   const menuCtx: MenuContext = shell.ctx;
-  const commonItems = menuItemsFor("common", menuCtx);
-  const roleGroups = roleMenuGroupsFor(menuCtx);
-  const adminItems = menuItemsFor("admin", menuCtx);
+  //   card:false 인 항목(활동일지 계열)은 여기서 빠집니다.
+  const commonItems = menuItemsFor("common", menuCtx, "card");
+  const roleGroups = roleMenuGroupsFor(menuCtx, "card");
+  const adminItems = menuItemsFor("admin", menuCtx, "card");
 
   // 숫자 하나로 표현되지 않는 문구만 화면이 덮습니다(키는 MenuItem.key).
   const descOverrides: Record<string, string> = {};
@@ -274,6 +266,21 @@ export default async function EmployeeDashboard({
       : credentialSummary.count > 0
         ? `열람 가능 ${credentialSummary.count}건 — 비밀번호 확인·복사`
         : "열람 가능한 항목이 없습니다 — 내 계정 비번을 등록할 수 있습니다";
+  }
+  // 내 의무교육 — 문구는 예전 카드와 같습니다. 항목 자체가 보일지는
+  //   lib/menu.ts(when: "myTrainings")가 사이드바와 같은 조건으로 정합니다.
+  const trainingSummary = shell.myTrainingSummary;
+  if (trainingSummary && trainingSummary.total > 0) {
+    descOverrides["common-my-trainings"] =
+      trainingSummary.notMet === 0
+        ? "올해 교육 모두 완료 ✓"
+        : `${trainingSummary.done}/${trainingSummary.total} 완료 · 미이수 ${trainingSummary.notMet}건${
+            trainingSummary.nearest
+              ? ` · 가장 임박: ${trainingSummary.nearest.name} ${ddayLabel(
+                  trainingSummary.nearest.dday,
+                )}`
+              : ""
+          }`;
   }
 
   // 핵심 인사정보가 모두 비어있으면 입력 안내를 강조.
@@ -421,30 +428,6 @@ export default async function EmployeeDashboard({
           items={commonItems}
           badges={badges}
           descOverrides={descOverrides}
-          after={{
-            // 내 의무교육 — 올해 교육이 1개 이상일 때만. 메뉴가 아니라 '있을 때만
-            //   보이는 안내' 라 menu.ts 에 넣지 않되, 자리는 원래대로 거래처관리
-            //   바로 뒤입니다.
-            "common-partners":
-              trainingSummary && trainingSummary.total > 0 ? (
-                <MenuCard
-                  href="/profile/hr#my-trainings"
-                  icon="🎓"
-                  title="내 의무교육"
-                  desc={
-                    trainingSummary.notMet === 0
-                      ? "올해 교육 모두 완료 ✓"
-                      : `${trainingSummary.done}/${trainingSummary.total} 완료 · 미이수 ${trainingSummary.notMet}건${
-                          trainingSummary.nearest
-                            ? ` · 가장 임박: ${trainingSummary.nearest.name} ${ddayLabel(
-                                trainingSummary.nearest.dday,
-                              )}`
-                            : ""
-                        }`
-                  }
-                />
-              ) : null,
-          }}
         >
           {/* LP-2. 연차 사용계획서 — 발부됐고 아직 제출 안 한 건이 있을 때만. */}
           {leavePlanNotice && (

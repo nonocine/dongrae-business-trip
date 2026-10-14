@@ -17,6 +17,10 @@
 import { cache } from "react";
 import { getGoogleSession, isManagerAdmin } from "@/app/actions";
 import { getMyProfile, getMyEmployeeRoles } from "@/app/(app)/profile/hr/actions";
+import {
+  getMyTrainingSummary,
+  type MyTrainingSummary,
+} from "@/app/(app)/profile/hr/trainingActions";
 import { getUnreadMailCount } from "@/app/(app)/mail/actions";
 import { getTrainingsAdminSummary } from "@/app/(app)/hr/trainings/actions";
 import { getPendingCertRequestCount } from "@/app/(app)/hr/certificates/actions";
@@ -31,16 +35,20 @@ export type ShellData = {
   // 대시보드가 이어서 쓰는 값들(다시 조회하지 않게 함께 돌려줍니다).
   rank: string | null;
   authLevel: string | null;
+  // 내 의무교육 요약 — 메뉴 '내 의무교육' 의 표시 조건(ctx.hasMyTrainings)과
+  //   대시보드 카드 문구가 같은 값을 쓰도록 여기서 한 번만 셉니다.
+  myTrainingSummary: MyTrainingSummary | null;
 };
 
 export const getShellData = cache(async (): Promise<ShellData> => {
-  const [my, roles, g, managerAdmin] = await Promise.all([
+  const [my, roles, g, managerAdmin, myTrainingSummary] = await Promise.all([
     getMyProfile(),
     getMyEmployeeRoles(),
     getGoogleSession(),
     // /admin 진입 기준 — isM0 보다 좁습니다(구글 세션 + master/관장).
     //   사이드바의 '관리자 대시보드' 를 가드와 같은 조건으로 걸기 위해 함께 봅니다.
     isManagerAdmin(),
+    getMyTrainingSummary(),
   ]);
 
   const rank = my?.driver?.rank ?? null;
@@ -56,7 +64,13 @@ export const getShellData = cache(async (): Promise<ShellData> => {
     ]);
 
   return {
-    ctx: { isM0, roles, isManagerAdmin: managerAdmin },
+    ctx: {
+      isM0,
+      roles,
+      isManagerAdmin: managerAdmin,
+      // 대시보드가 예전에 쓰던 조건 그대로 — 올해 교육이 1건 이상.
+      hasMyTrainings: (myTrainingSummary?.total ?? 0) > 0,
+    },
     badges: {
       "/mail": unreadMailCount,
       "/hr/trainings": trainingAdminSummary?.totalNotMet,
@@ -64,5 +78,6 @@ export const getShellData = cache(async (): Promise<ShellData> => {
     },
     rank,
     authLevel,
+    myTrainingSummary,
   };
 });

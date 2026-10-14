@@ -36,6 +36,16 @@
 //     때는 그 라우트의 가드를 읽고 같은 조건을 쓰세요.
 //
 //   선례: lib/employeeRoles.ts — 상수 배열 + 순수 헬퍼.
+//
+//   ★ 화면별 표시 여부 (2026-10, 사이드바·메인 카드 불일치 점검)
+//     사이드바(PC)·폰 드로어·메인 카드 셋 다 이 배열만 읽습니다. 화면마다
+//     일부러 다르게 보여야 하는 항목은 정의를 나누지 않고 항목의
+//     sidebar / card 값(기본 true)으로 표현합니다.
+//       · 활동일지·활동 작성(legacy) — 사이드바 맨 아래 '이전 기능' 에만(card:false).
+//       · 메인(MENU_HOME) — 사이드바·드로어 맨 위에만. 그룹 밖 항목이라 배열이
+//         아니라 아래 상수로 둡니다(대시보드는 자기 자신이라 카드가 없습니다).
+//     예전에는 '내 의무교육' 을 대시보드가 화면에서 직접 끼워 넣어 사이드바에
+//     없었습니다. 지금은 배열의 항목(when: "myTrainings")입니다.
 // =====================================================================
 
 // 메뉴 그룹 — 현재 대시보드의 구획을 그대로 옮긴 것입니다.
@@ -83,6 +93,11 @@ export type MenuVisibility =
   | { kind: "m0OrRole"; role: string }
   | { kind: "managerAdmin" };
 
+// 데이터 조건 — 권한이 아니라 '보여 줄 내용이 있을 때만' 나타나는 항목.
+//   myTrainings: 올해 내게 배정된 법정 의무교육이 1건 이상(getMyTrainingSummary).
+//   값은 MenuContext 로 들어오며, 모르면(undefined) 숨깁니다.
+export type MenuDataCondition = "myTrainings";
+
 export type MenuItem = {
   // 같은 경로가 여러 그룹에 있어(예: /mail 은 공통·관리자 양쪽) 경로로는
   //   가릴 수 없습니다. 키는 화면의 React key 로도 씁니다.
@@ -94,7 +109,14 @@ export type MenuItem = {
   // 카드 설명(사이드바에서는 쓰지 않습니다).
   desc: string;
   show: MenuVisibility;
-  // 5단계에서 하단으로 내릴 항목 표시. 지금은 동작에 영향이 없습니다.
+  // 데이터 조건 — 위 MenuDataCondition. 없으면 권한(show)만 봅니다.
+  when?: MenuDataCondition;
+  // 화면별 표시 여부. 생략하면 true(양쪽 다 표시).
+  //   sidebar: PC 좌측 사이드바 + 폰 드로어(같은 트리)
+  //   card   : 메인(대시보드) 카드
+  sidebar?: boolean;
+  card?: boolean;
+  // 사이드바에서 맨 아래 '이전 기능' 구역으로 내려 그릴 항목.
   legacy?: true;
   // 아직 만들지 않은 기능 — 링크 대신 "준비 중" 으로 그립니다.
   pending?: true;
@@ -184,6 +206,19 @@ export const MENU_ITEMS: MenuItem[] = [
     icon: "🤝",
     desc: "분야별 거래처·담당자 주소록 (인수인계용)",
     show: { kind: "everyone" },
+  },
+  // 내 의무교육 — 올해 배정된 교육이 있을 때만(when). 예전에는 대시보드가 이
+  //   자리(거래처관리 다음)에 직접 끼워 넣어 사이드바에는 없었습니다.
+  //   카드 문구(완료 수·미이수·가장 임박)는 대시보드가 descOverrides 로 덮습니다.
+  {
+    key: "common-my-trainings",
+    group: "common",
+    label: "내 의무교육",
+    href: "/profile/hr#my-trainings",
+    icon: "🎓",
+    desc: "올해 법정 의무교육 이수 현황",
+    show: { kind: "everyone" },
+    when: "myTrainings",
   },
   // 기관 대장 — 업무협약·수상(노미현 부장 요청). 조회·등록·수정은 전 직원,
   //   삭제는 등록자 본인 또는 관장·부장·인사 담당자(lib/orgRecordsServer).
@@ -542,8 +577,8 @@ export const MENU_ITEMS: MenuItem[] = [
   },
 
   // ---------- 레거시 — 활동일지 계열 ----------
-  //   대시보드 카드로는 지금도 없고 상단 네비(HeaderClient)에만 있습니다.
-  //   5단계에서 사이드바 하단으로 내릴 때 쓰려고 정의만 해 둡니다.
+  //   사이드바·드로어 맨 아래 '이전 기능' 에만 그립니다. 메인 카드로는 예전부터
+  //   없었습니다(card:false 로 명시).
   {
     key: "legacy-activities",
     group: "legacy",
@@ -552,6 +587,7 @@ export const MENU_ITEMS: MenuItem[] = [
     icon: "📒",
     desc: "외근·출장·교육 활동 기록 조회",
     show: { kind: "everyone" },
+    card: false,
     legacy: true,
   },
   {
@@ -562,11 +598,24 @@ export const MENU_ITEMS: MenuItem[] = [
     icon: "✍️",
     desc: "외근·출장·교육 활동 새로 쓰기",
     show: { kind: "everyone" },
+    card: false,
     legacy: true,
   },
 ];
 
+// 사이드바·드로어 맨 위 '메인' 링크 — sidebar 전용(card 없음).
+//   그룹 밖에 따로 그리는 항목이라 배열이 아니라 상수로 둡니다.
+export const MENU_HOME = {
+  key: "__home__",
+  label: "메인",
+  href: "/",
+  icon: "🏠",
+} as const;
+
 // --- 판정·조회 헬퍼 (순수 함수) ---------------------------------------
+
+// 어느 화면에 그리는가 — 항목의 sidebar / card 값을 고릅니다.
+export type MenuSurface = "sidebar" | "card";
 
 export type MenuContext = {
   isM0: boolean;
@@ -574,6 +623,8 @@ export type MenuContext = {
   // /admin 진입 가능 여부(isManagerAdmin). m0 와 기준이 다릅니다 — 위 주석 참고.
   //   값을 주지 않으면 false 로 봅니다(메뉴는 좁게 여는 쪽이 안전합니다).
   isManagerAdmin?: boolean;
+  // 데이터 조건(MenuDataCondition)의 값. 모르면 해당 항목을 숨깁니다.
+  hasMyTrainings?: boolean;
 };
 
 function hasRole(ctx: MenuContext, role: string): boolean {
@@ -582,7 +633,17 @@ function hasRole(ctx: MenuContext, role: string): boolean {
     : ctx.roles.has(role);
 }
 
+function meetsDataCondition(item: MenuItem, ctx: MenuContext): boolean {
+  switch (item.when) {
+    case undefined:
+      return true;
+    case "myTrainings":
+      return ctx.hasMyTrainings === true;
+  }
+}
+
 export function canSeeMenuItem(item: MenuItem, ctx: MenuContext): boolean {
+  if (!meetsDataCondition(item, ctx)) return false;
   switch (item.show.kind) {
     case "everyone":
       return true;
@@ -597,10 +658,18 @@ export function canSeeMenuItem(item: MenuItem, ctx: MenuContext): boolean {
   }
 }
 
-// 한 그룹에서 이 사람에게 보일 항목들 — 배열에 적힌 순서를 그대로 지킵니다.
-export function menuItemsFor(group: MenuGroup, ctx: MenuContext): MenuItem[] {
+export function showsOn(item: MenuItem, surface: MenuSurface): boolean {
+  return item[surface] !== false;
+}
+
+// 한 그룹에서 이 사람에게, 이 화면에 보일 항목들 — 배열 순서를 그대로 지킵니다.
+export function menuItemsFor(
+  group: MenuGroup,
+  ctx: MenuContext,
+  surface: MenuSurface,
+): MenuItem[] {
   return MENU_ITEMS.filter(
-    (i) => i.group === group && canSeeMenuItem(i, ctx),
+    (i) => i.group === group && showsOn(i, surface) && canSeeMenuItem(i, ctx),
   );
 }
 
@@ -615,11 +684,12 @@ export const ROLE_MENU_GROUPS: readonly MenuGroup[] = [
 
 export function roleMenuGroupsFor(
   ctx: MenuContext,
+  surface: MenuSurface,
 ): { group: MenuGroup; label: string; items: MenuItem[] }[] {
   return ROLE_MENU_GROUPS.map((group) => ({
     group,
     label: MENU_GROUP_LABEL[group],
-    items: menuItemsFor(group, ctx),
+    items: menuItemsFor(group, ctx, surface),
   })).filter((g) => g.items.length > 0);
 }
 
