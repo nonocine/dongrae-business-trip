@@ -185,6 +185,17 @@ export const MENU_ITEMS: MenuItem[] = [
     desc: "분야별 거래처·담당자 주소록 (인수인계용)",
     show: { kind: "everyone" },
   },
+  // 기관 대장 — 업무협약·수상(노미현 부장 요청). 조회·등록·수정은 전 직원,
+  //   삭제는 등록자 본인 또는 관장·부장·인사 담당자(lib/orgRecordsServer).
+  {
+    key: "common-org-records",
+    group: "common",
+    label: "기관 대장",
+    href: "/hr/org-records",
+    icon: "🏆",
+    desc: "업무협약 체결 현황·수상 현황 기록과 양식 출력",
+    show: { kind: "everyone" },
+  },
   {
     key: "common-my-certificates",
     group: "common",

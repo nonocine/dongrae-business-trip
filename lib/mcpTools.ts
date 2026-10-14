@@ -27,6 +27,14 @@ import { loadBusinessResultRows } from "@/lib/businessResultsData";
 import { calculateBusinessReportTotals } from "@/lib/businessResultsExport";
 import { listSummaries } from "@/lib/contractServer";
 import { contractStateLabel, type ContractSummary } from "@/lib/contractCore";
+import { loadOrgAgreements, loadOrgAwards } from "@/lib/orgRecordsServer";
+import {
+  RECIPIENT_TYPE_LABEL,
+  agreementBadge,
+  awardRecipientName,
+  fmtDotDate,
+  yearOf,
+} from "@/lib/orgRecords";
 
 // =====================================================================
 // 동업자씨 MCP 도구(읽기 전용) — Claude 커스텀 커넥터용.
@@ -537,6 +545,55 @@ async function contractStatus(year?: number): Promise<string> {
 }
 
 // =====================================================================
+// 9. org_records — 기관 대장(업무협약·수상)
+//   ⚠️ 청소년 수상자 이름은 항상 "***" 로 가립니다(출력의 '가리기' 와 같은 규칙).
+// =====================================================================
+async function orgRecords(kind: "agreements" | "awards" | undefined, year?: number): Promise<string> {
+  const out: string[] = [];
+  const countByYear = (dates: string[]) => {
+    const m = new Map<number, number>();
+    for (const d of dates) {
+      const y = yearOf(d);
+      if (y != null) m.set(y, (m.get(y) ?? 0) + 1);
+    }
+    return [...m.entries()].sort((a, b) => a[0] - b[0]).map(([y, n]) => `${y}년 ${n}건`).join(" · ") || "없음";
+  };
+  const scope = year ? `${year}년` : "전체 연도";
+
+  if (kind !== "awards") {
+    const all = await loadOrgAgreements(null);
+    const rows = year ? all.filter((r) => yearOf(r.agreed_on) === year) : all;
+    const today = kstTodayYmd();
+    out.push(`■ 업무협약 체결 현황 (${scope}) — ${rows.length}건`);
+    out.push(`  연도별: ${countByYear(all.map((r) => r.agreed_on))}`);
+    rows.forEach((r, i) => {
+      const badge = agreementBadge(r, today).label;
+      out.push(
+        `  ${String(i + 1).padStart(2, "0")}. ${r.partner_name} | ${fmtDotDate(r.agreed_on)} | ${r.content || "-"}${badge === "유효" ? "" : ` [${badge}]`}`
+      );
+    });
+  }
+
+  if (kind !== "agreements") {
+    const all = await loadOrgAwards(null);
+    const rows = year ? all.filter((r) => yearOf(r.awarded_on) === year) : all;
+    if (out.length) out.push("");
+    out.push(`■ 수상 현황 (${scope}) — ${rows.length}건`);
+    out.push(`  연도별: ${countByYear(all.map((r) => r.awarded_on))}`);
+    rows.forEach((r, i) => {
+      const who = awardRecipientName(r, true);
+      const type = r.recipient_type ? `[${RECIPIENT_TYPE_LABEL[r.recipient_type]}] ` : "";
+      out.push(
+        `  ${String(i + 1).padStart(2, "0")}. ${type}${r.award_name}${who ? ` (${who})` : ""} | ${r.awarded_by} | ${fmtDotDate(r.awarded_on)}`
+      );
+    });
+    out.push("");
+    out.push("  ※ 청소년 수상자 이름은 가려서 내보냅니다.");
+  }
+  return out.join("\n");
+}
+
+// =====================================================================
 // 등록
 // =====================================================================
 const READ_ONLY = { readOnlyHint: true, destructiveHint: false, openWorldHint: false } as const;
@@ -687,5 +744,22 @@ export function registerDongraeTools(server: McpServer): void {
       annotations: READ_ONLY,
     },
     async ({ year }) => run("contract_status", () => contractStatus(year))
+  );
+
+  server.registerTool(
+    "org_records",
+    {
+      title: "기관 대장(업무협약·수상)",
+      description:
+        "센터가 맺은 업무협약(기관명·협약일·협약내용·만료 여부)과 받은 수상(수상명·수상자·수상기관·수상일) 목록과 연도별 건수를 보여줍니다. " +
+        "'올해 업무협약 몇 건 맺었어?', '작년 수상 실적 알려줘', '협약 만료 임박한 곳 있어?' 같은 질문에 쓰세요. " +
+        "kind 를 안 주면 둘 다, year 를 안 주면 전체 연도. 청소년 수상자 이름은 항상 가려서 내보냅니다.",
+      inputSchema: z.object({
+        kind: z.enum(["agreements", "awards"]).optional().describe("agreements=업무협약, awards=수상 (없으면 둘 다)"),
+        year: z.number().int().min(1990).max(2100).optional().describe("연도 (없으면 전체)"),
+      }),
+      annotations: READ_ONLY,
+    },
+    async ({ kind, year }) => run("org_records", () => orgRecords(kind, year))
   );
 }

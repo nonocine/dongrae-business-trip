@@ -17,6 +17,8 @@ const nextConfig: NextConfig = {
   outputFileTracingIncludes: {
     "/hr/salary": ["./lib/fonts/*.ttf"],
     "/hr/salary/**": ["./lib/fonts/*.ttf"],
+    // 기관 대장 PDF 출력(나눔고딕).
+    "/hr/org-records/**": ["./lib/fonts/*.ttf"],
   },
 };
 
