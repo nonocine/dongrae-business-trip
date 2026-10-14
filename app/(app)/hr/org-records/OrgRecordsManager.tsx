@@ -53,6 +53,11 @@ export default function OrgRecordsManager({
 
   return (
     <div className="space-y-4">
+      {/* 관장 피드백 — "올리기 버튼이 안 보인다". 진입점을 글로 한 번 더 알려 줍니다. */}
+      <p className="rounded-lg border border-rule bg-card px-3 py-2 text-sm text-ink-body">
+        📎 각 줄의 <span className="font-semibold text-navy">[+ 올리기]</span>로 협약서·상장 스캔본과 사진을 올릴 수
+        있습니다
+      </p>
       <div className={tabBarCls}>
         <nav className={tabNavCls} aria-label="기관 대장 종류">
           {ORG_RECORD_TABS.map((t) => (

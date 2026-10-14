@@ -547,6 +547,7 @@ async function contractStatus(year?: number): Promise<string> {
 // =====================================================================
 // 9. org_records — 기관 대장(업무협약·수상)
 //   ⚠️ 청소년 수상자 이름은 항상 "***" 로 가립니다(출력의 '가리기' 와 같은 규칙).
+//   첨부는 개수만 — 파일 내용·서명 링크는 내보내지 않습니다.
 // =====================================================================
 async function orgRecords(kind: "agreements" | "awards" | undefined, year?: number): Promise<string> {
   const out: string[] = [];
@@ -569,7 +570,7 @@ async function orgRecords(kind: "agreements" | "awards" | undefined, year?: numb
     rows.forEach((r, i) => {
       const badge = agreementBadge(r, today).label;
       out.push(
-        `  ${String(i + 1).padStart(2, "0")}. ${r.partner_name} | ${fmtDotDate(r.agreed_on)} | ${r.content || "-"}${badge === "유효" ? "" : ` [${badge}]`}`
+        `  ${String(i + 1).padStart(2, "0")}. ${r.partner_name} | ${fmtDotDate(r.agreed_on)} | ${r.content || "-"}${badge === "유효" ? "" : ` [${badge}]`} | 첨부 ${r.files.length}개`
       );
     });
   }
@@ -584,11 +585,14 @@ async function orgRecords(kind: "agreements" | "awards" | undefined, year?: numb
       const who = awardRecipientName(r, true);
       const type = r.recipient_type ? `[${RECIPIENT_TYPE_LABEL[r.recipient_type]}] ` : "";
       out.push(
-        `  ${String(i + 1).padStart(2, "0")}. ${type}${r.award_name}${who ? ` (${who})` : ""} | ${r.awarded_by} | ${fmtDotDate(r.awarded_on)}`
+        `  ${String(i + 1).padStart(2, "0")}. ${type}${r.award_name}${who ? ` (${who})` : ""} | ${r.awarded_by} | ${fmtDotDate(r.awarded_on)} | 첨부 ${r.files.length}개`
       );
     });
     out.push("");
     out.push("  ※ 청소년 수상자 이름은 가려서 내보냅니다.");
+  }
+  if (out.length) {
+    out.push("  ※ 첨부(협약서·상장·사진)는 개수만 알려 드립니다. 파일 내용·링크는 내보내지 않습니다.");
   }
   return out.join("\n");
 }

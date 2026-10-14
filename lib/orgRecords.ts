@@ -37,7 +37,7 @@ export type OrgAgreement = {
   status: AgreementStatus;
   manager_driver_id: string | null;
   manager_name: string | null; // 화면 표시용(drivers.name)
-  has_file: boolean;
+  files: OrgRecordFile[];
   memo: string;
   created_by: string | null;
   can_delete: boolean;
@@ -82,11 +82,53 @@ export type OrgAward = {
   awarded_by: string;
   awarded_on: string; // YYYY-MM-DD
   related_program: string;
-  has_file: boolean;
+  files: OrgRecordFile[];
   memo: string;
   created_by: string | null;
   can_delete: boolean;
 };
+
+// --- 첨부(org_record_files) ---------------------------------------------
+//   한 건에 여러 개(상장+사진, 협약서+체결식 사진). DB kind 는 공통 세 가지,
+//   화면 이름만 탭별로 다릅니다.
+export const ORG_FILE_KINDS = ["document", "photo", "other"] as const;
+export type OrgFileKind = (typeof ORG_FILE_KINDS)[number];
+export const ORG_FILE_KIND_LABEL: Record<OrgRecordKind, Record<OrgFileKind, string>> = {
+  agreements: { document: "협약서", photo: "사진", other: "기타" },
+  awards: { document: "상장", photo: "사진", other: "기타" },
+};
+export function normalizeOrgFileKind(v: unknown): OrgFileKind {
+  return ORG_FILE_KINDS.includes(v as OrgFileKind) ? (v as OrgFileKind) : "other";
+}
+// 올릴 수 있는 형식·용량 — 화면 사전 검사와 서버 검사가 같은 값을 씁니다.
+export const ORG_FILE_EXT: Record<string, string> = {
+  "application/pdf": "pdf",
+  "image/jpeg": "jpg",
+  "image/png": "png",
+};
+export const ORG_FILE_ACCEPT = Object.keys(ORG_FILE_EXT).join(",");
+export const ORG_FILE_MAX_BYTES = 16 * 1024 * 1024;
+// 파일만 보고 고르는 기본 종류 — 이미지는 사진, PDF 는 협약서·상장.
+export function guessOrgFileKind(mime: string): OrgFileKind {
+  return mime.startsWith("image/") ? "photo" : "document";
+}
+
+export type OrgRecordFile = {
+  id: string;
+  kind: OrgFileKind;
+  file_name: string;
+  mime_type: string;
+  size_bytes: number | null;
+};
+
+// 상장·협약서 먼저, 사진 다음, 기타 마지막. 같은 종류는 올린 순서.
+const FILE_KIND_ORDER: Record<OrgFileKind, number> = { document: 0, photo: 1, other: 2 };
+export function sortOrgFiles<T extends Pick<OrgRecordFile, "kind">>(files: T[]): T[] {
+  return files
+    .map((f, i) => ({ f, i }))
+    .sort((a, b) => FILE_KIND_ORDER[a.f.kind] - FILE_KIND_ORDER[b.f.kind] || a.i - b.i)
+    .map((x) => x.f);
+}
 
 // 청소년 수상자 가리기 — 행감 제출용 출력과 MCP 가 같은 규칙을 씁니다.
 export const MASKED_NAME = "***";

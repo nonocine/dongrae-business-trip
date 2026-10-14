@@ -3,17 +3,22 @@
 import { revalidatePath } from "next/cache";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
 import {
+  ORG_FILE_PARENT,
   ORG_RECORD_TABLE,
+  addOrgRecordFile,
   canDeleteOrgRecord,
-  removeOrgRecordFile,
+  orgRecordStoragePaths,
+  removeStoragePaths,
   requireOrgRecordAccess,
-  signOrgRecordFile,
-  uploadOrgRecordFile,
+  signOrgRecordPath,
 } from "@/lib/orgRecordsServer";
 import {
   AGREEMENT_STATUSES,
+  ORG_FILE_KINDS,
   normalizeRecipientType,
   type AgreementStatus,
+  type OrgFileKind,
+  type OrgRecordFile,
   type OrgRecordKind,
 } from "@/lib/orgRecords";
 
@@ -89,25 +94,6 @@ async function driverName(id: string): Promise<string | null> {
   return (data as { name?: string } | null)?.name ?? null;
 }
 
-// 저장 뒤 첨부 처리 — 새 파일이 오면 올리고 옛 파일은 지웁니다.
-//   removeFile=1 이면 첨부만 뗍니다.
-async function applyFile(kind: OrgRecordKind, id: string, fd: FormData): Promise<void> {
-  const table = ORG_RECORD_TABLE[kind];
-  const file = fd.get("file");
-  const remove = fd.get("removeFile") === "1";
-  const hasNew = file instanceof File && file.size > 0;
-  if (!hasNew && !remove) return;
-  const { data } = await supabaseAdmin.from(table).select("file_path").eq("id", id).maybeSingle();
-  const old = (data as { file_path?: string | null } | null)?.file_path ?? null;
-  const path = hasNew ? await uploadOrgRecordFile(kind, id, file) : null;
-  const { error } = await supabaseAdmin.from(table).update({ file_path: path }).eq("id", id);
-  if (error) {
-    await removeOrgRecordFile(path);
-    throw new Error(error.message);
-  }
-  if (old && old !== path) await removeOrgRecordFile(old);
-}
-
 async function upsert(
   kind: OrgRecordKind,
   id: string | null,
@@ -177,7 +163,6 @@ export async function saveAgreement(fd: FormData): Promise<Result<{ id: string }
       },
       ctx.name,
     );
-    await applyFile("agreements", id, fd);
     revalidatePath(PATH);
     return { ok: true, id };
   } catch (e) {
@@ -226,7 +211,6 @@ export async function saveAward(fd: FormData): Promise<Result<{ id: string }>> {
       },
       ctx.name,
     );
-    await applyFile("awards", id, fd);
     revalidatePath(PATH);
     return { ok: true, id };
   } catch (e) {
@@ -235,7 +219,10 @@ export async function saveAward(fd: FormData): Promise<Result<{ id: string }>> {
 }
 
 // =====================================================================
-// 공통 — 삭제·첨부 열람
+// 공통 — 건 삭제
+//   첨부는 org_record_files FK cascade 로 행이 함께 지워지지만 Storage 파일은
+//   남으므로, 먼저 경로를 모아 Storage 에서 지운 뒤 행을 지웁니다.
+//   Storage 삭제가 실패하면 행도 지우지 않습니다(파일만 남는 일 방지).
 // =====================================================================
 function kindOf(v: string): OrgRecordKind | null {
   return v === "agreements" || v === "awards" ? v : null;
@@ -249,20 +236,20 @@ export async function deleteOrgRecord(kindRaw: string, id: string): Promise<Resu
     const table = ORG_RECORD_TABLE[kind];
     const { data: prev } = await supabaseAdmin
       .from(table)
-      .select("id, created_by, file_path")
+      .select("id, created_by")
       .eq("id", id)
       .maybeSingle();
     if (!prev) return { ok: false, message: "대상을 찾을 수 없습니다." };
-    const row = prev as { created_by?: string | null; file_path?: string | null };
+    const row = prev as { created_by?: string | null };
     if (!canDeleteOrgRecord(row.created_by, ctx)) {
       return {
         ok: false,
         message: "본인이 등록한 기록만 삭제할 수 있습니다. (관장·부장·인사 담당자는 모두 가능)",
       };
     }
+    await removeStoragePaths(await orgRecordStoragePaths(kind, id));
     const { error } = await supabaseAdmin.from(table).delete().eq("id", id);
     if (error) throw new Error(error.message);
-    await removeOrgRecordFile(row.file_path);
     revalidatePath(PATH);
     return { ok: true };
   } catch (e) {
@@ -270,18 +257,97 @@ export async function deleteOrgRecord(kindRaw: string, id: string): Promise<Resu
   }
 }
 
-export async function getOrgRecordFileUrl(kindRaw: string, id: string): Promise<Result<{ url: string }>> {
+// =====================================================================
+// 첨부 — 올리기·종류 바꾸기·삭제·열람
+//   첨부는 '내용 수정'과 같은 급으로 봅니다: 그 건을 고칠 수 있는 직원(=누구나)이
+//   올리고 지웁니다. 건 삭제 권한 규칙은 위 deleteOrgRecord 그대로입니다.
+//   업로드는 한 번에 파일 하나 — 여러 장은 화면이 차례로 부릅니다
+//   (Server Action 본문 한도 20MB 안에 들도록).
+// =====================================================================
+const fileKindOf = (v: unknown): OrgFileKind | null =>
+  ORG_FILE_KINDS.includes(v as OrgFileKind) ? (v as OrgFileKind) : null;
+
+async function recordExists(kind: OrgRecordKind, id: string): Promise<boolean> {
+  const { data } = await supabaseAdmin.from(ORG_RECORD_TABLE[kind]).select("id").eq("id", id).maybeSingle();
+  return !!data;
+}
+
+async function loadFileRow(fileId: string) {
+  const { data } = await supabaseAdmin
+    .from("org_record_files")
+    .select("id, file_path")
+    .eq("id", fileId)
+    .maybeSingle();
+  return data as { id: string; file_path: string } | null;
+}
+
+export async function uploadOrgRecordFile(fd: FormData): Promise<Result<{ file: OrgRecordFile }>> {
+  try {
+    const ctx = await requireOrgRecordAccess();
+    const kind = kindOf(String(fd.get("kind") ?? ""));
+    const recordId = uuidOrNull(fd.get("recordId"));
+    const fileKind = fileKindOf(fd.get("fileKind"));
+    if (!kind || !recordId || !fileKind) return { ok: false, message: "대상이 없습니다." };
+    if (!(await recordExists(kind, recordId))) return { ok: false, message: "대상을 찾을 수 없습니다." };
+    const file = await addOrgRecordFile(kind, recordId, fileKind, fd.get("file"), ctx.name);
+    revalidatePath(PATH);
+    return { ok: true, file };
+  } catch (e) {
+    return fail(e, "첨부를 올리지 못했습니다.");
+  }
+}
+
+export async function setOrgRecordFileKind(fileId: string, fileKind: string): Promise<Result> {
+  try {
+    await requireOrgRecordAccess();
+    const k = fileKindOf(fileKind);
+    if (!k || !(await loadFileRow(fileId))) return { ok: false, message: "첨부를 찾을 수 없습니다." };
+    const { error } = await supabaseAdmin.from("org_record_files").update({ kind: k }).eq("id", fileId);
+    if (error) throw new Error(error.message);
+    revalidatePath(PATH);
+    return { ok: true };
+  } catch (e) {
+    return fail(e, "첨부 종류를 바꾸지 못했습니다.");
+  }
+}
+
+export async function deleteOrgRecordFile(fileId: string): Promise<Result> {
+  try {
+    await requireOrgRecordAccess();
+    const row = await loadFileRow(fileId);
+    if (!row) return { ok: false, message: "첨부를 찾을 수 없습니다." };
+    await removeStoragePaths([row.file_path]);
+    const { error } = await supabaseAdmin.from("org_record_files").delete().eq("id", fileId);
+    if (error) throw new Error(error.message);
+    revalidatePath(PATH);
+    return { ok: true };
+  } catch (e) {
+    return fail(e, "첨부를 삭제하지 못했습니다.");
+  }
+}
+
+// 한 건의 첨부 열람 링크(1시간) — 상세의 썸네일·열람에 씁니다.
+export async function getOrgRecordFileUrls(
+  kindRaw: string,
+  recordId: string,
+): Promise<Result<{ urls: Record<string, string> }>> {
   try {
     await requireOrgRecordAccess();
     const kind = kindOf(kindRaw);
-    if (!kind || !id) return { ok: false, message: "대상이 없습니다." };
-    const { data } = await supabaseAdmin
-      .from(ORG_RECORD_TABLE[kind])
-      .select("file_path")
-      .eq("id", id)
-      .maybeSingle();
-    const url = await signOrgRecordFile((data as { file_path?: string | null } | null)?.file_path);
-    return url ? { ok: true, url } : { ok: false, message: "첨부 파일이 없습니다." };
+    if (!kind || !recordId) return { ok: false, message: "대상이 없습니다." };
+    const { data, error } = await supabaseAdmin
+      .from("org_record_files")
+      .select("id, file_path")
+      .eq(ORG_FILE_PARENT[kind], recordId);
+    if (error) throw new Error(error.message);
+    const urls: Record<string, string> = {};
+    await Promise.all(
+      (data ?? []).map(async (r) => {
+        const url = await signOrgRecordPath(String((r as { file_path: string }).file_path));
+        if (url) urls[String((r as { id: string }).id)] = url;
+      }),
+    );
+    return { ok: true, urls };
   } catch (e) {
     return fail(e, "첨부를 열지 못했습니다.");
   }

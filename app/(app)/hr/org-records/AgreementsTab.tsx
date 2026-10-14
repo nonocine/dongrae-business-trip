@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState, useTransition } from "react";
+import { useMemo, useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import {
   AGREEMENT_STATUSES,
@@ -10,6 +10,7 @@ import {
   yearOf,
   type AgreementStatus,
   type OrgAgreement,
+  type OrgRecordFile,
 } from "@/lib/orgRecords";
 import {
   deleteOrgRecord,
@@ -17,7 +18,15 @@ import {
   type PartnerOption,
   type StaffOption,
 } from "@/app/(app)/hr/org-records/actions";
-import { ExportPanel, FileLink, YearFilter, useYears } from "@/app/(app)/hr/org-records/OrgRecordParts";
+import {
+  AttachCell,
+  AttachmentPanel,
+  ExportPanel,
+  YearFilter,
+  uploadQueued,
+  useYears,
+  type QueuedFile,
+} from "@/app/(app)/hr/org-records/OrgRecordParts";
 import {
   badgeDanger,
   badgeNeutral,
@@ -31,6 +40,7 @@ import {
   linkCls,
   noticeError,
   panelToneCls,
+  rowLinkCls,
   sectionTitleCls,
   tableHeadCls,
   tableRowCls,
@@ -49,7 +59,6 @@ type Form = {
   status: AgreementStatus;
   manager_driver_id: string;
   memo: string;
-  has_file: boolean;
   can_delete: boolean;
 };
 
@@ -64,7 +73,6 @@ const EMPTY: Form = {
   status: "active",
   manager_driver_id: "",
   memo: "",
-  has_file: false,
   can_delete: false,
 };
 
@@ -131,7 +139,9 @@ export default function AgreementsTab({
   );
   const alertCount = rows.filter((r) => agreementBadge(r, today).tone === "warn").length;
 
-  const openEdit = (r: OrgAgreement) =>
+  const formTop = useRef<HTMLDivElement>(null);
+  const openEdit = (r: OrgAgreement) => {
+    formTop.current?.scrollIntoView({ behavior: "smooth", block: "start" });
     setForm({
       id: r.id,
       partner_name: r.partner_name,
@@ -143,16 +153,19 @@ export default function AgreementsTab({
       status: r.status,
       manager_driver_id: r.manager_driver_id ?? "",
       memo: r.memo,
-      has_file: r.has_file,
       can_delete: r.can_delete,
     });
+  };
 
   return (
     <div className="space-y-4">
+      <div ref={formTop} className="scroll-mt-4" />
       {form && (
         <AgreementForm
+          key={form.id ?? "new"}
           form={form}
           setForm={setForm}
+          files={(form.id && rows.find((r) => r.id === form.id)?.files) || []}
           partners={partners}
           staff={staff}
           onDone={() => {
@@ -189,19 +202,28 @@ export default function AgreementsTab({
                 <th className="w-28 py-2">협약일</th>
                 <th className="py-2">협약내용</th>
                 <th className="w-20 py-2 text-center">상태</th>
-                <th className="w-24 py-2" />
+                <th className="w-20 py-2 text-center">첨부</th>
+                <th className="w-12 py-2" />
               </tr>
             </thead>
             <tbody>
               {visible.map((r, i) => {
                 const b = agreementBadge(r, today);
                 return (
-                  <tr key={r.id} className={`${tableRowCls} align-top`}>
+                  <tr
+                    key={r.id}
+                    className={`${tableRowCls} ${rowLinkCls} align-top`}
+                    onClick={() => openEdit(r)}
+                    title="눌러서 상세·첨부 보기"
+                  >
                     <td className="py-2 text-center tabular-nums text-ink-muted">{String(i + 1).padStart(2, "0")}</td>
                     <td className="py-2 font-medium text-ink">
                       {r.partner_name}
                       {r.business_partner_id && (
-                        <a href={`/hr/partners?id=${r.business_partner_id}`} className={`${linkCls} ml-1 text-xs`} title="거래처관리에서 보기">
+                        <a href={`/hr/partners?id=${r.business_partner_id}`} className={`${linkCls} ml-1 text-xs`}
+                          title="거래처관리에서 보기"
+                          onClick={(e) => e.stopPropagation()}
+                        >
                           🔗
                         </a>
                       )}
@@ -219,20 +241,18 @@ export default function AgreementsTab({
                     <td className="py-2 text-center">
                       <span className={BADGE[b.tone]}>{b.label}</span>
                     </td>
+                    <td className="py-2 text-center">
+                      <AttachCell kind="agreements" recordId={r.id} count={r.files.length} onOpen={() => openEdit(r)} />
+                    </td>
                     <td className="py-2 text-right">
-                      <div className="flex flex-col items-end gap-1">
-                        <button type="button" className={`${linkCls} text-xs`} onClick={() => openEdit(r)}>
-                          수정
-                        </button>
-                        {r.has_file && <FileLink kind="agreements" id={r.id} />}
-                      </div>
+                      <span className={`${linkCls} text-xs`}>수정</span>
                     </td>
                   </tr>
                 );
               })}
               {visible.length === 0 && (
                 <tr>
-                  <td colSpan={6} className="py-6 text-center text-sm text-ink-hint">
+                  <td colSpan={7} className="py-6 text-center text-sm text-ink-hint">
                     등록된 협약이 없습니다.
                   </td>
                 </tr>
@@ -249,12 +269,14 @@ export default function AgreementsTab({
 
 function AgreementForm({
   form,
+  files,
   setForm,
   partners,
   staff,
   onDone,
 }: {
   form: Form;
+  files: OrgRecordFile[];
   setForm: (f: Form | null) => void;
   partners: PartnerOption[];
   staff: StaffOption[];
@@ -262,8 +284,7 @@ function AgreementForm({
 }) {
   const [pending, start] = useTransition();
   const [error, setError] = useState<string | null>(null);
-  const [file, setFile] = useState<File | null>(null);
-  const [removeFile, setRemoveFile] = useState(false);
+  const [queue, setQueue] = useState<QueuedFile[]>([]);
   const set = <K extends keyof Form>(k: K, v: Form[K]) => setForm({ ...form, [k]: v });
 
   const linked = partners.find((p) => p.id === form.business_partner_id) ?? null;
@@ -284,11 +305,14 @@ function AgreementForm({
       fd.set("status", form.status);
       fd.set("manager_driver_id", form.manager_driver_id);
       fd.set("memo", form.memo);
-      if (file) fd.set("file", file);
-      if (removeFile) fd.set("removeFile", "1");
       const r = await saveAgreement(fd);
-      if (r.ok) onDone();
-      else setError(r.message);
+      if (!r.ok) return setError(r.message);
+      // 새 건이면 저장으로 id 가 생긴 뒤 대기열의 첨부를 올립니다.
+      if (queue.length) {
+        const errors = await uploadQueued("agreements", r.id, queue);
+        if (errors.length) alert(`저장했지만 일부 첨부를 올리지 못했습니다.\n${errors.join("\n")}`);
+      }
+      onDone();
     });
 
   const remove = () => {
@@ -303,6 +327,9 @@ function AgreementForm({
   return (
     <section className={panelToneCls("yellow")}>
       <h3 className={sectionTitleCls("yellow")}>{form.id ? "협약 수정" : "협약 등록"}</h3>
+      <div className="mt-3">
+        <AttachmentPanel kind="agreements" recordId={form.id} files={files} queue={queue} setQueue={setQueue} />
+      </div>
       <div className="mt-3 grid gap-3 sm:grid-cols-2">
         <div className="sm:col-span-2">
           <label className={labelCls}>
@@ -382,24 +409,6 @@ function AgreementForm({
             ))}
           </select>
         </label>
-        <div className={labelCls}>
-          협약서 파일 <span className="text-ink-hint">(PDF·JPG·PNG, 16MB 이하)</span>
-          <input
-            type="file"
-            accept="application/pdf,image/jpeg,image/png"
-            className="mt-1 block w-full text-sm"
-            onChange={(e) => setFile(e.target.files?.[0] ?? null)}
-          />
-          {form.has_file && form.id && !file && (
-            <div className="mt-1 flex items-center gap-3">
-              <FileLink kind="agreements" id={form.id} />
-              <label className="flex items-center gap-1 text-xs">
-                <input type="checkbox" checked={removeFile} onChange={(e) => setRemoveFile(e.target.checked)} />
-                첨부 삭제
-              </label>
-            </div>
-          )}
-        </div>
         <label className={`${labelCls} sm:col-span-2`}>
           메모
           <textarea rows={2} className={inputCls} value={form.memo} onChange={(e) => set("memo", e.target.value)} />
