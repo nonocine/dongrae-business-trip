@@ -3,7 +3,8 @@
 //   출처(실제 테이블 확인 후 연결, 2026-10):
 //     근무   employee_profiles(join_date·appointments) + lib/appointments.currentAssignment
 //     교육   mandatory_trainings + training_completions(의무교육, 대상 판정은
-//            lib/trainings.trainingTargetState) + staff_training_results(종사자교육)
+//            lib/trainings.evaluateTraining — 신규 입사자 규칙 포함, 현황판과 같음)
+//            + staff_training_results(종사자교육)
 //            ⚠️ staff_training_results 중 source='mandatory' 행은 의무교육 이수를 복사한
 //              것이라(2026-10 기준 186건 중 182건) 종사자교육에서 뺍니다 — 넣으면 의무교육이
 //              두 번 세어집니다. 연결은 driver_id 가 없어 staff_name = drivers.name.
@@ -15,7 +16,7 @@
 
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
 import { currentAssignment } from "@/lib/appointments";
-import { trainingTargetState } from "@/lib/trainings";
+import { evaluateTraining, needsTargetList } from "@/lib/trainings";
 import { loadTrainingTargets } from "@/lib/trainingRoster";
 import { activePromotionBlock, DISCIPLINE_LABEL, isDisciplineKind } from "@/lib/hrDiscipline";
 import {
@@ -49,7 +50,7 @@ export async function collectMaterials(driverId: string, year: number, half: Per
       .select("join_date, resignation_date, appointments, career")
       .eq("driver_id", driverId)
       .maybeSingle(),
-    supabaseAdmin.from("mandatory_trainings").select("id, name, held_on, due_date, hours, target_scope, is_active").eq("year", year),
+    supabaseAdmin.from("mandatory_trainings").select("id, year, name, held_on, due_date, hours, target_scope, new_hire_rule, is_active").eq("year", year),
     supabaseAdmin.from("hr_awards").select("awarded_on, title, awarding_body, award_kind, award_source").eq("driver_id", driverId),
     supabaseAdmin.from("hr_disciplines").select("kind, decided_on, reason, promotion_block_until").eq("driver_id", driverId),
   ]);
@@ -75,19 +76,22 @@ export async function collectMaterials(driverId: string, year: number, half: Per
   // --- 의무교육 ---
   const trainings = ((mts ?? []) as {
     id: string;
+    year: number;
     name: string;
     held_on: string | null;
     due_date: string | null;
     hours: string | null;
     target_scope: string | null;
+    new_hire_rule: string | null;
     is_active: boolean | null;
   }[])
     .filter((t) => t.is_active !== false)
     // 반기 평정이면 실시일(없으면 이수기한)이 그 반기에 든 교육만. 날짜가 없으면 연간에만.
     .filter((t) => half === "YEAR" || inRange(t.held_on || t.due_date, from, to));
-  const selected = await loadTrainingTargets(trainings.filter((t) => t.target_scope === "selected").map((t) => t.id));
+  const selected = await loadTrainingTargets(trainings.filter(needsTargetList).map((t) => t.id));
   const span = { driver_id: driverId, joinDate: p.join_date ?? null, resignationDate: p.resignation_date ?? null };
-  const targets = trainings.filter((t) => trainingTargetState(t, span, selected.get(t.id)).isTarget);
+  // 신규 입사자 규칙상 "대상 아님" 교육은 미이수로 잡지 않습니다(현황판·알림과 같은 판정).
+  const targets = trainings.filter((t) => evaluateTraining(t, span, selected.get(t.id), asOf).isTarget);
   const { data: comps } = targets.length
     ? await supabaseAdmin
         .from("training_completions")

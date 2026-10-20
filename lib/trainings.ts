@@ -27,9 +27,64 @@ export type MandatoryTraining = {
   // 교육 대상 범위 — 'all'(재직자 전원 자동 판정) / 'selected'(개별 지정자만).
   //   selected 의 명단은 mandatory_training_targets 에 있습니다.
   target_scope: TargetScope;
+  // 신규 입사자 처리 규칙 — evaluateTraining 참고.
+  new_hire_rule: NewHireRule;
 };
 
 export type TargetScope = "all" | "selected";
+
+// =====================================================================
+// 신규 입사자 처리 규칙(mandatory_trainings.new_hire_rule)
+//   법정교육마다 대상·주기가 달라 신규 직원에게 일괄 기한을 줄 수 없습니다.
+//   기존 직원(입사일 ≤ 이수기한)은 규칙과 무관하게 원래 due_date 그대로입니다
+//   (after_condition 만 예외 — 조건 미충족이면 기존 직원도 대상이 아님).
+// =====================================================================
+export type NewHireRule =
+  | "within_year"
+  | "from_hire_half"
+  | "after_condition"
+  | "role_only"
+  | "on_hire";
+
+export const NEW_HIRE_RULES: { value: NewHireRule; label: string; desc: string }[] = [
+  {
+    value: "within_year",
+    label: "그 해 안에 이수",
+    desc: "기한이 입사 전이면 입사일+30일(12/31 넘지 않게)까지 이수",
+  },
+  {
+    value: "from_hire_half",
+    label: "입사한 반기부터",
+    desc: "입사 전 반기의 교육은 제외, 입사한 반기 교육은 입사일+30일까지",
+  },
+  {
+    value: "after_condition",
+    label: "조건 충족 후",
+    desc: "퇴직연금 가입 후부터 대상(입사 1년 이후로 판정)",
+  },
+  {
+    value: "role_only",
+    label: "담당자만",
+    desc: "신규 직원 자동 포함 안 함 — 대상자로 지정된 경우만",
+  },
+  {
+    value: "on_hire",
+    label: "채용 시 교육",
+    desc: "신규 직원만 대상, 입사일+7일까지 이수",
+  },
+];
+
+export function normalizeNewHireRule(v: unknown): NewHireRule {
+  return NEW_HIRE_RULES.some((r) => r.value === v)
+    ? (v as NewHireRule)
+    : "within_year";
+}
+
+// 신규 입사자 개인 기한 — 입사일 + N일.
+export const NEW_HIRE_GRACE_DAYS = 30;
+export const ON_HIRE_DUE_DAYS = 7;
+// after_condition — 직원별 퇴직연금 가입 여부·가입일 칸이 없어 "입사 1년 이후"로 판정.
+export const CONDITION_AFTER_YEARS = 1;
 
 // training_completions 한 행.
 export type TrainingCompletion = {
@@ -116,7 +171,13 @@ export type TargetReason =
   | "not-selected" // 개별 지정 교육인데 지정되지 않음 → 대상 아님
   | "after-resign" // 퇴사 후 교육 → 대상 아님
   | "no-join-date" // 입사일 미기재 → 대상(판정에는 영향 없음, 인사기록 보완 안내용)
-  | "no-base-date"; // 실시일·이수기한 둘 다 없음 → 대상 유지(안전측)
+  | "no-base-date" // 실시일·이수기한 둘 다 없음 → 대상 유지(안전측)
+  // 아래는 신규 입사자 규칙(evaluateTraining)에서만 나옵니다.
+  | "joined-after-year" // 교육 연도가 끝난 뒤 입사 → 대상 아님
+  | "before-hire-half" // from_hire_half: 입사한 반기보다 앞 반기 교육 → 대상 아님
+  | "condition-unmet" // after_condition: 연말까지 조건(입사 1년) 미충족 → 대상 아님
+  | "role-only" // role_only: 신규 직원이 담당자로 지정되지 않음 → 대상 아님
+  | "not-new-hire"; // on_hire: 그 해 신규 입사자가 아님 → 대상 아님
 
 // 교육의 판정 기준일 — 실시일 우선, 없으면 이수기한.
 export function trainingBaseYmd(
@@ -166,6 +227,9 @@ export type TrainingTargetRule = {
   held_on?: string | null;
   due_date?: string | null;
   target_scope?: string | null;
+  // evaluateTraining 전용 — 없으면 within_year / 기한·실시일의 연도.
+  year?: number | null;
+  new_hire_rule?: string | null;
 };
 
 export function normalizeTargetScope(v: unknown): TargetScope {
@@ -193,6 +257,163 @@ export function isTrainingTarget(
   return trainingTargetState(t, emp, selectedIds).isTarget;
 }
 
+// =====================================================================
+// 최종 판정 — 대상 여부 + 개인 기한 + 상태. 단일 출처.
+//   * 현황판·내 의무교육·메인 카드·관리 요약·슬랙 알림·MCP(training_status)가
+//     전부 이 함수(또는 기준일 없는 trainingEligibility)를 씁니다.
+//   * 1단계: trainingTargetState(대상 범위·퇴사 후 교육) — 업로드 가드도 쓰는
+//     기존 판정. 이수 처리 로직은 그대로 두기 위해 여기에 덧씌웁니다.
+//   * 2단계: 신규 입사자 규칙(new_hire_rule). "신규" = 이수기한이 입사일보다 앞.
+//   * 초과일·D-n 은 개인 기한(dueDate)부터 셉니다.
+// =====================================================================
+export type TrainingEligibility = {
+  isTarget: boolean;
+  reason: TargetReason;
+  dueDate: string | null; // 개인 기한(신규 입사자면 원래 due_date 와 다름)
+  personalDue: boolean; // dueDate 가 원래 due_date 와 다르게 계산됐는지
+};
+
+export type TrainingStatus = "done" | "overdue" | "pending" | "no-due" | "not-target";
+
+export type TrainingEvaluation = TrainingEligibility & {
+  dday: number | null;
+  status: TrainingStatus;
+};
+
+// "YYYY-MM-DD" + n일.
+export function addDaysYmd(ymd: string, n: number): string {
+  const d = new Date(`${ymd}T00:00:00Z`);
+  d.setUTCDate(d.getUTCDate() + n);
+  return d.toISOString().slice(0, 10);
+}
+
+function addYearsYmd(ymd: string, n: number): string {
+  const d = new Date(`${ymd}T00:00:00Z`);
+  d.setUTCFullYear(d.getUTCFullYear() + n);
+  return d.toISOString().slice(0, 10);
+}
+
+const minYmd = (a: string, b: string) => (a < b ? a : b);
+const halfOf = (ymd: string) => (Number(ymd.slice(5, 7)) <= 6 ? 1 : 2);
+
+function trainingYear(t: TrainingTargetRule): number | null {
+  if (t.year && Number.isFinite(t.year) && t.year > 0) return t.year;
+  const base = t.due_date || t.held_on;
+  return base ? Number(base.slice(0, 4)) : null;
+}
+
+export function trainingEligibility(
+  t: TrainingTargetRule,
+  emp: EmploymentSpan & { driver_id: string },
+  selectedIds: ReadonlySet<string> | null | undefined,
+): TrainingEligibility {
+  const orig = t.due_date ?? null;
+  const yes = (reason: TargetReason, due = orig): TrainingEligibility => ({
+    isTarget: true,
+    reason,
+    dueDate: due,
+    personalDue: due !== orig,
+  });
+  const no = (reason: TargetReason): TrainingEligibility => ({
+    isTarget: false,
+    reason,
+    dueDate: orig,
+    personalDue: false,
+  });
+
+  const base = trainingTargetState(t, emp, selectedIds);
+  if (!base.isTarget) return no(base.reason);
+
+  const rule = normalizeNewHireRule(t.new_hire_rule);
+  const join = emp.joinDate;
+  // 입사일 미기재 — 비교 기준이 없으니 기존 직원으로 봅니다(종전 그대로).
+  //   채용 시 교육만은 "신규 직원만" 이라 대상에서 뺍니다.
+  if (!join) return rule === "on_hire" ? no("not-new-hire") : yes(base.reason);
+
+  const year = trainingYear(t);
+  const yearStart = year ? `${year}-01-01` : null;
+  const yearEnd = year ? `${year}-12-31` : null;
+  if (yearEnd && join > yearEnd) return no("joined-after-year");
+
+  const graceDue = () => {
+    const d = addDaysYmd(join, NEW_HIRE_GRACE_DAYS);
+    return yearEnd ? minYmd(d, yearEnd) : d;
+  };
+  const isNew = !!orig && orig < join;
+
+  switch (rule) {
+    case "on_hire":
+      if (yearStart && join < yearStart) return no("not-new-hire");
+      return yes("target", addDaysYmd(join, ON_HIRE_DUE_DAYS));
+    case "after_condition": {
+      // 조건 충족일 = 입사 1년. 연내 미충족이면 대상 아님, 기한 뒤에 충족하면
+      //   충족일+30일(연말 상한)이 개인 기한.
+      const eligible = addYearsYmd(join, CONDITION_AFTER_YEARS);
+      if (yearEnd && eligible > yearEnd) return no("condition-unmet");
+      if (orig && eligible > orig) {
+        const d = addDaysYmd(eligible, NEW_HIRE_GRACE_DAYS);
+        return yes("target", yearEnd ? minYmd(d, yearEnd) : d);
+      }
+      return yes(base.reason);
+    }
+    case "role_only":
+      if (isNew && !selectedIds?.has(emp.driver_id)) return no("role-only");
+      break;
+    case "from_hire_half": {
+      const b = trainingBaseYmd(t);
+      if (b && b.slice(0, 4) === join.slice(0, 4) && halfOf(b) < halfOf(join))
+        return no("before-hire-half");
+      break;
+    }
+  }
+  return isNew ? yes("target", graceDue()) : yes(base.reason);
+}
+
+export function evaluateTraining(
+  t: TrainingTargetRule,
+  emp: EmploymentSpan & { driver_id: string },
+  selectedIds: ReadonlySet<string> | null | undefined,
+  todayYmd: string,
+  completed = false,
+): TrainingEvaluation {
+  const el = trainingEligibility(t, emp, selectedIds);
+  const dday = daysUntil(el.dueDate, todayYmd);
+  const status: TrainingStatus = !el.isTarget
+    ? "not-target"
+    : completed
+      ? "done"
+      : dday == null
+        ? "no-due"
+        : dday < 0
+          ? "overdue"
+          : "pending";
+  return { ...el, dday, status };
+}
+
+// "MM/DD".
+export function mmdd(ymd: string | null | undefined): string {
+  return ymd ? `${ymd.slice(5, 7)}/${ymd.slice(8, 10)}` : "";
+}
+
+// 기한 문구 — 기한 전 "기한 MM/DD (D-n)", 당일 "기한 MM/DD (D-DAY)",
+//   지나면 "n일 초과 (기한 MM/DD)". 초과일은 개인 기한부터 셉니다.
+export function dueLabel(dueDate: string | null, dday: number | null): string {
+  if (!dueDate || dday == null) return "기한 없음";
+  if (dday < 0) return `${-dday}일 초과 (기한 ${mmdd(dueDate)})`;
+  return `기한 ${mmdd(dueDate)} (${dday === 0 ? "D-DAY" : `D-${dday}`})`;
+}
+
+// 대상자 명단(mandatory_training_targets)을 읽어야 하는 교육 — 개별 지정 또는 담당자만.
+export function needsTargetList(t: {
+  target_scope?: string | null;
+  new_hire_rule?: string | null;
+}): boolean {
+  return (
+    normalizeTargetScope(t.target_scope) === "selected" ||
+    normalizeNewHireRule(t.new_hire_rule) === "role_only"
+  );
+}
+
 // 대상 아닌 셀에 붙일 짧은 사유 문구(현황판 툴팁).
 export function targetReasonLabel(
   reason: TargetReason,
@@ -208,6 +429,16 @@ export function targetReasonLabel(
       return "입사일 미기재 — 대상입니다(인사기록 확인 필요)";
     case "no-base-date":
       return "실시일·이수기한 미입력 — 대상으로 둡니다(실시일 입력 권장)";
+    case "joined-after-year":
+      return "대상 아님 — 교육 연도 이후 입사";
+    case "before-hire-half":
+      return "대상 아님 — 입사 전 반기의 정기교육";
+    case "condition-unmet":
+      return "대상 아님 — 조건 미충족(입사 1년 전)";
+    case "role-only":
+      return "대상 아님 — 담당자 지정 교육(신규 입사자 자동 포함 안 함)";
+    case "not-new-hire":
+      return "대상 아님 — 채용 시 교육(그 해 신규 입사자만)";
     default:
       return `대상 (${on})`;
   }
@@ -238,6 +469,7 @@ export function toTraining(raw: Record<string, unknown>): MandatoryTraining {
     organizer: (raw.organizer as string | null) ?? null,
     hours: (raw.hours as string | null) ?? null,
     target_scope: normalizeTargetScope(raw.target_scope),
+    new_hire_rule: normalizeNewHireRule(raw.new_hire_rule),
   };
 }
 
@@ -258,7 +490,7 @@ export function cellKey(trainingId: string, driverId: string): string {
 }
 
 // 교육별 대상 인원 / 미이수 인원 — 현황판(TrainingsManager)과 MCP 공용.
-//   대상 판정은 trainingTargetState 하나로(대상 아닌 셀은 미이수로 세지 않음).
+//   대상 판정은 trainingEligibility 하나로(대상 아닌 셀은 미이수로 세지 않음).
 //   completed: 이수 기록이 있는 cellKey 집합.
 export function trainingStatsByTraining(
   trainings: (TrainingTargetRule & { id: string })[],
@@ -272,7 +504,7 @@ export function trainingStatsByTraining(
     let target = 0;
     let notMet = 0;
     for (const e of employees) {
-      if (!trainingTargetState(t, e, sel).isTarget) continue;
+      if (!trainingEligibility(t, e, sel).isTarget) continue;
       target += 1;
       if (!completed.has(cellKey(t.id, e.driver_id))) notMet += 1;
     }
@@ -293,7 +525,7 @@ export function trainingStatsByEmployee(
     let target = 0;
     let done = 0;
     for (const t of trainings) {
-      if (!trainingTargetState(t, e, targetSets.get(t.id)).isTarget) continue;
+      if (!trainingEligibility(t, e, targetSets.get(t.id)).isTarget) continue;
       target += 1;
       if (completed.has(cellKey(t.id, e.driver_id))) done += 1;
     }

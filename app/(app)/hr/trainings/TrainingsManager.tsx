@@ -16,13 +16,15 @@ import {
   type RosterEmployee,
   type TrainingInput,
 } from "@/app/(app)/hr/trainings/actions";
-import type { MandatoryTraining, TargetScope } from "@/lib/trainings";
+import type { MandatoryTraining, NewHireRule, TargetScope } from "@/lib/trainings";
 import {
   ddayLabel,
   cellKey,
   targetStateOn,
-  trainingTargetState,
+  evaluateTraining,
+  dueLabel,
   targetReasonLabel,
+  NEW_HIRE_RULES,
   trainingBaseYmd,
   trainingStatsByTraining,
   CERT_ACCEPT,
@@ -62,6 +64,7 @@ type EditFields = {
   organizer: string;
   hours: string;
   target_scope: TargetScope;
+  new_hire_rule: NewHireRule;
   // 개별 지정 대상자 driver_id. 재직 명단에 없는 기존 지정자(퇴사 등)도
   //   그대로 들고 있다가 저장 시 함께 보냅니다(조용히 빠지지 않게).
   target_ids: string[];
@@ -106,6 +109,7 @@ export default function TrainingsManager({
   // 교육 대상 — 기본은 전체 직원.
   const [addScope, setAddScope] = useState<TargetScope>("all");
   const [addTargets, setAddTargets] = useState<string[]>([]);
+  const [addRule, setAddRule] = useState<NewHireRule>("within_year");
 
   // 수정 중인 교육.
   const [editId, setEditId] = useState<string | null>(null);
@@ -118,15 +122,10 @@ export default function TrainingsManager({
   } | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
 
-  // D-7 독촉 수동 실행(M0).
+  // 알림 미리보기(M0) — Cron 과 같은 코어를 dry-run 으로. 아무것도 보내지 않습니다.
   const [reminding, startRemind] = useTransition();
+  const [preview, setPreview] = useState<string | null>(null);
   function runReminderNow() {
-    if (
-      !confirm(
-        "마감 D-7 이내 미이수자에게 슬랙 독촉 DM을 지금 보낼까요? (관리자 요약도 함께 발송)"
-      )
-    )
-      return;
     setMsg(null);
     startRemind(async () => {
       const res = await runTrainingReminderNow();
@@ -135,31 +134,24 @@ export default function TrainingsManager({
         return;
       }
       const s = res.summary;
-      // 성범죄경력조회 만료(SA-14)·상조회(MU-3) 알림은 의무교육 대상이 없어도
-      // 같은 Cron 에 얹혀 별도로 발송된다.
-      const crimeTail =
-        s.crimeCheckTargets > 0
-          ? ` · 성범죄경력조회 갱신 필요 ${s.crimeCheckTargets}명 알림`
-          : "";
-      const mutualTail =
-        (s.mutualBirthdays > 0
-          ? ` · 상조회 생일 ${s.mutualBirthdays}명 알림`
-          : "") + (s.mutualBonusProposed ? " · 연말상여 제안" : "");
-      if (s.targetEmployees === 0) {
-        setMsg({
-          kind: "ok",
-          text: `독촉 대상이 없습니다. (D-7 이내 미이수 없음)${crimeTail}${mutualTail}`,
-        });
-        return;
-      }
-      const tail =
-        s.unreachable.length > 0
-          ? ` · 미연결 ${s.unreachable.length}명(${s.unreachable.join(", ")})`
-          : "";
-      setMsg({
-        kind: "ok",
-        text: `DM ${s.dmSent}건 발송 / 미연결 ${s.dmFailed}명${tail} · 관리자 요약 발송${crimeTail}${mutualTail}`,
-      });
+      const label = { reminder: "본인 알림", welcome: "입사 환영", "admin-detail": "관리자 상세" };
+      const lines = [
+        `기준일 ${s.today}${s.weekly ? " (화요일 — 공개 요약·기한 지남 알림 포함)" : ""}`,
+        s.liveBlockedReason ? `⚠️ ${s.liveBlockedReason}` : "",
+        "",
+        `[공개 채널] ${
+          s.publicSummary
+            ? s.publicSummary.post
+              ? s.publicSummary.text
+              : `올리지 않음 — ${s.publicSummary.skipReason}`
+            : "화요일에만 올립니다"
+        }`,
+        "",
+        `[DM ${s.dms.length}통]`,
+        ...s.dms.map((d) => `── ${label[d.kind]} → ${d.to}\n${d.text}`),
+      ];
+      // 경고 줄이 없으면 그 빈 자리만 뺍니다.
+      setPreview(lines.filter((l, i) => l || i !== 1).join("\n"));
     });
   }
 
@@ -191,17 +183,20 @@ export default function TrainingsManager({
     return m;
   }, [matrix.targets]);
 
-  // 셀별 대상 여부 — 판정은 서버(대시보드·D-7)와 같은 lib/trainings 함수로.
-  //   대상 아닌 셀은 "미이수"로 세지 않고 표에서도 "—" 로 표시합니다.
+  // 셀별 대상 여부·개인 기한 — 판정은 서버(대시보드·슬랙 알림)와 같은
+  //   lib/trainings.evaluateTraining 으로. 대상 아닌 셀은 "미이수"로 세지 않고
+  //   표에서도 "—" 로 표시합니다. 기준일은 서버가 내려준 matrix.today.
   const targetMap = useMemo(() => {
-    const m = new Map<string, ReturnType<typeof trainingTargetState>>();
+    const m = new Map<string, ReturnType<typeof evaluateTraining>>();
     for (const t of matrix.trainings) {
       const sel = targetSets.get(t.id);
-      for (const e of matrix.employees)
-        m.set(cellKey(t.id, e.driver_id), trainingTargetState(t, e, sel));
+      for (const e of matrix.employees) {
+        const key = cellKey(t.id, e.driver_id);
+        m.set(key, evaluateTraining(t, e, sel, matrix.today, compMap.has(key)));
+      }
     }
     return m;
-  }, [matrix.trainings, matrix.employees, targetSets]);
+  }, [matrix.trainings, matrix.employees, matrix.today, targetSets, compMap]);
 
   // 교육별 대상 인원 / 미이수 인원 — lib/trainings 단일 출처(MCP 와 공유).
   const statsByTraining = useMemo(
@@ -288,6 +283,7 @@ export default function TrainingsManager({
         hours: addHours || null,
         target_scope: addScope,
         target_ids: addScope === "selected" ? addTargets : [],
+        new_hire_rule: addRule,
       });
       if (!res.ok) {
         if (res.message) setMsg({ kind: "err", text: res.message });
@@ -295,6 +291,7 @@ export default function TrainingsManager({
       }
       setAddScope("all");
       setAddTargets([]);
+      setAddRule("within_year");
       setAddName("");
       setAddHeld("");
       setAddDue("");
@@ -322,6 +319,7 @@ export default function TrainingsManager({
       organizer: t.organizer ?? "",
       hours: t.hours ?? "",
       target_scope: t.target_scope,
+      new_hire_rule: t.new_hire_rule,
       target_ids: matrix.targets?.[t.id] ?? [],
     });
   }
@@ -352,6 +350,7 @@ export default function TrainingsManager({
         hours: edit.hours || null,
         target_scope: edit.target_scope,
         target_ids: edit.target_scope === "selected" ? edit.target_ids : [],
+        new_hire_rule: edit.new_hire_rule,
       });
       if (!res.ok) {
         if (res.message) setMsg({ kind: "err", text: res.message });
@@ -629,6 +628,13 @@ export default function TrainingsManager({
               onSelected={setAddTargets}
             />
           </div>
+          <div className="sm:col-span-12">
+            <NewHireRulePicker
+              value={addRule}
+              disabled={busy}
+              onChange={setAddRule}
+            />
+          </div>
         </form>
 
         {/* 교육 목록 */}
@@ -809,6 +815,15 @@ export default function TrainingsManager({
                           }
                         />
                       </div>
+                      <div className="mt-2">
+                        <NewHireRulePicker
+                          value={edit.new_hire_rule}
+                          disabled={busy}
+                          onChange={(next) =>
+                            setEdit({ ...edit, new_hire_rule: next })
+                          }
+                        />
+                      </div>
                     </td>
                   </tr>
                   </Fragment>
@@ -928,14 +943,33 @@ export default function TrainingsManager({
                 type="button"
                 onClick={runReminderNow}
                 disabled={reminding}
-                className="inline-flex h-[38px] items-center justify-center gap-1.5 rounded-lg border border-transparent bg-[#800020] px-4 text-sm font-semibold text-white shadow-sm transition hover:bg-[#66001a] disabled:opacity-60"
-                title="마감 D-7 이내 미이수자에게 슬랙 독촉 DM + 관리자 요약을 즉시 발송"
+                className={`${btnSecondary} h-[38px] px-4 text-sm`}
+                title="오늘 Cron 이 돌면 누구에게 어떤 슬랙 알림이 갈지 미리 봅니다(발송하지 않음)"
               >
-                {reminding ? "발송 중…" : "지금 독촉 보내기"}
+                {reminding ? "계산 중…" : "알림 미리보기"}
               </button>
             )}
           </div>
         </div>
+        {preview && (
+          <div className="mb-3 rounded-lg border border-line bg-surface p-3">
+            <div className="mb-1 flex items-center justify-between">
+              <span className="text-xs font-semibold text-navy">
+                슬랙 알림 미리보기 (발송 안 됨)
+              </span>
+              <button
+                type="button"
+                className="text-xs text-ink-hint hover:underline"
+                onClick={() => setPreview(null)}
+              >
+                닫기
+              </button>
+            </div>
+            <pre className="max-h-96 overflow-auto whitespace-pre-wrap text-[11px] leading-relaxed text-ink-body">
+              {preview}
+            </pre>
+          </div>
+        )}
 
         {matrix.trainings.length === 0 || matrix.employees.length === 0 ? (
           <p className="py-6 text-center text-sm text-ink-hint">
@@ -1038,7 +1072,8 @@ export default function TrainingsManager({
                             </td>
                           );
                         }
-                        const overdue = t.dday != null && t.dday < 0;
+                        // 기한 지남 — 개인 기한(신규 입사자 규칙) 기준.
+                        const overdue = state?.status === "overdue";
                         const isSel =
                           sel?.trainingId === t.id &&
                           sel?.driverId === emp.driver_id;
@@ -1072,7 +1107,9 @@ export default function TrainingsManager({
                                     }`
                                   : state && state.reason !== "target"
                                     ? targetReasonLabel(state.reason, baseYmd)
-                                    : "미이수 — 클릭해 수료증 업로드"
+                                    : `미이수 · ${dueLabel(state?.dueDate ?? null, state?.dday ?? null)}${
+                                        state?.personalDue ? " (개인 기한)" : ""
+                                      } — 클릭해 수료증 업로드`
                               }
                             >
                               {done ? (
@@ -1091,11 +1128,10 @@ export default function TrainingsManager({
             </div>
             <p className="mt-2 text-[11px] text-ink-hint">
               ✓ 클릭 → 상세(수료증 열람/재업로드/취소), 빈 칸 클릭 → 대리 업로드.
-              붉은 칸은 기한이 지난 미이수입니다. <b>—</b> 는 퇴사 후에 실시된
-              교육이거나, 대상자를 개별 지정한 교육(「지정 대상」 표시)에서
-              지정되지 않은 직원이어서 <b>대상이 아닌</b> 칸입니다(미이수로 세지
-              않고 업로드도 막습니다). 입사 전에 실시된 교육도 대상이므로 수료증을 올릴 수
-              있습니다.
+              붉은 칸은 기한이 지난 미이수입니다 — 신규 입사자는 교육별 「신규 입사자
+              처리」에 따른 개인 기한 기준입니다(칸에 마우스를 올리면 기한 표시).{" "}
+              <b>—</b> 는 퇴사 후 교육, 개별 지정 교육의 비지정자, 신규 입사자 규칙상
+              대상이 아닌 칸입니다(미이수로 세지 않습니다).
             </p>
             {missingJoinDate.length > 0 && (
               <p className="mt-1 text-[11px] text-warning">
@@ -1315,6 +1351,47 @@ function TargetPicker({
           )}
         </div>
       )}
+    </div>
+  );
+}
+
+// 신규 입사자 처리 — 선택지마다 한 줄 설명(lib/trainings.NEW_HIRE_RULES).
+function NewHireRulePicker({
+  value,
+  disabled,
+  onChange,
+}: {
+  value: NewHireRule;
+  disabled?: boolean;
+  onChange: (next: NewHireRule) => void;
+}) {
+  return (
+    <div>
+      <span className={lblCls}>신규 입사자 처리</span>
+      <div className="mt-1 grid gap-1 sm:grid-cols-2 lg:grid-cols-3">
+        {NEW_HIRE_RULES.map((r) => (
+          <label
+            key={r.value}
+            className={`flex cursor-pointer items-start gap-1.5 rounded-md border px-2.5 py-1.5 text-xs ${
+              value === r.value
+                ? "border-navy bg-navy-soft text-navy"
+                : "border-line bg-card text-ink-body hover:bg-surface"
+            }`}
+          >
+            <input
+              type="radio"
+              className="mt-0.5"
+              checked={value === r.value}
+              disabled={disabled}
+              onChange={() => onChange(r.value)}
+            />
+            <span>
+              <b className="font-semibold">{r.label}</b>
+              <span className="block text-[11px] text-ink-hint">{r.desc}</span>
+            </span>
+          </label>
+        ))}
+      </div>
     </div>
   );
 }

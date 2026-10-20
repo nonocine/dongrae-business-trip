@@ -1,32 +1,52 @@
 // =====================================================================
-// 의무교육 D-7 독촉 로직 — Cron / 수동버튼 공용 코어(권한 게이트 없음).
-//   * 재직자의 미이수 의무교육 중 마감 D-7 이내(초과 포함) 건을 스캔.
-//   * 개인: 이메일로 슬랙 DM. 관리자: SLACK_WEBHOOK_TRAINING 요약 1건
-//     (미설정이면 SLACK_WEBHOOK_ADMIN 으로 폴백 — 다른 알림은 ADMIN 그대로).
+// 의무교육 알림 — Cron(매일 KST 09:00) / 수동버튼(미리보기) 공용 코어.
+//   * 판정은 lib/trainings.evaluateTraining 단일 출처(현황판·내 의무교육과 같음).
+//     신규 입사자는 교육별 new_hire_rule 에 따른 개인 기한으로 셉니다.
+//   * 본인 DM: 개인 기한 14일 전·3일 전·당일, 지나면 매주 화요일 1회.
+//     같은 교육·같은 시점은 training_notification_log 로 한 번만.
+//   * 신규 입사 환영 DM: 입사일이 최근 30일 안인 직원에게 한 번 — 올해 받아야
+//     할 교육(대상인 것만)·개인 기한·수료증 올리는 곳. 기능 첫 실행(welcome
+//     기록 0건)에만 90일 안까지 넓혀 도입 직전 입사자도 받게 합니다.
+//   * 공개 채널(SLACK_WEBHOOK_TRAINING = #0_독촉자)은 화요일에 숫자 요약만.
+//     이름은 싣지 않고, 지난번과 숫자가 같으면 올리지 않습니다.
+//     이름 있는 상세 명단은 관장·부장·인사 담당(trainingAccess 와 같은 판정)에게 DM.
+//   * 실제 발송은 TRAINING_NOTIFY_LIVE=1 일 때만(관장 확인 후 켬). 그 전에는
+//     의무교육 부분은 dry-run — 무엇이 나갈지만 계산해 돌려줍니다.
 //   * SA-14: 같은 Cron 에 성범죄경력조회 만료 스캔을 얹는다(별도 Cron 만들지 않음).
-//     단 발송 채널은 분리 — 교육 요약과 한 메시지로 묶지 않고 SLACK_WEBHOOK_ADMIN
-//     으로 별도 1건. 강사는 슬랙 미가입 → 개인 DM 없음.
-//   * MU-3: 같은 Cron 에 상조회 블록(생일 축하금 대상·연말상여 제안)을 더 얹는다.
-//     상조회 담당을 코드로 식별하려면 employee_roles 를 뒤져야 하고 담당이 자주
-//     바뀌므로, 개인 DM 대신 관리자 요약에 포함한다(지시문 지시).
+//     단 발송 채널은 분리 — SLACK_WEBHOOK_ADMIN 으로 별도 1건. 강사는 슬랙 미가입
+//     → 개인 DM 없음. Cron 이 매일로 바뀌어 화요일에만 보냅니다(종전 주 1회 그대로).
+//   * MU-3: 상조회 블록(생일 축하금 대상·연말상여 제안) — 화요일에만, 요약 채널로
+//     별도 1건(종전과 같음 — 연말상여 제안은 12/1 이 화요일인 해에만 뜹니다).
 //   * 슬랙 발송은 부가기능 — 전부 실패해도 throw 하지 않음. DB 조회 실패만 throw.
 //   * "use server" 아님 — 라우트/액션이 각자 인증 후 호출.
 // =====================================================================
 
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
-import { sendSlack, sendSlackDM, siteBaseUrl, slackLink } from "@/lib/slack";
+import {
+  sendSlack,
+  sendSlackDMDetailed,
+  siteBaseUrl,
+  slackLink,
+} from "@/lib/slack";
 import {
   kstTodayYmd,
-  daysUntil,
+  addDaysYmd,
   toTraining,
   cellKey,
-  isTrainingTarget,
+  sortTrainings,
+  evaluateTraining,
+  needsTargetList,
+  dueLabel,
+  targetReasonLabel,
+  type MandatoryTraining,
+  type TrainingEvaluation,
 } from "@/lib/trainings";
 import {
   loadTrainingRoster,
   loadTrainingTargets,
   type TrainingRosterEmployee,
 } from "@/lib/trainingRoster";
+import { isM0Grant } from "@/lib/authLevels";
 import {
   CRIME_CHECK_SLOT,
   crimeCheckState,
@@ -43,7 +63,22 @@ import {
   sumEntries,
 } from "@/lib/mutual";
 
-const DUE_WITHIN_DAYS = 7; // D-7 이내(초과 포함)
+// 주 1회 블록(공개 요약·기한 지남 DM·관리자 명단·성범죄경력조회·상조회)을
+//   보내는 요일 — 화(2). 종전 Cron(0 0 * * 2, KST 화 09:00)과 같은 요일입니다.
+const WEEKLY_DOW = 2;
+// 본인 DM 시점(개인 기한 기준 남은 일수). 창으로 판정해 Cron 이 하루 빠져도 놓치지 않습니다.
+const STAGES = [
+  { key: "d14", from: 4, to: 14 },
+  { key: "d3", from: 1, to: 3 },
+  { key: "d0", from: 0, to: 0 },
+] as const;
+// 공개 요약의 "곧 마감" 범위.
+const SOON_DAYS = 7;
+// 환영 DM — 입사일이 오늘 기준 이 일수 안이면 대상(입사일을 나중에 넣어도 잡히게).
+const WELCOME_WINDOW_DAYS = 30;
+// 기능 첫 실행(welcome 기록 0건)에만 넓히는 창 — 도입 직전 입사자 포함.
+const WELCOME_FIRST_RUN_DAYS = 90;
+const LOG_TABLE = "training_notification_log";
 
 // 의무교육 요약(+상조회) 채널. 환경변수 미설정 시 기존 관리자 채널로 폴백.
 function summaryWebhookKey(): string {
@@ -55,16 +90,59 @@ function summaryWebhookKey(): string {
 // 성범죄경력조회 경고 채널 — 교육 요약과 분리해 항상 관리자 채널로 보낸다.
 const CRIME_CHECK_WEBHOOK = "SLACK_WEBHOOK_ADMIN";
 
+// 직원×교육 판정 한 줄 — dry-run 표·관리자 상세 명단용.
+export type TrainingEvalRow = {
+  driverId: string;
+  name: string;
+  joinDate: string | null;
+  trainingId: string;
+  training: string;
+  completed: boolean;
+} & TrainingEvaluation;
+
+export type PlannedDm = {
+  kind: "reminder" | "welcome" | "admin-detail";
+  to: string; // 직원 이름
+  text: string;
+  keys: string[]; // 발송 성공 시 남길 중복방지 키
+  result: "sent" | "failed" | "dry-run";
+  failReason?: string | null;
+};
+
 export type TrainingReminderSummary = {
   today: string;
-  targetEmployees: number; // 독촉 대상 직원 수
-  targetItems: number; // (직원×교육) 미이수 건 수
-  dmSent: number; // DM 성공
-  dmFailed: number; // DM 미연결/실패
-  unreachable: string[]; // DM 실패 직원 이름
+  weekly: boolean; // 화요일 블록 실행 여부
+  live: boolean; // 실제 발송 여부(false = dry-run)
+  liveBlockedReason: string | null; // 켜려 했으나 막힌 이유(로그 테이블 없음 등)
+  rows: TrainingEvalRow[];
+  dms: PlannedDm[];
+  publicSummary: {
+    text: string;
+    counts: SummaryCounts;
+    post: boolean;
+    skipReason: string | null;
+  } | null;
+  dmSent: number;
+  dmFailed: number;
+  unreachable: string[];
   crimeCheckTargets: number; // 성범죄경력조회 만료·임박·미제출 강사 수
   mutualBirthdays: number; // MU-3: 7일 내 생일 회원 수
   mutualBonusProposed: boolean; // MU-3: 연말상여 제안 발송 여부(12/1 하루만)
+};
+
+export type SummaryCounts = {
+  people: number; // 미이수가 있는 직원 수
+  items: number; // 미이수 건
+  overdue: number; // 기한 지난 것
+  soon: number; // 7일 내 마감
+};
+
+export type TrainingReminderOptions = {
+  dryRun?: boolean; // true 면 무엇도 보내지 않고 계획만 돌려줍니다.
+  today?: string; // 검증용 기준일 덮어쓰기(YYYY-MM-DD)
+  // dry-run 전용 — 여러 날을 이어 시뮬레이션할 때 "이미 보낸 것"으로 칠 키.
+  //   PlannedDm.keys 를 모아 넘기면 됩니다.
+  assumeSentKeys?: ReadonlySet<string>;
 };
 
 // =====================================================================
@@ -111,46 +189,6 @@ async function scanCrimeCheckLines(today: string): Promise<string[]> {
   } catch {
     return [];
   }
-}
-
-// 재직자 명단(+이메일·입사일)은 lib/trainingRoster 단일 출처를 씁니다.
-//   현황판·대시보드 카드와 같은 명단·같은 대상 판정을 쓰기 위한 것으로,
-//   여기서 따로 만들면 화면과 슬랙 숫자가 어긋납니다.
-type Emp = TrainingRosterEmployee;
-
-// dday 를 사람이 읽는 문구로.
-function ddayPhrase(dday: number): string {
-  if (dday > 0) return `D-${dday} (${dday}일 남음)`;
-  if (dday === 0) return "D-DAY (오늘 마감)";
-  return `${-dday}일 초과`;
-}
-
-// =====================================================================
-// 독촉 대상 여부 — "입사일 이후에 도래하는 기한"만 독촉합니다.
-//   * 대상 판정(lib/trainings.targetStateOn)과는 별개입니다. 대상 판정에서
-//     before-join 을 제거해 재직 전원이 모든 교육의 대상이 되었지만, 독촉
-//     필터는 dday <= 7 로 하한이 없어(기한이 한참 지난 교육도 상시 포함)
-//     그대로 두면 신규 입사자에게 입사 전 교육이 DM 한 통에 몰립니다.
-//   * 현황판·마이페이지의 미이수 집계는 건드리지 않습니다 — 법적 관리
-//     의무(미이수를 보이는 것)와 독촉(DM 을 보내는 것)은 성격이 다릅니다.
-//   * 입사일이 없으면 독촉하지 않습니다. 비교 기준이 없어 과거 교육을 전부
-//     보내게 되고, 그 직원은 애초에 인사기록 보완 안내 대상입니다
-//     (targetStateOn 의 'no-join-date'). 현황판에는 그대로 미이수로 남습니다.
-//   * due_date 가 없는 교육은 애초에 dueTrainings 에 들어오지 않지만
-//     (daysUntil 이 null → 필터에서 제외), 방어적으로 함께 막습니다.
-// =====================================================================
-function isReminderDue(emp: Emp, t: { due_date: string | null }): boolean {
-  if (!emp.joinDate) return false;
-  if (!t.due_date) return false;
-  return t.due_date >= emp.joinDate;
-}
-
-// DM 이 가지 않는 이유 — 관리자 요약에만 덧붙입니다. 요약에는 미이수 전부가
-//   실리므로, 표시가 없으면 관리자가 "왜 DM 은 안 갔지" 하고 헷갈립니다.
-function reminderSkipNote(emp: Emp, t: { due_date: string | null }): string {
-  if (!emp.joinDate) return "입사일 미기재 · DM 미발송";
-  if (t.due_date && t.due_date < emp.joinDate) return "입사 전 교육 · DM 미발송";
-  return "DM 미발송";
 }
 
 // 성범죄경력조회 경고 — 교육 요약과 별개 메시지로 관리자 채널에 1건.
@@ -257,160 +295,424 @@ async function scanMutual(today: string): Promise<MutualScan> {
   }
 }
 
-function mutualBlock(lines: string[]): string[] {
-  return lines.length ? ["", "🤲 상조회", ...lines] : [];
+// 관장·부장·인사 담당 — lib/trainingAccess 와 같은 판정(M0 또는 hr 직무).
+async function loadAdminRecipients(
+  roster: TrainingRosterEmployee[],
+): Promise<TrainingRosterEmployee[]> {
+  const ids = roster.map((e) => e.driver_id);
+  if (ids.length === 0) return [];
+  const [{ data: profs, error: pErr }, { data: roles, error: rErr }] =
+    await Promise.all([
+      supabaseAdmin
+        .from("employee_profiles")
+        .select("driver_id, auth_level")
+        .in("driver_id", ids),
+      supabaseAdmin
+        .from("employee_roles")
+        .select("driver_id, role_key")
+        .in("driver_id", ids)
+        .eq("role_key", "hr"),
+    ]);
+  if (pErr) throw new Error(pErr.message);
+  if (rErr) throw new Error(rErr.message);
+  const level = new Map(
+    ((profs ?? []) as Record<string, unknown>[]).map((p) => [
+      String(p.driver_id ?? ""),
+      (p.auth_level as string | null) ?? null,
+    ]),
+  );
+  const hr = new Set(
+    ((roles ?? []) as Record<string, unknown>[]).map((r) =>
+      String(r.driver_id ?? ""),
+    ),
+  );
+  return roster.filter(
+    (e) =>
+      hr.has(e.driver_id) ||
+      isM0Grant({
+        rank: e.rank,
+        email: e.email,
+        authLevel: level.get(e.driver_id),
+      }),
+  );
 }
 
-export async function runTrainingReminder(): Promise<TrainingReminderSummary> {
-  const today = kstTodayYmd();
+// 중복방지 기록 — 테이블이 없으면 available=false(그때는 실제 발송을 막습니다).
+type NotifyLog = {
+  available: boolean;
+  keys: Set<string>;
+  lastSummary: SummaryCounts | null;
+  hasWelcome: boolean; // welcome 기록이 하나라도 있는지(없으면 첫 실행)
+};
+
+async function loadNotifyLog(today: string): Promise<NotifyLog> {
+  const since = `${addDaysYmd(today, -400)}T00:00:00Z`;
+  const keys = new Set<string>();
+  const PAGE = 1000;
+  for (let from = 0; ; from += PAGE) {
+    const { data, error } = await supabaseAdmin
+      .from(LOG_TABLE)
+      .select("dedup_key")
+      .gte("sent_at", since)
+      .order("dedup_key")
+      .range(from, from + PAGE - 1);
+    if (error)
+      return { available: false, keys, lastSummary: null, hasWelcome: false };
+    for (const r of (data ?? []) as { dedup_key: string }[]) keys.add(r.dedup_key);
+    if (!data || data.length < PAGE) break;
+  }
+  const { data: last } = await supabaseAdmin
+    .from(LOG_TABLE)
+    .select("payload")
+    .eq("kind", "public_summary")
+    .order("sent_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  const payload = (last as { payload?: SummaryCounts } | null)?.payload ?? null;
+  // 기간 제한 없이 확인 — 첫 실행 판정이 400일 창에 좌우되지 않게.
+  const { count } = await supabaseAdmin
+    .from(LOG_TABLE)
+    .select("dedup_key", { count: "exact", head: true })
+    .eq("kind", "welcome");
+  return {
+    available: true,
+    keys,
+    lastSummary: payload,
+    hasWelcome: (count ?? 0) > 0,
+  };
+}
+
+async function writeNotifyLog(
+  rows: {
+    dedup_key: string;
+    kind: string;
+    driver_id?: string | null;
+    training_id?: string | null;
+    payload?: unknown;
+  }[],
+): Promise<void> {
+  if (rows.length === 0) return;
+  const { error } = await supabaseAdmin
+    .from(LOG_TABLE)
+    .upsert(rows, { onConflict: "dedup_key", ignoreDuplicates: true });
+  if (error) console.warn(`[training-notify] 기록 실패: ${error.message}`);
+}
+
+const sameCounts = (a: SummaryCounts | null, b: SummaryCounts) =>
+  !!a &&
+  a.people === b.people &&
+  a.items === b.items &&
+  a.overdue === b.overdue &&
+  a.soon === b.soon;
+
+function dowOf(ymd: string): number {
+  return new Date(`${ymd}T00:00:00Z`).getUTCDay();
+}
+
+// 본인 DM 시점 — 기한 전은 STAGES 창, 지나면 화요일만 "overdue".
+function stageOf(dday: number, weekly: boolean): string | null {
+  if (dday < 0) return weekly ? "overdue" : null;
+  return STAGES.find((s) => dday >= s.from && dday <= s.to)?.key ?? null;
+}
+
+export async function runTrainingReminder(
+  opts: TrainingReminderOptions = {},
+): Promise<TrainingReminderSummary> {
+  const today = opts.today ?? kstTodayYmd();
   const year = Number(today.slice(0, 4));
+  const weekly = dowOf(today) === WEEKLY_DOW;
+  const dryRun = opts.dryRun === true;
 
-  // SA-14 / MU-3 — 의무교육 대상 유무와 무관하게 항상 스캔한다(같은 Cron 재사용).
+  // SA-14 / MU-3 — 화요일에만(종전 주 1회 Cron 과 같음). 의무교육 발송 스위치와 무관.
   const [crimeLines, mutual] = await Promise.all([
-    scanCrimeCheckLines(today),
-    scanMutual(today),
+    weekly ? scanCrimeCheckLines(today) : Promise.resolve([] as string[]),
+    weekly
+      ? scanMutual(today)
+      : Promise.resolve<MutualScan>({ lines: [], birthdays: 0, bonusProposed: false }),
   ]);
-
-  // 의무교육 독촉 대상이 없을 때: 부가 블록(성범죄경력조회·상조회)만 보내고 끝낸다.
-  //   성범죄경력조회는 관리자 채널, 상조회는 교육 요약과 같은 채널로 각각 발송.
-  const noTrainingTargets = async (): Promise<TrainingReminderSummary> => {
+  if (!dryRun) {
     await sendCrimeCheckAlert(today, crimeLines);
     if (mutual.lines.length > 0) {
       await sendSlack(
         summaryWebhookKey(),
-        [`🤲 상조회 알림 (${today})`, ...mutual.lines].join("\n")
+        [`🤲 상조회 알림 (${today})`, ...mutual.lines].join("\n"),
       );
     }
-    return {
-      today,
-      targetEmployees: 0,
-      targetItems: 0,
-      dmSent: 0,
-      dmFailed: 0,
-      unreachable: [],
-      crimeCheckTargets: crimeLines.length,
-      mutualBirthdays: mutual.birthdays,
-      mutualBonusProposed: mutual.bonusProposed,
-    };
-  };
-  // 기존 호출부 이름 유지(아래 early return 들이 쓴다).
-  const crimeOnly = noTrainingTargets;
+  }
 
-  // 1) 올해 활성 교육 중 마감 D-7 이내(초과 포함).
+  // 1) 올해 활성 교육 + 재직자 + 이수기록 + 지정 명단.
   const { data: trsRaw, error: tErr } = await supabaseAdmin
     .from("mandatory_trainings")
     .select("*")
     .eq("year", year)
     .eq("is_active", true);
   if (tErr) throw new Error(tErr.message);
-
-  const dueTrainings = (trsRaw ?? [])
-    .map((r) => toTraining(r as Record<string, unknown>))
-    .map((t) => ({ t, dday: daysUntil(t.due_date, today) }))
-    .filter(
-      (x): x is { t: ReturnType<typeof toTraining>; dday: number } =>
-        x.dday != null && x.dday <= DUE_WITHIN_DAYS
-    );
-
-  if (dueTrainings.length === 0) return crimeOnly();
-
-  // 2) 재직자 + 이수기록.
+  const trainings: MandatoryTraining[] = sortTrainings(
+    (trsRaw ?? []).map((r) => toTraining(r as Record<string, unknown>)),
+  );
   const roster = await loadTrainingRoster();
-  if (roster.length === 0) return crimeOnly();
-
-  const trainingIds = dueTrainings.map((x) => x.t.id);
-  const [{ data: comps, error: cErr }, targetsByTraining] = await Promise.all([
-    supabaseAdmin
-      .from("training_completions")
-      .select("training_id, driver_id")
-      .in("training_id", trainingIds),
-    // 개별 지정 교육(target_scope=selected)의 대상자 — 지정된 사람만 독촉합니다.
-    loadTrainingTargets(
-      dueTrainings
-        .filter((x) => x.t.target_scope === "selected")
-        .map((x) => x.t.id),
-    ),
+  const ids = trainings.map((t) => t.id);
+  const [compsRes, targetsByTraining, admins, log] = await Promise.all([
+    ids.length
+      ? supabaseAdmin
+          .from("training_completions")
+          .select("training_id, driver_id")
+          .in("training_id", ids)
+      : Promise.resolve({ data: [] as Record<string, unknown>[], error: null }),
+    loadTrainingTargets(trainings.filter(needsTargetList).map((t) => t.id)),
+    loadAdminRecipients(roster),
+    loadNotifyLog(today),
   ]);
-  if (cErr) throw new Error(cErr.message);
+  if (compsRes.error) throw new Error(compsRes.error.message);
   const done = new Set<string>();
-  for (const c of comps ?? []) {
+  for (const c of compsRes.data ?? []) {
     const r = c as Record<string, unknown>;
     done.add(cellKey(String(r.training_id ?? ""), String(r.driver_id ?? "")));
   }
 
-  // 3) 직원별 미이수 due-soon 항목 수집.
-  const base = siteBaseUrl();
-  type Item = { name: string; dday: number; url: string };
-  const perEmp = new Map<string, { emp: Emp; items: Item[] }>();
-  const adminLines: string[] = [];
-  for (const emp of roster) {
-    for (const { t, dday } of dueTrainings) {
-      // 대상 아님(퇴사 후 교육 / 개별 지정 교육의 비지정자)
-      //   → DM·관리자 요약 어느 쪽에도 넣지 않습니다.
-      if (!isTrainingTarget(t, emp, targetsByTraining.get(t.id))) continue;
-      if (done.has(cellKey(t.id, emp.driver_id))) continue;
-
-      // 관리자 요약과 DM 을 분리합니다 — 목적이 다릅니다.
-      //   * 요약("누가 무엇을 안 들었나")은 미이수 전부를 싣습니다. 여기서
-      //     빠지면 담당 팀장이 신규 입사자의 미이수를 놓칩니다.
-      //   * DM("당사자에게 재촉")은 입사일 이후에 도래하는 기한만 보냅니다
-      //     (isReminderDue 주석 참고).
-      const dmTarget = isReminderDue(emp, t);
-      const note = dmTarget ? "" : `, ${reminderSkipNote(emp, t)}`;
-      adminLines.push(`• ${emp.name} — ${t.name} (${ddayPhrase(dday)}${note})`);
-      if (!dmTarget) continue;
-
-      const url = t.site_url || (base ? `${base}/profile/hr` : "/profile/hr");
-      const bucket = perEmp.get(emp.driver_id) ?? { emp, items: [] };
-      bucket.items.push({ name: t.name, dday, url });
-      perEmp.set(emp.driver_id, bucket);
+  if (dryRun) {
+    for (const k of opts.assumeSentKeys ?? []) {
+      log.keys.add(k);
+      if (k.startsWith("welcome:")) log.hasWelcome = true;
     }
   }
 
-  const targets = [...perEmp.values()];
-  // 요약 기준으로 판단합니다 — DM 대상이 0명이어도(전부 입사 전 교육 등)
-  //   미이수가 있으면 관리자 요약은 보내야 합니다. targets 로 판단하면 그
-  //   경우 요약이 통째로 빠져 분리한 의미가 없어집니다.
-  if (adminLines.length === 0) return crimeOnly();
+  const wantLive = !dryRun && process.env.TRAINING_NOTIFY_LIVE === "1";
+  const liveBlockedReason =
+    wantLive && !log.available
+      ? `${LOG_TABLE} 테이블이 없어 중복 방지를 할 수 없습니다 — dry-run 으로만 실행`
+      : null;
+  const live = wantLive && log.available;
 
-  // 4) 개인 DM.
+  // 2) 판정 — 직원×교육 전부(evaluateTraining 단일 출처).
+  const rows: TrainingEvalRow[] = [];
+  for (const emp of roster) {
+    for (const t of trainings) {
+      const completed = done.has(cellKey(t.id, emp.driver_id));
+      const ev = evaluateTraining(
+        t,
+        emp,
+        targetsByTraining.get(t.id),
+        today,
+        completed,
+      );
+      rows.push({
+        driverId: emp.driver_id,
+        name: emp.name,
+        joinDate: emp.joinDate,
+        trainingId: t.id,
+        training: t.name,
+        completed,
+        ...ev,
+      });
+    }
+  }
+  const pendingRows = rows.filter((r) => r.isTarget && !r.completed);
+
+  const base = siteBaseUrl() ?? "";
+  const myUrl = `${base}/profile/hr#my-trainings`;
+  const boardUrl = `${base}/hr/trainings`;
+  const siteOf = new Map(trainings.map((t) => [t.id, t.site_url]));
+  const itemLine = (r: TrainingEvalRow) => {
+    const site = siteOf.get(r.trainingId);
+    return `• *${r.training}* — ${dueLabel(r.dueDate, r.dday)}${
+      site ? ` · ${slackLink(site, "수강 사이트")}` : ""
+    }`;
+  };
+
+  // 3) 본인 DM 계획 — 환영 DM 이 나가는 날은 그 안에 묶습니다(같은 날 두 통 방지).
+  //   중복방지 키: 시점:직원:교육:개인기한(기한이 바뀌면 다시 알림). 지남은 주차(오늘)까지.
+  const dms: PlannedDm[] = [];
+  const welcomeFrom = addDaysYmd(
+    today,
+    -(log.hasWelcome ? WELCOME_WINDOW_DAYS : WELCOME_FIRST_RUN_DAYS),
+  );
+  for (const emp of roster) {
+    const mine = pendingRows.filter((r) => r.driverId === emp.driver_id);
+    const stageKeys: string[] = [];
+    const stageItems: TrainingEvalRow[] = [];
+    for (const r of mine) {
+      if (!r.dueDate || r.dday == null) continue;
+      const stage = stageOf(r.dday, weekly);
+      if (!stage) continue;
+      const key = [stage, emp.driver_id, r.trainingId, r.dueDate]
+        .concat(stage === "overdue" ? [today] : [])
+        .join(":");
+      if (log.keys.has(key)) continue;
+      stageKeys.push(key);
+      stageItems.push(r);
+    }
+
+    // 환영 DM 목록 = 올해 대상 교육 전부(대상 아닌 것은 뺌). 이미 이수한 것은 ✓ 로
+    //   남깁니다 — 첫 실행 90일 창에는 이미 다 들은 직원도 들어오기 때문입니다.
+    const welcomeKey = `welcome:${emp.driver_id}`;
+    const targetsOfEmp = rows.filter(
+      (r) => r.driverId === emp.driver_id && r.isTarget,
+    );
+    const isWelcome =
+      !!emp.joinDate &&
+      emp.joinDate >= welcomeFrom &&
+      !log.keys.has(welcomeKey) &&
+      targetsOfEmp.length > 0;
+    if (isWelcome) {
+      const list = [...targetsOfEmp].sort(
+        (a, b) =>
+          Number(a.completed) - Number(b.completed) ||
+          (a.dueDate ?? "9999").localeCompare(b.dueDate ?? "9999"),
+      );
+      const remaining = list.filter((r) => !r.completed).length;
+      dms.push({
+        kind: "welcome",
+        to: emp.name,
+        text: [
+          `👋 ${emp.name}님, 입사를 환영합니다!`,
+          remaining > 0
+            ? `올해 받아야 할 법정 의무교육 ${list.length}건(남은 것 ${remaining}건)과 개인 기한입니다.`
+            : `올해 받아야 할 법정 의무교육 ${list.length}건을 모두 이수하셨습니다 ✓`,
+          ...list.map((r) =>
+            r.completed ? `• ✓ ${r.training} — 이수 완료` : itemLine(r),
+          ),
+          `수료 후 수료증을 동업자씨 ${slackLink(myUrl, "내 의무교육")}에 올리면 이수 처리됩니다.`,
+        ].join("\n"),
+        keys: [welcomeKey, ...stageKeys],
+        result: "dry-run",
+      });
+      continue;
+    }
+    if (stageItems.length === 0) continue;
+    const overdue = stageItems.some((r) => (r.dday ?? 0) < 0);
+    dms.push({
+      kind: "reminder",
+      to: emp.name,
+      text: [
+        overdue
+          ? "⏰ 이수 기한이 지난 법정 의무교육이 있습니다."
+          : "⏰ 이수 기한이 다가오는 법정 의무교육이 있습니다.",
+        ...stageItems.map(itemLine),
+        `수료증 올리기: ${slackLink(myUrl, "동업자씨 내 의무교육")}`,
+      ].join("\n"),
+      keys: stageKeys,
+      result: "dry-run",
+    });
+  }
+
+  // 4) 공개 요약(화요일) — 이름 없이 숫자만. 지난번과 같으면 올리지 않습니다.
+  let publicSummary: TrainingReminderSummary["publicSummary"] = null;
+  let adminText: string | null = null;
+  if (weekly) {
+    const counts: SummaryCounts = {
+      people: new Set(pendingRows.map((r) => r.driverId)).size,
+      items: pendingRows.length,
+      overdue: pendingRows.filter((r) => r.status === "overdue").length,
+      soon: pendingRows.filter(
+        (r) => r.dday != null && r.dday >= 0 && r.dday <= SOON_DAYS,
+      ).length,
+    };
+    const text = [
+      `📋 의무교육 미이수 현황 (${today})`,
+      `미이수 ${counts.people}명 ${counts.items}건 · 기한 지난 것 ${counts.overdue}건 · ${SOON_DAYS}일 내 마감 ${counts.soon}건`,
+      slackLink(boardUrl, "동업자씨 의무교육 현황 보기"),
+    ].join("\n");
+    const skipReason =
+      counts.items === 0
+        ? "미이수 없음"
+        : sameCounts(log.lastSummary, counts)
+          ? "지난번과 숫자가 같음"
+          : null;
+    publicSummary = { text, counts, post: skipReason == null, skipReason };
+
+    // 이름 있는 상세 명단 — 공개 요약이 올라가는 주에만 관리자에게 DM.
+    if (skipReason == null) {
+      const sorted = [...pendingRows].sort(
+        (a, b) =>
+          (a.dday ?? 9999) - (b.dday ?? 9999) ||
+          a.name.localeCompare(b.name, "ko"),
+      );
+      adminText = [
+        `📋 의무교육 미이수 상세 (${today}) — 관장·부장·인사 담당에게만 보내는 명단입니다.`,
+        ...sorted.map(
+          (r) =>
+            `• ${r.name} — ${r.training} (${dueLabel(r.dueDate, r.dday)}${
+              r.personalDue ? ", 개인 기한" : ""
+            })`,
+        ),
+        slackLink(boardUrl, "의무교육 현황 보기"),
+      ].join("\n");
+    }
+  }
+
+  // 5) 발송(live) — 본인 DM 먼저(미연결 명단을 관리자 상세에 붙이기 위해).
+  //   성공한 DM 만 기록 → 실패분은 다음 실행에서 다시 시도됩니다.
   let dmSent = 0;
   let dmFailed = 0;
   const unreachable: string[] = [];
-  let targetItems = 0;
-  for (const { emp, items } of targets) {
-    targetItems += items.length;
-    const lines = items.map(
-      (it) =>
-        `• [${it.name}] 이수 마감 ${ddayPhrase(it.dday)} — ${slackLink(
-          it.url,
-          "지금 이수하기"
-        )}`
-    );
-    const text = `⏰ 이수 마감이 임박한 법정 의무교육이 있습니다.\n${lines.join("\n")}`;
-    const ok = await sendSlackDM(emp.email, text);
-    if (ok) dmSent++;
-    else {
-      dmFailed++;
-      unreachable.push(emp.name);
+  const empByName = new Map(roster.map((e) => [e.name, e]));
+  if (live) {
+    for (const dm of dms) {
+      const emp = empByName.get(dm.to);
+      const res = await sendSlackDMDetailed(emp?.email, dm.text);
+      dm.result = res.ok ? "sent" : "failed";
+      dm.failReason = res.reason;
+      if (res.ok) {
+        dmSent++;
+        await writeNotifyLog(
+          dm.keys.map((k) => ({
+            dedup_key: k,
+            kind: k.split(":")[0],
+            driver_id: emp?.driver_id ?? null,
+            training_id: k.split(":")[2] ?? null,
+          })),
+        );
+      } else {
+        dmFailed++;
+        unreachable.push(dm.to);
+      }
     }
   }
 
-  // 5) 관리자 요약 — 미이수가 있으면 DM 대상이 없어도 보냅니다.
-  const summaryLines = [`📋 의무교육 미이수 현황 (${today})`, ...adminLines];
-  if (unreachable.length > 0) {
-    summaryLines.push(`⚠️ 슬랙 미연결(DM 실패): ${unreachable.join(", ")}`);
+  if (adminText != null) {
+    const text =
+      unreachable.length > 0
+        ? `${adminText}\n⚠️ 슬랙 미연결(DM 실패): ${unreachable.join(", ")}`
+        : adminText;
+    for (const a of admins) {
+      const dm: PlannedDm = {
+        kind: "admin-detail",
+        to: a.name,
+        text,
+        keys: [],
+        result: "dry-run",
+      };
+      if (live) {
+        const res = await sendSlackDMDetailed(a.email, text);
+        dm.result = res.ok ? "sent" : "failed";
+        dm.failReason = res.reason;
+      }
+      dms.push(dm);
+    }
   }
-  summaryLines.push(...mutualBlock(mutual.lines));
-  await sendSlack(summaryWebhookKey(), summaryLines.join("\n"));
 
-  // 성범죄경력조회는 교육 요약과 분리 — 관리자 채널로 별도 1건.
-  await sendCrimeCheckAlert(today, crimeLines);
+  if (live && publicSummary?.post) {
+    const ok = await sendSlack(summaryWebhookKey(), publicSummary.text);
+    if (ok) {
+      await writeNotifyLog([
+        {
+          dedup_key: `public_summary:${today}`,
+          kind: "public_summary",
+          payload: publicSummary.counts,
+        },
+      ]);
+    }
+  }
 
   return {
     today,
-    targetEmployees: targets.length,
-    targetItems,
+    weekly,
+    live,
+    liveBlockedReason,
+    rows,
+    dms,
+    publicSummary,
     dmSent,
     dmFailed,
     unreachable,
@@ -419,3 +721,23 @@ export async function runTrainingReminder(): Promise<TrainingReminderSummary> {
     mutualBonusProposed: mutual.bonusProposed,
   };
 }
+
+// dry-run 출력용 — 직원별 대상 교육·개인 기한·상태 표(텍스트).
+export function formatEvalTable(rows: TrainingEvalRow[]): string {
+  const out: string[] = [];
+  let cur = "";
+  for (const r of rows) {
+    if (r.driverId !== cur) {
+      cur = r.driverId;
+      out.push("", `■ ${r.name} (입사 ${r.joinDate ?? "미기재"})`);
+    }
+    const state = !r.isTarget
+      ? targetReasonLabel(r.reason, null)
+      : r.completed
+        ? "이수"
+        : `미이수 · ${dueLabel(r.dueDate, r.dday)}${r.personalDue ? " · 개인 기한" : ""}`;
+    out.push(`  - ${r.training}: ${state}`);
+  }
+  return out.join("\n");
+}
+

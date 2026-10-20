@@ -7,7 +7,7 @@ import { getMyJudgeAssignments } from "@/app/(app)/hr/recruitment/[slug]/actions
 import { getMyCredentialSummary } from "@/app/(app)/hr/credentials/actions";
 // 메뉴 권한·배지는 좌측 사이드바와 같은 계산을 씁니다(요청당 1회).
 import { getShellData } from "@/app/(app)/shellData";
-import { ddayLabel } from "@/lib/trainings";
+import { dueLabel } from "@/lib/trainings";
 import {
   MENU_GROUP_LABEL,
   menuItemDesc,
@@ -276,7 +276,8 @@ export default async function EmployeeDashboard({
         ? "올해 교육 모두 완료 ✓"
         : `${trainingSummary.done}/${trainingSummary.total} 완료 · 미이수 ${trainingSummary.notMet}건${
             trainingSummary.nearest
-              ? ` · 가장 임박: ${trainingSummary.nearest.name} ${ddayLabel(
+              ? ` · 가장 임박: ${trainingSummary.nearest.name} ${dueLabel(
+                  trainingSummary.nearest.due_date,
                   trainingSummary.nearest.dday,
                 )}`
               : ""

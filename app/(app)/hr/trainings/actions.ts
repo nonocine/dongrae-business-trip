@@ -18,11 +18,15 @@ import {
   kstTodayYmd,
   isTrainingTarget,
   trainingTargetState,
+  trainingEligibility,
+  needsTargetList,
   normalizeTargetScope,
+  normalizeNewHireRule,
   CERT_EXT,
   CERT_MAX_BYTES,
   cellKey,
   type MandatoryTraining,
+  type NewHireRule,
   type TargetScope,
 } from "@/lib/trainings";
 import {
@@ -98,6 +102,8 @@ export type TrainingInput = {
   //   생략하면 all 로 저장합니다(기존 호출부 호환).
   target_scope?: TargetScope;
   target_ids?: string[] | null;
+  // 신규 입사자 처리 — 생략하면 within_year(기존 호출부 호환).
+  new_hire_rule?: NewHireRule;
   // 이수 기록이 있는 사람이 대상에서 빠지는 것을 담당자가 확인했는지.
   //   false 면 서버가 저장하지 않고 excluded 명단을 돌려줍니다(화면에서 확인 후 재전송).
   confirm_exclusion?: boolean;
@@ -195,6 +201,7 @@ export async function saveTraining(
       organizer: cleanStr(input.organizer),
       hours: cleanStr(input.hours),
       target_scope: targetScope,
+      new_hire_rule: normalizeNewHireRule(input.new_hire_rule),
     };
 
     if (input.id) {
@@ -409,6 +416,7 @@ export async function copyTrainingsFromYear(
         // 대상 범위도 복사합니다 — 개별 지정 교육(소방안전관리자 등)은 해가
         //   바뀌어도 대개 같은 사람이 대상이라, 아래에서 지정 명단도 함께 옮깁니다.
         target_scope: t.target_scope,
+        new_hire_rule: t.new_hire_rule,
       }));
     if (rows.length === 0) {
       return { ok: false, message: "복사할 새 교육이 없습니다(이미 모두 존재)." };
@@ -478,8 +486,7 @@ export async function getTrainingMatrix(year: number): Promise<TrainingMatrix> {
 }
 
 // 대시보드 관리 카드용 요약 — 올해 활성 교육 중 "대상"인 (교육×직원) 셀만 집계.
-//   * 대상 = lib/trainings.trainingTargetState. 'all' 교육은 재직 직원 전원
-//     (퇴사 후 교육만 제외), 'selected' 교육은 지정된 사람만.
+//   * 대상 = lib/trainings.trainingEligibility(대상 범위 + 신규 입사자 규칙).
 //   * 접근 없으면 null(카드 미노출).
 export async function getTrainingsAdminSummary(): Promise<
   { year: number; totalNotMet: number } | null
@@ -491,16 +498,18 @@ export async function getTrainingsAdminSummary(): Promise<
   const [{ data: trs }, employees] = await Promise.all([
     supabaseAdmin
       .from("mandatory_trainings")
-      .select("id, held_on, due_date, target_scope")
+      .select("id, year, held_on, due_date, target_scope, new_hire_rule")
       .eq("year", year)
       .eq("is_active", true),
     listActiveRoster(),
   ]);
   const trainings = ((trs ?? []) as Record<string, unknown>[]).map((r) => ({
     id: String(r.id ?? ""),
+    year: Number(r.year ?? year),
     held_on: (r.held_on as string | null) ?? null,
     due_date: (r.due_date as string | null) ?? null,
     target_scope: normalizeTargetScope(r.target_scope),
+    new_hire_rule: normalizeNewHireRule(r.new_hire_rule),
   }));
   if (trainings.length === 0 || employees.length === 0) {
     return { year, totalNotMet: 0 };
@@ -514,9 +523,7 @@ export async function getTrainingsAdminSummary(): Promise<
         "training_id",
         trainings.map((t) => t.id),
       ),
-    loadTrainingTargets(
-      trainings.filter((t) => t.target_scope === "selected").map((t) => t.id),
-    ),
+    loadTrainingTargets(trainings.filter(needsTargetList).map((t) => t.id)),
   ]);
   const roster = new Set(employees.map((e) => e.driver_id));
   const done = new Set<string>();
@@ -530,7 +537,7 @@ export async function getTrainingsAdminSummary(): Promise<
   for (const t of trainings) {
     for (const e of employees) {
       // 대상 아님 → 미이수로 세지 않음
-      if (!isTrainingTarget(t, e, targetsByTraining.get(t.id))) continue;
+      if (!trainingEligibility(t, e, targetsByTraining.get(t.id)).isTarget) continue;
       if (!done.has(cellKey(t.id, e.driver_id))) totalNotMet += 1;
     }
   }
@@ -722,19 +729,21 @@ export async function adminDeleteCompletion(
 }
 
 // =====================================================================
-// 의무교육 D-7 독촉 — 수동 실행(M0 전용). Cron 과 동일 코어(lib/trainingReminder).
-//   * Cron 하루 안 기다리고 검증용. 슬랙 실패해도 데이터 조회만 성공하면 ok.
+// 의무교육 알림 미리보기 — M0 전용. Cron 과 동일 코어(lib/trainingReminder)를
+//   dry-run 으로 돌려 "오늘 Cron 이 돌면 무엇이 나갈지" 를 보여줍니다.
+//   * 아무것도 보내지 않습니다(성범죄경력조회·상조회 포함). 실제 발송은 Cron 만.
 // =====================================================================
 export async function runTrainingReminderNow(): Promise<
-  | { ok: true; summary: TrainingReminderSummary }
+  | { ok: true; summary: Omit<TrainingReminderSummary, "rows"> }
   | { ok: false; message: string }
 > {
   try {
     const ctx = await requireTrainingAccess();
     if (!ctx.isM0) {
-      return { ok: false, message: "독촉 발송은 관장·부장만 실행할 수 있습니다." };
+      return { ok: false, message: "알림 미리보기는 관장·부장만 실행할 수 있습니다." };
     }
-    const summary = await runTrainingReminder();
+    const { rows: _rows, ...summary } = await runTrainingReminder({ dryRun: true });
+    void _rows;
     return { ok: true, summary };
   } catch (e) {
     return {

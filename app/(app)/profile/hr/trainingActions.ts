@@ -12,9 +12,9 @@ import { supabaseAdmin } from "@/lib/supabaseAdmin";
 import {
   toTraining,
   sortTrainings,
-  daysUntil,
   kstTodayYmd,
-  isTrainingTarget,
+  evaluateTraining,
+  needsTargetList,
   trainingTargetState,
   CERT_EXT,
   CERT_MAX_BYTES,
@@ -51,7 +51,8 @@ function currentYear(): number {
 export type MyTrainingItem = {
   training_id: string;
   name: string;
-  due_date: string | null;
+  due_date: string | null; // 개인 기한(신규 입사자 규칙 반영)
+  personal_due: boolean; // 원래 이수기한과 다른 개인 기한인지
   site_url: string | null;
   note: string | null;
   dday: number | null;
@@ -107,9 +108,7 @@ export async function getMyTrainings(): Promise<MyTrainings | null> {
         "training_id",
         allTrainings.map((t) => t.id)
       ),
-    loadTrainingTargets(
-      allTrainings.filter((t) => t.target_scope === "selected").map((t) => t.id)
-    ),
+    loadTrainingTargets(allTrainings.filter(needsTargetList).map((t) => t.id)),
   ]);
   const doneMap = new Map<
     string,
@@ -127,21 +126,30 @@ export async function getMyTrainings(): Promise<MyTrainings | null> {
 
   // 대상 아닌 교육은 목록에서 제외 — 다만 이미 이수 기록이 있으면 남겨서
   //   본인이 올린 수료증을 계속 열람할 수 있게 합니다(미이수로는 잡히지 않음).
-  const trainings = allTrainings.filter(
-    (t) =>
-      isTrainingTarget(t, span, targetsByTraining.get(t.id)) ||
-      doneMap.has(t.id),
-  );
+  //   판정·개인 기한은 lib/trainings.evaluateTraining 단일 출처.
+  const evaluated = allTrainings
+    .map((t) => ({
+      t,
+      ev: evaluateTraining(
+        t,
+        span,
+        targetsByTraining.get(t.id),
+        today,
+        doneMap.has(t.id),
+      ),
+    }))
+    .filter(({ t, ev }) => ev.isTarget || doneMap.has(t.id));
 
-  const items: MyTrainingItem[] = trainings.map((t) => {
+  const items: MyTrainingItem[] = evaluated.map(({ t, ev }) => {
     const done = doneMap.get(t.id);
     return {
       training_id: t.id,
       name: t.name,
-      due_date: t.due_date,
+      due_date: ev.dueDate,
+      personal_due: ev.personalDue,
       site_url: t.site_url,
       note: t.note,
-      dday: daysUntil(t.due_date, today),
+      dday: ev.dday,
       completed: !!done,
       completed_at: done?.completed_at ?? null,
       has_cert: done?.has_cert ?? false,
@@ -324,7 +332,7 @@ export type MyTrainingSummary = {
   total: number;
   done: number;
   notMet: number;
-  nearest: { name: string; dday: number | null } | null; // 미이수 중 가장 임박
+  nearest: { name: string; due_date: string | null; dday: number | null } | null; // 미이수 중 가장 임박
 };
 
 export async function getMyTrainingSummary(): Promise<MyTrainingSummary | null> {
@@ -344,7 +352,7 @@ export async function getMyTrainingSummary(): Promise<MyTrainingSummary | null> 
   });
   const nearest =
     pending.length > 0
-      ? { name: pending[0].name, dday: pending[0].dday }
+      ? { name: pending[0].name, due_date: pending[0].due_date, dday: pending[0].dday }
       : null;
 
   return { total, done, notMet, nearest };

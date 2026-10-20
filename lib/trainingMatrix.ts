@@ -4,6 +4,7 @@ import {
   sortTrainings,
   daysUntil,
   kstTodayYmd,
+  needsTargetList,
   type MandatoryTraining,
 } from "@/lib/trainings";
 import { loadTrainingRoster, loadTrainingTargets } from "@/lib/trainingRoster";
@@ -35,7 +36,7 @@ export type TrainingMatrix = {
   trainings: TrainingColumn[];
   employees: RosterEmployee[];
   completions: MatrixCompletion[];
-  // 개별 지정 교육(target_scope=selected)의 지정 대상자 — training_id → driver_id[].
+  // 개별 지정·담당자만 교육의 지정 대상자 — training_id → driver_id[].
   //   활성·비활성 모두 실어 보냅니다(수정 폼이 비활성 교육의 명단도 채워야 함).
   targets: Record<string, string[]>;
 };
@@ -75,16 +76,23 @@ export async function loadTrainingMatrix(year: number): Promise<TrainingMatrix> 
       .eq("year", year)
       .eq("is_active", true),
     listActiveRoster(),
+    // 지정 명단이 필요한 교육(개별 지정 + 담당자만) — 활성·비활성 모두.
     supabaseAdmin
       .from("mandatory_trainings")
-      .select("id")
-      .eq("year", year)
-      .eq("target_scope", "selected"),
+      .select("id, target_scope, new_hire_rule")
+      .eq("year", year),
   ]);
   if (trainingsRaw.error) throw new Error(trainingsRaw.error.message);
   if (selectedRaw.error) throw new Error(selectedRaw.error.message);
   const targetSets = await loadTrainingTargets(
-    (selectedRaw.data ?? []).map((r) => String((r as { id: unknown }).id)),
+    ((selectedRaw.data ?? []) as Record<string, unknown>[])
+      .filter((r) =>
+        needsTargetList({
+          target_scope: r.target_scope as string | null,
+          new_hire_rule: r.new_hire_rule as string | null,
+        }),
+      )
+      .map((r) => String(r.id)),
   );
   const targets: Record<string, string[]> = {};
   for (const [tid, set] of targetSets) targets[tid] = [...set];

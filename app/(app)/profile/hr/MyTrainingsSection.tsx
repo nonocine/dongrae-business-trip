@@ -9,7 +9,7 @@ import {
   type MyTrainings,
   type MyTrainingItem,
 } from "@/app/(app)/profile/hr/trainingActions";
-import { ddayLabel, isDueSoon, CERT_ACCEPT } from "@/lib/trainings";
+import { dueLabel, isDueSoon, CERT_ACCEPT } from "@/lib/trainings";
 import { fmtKstDate } from "@/lib/datetime";
 import {
   panelToneCls,
@@ -208,8 +208,16 @@ export default function MyTrainingsSection({
                             <span className="text-sm font-semibold text-ink">
                               {it.name}
                             </span>
-                            <span className={soon ? badgeWarning : badgeNeutral}>
-                              {ddayLabel(it.dday)}
+                            <span
+                              className={soon ? badgeWarning : badgeNeutral}
+                              title={
+                                it.personal_due
+                                  ? "입사일 기준으로 정해진 개인 기한입니다"
+                                  : undefined
+                              }
+                            >
+                              {dueLabel(it.due_date, it.dday)}
+                              {it.personal_due ? " · 개인 기한" : ""}
                             </span>
                             <span className={badgeWarning}>미이수</span>
                           </div>

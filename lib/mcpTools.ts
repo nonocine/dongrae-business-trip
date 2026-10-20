@@ -4,6 +4,8 @@ import { kstTodayYmd } from "@/lib/trainings";
 import {
   trainingStatsByTraining,
   trainingStatsByEmployee,
+  evaluateTraining,
+  dueLabel,
   cellKey,
 } from "@/lib/trainings";
 import {
@@ -450,7 +452,16 @@ async function trainingStatus(yearIn?: number): Promise<string> {
       out.push(`  · ${e.name}: 대상 교육 없음`);
       continue;
     }
+    // 미이수 상세 — 개인 기한(신규 입사자 규칙) 기준 lib/trainings.evaluateTraining.
+    const pending = m.trainings
+      .map((t) => ({
+        t,
+        ev: evaluateTraining(t, e, targetSets.get(t.id), m.today, done.has(cellKey(t.id, e.driver_id))),
+      }))
+      .filter(({ ev }) => ev.isTarget && ev.status !== "done")
+      .map(({ t, ev }) => `${t.name} ${dueLabel(ev.dueDate, ev.dday)}${ev.personalDue ? "·개인 기한" : ""}`);
     out.push(`  · ${e.name}: ${s.done}/${s.target} 이수${s.target - s.done ? ` (미이수 ${s.target - s.done})` : " ✓"}`);
+    for (const line of pending) out.push(`      - ${line}`);
   }
   return out.join("\n");
 }
