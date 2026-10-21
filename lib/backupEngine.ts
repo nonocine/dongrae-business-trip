@@ -18,14 +18,13 @@ import { sendSlack } from "@/lib/slack";
 // --- 화이트리스트 -----------------------------------------------------
 // ① 이 저장소 코드가 실제로 참조하는 테이블 (grep 기준 50개)
 // ② 코드 참조는 없지만 이 앱 소유가 확실한 테이블 (6개)
-// 제외: backup_logs(자기 자신) / recruitment_scores_backup_v1(임시 백업본)
-//       yangjeong_* · global_plans · reports · center_reports (소유 불명)
-//       profiles · admins · stamp_records · centers · reviews · applications
-//       programs · organization_logos · push_subscriptions (타 앱)
+// ③ 2026-10 백업 점검에서 추가(관장 지시)
+// 백업하지 않는 public 테이블은 아래 BACKUP_EXCLUDED 에 이유와 함께 적습니다.
+//   둘 다에 없는 테이블이 생기면 백업 Cron 이 관장에게 DM(lib/backupCoverage).
 export const BACKUP_TABLES: readonly string[] = [
   // --- 활동/차량 ---
   "activities",
-  "business_trips",
+  // business_trips 는 2026-10 점검 때 운영 DB 에 없어(매번 skipped) 목록에서 뺐습니다.
   "drivers",
   "driving_logs",
   "settings",
@@ -39,6 +38,11 @@ export const BACKUP_TABLES: readonly string[] = [
   "employment_contracts", // ②
   "salary_contracts", // ②
   "certificates_issued", // ②
+  "employee_document_files", // ③ 인사기록 첨부서류(한 행 = 한 파일)
+  // --- 기관 대장 ---
+  "org_agreements", // ③
+  "org_awards", // ③
+  "org_record_files", // ③
   // --- 급여 ---
   "salary_config",
   "salary_grade_table",
@@ -49,6 +53,7 @@ export const BACKUP_TABLES: readonly string[] = [
   "training_completions",
   "mandatory_training_targets",
   "staff_training_results",
+  "training_notification_log", // ③ 의무교육 알림 중복방지 기록
   // --- 채용 ---
   "recruitment_postings",
   "recruitment_applicants",
@@ -86,11 +91,61 @@ export const BACKUP_TABLES: readonly string[] = [
   "business_categories",
   "business_programs",
   "business_promotions",
+  "business_program_rental_links", // ③ 사업 ↔ 대관 프로그램 연결
   "report_rooms",
   "coin_pay_results",
   // --- 공용 메일함 ---
   "mail_messages",
 ];
+
+// --- 백업 제외 목록 ---------------------------------------------------
+// 운영 DB public 에 있지만 백업하지 않는 테이블 — 테이블마다 이유 한 줄.
+//   BACKUP_TABLES 에도 여기에도 없는 테이블이 생기면 lib/backupCoverage 가 잡아
+//   관장에게 알립니다. 새 테이블을 만들면 둘 중 한 곳에 꼭 적어 주세요.
+//   "결정 대기" 는 2026-10-21 점검 보고에서 포함을 권했으나 관장 결정 전인 것 —
+//   포함하기로 하면 BACKUP_TABLES 로 옮깁니다.
+export const BACKUP_EXCLUDED: Readonly<Record<string, string>> = {
+  // 이 엔진 자신·임시 사본
+  backup_logs: "백업 엔진 자신의 실행 기록",
+  recruitment_scores_backup_v1: "채용 v1.2 점수 임시 백업본(2026-05) — 원본은 recruitment_scores",
+  mail_messages_backup_20260901: "메일 정리 전 임시 사본(2026-09-01) — 원본은 mail_messages",
+  // 다시 받을 수 있는 캐시
+  rental_reservations: "대관 시스템에서 매일 다시 받는 사본(rental-sync Cron)",
+  // 공용 인스턴스의 다른 앱(스탬프투어 등)·소유 불명 — 이 저장소 코드가 쓰지 않음
+  admins: "다른 앱(스탬프투어) 관리자",
+  applications: "다른 앱(스탬프투어) 신청",
+  centers: "다른 앱(스탬프투어) 기관",
+  profiles: "다른 앱(스탬프투어) 회원",
+  programs: "다른 앱(스탬프투어) 프로그램",
+  reviews: "다른 앱(스탬프투어) 후기",
+  stamp_records: "다른 앱(스탬프투어) 스탬프",
+  organization_logos: "다른 앱(스탬프투어) 기관 로고",
+  push_subscriptions: "다른 앱 웹푸시 구독",
+  global_plans: "소유 불명(이 저장소 코드 미사용)",
+  reports: "소유 불명(이 저장소 코드 미사용)",
+  center_reports: "소유 불명(이 저장소 코드 미사용)",
+  yangjeong_drivers: "양정 차량 앱 소유",
+  yangjeong_driving_logs: "양정 차량 앱 소유",
+  yangjeong_settings: "양정 차량 앱 소유",
+  // 결정 대기 — 이 앱이 쓰는 원본 데이터(포함 권장)
+  hr_awards: "결정 대기 — 수상·포상(인사기록)",
+  hr_committees: "결정 대기 — 인사위원회 기록",
+  hr_disciplines: "결정 대기 — 징계 기록",
+  hr_evaluations: "결정 대기 — 근무평정",
+  hr_incident_reports: "결정 대기 — 경위서",
+  business_cards: "결정 대기 — 명함첩",
+  business_partners: "결정 대기 — 거래처",
+  partner_contacts: "결정 대기 — 거래처 담당자",
+  partner_transaction_logs: "결정 대기 — 거래처 거래이력",
+  mail_replies: "결정 대기 — 공용 메일 답장 기록",
+  shared_credentials: "결정 대기 — 공용 비밀번호(암호문. 복호화 키는 환경변수라 백업에 없음)",
+  credential_viewers: "결정 대기 — 공용 비밀번호 열람자 지정",
+  saem_club_budget_plans: "결정 대기 — 동래샘들 동아리 예산계획",
+  saem_club_expenses: "결정 대기 — 동래샘들 동아리 지출",
+  saem_club_monthly_reports: "결정 대기 — 동래샘들 동아리 월보고",
+  saem_lecture_certificates: "결정 대기 — 동래샘들 강의확인증 발급대장",
+  saem_member_roles: "결정 대기 — 동래샘들 회원 역할",
+};
 
 // backup_logs 는 이 엔진이 유일하게 쓰는 테이블입니다.
 const LOG_TABLE = "backup_logs";
