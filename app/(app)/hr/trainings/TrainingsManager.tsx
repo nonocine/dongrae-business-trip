@@ -77,6 +77,7 @@ export default function TrainingsManager({
   trainings: initialTrainings,
   matrix: initialMatrix,
   isM0,
+  canViewPersonal,
 }: {
   initialYear: number;
   thisYear: number;
@@ -84,6 +85,8 @@ export default function TrainingsManager({
   trainings: MandatoryTraining[];
   matrix: TrainingMatrix;
   isM0: boolean;
+  // 인사 파일 열람 — 이수 현황판(직원별 이수·수료증). 없으면 교육 등록·수정만.
+  canViewPersonal: boolean;
 }) {
   const [year, setYear] = useState<number>(initialYear);
   const [trainings, setTrainings] =
@@ -923,7 +926,12 @@ export default function TrainingsManager({
         </div>
       </section>
 
-      {/* 현황판 */}
+      {/* 현황판 — 인사 파일 열람 보유자만(서버도 이수 기록을 내려보내지 않음) */}
+      {!canViewPersonal ? (
+        <p className="text-xs text-ink-hint">
+          직원별 이수 현황·수료증은 관장·부장과 관장이 지정한 사람(인사 파일 열람)만 봅니다.
+        </p>
+      ) : (
       <section className={cardCls}>
         <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
           <h3 className="text-sm font-bold tracking-wide text-navy">
@@ -1219,6 +1227,7 @@ export default function TrainingsManager({
           </div>
         )}
       </section>
+      )}
     </div>
   );
 }

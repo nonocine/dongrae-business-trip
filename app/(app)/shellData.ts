@@ -25,6 +25,7 @@ import { getUnreadMailCount } from "@/app/(app)/mail/actions";
 import { getTrainingsAdminSummary } from "@/app/(app)/hr/trainings/actions";
 import { getPendingCertRequestCount } from "@/app/(app)/hr/certificates/actions";
 import { isM0Grant } from "@/lib/authLevels";
+import { hasPersonnelAccess } from "@/lib/personnelAccess";
 import type { MenuContext } from "@/lib/menu";
 
 export type ShellData = {
@@ -41,7 +42,7 @@ export type ShellData = {
 };
 
 export const getShellData = cache(async (): Promise<ShellData> => {
-  const [my, roles, g, managerAdmin, myTrainingSummary] = await Promise.all([
+  const [my, roles, g, managerAdmin, myTrainingSummary, isPersonnel] = await Promise.all([
     getMyProfile(),
     getMyEmployeeRoles(),
     getGoogleSession(),
@@ -49,6 +50,8 @@ export const getShellData = cache(async (): Promise<ShellData> => {
     //   사이드바의 '관리자 대시보드' 를 가드와 같은 조건으로 걸기 위해 함께 봅니다.
     isManagerAdmin(),
     getMyTrainingSummary(),
+    // 인사 파일 열람 — 인사기록·증명서·연차 메뉴 기준(가드와 같은 판정).
+    hasPersonnelAccess(),
   ]);
 
   const rank = my?.driver?.rank ?? null;
@@ -68,6 +71,7 @@ export const getShellData = cache(async (): Promise<ShellData> => {
       isM0,
       roles,
       isManagerAdmin: managerAdmin,
+      isPersonnel,
       // 대시보드가 예전에 쓰던 조건 그대로 — 올해 교육이 1건 이상.
       hasMyTrainings: (myTrainingSummary?.total ?? 0) > 0,
     },

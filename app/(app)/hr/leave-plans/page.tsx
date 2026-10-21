@@ -14,9 +14,9 @@ export default async function LeavePlansPage({
 }) {
   await enforcePasswordChange();
 
-  // 접근: M0(관장·부장·master) 또는 회계(accounting) 직무 — 급여 게이트 재사용.
+  // 접근: 인사 파일 열람 보유자만(2026-10 관장 결정 — 직원별 연차·계획서는 인사 파일).
   const access = await resolveSalaryAccess();
-  if (!access) redirect("/");
+  if (!access?.isPersonnel) redirect("/");
 
   const { year } = await searchParams;
   const y = Number(year);

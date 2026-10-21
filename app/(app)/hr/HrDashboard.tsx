@@ -30,6 +30,7 @@ export default function HrDashboard({
   recruitmentPostings,
   initialTab = "records",
   canManageAuth,
+  canGrantPersonnel,
   allowedTabs,
   today,
 }: {
@@ -40,6 +41,7 @@ export default function HrDashboard({
   today: string;
   initialTab?: TabKey;
   canManageAuth: boolean;
+  canGrantPersonnel: boolean; // '인사 파일 열람' 직무 칸 표시 — 관장(·master)만
   // 이 사람에게 보일 탭 — 서버(app/hr/page.tsx)가 영역(scope)으로 정합니다.
   //   ★ 화면에서 감추는 것은 안내일 뿐이고, 실제 차단은 각 액션의
   //     requireHrAdmin(scope) 이 합니다. 탭을 숨겨도 데이터가 안 내려오는
@@ -58,6 +60,7 @@ export default function HrDashboard({
           drivers={drivers}
           profiles={profiles}
           canManageAuth={canManageAuth}
+          canGrantPersonnel={canGrantPersonnel}
           today={today}
         />
       )}
@@ -205,11 +208,13 @@ function RecordsTab({
   drivers,
   profiles,
   canManageAuth,
+  canGrantPersonnel,
   today,
 }: {
   drivers: Driver[];
   profiles: EmployeeProfile[];
   canManageAuth: boolean;
+  canGrantPersonnel: boolean;
   today: string;
 }) {
   const [selectedId, setSelectedId] = useState("");
@@ -316,6 +321,7 @@ function RecordsTab({
               driver={selectedDriver}
               profile={selectedProfile}
               canManageAuth={canManageAuth}
+              canGrantPersonnel={canGrantPersonnel}
               knownDepartments={knownDepartments}
               today={today}
               onDeleted={() => setSelectedId("")}

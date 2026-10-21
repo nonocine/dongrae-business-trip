@@ -3,9 +3,9 @@ import { redirect } from "next/navigation";
 import { enforcePasswordChange } from "@/app/actions";
 import { resolveContractAdmin, listSummaries, namesById } from "@/lib/contractServer";
 import { listContractEmployees, getContractClauses } from "@/app/(app)/hr/contracts/actions";
-import { getSalaryWorkspace } from "@/app/(app)/hr/contracts/salaryActions";
-import ContractsManager from "@/app/(app)/hr/contracts/ContractsManager";
-import SalaryContractsManager from "@/app/(app)/hr/contracts/SalaryContractsManager";
+import { getSalaryWorkspace, getSalaryTemplates } from "@/app/(app)/hr/contracts/salaryActions";
+import ContractsManager, { ClauseEditor } from "@/app/(app)/hr/contracts/ContractsManager";
+import SalaryContractsManager, { HolidayPanel, SalaryClauseEditor } from "@/app/(app)/hr/contracts/SalaryContractsManager";
 import { tabBarCls, tabNavCls, tabItemCls, linkCls, noticeWarning } from "@/lib/ui";
 import { contractsPath, type ContractFocus } from "@/lib/contractCore";
 
@@ -15,7 +15,9 @@ export const dynamic = "force-dynamic";
 // 계약서 — 근로계약서 / 연봉계약서 탭 (2026-10)
 //   메뉴가 늘어나지 않게 '계약서' 한 자리에 두고 탭으로 나눴습니다.
 //   흐름(보내기·직원 서명·센터장 서명·PDF·교부)은 두 탭이 같은 부품(./shared)을 씁니다.
-//   접근: M0(관장·부장) 또는 hr(인사) 직무. 그 밖은 페이지 자체를 렌더하지 않습니다.
+//   접근: M0(관장·부장) · hr(인사) 직무 · 인사 파일 열람. 그 밖은 페이지 자체를 렌더하지 않습니다.
+//   ★ 2026-10 관장 결정: 직원별 계약은 인사 파일 열람(personnel) 보유자에게만 불러옵니다.
+//     그 밖(hr 직무만)은 직원 정보가 없는 서식 — 조항 문구·명절 날짜 — 만 봅니다.
 //   ?driver={id}: 그 직원 것만 걸러 봅니다(인사기록카드 직원 행·슬랙 서명 알림 링크).
 //     권한은 그대로 — 거르는 것은 보기 편의일 뿐, 접근 범위는 바뀌지 않습니다.
 // =====================================================================
@@ -96,11 +98,39 @@ export default async function ContractsPage({
         </p>
       )}
 
-      {tab === "employment" ? (
+      {!access.isPersonnel ? (
+        <TemplatesOnly tab={tab} year={year} />
+      ) : tab === "employment" ? (
         <EmploymentTab isM0={access.isM0} focus={focus} />
       ) : (
         <SalaryTab isM0={access.isM0} year={year} focus={focus} />
       )}
+    </div>
+  );
+}
+
+// 인사 파일 열람 권한이 없는 담당자 — 서식만(직원 목록·계약 내용은 불러오지 않음).
+async function TemplatesOnly({ tab, year }: { tab: "employment" | "salary"; year: number }) {
+  const notice = (
+    <p className={`mb-4 ${noticeWarning}`}>
+      직원별 계약서는 관장·부장과 관장이 지정한 사람(인사 파일 열람)만 봅니다. 여기서는 계약서 서식만 고칠 수 있습니다.
+    </p>
+  );
+  if (tab === "employment") {
+    const clauses = await getContractClauses();
+    return (
+      <div>
+        {notice}
+        <ClauseEditor initial={clauses} />
+      </div>
+    );
+  }
+  const t = await getSalaryTemplates(year);
+  return (
+    <div className="space-y-4">
+      {notice}
+      <HolidayPanel year={t.year} holidays={t.holidays} driverId={null} />
+      <SalaryClauseEditor initial={t.clauses} />
     </div>
   );
 }

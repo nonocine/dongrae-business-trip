@@ -9,7 +9,7 @@
 //     기록 0건)에만 90일 안까지 넓혀 도입 직전 입사자도 받게 합니다.
 //   * 공개 채널(SLACK_WEBHOOK_TRAINING = #0_독촉자)은 화요일에 숫자 요약만.
 //     이름은 싣지 않고, 지난번과 숫자가 같으면 올리지 않습니다.
-//     이름 있는 상세 명단은 관장·부장·인사 담당(trainingAccess 와 같은 판정)에게 DM.
+//     이름 있는 상세 명단은 인사 파일 열람 보유자(관장·부장·관장이 지정한 사람)에게만 DM.
 //   * 실제 발송은 TRAINING_NOTIFY_LIVE=1 일 때만(관장 확인 후 켬). 그 전에는
 //     의무교육 부분은 dry-run — 무엇이 나갈지만 계산해 돌려줍니다.
 //   * SA-14: 같은 Cron 에 성범죄경력조회 만료 스캔을 얹는다(별도 Cron 만들지 않음).
@@ -46,7 +46,8 @@ import {
   loadTrainingTargets,
   type TrainingRosterEmployee,
 } from "@/lib/trainingRoster";
-import { isM0Grant } from "@/lib/authLevels";
+import { isPersonnelHolder, PERSONNEL_ROLE_KEY } from "@/lib/personnel";
+import { MASTER_EMAIL } from "@/lib/authConstants";
 import {
   CRIME_CHECK_SLOT,
   crimeCheckState,
@@ -295,45 +296,31 @@ async function scanMutual(today: string): Promise<MutualScan> {
   }
 }
 
-// 관장·부장·인사 담당 — lib/trainingAccess 와 같은 판정(M0 또는 hr 직무).
+// 관리자 상세 명단 DM 수신자 = 인사 파일 열람(personnel) 보유자 — 관장·부장·master 자동 +
+//   관장이 지정한 사람(lib/personnel.ts). ★ 2026-10 관장 결정: 미이수자 이름·기한은 인사
+//   파일이라 hr 직무·권한등급 M0 만으로는 받지 않습니다.
 async function loadAdminRecipients(
   roster: TrainingRosterEmployee[],
 ): Promise<TrainingRosterEmployee[]> {
   const ids = roster.map((e) => e.driver_id);
   if (ids.length === 0) return [];
-  const [{ data: profs, error: pErr }, { data: roles, error: rErr }] =
-    await Promise.all([
-      supabaseAdmin
-        .from("employee_profiles")
-        .select("driver_id, auth_level")
-        .in("driver_id", ids),
-      supabaseAdmin
-        .from("employee_roles")
-        .select("driver_id, role_key")
-        .in("driver_id", ids)
-        .eq("role_key", "hr"),
-    ]);
-  if (pErr) throw new Error(pErr.message);
+  const { data: roles, error: rErr } = await supabaseAdmin
+    .from("employee_roles")
+    .select("driver_id, role_key")
+    .in("driver_id", ids)
+    .eq("role_key", PERSONNEL_ROLE_KEY);
   if (rErr) throw new Error(rErr.message);
-  const level = new Map(
-    ((profs ?? []) as Record<string, unknown>[]).map((p) => [
-      String(p.driver_id ?? ""),
-      (p.auth_level as string | null) ?? null,
-    ]),
-  );
-  const hr = new Set(
+  const granted = new Set(
     ((roles ?? []) as Record<string, unknown>[]).map((r) =>
       String(r.driver_id ?? ""),
     ),
   );
-  return roster.filter(
-    (e) =>
-      hr.has(e.driver_id) ||
-      isM0Grant({
-        rank: e.rank,
-        email: e.email,
-        authLevel: level.get(e.driver_id),
-      }),
+  return roster.filter((e) =>
+    isPersonnelHolder({
+      rank: e.rank,
+      isMaster: !!e.email && e.email.trim().toLowerCase() === MASTER_EMAIL,
+      roles: granted.has(e.driver_id) ? [PERSONNEL_ROLE_KEY] : [],
+    }),
   );
 }
 
@@ -629,7 +616,7 @@ export async function runTrainingReminder(
           a.name.localeCompare(b.name, "ko"),
       );
       adminText = [
-        `📋 의무교육 미이수 상세 (${today}) — 관장·부장·인사 담당에게만 보내는 명단입니다.`,
+        `📋 의무교육 미이수 상세 (${today}) — 관장·부장·인사 파일 열람 권한자에게만 보내는 명단입니다.`,
         ...sorted.map(
           (r) =>
             `• ${r.name} — ${r.training} (${dueLabel(r.dueDate, r.dday)}${

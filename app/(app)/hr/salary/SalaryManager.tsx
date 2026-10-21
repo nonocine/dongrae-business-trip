@@ -62,6 +62,7 @@ export default function SalaryManager({
   employees,
   salaryRows,
   isM0,
+  canViewPersonal,
 }: {
   initialYear: number;
   years: number[];
@@ -70,8 +71,10 @@ export default function SalaryManager({
   employees: SalaryEmployee[];
   salaryRows: EmployeeSalaryProfileRow[];
   isM0: boolean;
+  // 인사 파일 열람 — 월별 급여·직원별 급여 설정(개인별 금액). 없으면 호봉표·기준값만.
+  canViewPersonal: boolean;
 }) {
-  const [section, setSection] = useState<SectionKey>("monthly");
+  const [section, setSection] = useState<SectionKey>(canViewPersonal ? "monthly" : "grade");
   const [year, setYear] = useState<number>(initialYear);
   const [yearList, setYearList] = useState<number[]>(
     years.length > 0 ? years : [initialYear]
@@ -88,7 +91,7 @@ export default function SalaryManager({
       const [g, c, r] = await Promise.all([
         listGradeTable(targetYear),
         listConfig(targetYear),
-        listEmployeeSalaryRows(targetYear),
+        canViewPersonal ? listEmployeeSalaryRows(targetYear) : Promise.resolve([]),
       ]);
       setGrades(g);
       setConfigs(c);
@@ -142,7 +145,9 @@ export default function SalaryManager({
               { key: "config", label: "급여 기준값" },
               { key: "employee", label: "직원별 급여 설정" },
             ] as { key: SectionKey; label: string }[]
-          ).map((t) => (
+          )
+            .filter((t) => canViewPersonal || (t.key !== "monthly" && t.key !== "employee"))
+            .map((t) => (
             <button
               key={t.key}
               type="button"
@@ -155,7 +160,12 @@ export default function SalaryManager({
         </nav>
       </div>
 
-      {section === "monthly" && (
+      {!canViewPersonal && (
+        <p className="text-xs text-ink-hint">
+          월별 급여·직원별 급여 설정은 관장·부장과 관장이 지정한 사람(인사 파일 열람)만 봅니다.
+        </p>
+      )}
+      {canViewPersonal && section === "monthly" && (
         <MonthlyPayrollSection year={year} isM0={isM0} />
       )}
       {section === "grade" && (
@@ -172,7 +182,7 @@ export default function SalaryManager({
           onRefresh={() => reload(year)}
         />
       )}
-      {section === "employee" && (
+      {canViewPersonal && section === "employee" && (
         <EmployeeSalarySection
           year={year}
           grades={grades}

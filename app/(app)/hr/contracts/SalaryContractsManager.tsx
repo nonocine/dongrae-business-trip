@@ -297,7 +297,7 @@ function FocusEmptySalary({
   );
 }
 
-function HolidayPanel({ year, holidays, driverId }: { year: number; holidays: HolidayDates; driverId: string | null }) {
+export function HolidayPanel({ year, holidays, driverId }: { year: number; holidays: HolidayDates; driverId: string | null }) {
   const router = useRouter();
   const [seol, setSeol] = useState(holidays.seol ?? "");
   const [chuseok, setChuseok] = useState(holidays.chuseok ?? "");
@@ -659,7 +659,7 @@ function SegmentEditor({
 }
 
 // 4~6항 조항 문구 — settings. 보낸 계약서에는 영향 없음(고정본).
-function SalaryClauseEditor({ initial }: { initial: SalaryClauses }) {
+export function SalaryClauseEditor({ initial }: { initial: SalaryClauses }) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
   const [c, setC] = useState<SalaryClauses>(initial);

@@ -7,6 +7,7 @@ import {
   requireCertificateAccess,
   resolveCertificateAccess,
 } from "@/lib/certificateAccess";
+import { canViewPersonnelFileOf, resolvePersonnelViewer } from "@/lib/personnelAccess";
 import {
   CERT_TYPES,
   CERT_STATEMENT,
@@ -807,13 +808,14 @@ export async function reissuePdf(id: string): Promise<ReissueResult> {
     if (error) throw new Error(error.message);
     if (!data) return { ok: false, message: "발급 기록을 찾을 수 없습니다." };
     const rec = toCertificateIssue(data as Record<string, unknown>);
+    // 권한: 인사 파일 열람 보유자(관장·부장·관장이 지정한 사람) 또는 본인 것 — 기록 내용을
+    //   보기 전에 판정합니다.
+    if (!canViewPersonnelFileOf(await resolvePersonnelViewer(), rec.driver_id)) {
+      return { ok: false, message: "재발급 권한이 없습니다." };
+    }
     const snapshot = pdfSnapshotFromRecord(rec);
     if (!snapshot)
       return { ok: false, message: "재발급에 필요한 정보(snapshot)가 없습니다." };
-
-    // 권한: 관리자(M0/hr) 또는 본인 것.
-    const access = await resolveOwnershipOrAdmin(rec.driver_id, me.name.trim());
-    if (!access) return { ok: false, message: "재발급 권한이 없습니다." };
 
     const pdf = await buildCertificatePdf(snapshot, await loadSeal());
     return {
@@ -829,20 +831,3 @@ export async function reissuePdf(id: string): Promise<ReissueResult> {
   }
 }
 
-// 본인 소유이거나 관리자면 true. (재발급 권한)
-async function resolveOwnershipOrAdmin(
-  ownerDriverId: string | null,
-  myName: string
-): Promise<boolean> {
-  const { resolveCertificateAccess } = await import("@/lib/certificateAccess");
-  const admin = await resolveCertificateAccess();
-  if (admin) return true;
-  if (!ownerDriverId) return false;
-  const { data: driver } = await supabaseAdmin
-    .from("drivers")
-    .select("id")
-    .eq("name", myName)
-    .maybeSingle();
-  const myId = (driver as { id?: string } | null)?.id ?? null;
-  return !!myId && myId === ownerDriverId;
-}

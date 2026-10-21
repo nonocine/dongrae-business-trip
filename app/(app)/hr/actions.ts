@@ -40,6 +40,8 @@ import { AUTH_LEVELS, isM0Grant } from "@/lib/authLevels";
 import { hashPassword, isHashed } from "@/lib/password";
 import { isEmployeeRoleKey } from "@/lib/employeeRoles";
 import { listRolesForDriver } from "@/lib/employeeRolesServer";
+import { resolvePersonnelViewer } from "@/lib/personnelAccess";
+import { PERSONNEL_ROLE_KEY } from "@/lib/personnel";
 
 // =====================================================================
 // HR 영역 접근 게이트
@@ -52,10 +54,11 @@ import { listRolesForDriver } from "@/lib/employeeRolesServer";
 //     '부장이 인사를 본다' 는 조직 전제에 묶여 있어 위임도, 다른 기관 적용도
 //     불가능했습니다.
 //
-//   통과 조건 — 다음 중 하나:
-//     · isM0Grant : rank ∈ (관장·부장) OR master 계정 OR auth_level='M0'
-//     · hr 직무          → 인사(records) 영역만
-//     · recruitment 직무 → 채용(recruitment) 영역만
+//   통과 조건 — 영역별:
+//     · 인사(records) 영역 = 인사 파일 열람(personnel) 보유자만 — 관장·부장·master
+//       자동 + 관장이 지정한 사람(lib/personnel.ts). ★ 2026-10 관장 결정: hr 직무·
+//       권한등급 M0 만으로는 다른 직원 인사기록을 볼 수 없습니다.
+//     · 채용(recruitment) 영역 = isM0Grant(관장·부장·master·auth_level M0) 또는 채용 직무
 //
 //   ★ 영역(scope)을 나눈 이유: 두 직무는 하는 일이 다릅니다. 채용 담당자에게
 //     전 직원 인사기록카드를 열어 줄 이유가 없고, 인사 담당자에게 지원자
@@ -83,9 +86,8 @@ export type HrAccess = {
   scopes: HrScope[];
 };
 
-// 직무 → 열어 줄 영역.
+// 직무 → 열어 줄 영역. (인사 영역은 직무가 아니라 personnel 판정 — 아래)
 const HR_SCOPE_BY_ROLE: Record<string, HrScope> = {
-  hr: "records",
   recruitment: "recruitment",
 };
 
@@ -131,7 +133,10 @@ async function resolveHrAccess(): Promise<HrAccess | null> {
   }
 
   const isM0 = isM0Grant({ rank, email, authLevel });
-  if (isM0) return { name, isM0: true, scopes: ["records", "recruitment"] };
+  const personnel = !!(await resolvePersonnelViewer())?.isPersonnel;
+  if (isM0) {
+    return { name, isM0: true, scopes: personnel ? ["records", "recruitment"] : ["recruitment"] };
+  }
 
   // --- 직무로 여는 경로 ---
   //   퇴사자는 직무 행이 남아 있어도 들어오지 못하게 재직 여부를 확인합니다.
@@ -147,11 +152,12 @@ async function resolveHrAccess(): Promise<HrAccess | null> {
 
   const roles = await listRolesForDriver(driverId);
   const scopes = [
-    ...new Set(
-      roles
+    ...new Set([
+      ...(personnel ? (["records"] as HrScope[]) : []),
+      ...roles
         .map((r) => HR_SCOPE_BY_ROLE[r])
         .filter((s): s is HrScope => s !== undefined),
-    ),
+    ]),
   ];
   if (scopes.length === 0) return null;
   return { name, isM0: false, scopes };
@@ -611,7 +617,8 @@ export async function getEmployeeAuthLevel(
 
 // =====================================================================
 // 직원 직무(employee_roles) — 다중 직무 부여/해제.
-//   * 조회는 HR 관리자, 변경은 M0(관장·부장·master) 공유 권한만.
+//   * 조회는 인사 영역(personnel), 변경은 M0(관장·부장·master) 공유 권한만.
+//   * 단, 인사 파일 열람(personnel) 직무는 관장(·master)만 주고 뺄 수 있습니다.
 //   * EMPLOYEE_ROLES 에 정의된 key 만 허용. 직무 0개도 정상(일반 직원).
 //   * employee_roles 는 service_role 경유(supabaseAdmin) — listRolesForDriver 재사용.
 // =====================================================================
@@ -642,6 +649,14 @@ export async function setEmployeeRoles(
     const current = await listRolesForDriver(driverId);
     const toAdd = wanted.filter((k) => !current.includes(k));
     const toRemove = current.filter((k) => !wanted.includes(k));
+
+    // 인사 파일 열람(personnel)은 관장(·master)만 주고 뺄 수 있습니다 — 부장도 불가.
+    if ([...toAdd, ...toRemove].includes(PERSONNEL_ROLE_KEY)) {
+      const v = await resolvePersonnelViewer();
+      if (!v?.canGrantPersonnel) {
+        return { ok: false, message: "'인사 파일 열람' 권한은 관장만 주고 뺄 수 있습니다." };
+      }
+    }
 
     if (toAdd.length > 0) {
       const rows = toAdd.map((role_key) => ({ driver_id: driverId, role_key }));

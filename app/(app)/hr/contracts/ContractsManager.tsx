@@ -413,7 +413,7 @@ export default function ContractsManager({
 }
 
 // 조항 문구 — settings 테이블. 줄마다 한 항목. 보낸 계약서에는 영향 없음(고정본).
-function ClauseEditor({ initial }: { initial: ContractClauses }) {
+export function ClauseEditor({ initial }: { initial: ContractClauses }) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
   const [c, setC] = useState<ContractClauses>(initial);

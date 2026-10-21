@@ -183,7 +183,8 @@ export async function saveTraining(
         return {
           ok: false,
           message: `이수 기록이 있는 ${excluded.length}명이 대상에서 제외됩니다.`,
-          excluded,
+          // 누가 이수했는지는 인사 파일 — 열람 권한이 없으면 이름 대신 자리표시만.
+          excluded: ctx.isPersonnel ? excluded : excluded.map(() => "○○○"),
         };
       }
     }
@@ -339,7 +340,7 @@ export async function deleteTraining(
   id: string
 ): Promise<{ ok: true } | { ok: false; message: string }> {
   try {
-    await requireTrainingAccess();
+    await requireTrainingAccess({ personnel: true });
     if (!id) return { ok: false, message: "교육 정보가 없습니다." };
 
     const { data: comps } = await supabaseAdmin
@@ -480,9 +481,17 @@ export type {
   TrainingMatrix,
 } from "@/lib/trainingMatrix";
 
+// 인사 파일 열람 보유자 = 전체(이수·수료증·입사일). 그 밖(일정 담당 hr 직무)은 대상자를 고를
+//   이름 목록과 교육 정보만 — 이수 기록·입퇴사일은 내려보내지 않습니다(화면도 현황판을 숨김).
 export async function getTrainingMatrix(year: number): Promise<TrainingMatrix> {
-  await requireTrainingAccess();
-  return loadTrainingMatrix(year);
+  const ctx = await requireTrainingAccess();
+  const m = await loadTrainingMatrix(year);
+  if (ctx.isPersonnel) return m;
+  return {
+    ...m,
+    completions: [],
+    employees: m.employees.map((e) => ({ ...e, joinDate: null, resignationDate: null })),
+  };
 }
 
 // 대시보드 관리 카드용 요약 — 올해 활성 교육 중 "대상"인 (교육×직원) 셀만 집계.
@@ -553,7 +562,7 @@ export async function adminUploadCertificate(
   formData: FormData
 ): Promise<{ ok: true; signedUrl: string | null } | { ok: false; message: string }> {
   try {
-    const ctx = await requireTrainingAccess();
+    const ctx = await requireTrainingAccess({ personnel: true });
 
     const trainingId = String(formData.get("training_id") ?? "").trim();
     const driverId = String(formData.get("driver_id") ?? "").trim();
@@ -674,7 +683,7 @@ export async function adminGetCertificateUrl(
   trainingId: string,
   driverId: string
 ): Promise<string | null> {
-  await requireTrainingAccess();
+  await requireTrainingAccess({ personnel: true });
   if (!trainingId || !driverId) return null;
   const { data } = await supabaseAdmin
     .from("training_completions")
@@ -695,7 +704,7 @@ export async function adminDeleteCompletion(
   driverId: string
 ): Promise<{ ok: true } | { ok: false; message: string }> {
   try {
-    await requireTrainingAccess();
+    await requireTrainingAccess({ personnel: true });
     if (!trainingId || !driverId) {
       return { ok: false, message: "교육/직원 정보가 누락되었습니다." };
     }
@@ -738,7 +747,7 @@ export async function runTrainingReminderNow(): Promise<
   | { ok: false; message: string }
 > {
   try {
-    const ctx = await requireTrainingAccess();
+    const ctx = await requireTrainingAccess({ personnel: true });
     if (!ctx.isM0) {
       return { ok: false, message: "알림 미리보기는 관장·부장만 실행할 수 있습니다." };
     }

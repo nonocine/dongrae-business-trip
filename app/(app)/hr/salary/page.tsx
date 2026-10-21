@@ -16,7 +16,9 @@ export const dynamic = "force-dynamic";
 export default async function SalaryPage() {
   await enforcePasswordChange();
 
-  // 접근: M0(관장·부장·master) 또는 회계(accounting) 직무만. 그 외 / 로.
+  // 접근: M0(관장·부장·master) · 회계(accounting) 직무 · 인사 파일 열람. 그 외 / 로.
+  //   ★ 직원별 급여 설정·월별 급여는 인사 파일 열람 보유자에게만 불러옵니다(2026-10 관장 결정).
+  //     회계 직무만이면 호봉표·급여 기준값만 보입니다.
   const access = await resolveSalaryAccess();
   if (!access) {
     redirect("/");
@@ -29,8 +31,8 @@ export default async function SalaryPage() {
   const [gradeTable, config, employees, salaryRows] = await Promise.all([
     listGradeTable(initialYear),
     listConfig(initialYear),
-    listSalaryEmployees(),
-    listEmployeeSalaryRows(initialYear),
+    access.isPersonnel ? listSalaryEmployees() : Promise.resolve([]),
+    access.isPersonnel ? listEmployeeSalaryRows(initialYear) : Promise.resolve([]),
   ]);
 
   return (
@@ -61,6 +63,7 @@ export default async function SalaryPage() {
         employees={employees}
         salaryRows={salaryRows}
         isM0={access.isM0}
+        canViewPersonal={access.isPersonnel}
       />
     </div>
   );

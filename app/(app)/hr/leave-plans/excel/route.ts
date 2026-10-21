@@ -10,7 +10,7 @@ export const dynamic = "force-dynamic";
 //   employeeId 없으면 그 연도 발부 전체(직원당 1시트).
 export async function GET(req: Request) {
   try {
-    await requireSalaryAccess();
+    await requireSalaryAccess({ personnel: true });
   } catch {
     return new Response("권한이 없습니다.", { status: 403 });
   }

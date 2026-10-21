@@ -24,9 +24,10 @@ function assert(cond: boolean, message: string) {
   if (!cond) throw new Error(message);
 }
 
-const ctx = (isM0: boolean, roles: string[]): MenuContext => ({
+const ctx = (isM0: boolean, roles: string[], isPersonnel = false): MenuContext => ({
   isM0,
   roles: new Set(roles),
+  isPersonnel,
 });
 
 function sees(c: MenuContext, key: string): boolean {
@@ -42,7 +43,6 @@ const M0_OR_ROLE = [
   ["facility-driving", "facility"],
   ["facility-rentals", "facility"],
   ["accounting-salary", "accounting"],
-  ["accounting-leave-plans", "accounting"],
   ["bangka-members", "bangka"],
   ["bangka-posts", "bangka"],
   ["bangka-meals", "bangka"],
@@ -67,14 +67,35 @@ for (const [key, role] of M0_OR_ROLE) {
   );
 }
 
-// --- 2) 직무 전용 항목은 M0 라고 해서 '담당 업무' 에 끼어들지 않습니다 ---
+// --- 2) 인사 파일 메뉴 — 2026-10 관장 결정: 인사 파일 열람(personnel) 기준 ---------
 //   M0 의 진입점은 '관리자 영역' 카드가 따로 맡습니다(중복 노출 방지).
-for (const key of ["hr-records", "hr-certificates", "hr-trainings"]) {
+for (const key of ["hr-records", "hr-certificates"]) {
   assert(
-    !sees(ctx(true, []), key),
-    `${key}: 직무 없는 M0 의 '담당 업무' 에는 나오면 안 됩니다(관리자 영역이 맡음).`,
+    !sees(ctx(true, [], true), key),
+    `${key}: M0 의 '담당 업무' 에는 나오면 안 됩니다(관리자 영역이 맡음).`,
   );
-  assert(sees(ctx(false, ["hr"]), key), `${key}: hr 직무에게 보여야 합니다.`);
+  assert(sees(ctx(false, [], true), key), `${key}: 인사 파일 열람 보유자에게 보여야 합니다.`);
+  assert(!sees(ctx(false, ["hr", "accounting"]), key), `${key}: hr·회계 직무만으로는 보이면 안 됩니다.`);
+}
+// 서식·일정 담당(hr 직무)은 계약서·의무교육 화면에 들어옵니다(직원별 내용은 가드가 막음).
+for (const key of ["hr-contracts", "hr-trainings"]) {
+  assert(!sees(ctx(true, []), key), `${key}: 직무 없는 M0 의 '담당 업무' 에는 나오면 안 됩니다.`);
+  assert(sees(ctx(false, ["hr"]), key), `${key}: hr 직무에게 보여야 합니다(서식·일정).`);
+  assert(sees(ctx(false, [], true), key), `${key}: 인사 파일 열람 보유자에게 보여야 합니다.`);
+  assert(!sees(ctx(false, ["accounting"]), key), `${key}: 회계 직무만으로는 보이면 안 됩니다.`);
+}
+// 연차 사용촉진 — 직원별 연차는 인사 파일. 회계 직무만으로는 안 보입니다.
+assert(sees(ctx(true, [], true), "accounting-leave-plans"), "관장·부장은 연차 사용촉진을 봅니다.");
+assert(sees(ctx(false, [], true), "accounting-leave-plans"), "인사 파일 열람 보유자는 연차 사용촉진을 봅니다.");
+assert(!sees(ctx(false, ["accounting"]), "accounting-leave-plans"), "회계 직무만으로는 연차 사용촉진이 안 보입니다.");
+assert(!sees(ctx(true, []), "accounting-leave-plans"), "인사 파일 열람이 없는 M0 권한등급에는 안 보입니다.");
+// 급여 — 회계 직무(호봉표·기준값)·인사 파일 열람 둘 다 들어옵니다.
+assert(sees(ctx(false, [], true), "accounting-salary"), "인사 파일 열람 보유자는 급여 화면에 들어옵니다.");
+// 관리자 영역의 인사 파일 항목 — M0 이면서 인사 파일 열람.
+for (const key of ["admin-records", "admin-roles", "admin-certificates"]) {
+  assert(sees(ctx(true, [], true), key), `${key}: 관장·부장에게 보여야 합니다.`);
+  assert(!sees(ctx(true, []), key), `${key}: 인사 파일 열람 없는 M0 권한등급에는 안 보입니다.`);
+  assert(!sees(ctx(false, [], true), key), `${key}: M0 아닌 보유자는 담당 업무 쪽으로 들어옵니다.`);
 }
 assert(
   sees(ctx(false, ["recruitment"]), "recruitment-manage"),
@@ -91,7 +112,7 @@ assert(
   !sees(ctx(false, ["hr"]), "admin-records"),
   "관리자 영역은 M0 만 봅니다.",
 );
-assert(sees(ctx(true, []), "admin-records"), "M0 는 관리자 영역을 봅니다.");
+assert(sees(ctx(true, []), "admin-contracts"), "M0 는 관리자 영역을 봅니다.");
 
 // --- 4) 직무가 하나도 없는 일반 직원 ----------------------------------
 //   공통만 보이고 '담당 업무'·'관리자 영역' 은 비어 있어야 합니다.

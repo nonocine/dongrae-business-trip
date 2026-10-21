@@ -157,7 +157,7 @@ function toRow(
 export async function getLeavePlanOverview(
   yearInput?: number
 ): Promise<LeavePlanOverview> {
-  const ctx = await requireSalaryAccess();
+  const ctx = await requireSalaryAccess({ personnel: true });
   const thisYear = Number(kstTodayYmd().slice(0, 4));
 
   const { data: yearRows } = await supabaseAdmin.from(REQ).select("year");
@@ -230,7 +230,7 @@ export async function issueLeavePlans(input: {
   targets: IssueTarget[];
 }): Promise<IssueResult> {
   try {
-    const ctx = await requireSalaryAccess();
+    const ctx = await requireSalaryAccess({ personnel: true });
     const year = Math.round(Number(input.year));
     if (!Number.isFinite(year) || year <= 0)
       return { ok: false, message: "연도를 확인하세요." };
@@ -347,7 +347,7 @@ export async function revokeLeavePlan(
   id: string
 ): Promise<{ ok: true } | { ok: false; message: string }> {
   try {
-    await requireSalaryAccess();
+    await requireSalaryAccess({ personnel: true });
     if (!id) return { ok: false, message: "대상이 없습니다." };
     const { data, error } = await supabaseAdmin
       .from(REQ)
@@ -381,7 +381,7 @@ export async function unsubmitLeavePlan(
   id: string
 ): Promise<{ ok: true } | { ok: false; message: string }> {
   try {
-    await requireSalaryAccess();
+    await requireSalaryAccess({ personnel: true });
     if (!id) return { ok: false, message: "대상이 없습니다." };
     const { data, error } = await supabaseAdmin
       .from(REQ)
@@ -414,7 +414,7 @@ export async function remindLeavePlans(
   | { ok: false; message: string }
 > {
   try {
-    await requireSalaryAccess();
+    await requireSalaryAccess({ personnel: true });
     const y = Math.round(Number(year));
     if (!Number.isFinite(y) || y <= 0)
       return { ok: false, message: "연도를 확인하세요." };
@@ -473,7 +473,7 @@ export async function loadLeavePlansForExport(input: {
   year: number;
   employeeId?: string;
 }): Promise<LeavePlanRow[]> {
-  await requireSalaryAccess();
+  await requireSalaryAccess({ personnel: true });
   return loadRowsForExport(input);
 }
 
@@ -556,7 +556,7 @@ export async function buildLeavePlanPdfFor(input: {
   employeeId: string;
 }): Promise<LeavePlanPdfResult> {
   try {
-    await requireSalaryAccess();
+    await requireSalaryAccess({ personnel: true });
     if (!input.employeeId) return { ok: false, message: "대상이 없습니다." };
     const rows = await loadRowsForExport({
       year: input.year,
@@ -602,7 +602,7 @@ export async function buildLeavePlanBundle(
   year: number
 ): Promise<LeavePlanBundleResult> {
   try {
-    await requireSalaryAccess();
+    await requireSalaryAccess({ personnel: true });
     const y = Math.round(Number(year));
     if (!Number.isFinite(y) || y <= 0)
       return { ok: false, message: "연도를 확인하세요." };

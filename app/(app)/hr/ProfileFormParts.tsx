@@ -1413,15 +1413,20 @@ function EmployeeDocRow({
 //   * HR 직원관리 폼: 편집 가능(M0). 저장 시 onSave(roleKeys) 호출.
 //   * 직원 본인 마이페이지: readOnly(열람만, onSave 없음).
 //   * 권한등급 박스와 동일한 톤. 0개 선택도 정상.
+//   * 관장 전용 직무(chiefOnly — 인사 파일 열람)는 showChiefOnly 일 때만 칸이 보입니다.
+//     읽기 전용(본인 마이페이지 등)에서는 가진 경우에만 보입니다. 숨겨도 선택 상태는
+//     그대로 들고 저장하므로, 관장 아닌 사람이 저장해도 그 직무는 바뀌지 않습니다.
 // =====================================================================
 export function EmployeeRolesSection({
   initialRoles,
   readOnly,
   onSave,
+  showChiefOnly = false,
 }: {
   initialRoles: string[];
   readOnly: boolean;
   onSave?: (roleKeys: string[]) => Promise<ActionResult>;
+  showChiefOnly?: boolean;
 }) {
   const [selected, setSelected] = useState<Set<string>>(
     () => new Set(initialRoles)
@@ -1470,7 +1475,9 @@ export function EmployeeRolesSection({
         대시보드 메뉴·기능 접근의 기준이 됩니다. 여러 개 선택할 수 있습니다.
       </p>
       <div className="mt-2 grid grid-cols-1 gap-1.5 sm:grid-cols-2">
-        {EMPLOYEE_ROLES.map((r) => {
+        {EMPLOYEE_ROLES.filter(
+          (r) => !r.chiefOnly || showChiefOnly || (readOnly && selected.has(r.key))
+        ).map((r) => {
           const on = selected.has(r.key);
           return (
             <label

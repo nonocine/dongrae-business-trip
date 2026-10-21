@@ -10,15 +10,17 @@ export type EmployeeRole = {
   key: string;
   label: string;
   description: string;
+  // 관장(·master)만 주고 뺄 수 있고, 지정 화면에서도 관장에게만 보이는 칸.
+  chiefOnly?: boolean;
 };
 
 export const EMPLOYEE_ROLES: EmployeeRole[] = [
   { key: "facility", label: "시설관리", description: "비품·거래처 관리" },
-  { key: "accounting", label: "회계", description: "급여·예산" },
+  { key: "accounting", label: "회계", description: "호봉표·급여 기준값·강사비·예산 (개인별 급여는 인사 파일 열람)" },
   {
     key: "hr",
     label: "인사",
-    description: "직원정보·증명서·의무교육 현황",
+    description: "의무교육 일정·계약서 조항·명함첩 (직원 파일은 인사 파일 열람)",
   },
   { key: "recruitment", label: "채용", description: "지원자 심사" },
   {
@@ -37,6 +39,14 @@ export const EMPLOYEE_ROLES: EmployeeRole[] = [
     key: "bangka",
     label: "방과후아카데미",
     description: "학생·보호자 관리(동래방카)",
+  },
+  {
+    // 다른 직원의 인사 파일(인사기록·계약·급여·연가·증명서·의무교육 개인별) 열람.
+    //   관장·부장은 이 행 없이도 자동 포함(lib/personnel.ts). hr·회계 직무와 별개.
+    key: "personnel",
+    label: "인사 파일 열람",
+    description: "다른 직원의 인사기록·계약서·급여·증명서·의무교육 열람 (관장만 지정)",
+    chiefOnly: true,
   },
 ];
 

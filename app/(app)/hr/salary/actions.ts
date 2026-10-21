@@ -425,7 +425,7 @@ export type SalaryEmployee = {
 
 // 급여 설정 대상 직원 — drivers + employee_profiles 재직 상태. 재직 우선 정렬.
 export async function listSalaryEmployees(): Promise<SalaryEmployee[]> {
-  await requireSalaryAccess();
+  await requireSalaryAccess({ personnel: true });
   const [{ data: drivers, error: dErr }, { data: profiles }] =
     await Promise.all([
       supabaseAdmin.from("drivers").select("id, name, rank, created_at"),
@@ -476,7 +476,7 @@ export async function listSalaryEmployees(): Promise<SalaryEmployee[]> {
 export async function listEmployeeSalaryRows(
   year: number
 ): Promise<EmployeeSalaryProfileRow[]> {
-  await requireSalaryAccess();
+  await requireSalaryAccess({ personnel: true });
   const { data, error } = await supabaseAdmin
     .from("employee_salary_profiles")
     .select("*")
@@ -502,7 +502,7 @@ export async function saveEmployeeSalaryRows(input: {
   }[];
 }): Promise<{ ok: true } | { ok: false; message: string }> {
   try {
-    await requireSalaryAccess();
+    await requireSalaryAccess({ personnel: true });
     const driverId = input.driverId?.trim();
     const year = Number(input.year);
     if (!driverId) return { ok: false, message: "직원이 지정되지 않았습니다." };

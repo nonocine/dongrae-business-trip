@@ -24,6 +24,7 @@ import {
 } from "@/lib/salaryContractServer";
 import {
   requireContractAdmin,
+  requireContractPersonnel,
   readCurrentClausesRaw,
   readSetting,
   writeSetting,
@@ -69,7 +70,7 @@ export type SalaryWorkspace = {
 
 // 그 해 급여설정이 있는 재직 직원 + 계산 재료. 화면이 미리보기를 직접 계산하도록 넘깁니다.
 export async function getSalaryWorkspace(year: number): Promise<SalaryWorkspace> {
-  await requireContractAdmin();
+  await requireContractPersonnel();
   const y = Math.trunc(Number(year)) || new Date().getFullYear();
   const [inputs, { data: profs }, { data: drivers }, { data: emp }, { data: existing }, clausesRaw] = await Promise.all([
     loadCalcInputs(y),
@@ -109,11 +110,21 @@ export async function getSalaryWorkspace(year: number): Promise<SalaryWorkspace>
   return { year: y, ...inputs, clauses: parseSalaryClauses(clausesRaw), employees };
 }
 
+// 서식만(명절 날짜·연봉계약서 조항) — 직원 정보 없이. 인사 파일 열람 권한이 없는 hr 직무용 화면.
+export async function getSalaryTemplates(
+  year: number
+): Promise<{ year: number; holidays: HolidayDates; clauses: SalaryClauses }> {
+  await requireContractAdmin();
+  const y = Math.trunc(Number(year)) || new Date().getFullYear();
+  const [{ holidays }, clausesRaw] = await Promise.all([loadCalcInputs(y), readCurrentClausesRaw("salary")]);
+  return { year: y, holidays, clauses: parseSalaryClauses(clausesRaw) };
+}
+
 export type { SalaryContractInput } from "@/lib/salaryContractServer";
 
 export async function saveSalaryContract(input: SalaryContractInput): Promise<Result<{ id: string; total: number }>> {
   try {
-    const me = await requireContractAdmin();
+    const me = await requireContractPersonnel();
     const res = await saveSalaryContractCore(input, me);
     if (res.ok) revalidatePath("/hr/contracts");
     return res;
@@ -129,7 +140,7 @@ export async function bulkCreateSalaryDrafts(
   driverIds: string[]
 ): Promise<Result<{ created: string[]; skipped: { name: string; reason: string }[] }>> {
   try {
-    await requireContractAdmin();
+    await requireContractPersonnel();
     const ws = await getSalaryWorkspace(year);
     const created: string[] = [];
     const skipped: { name: string; reason: string }[] = [];
@@ -159,7 +170,7 @@ export async function getSalaryContractForEdit(
   id: string
 ): Promise<Result<{ driverId: string; year: number; segments: SegmentInput[]; status: string; overrideReason: string }>> {
   try {
-    await requireContractAdmin();
+    await requireContractPersonnel();
     const { data, error } = await supabaseAdmin.from(TABLE).select(SALARY_LIST_COLUMNS).eq("id", id).maybeSingle();
     if (error) throw new Error(error.message);
     if (!data) return { ok: false, message: "계약서를 찾을 수 없습니다." };

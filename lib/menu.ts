@@ -83,6 +83,14 @@ export const MENU_GROUP_LABEL: Record<MenuGroup, string> = {
 //       관장에게는 비품관리·안전점검·운행기록·대관예약 진입점이 아예 없었습니다
 //       (들어갈 수는 있는데 메뉴에 없어 주소를 직접 쳐야 했습니다).
 //       메뉴가 가드보다 좁으면 그냥 버그입니다.
+//   인사 파일 열람(personnel — 관장·부장·master 자동 + 관장이 지정한 사람, lib/personnel.ts).
+//     ★ 2026-10 관장 결정: 다른 직원의 인사 파일 화면은 이 권한 기준. hr·회계 직무는
+//       인사 파일과 무관한 일(서식·호봉표·의무교육 일정)로만 들어옵니다.
+//   personnel        : 보유자 전원(관장·부장 포함) — 연차 사용촉진처럼 그룹 하나에만 있는 항목.
+//   personnelStaff   : 보유자 중 M0 가 아닌 사람 — '담당 업무' 쪽. M0 는 관리자 영역 카드로.
+//   m0Personnel      : M0 이면서 보유자 — 관리자 영역의 인사 파일 항목.
+//   roleOrPersonnel  : 직무 보유자 또는 personnelStaff — 서식·일정 담당 + 열람 권한자.
+//   m0OrRoleOrPersonnel: M0 · 직무 · 보유자 중 하나 — 가드가 셋 다 받는 라우트(/hr/salary).
 //   managerAdmin: /admin 진입 가능 여부 — isManagerAdmin() 과 같은 기준.
 //     ★ m0 보다 좁습니다. isM0Grant 는 rank ∈ (관장·부장) 이거나 master 이거나
 //       auth_level='M0' 면 참이지만, isManagerAdmin 은 '구글 세션' 이면서
@@ -93,6 +101,11 @@ export type MenuVisibility =
   | { kind: "m0" }
   | { kind: "role"; role: string }
   | { kind: "m0OrRole"; role: string }
+  | { kind: "personnel" }
+  | { kind: "personnelStaff" }
+  | { kind: "m0Personnel" }
+  | { kind: "roleOrPersonnel"; role: string }
+  | { kind: "m0OrRoleOrPersonnel"; role: string }
   | { kind: "managerAdmin" };
 
 // 데이터 조건 — 권한이 아니라 '보여 줄 내용이 있을 때만' 나타나는 항목.
@@ -321,7 +334,8 @@ export const MENU_ITEMS: MenuItem[] = [
     href: "/hr/salary",
     icon: "💰",
     desc: "호봉표·기준값·직원별 급여 설정",
-    show: { kind: "m0OrRole", role: "accounting" },
+    // 가드: M0·회계 직무(호봉표·기준값) · 인사 파일 열람(직원별 급여·월별 급여).
+    show: { kind: "m0OrRoleOrPersonnel", role: "accounting" },
   },
   {
     // 강사비 지출표 — 회계 담당이 이체·품의를 올리는 화면.
@@ -342,7 +356,8 @@ export const MENU_ITEMS: MenuItem[] = [
     href: "/hr/leave-plans",
     icon: "🌴",
     desc: "미사용 연차 사용계획서 발부·수합·서식 출력",
-    show: { kind: "m0OrRole", role: "accounting" },
+    // 직원별 연차·계획서 = 인사 파일 — 가드도 인사 파일 열람 보유자만.
+    show: { kind: "personnel" },
   },
   {
     key: "accounting-budget",
@@ -363,7 +378,7 @@ export const MENU_ITEMS: MenuItem[] = [
     href: "/hr?tab=records",
     icon: "👥",
     desc: "직원 인사기록카드 열람·입력",
-    show: { kind: "role", role: "hr" },
+    show: { kind: "personnelStaff" },
   },
   {
     key: "hr-certificates",
@@ -373,7 +388,7 @@ export const MENU_ITEMS: MenuItem[] = [
     icon: "🧾",
     // ★ 관리자 영역의 같은 항목과 달리 승인 대기 배지를 쓰지 않습니다(현행 유지).
     desc: "재직·경력증명서 발급·발급 기록",
-    show: { kind: "role", role: "hr" },
+    show: { kind: "personnelStaff" },
   },
   {
     key: "hr-discipline",
@@ -402,7 +417,8 @@ export const MENU_ITEMS: MenuItem[] = [
     href: "/hr/contracts",
     icon: "📝",
     desc: "근로·연봉계약서 작성·발송·서명 현황",
-    show: { kind: "role", role: "hr" },
+    // hr 직무는 서식(조항·명절 날짜)만, 직원별 계약은 인사 파일 열람 보유자.
+    show: { kind: "roleOrPersonnel", role: "hr" },
   },
   {
     key: "hr-trainings",
@@ -411,7 +427,8 @@ export const MENU_ITEMS: MenuItem[] = [
     href: "/hr/trainings",
     icon: "🎓",
     desc: "법정 의무교육 등록·이수 현황",
-    show: { kind: "role", role: "hr" },
+    // hr 직무는 교육 일정 등록, 이수 현황판은 인사 파일 열람 보유자.
+    show: { kind: "roleOrPersonnel", role: "hr" },
     // 관리자 영역과 달리 0건일 때 "모두 이수" 문구를 쓰지 않습니다(현행 유지).
     badgeDesc: (n) =>
       n && n > 0
@@ -509,7 +526,7 @@ export const MENU_ITEMS: MenuItem[] = [
     href: "/hr?tab=records",
     icon: "👥",
     desc: "인사기록카드 열람·입력, 첨부서류",
-    show: { kind: "m0" },
+    show: { kind: "m0Personnel" },
   },
   {
     // 경로는 위와 같지만 사람이 찾는 이름이 달라 카드를 따로 둡니다.
@@ -519,7 +536,7 @@ export const MENU_ITEMS: MenuItem[] = [
     href: "/hr?tab=records",
     icon: "🔑",
     desc: "권한등급·담당 직무 변경 (인사기록카드 편집)",
-    show: { kind: "m0" },
+    show: { kind: "m0Personnel" },
   },
   {
     key: "admin-trainings",
@@ -562,7 +579,7 @@ export const MENU_ITEMS: MenuItem[] = [
     href: "/hr/certificates",
     icon: "🧾",
     desc: "재직·경력증명서 발급·발급 기록",
-    show: { kind: "m0" },
+    show: { kind: "m0Personnel" },
     badgeDesc: (n) =>
       n && n > 0
         ? `승인 대기 ${n}건 — 발급·기록`
@@ -666,6 +683,8 @@ export type MenuContext = {
   // /admin 진입 가능 여부(isManagerAdmin). m0 와 기준이 다릅니다 — 위 주석 참고.
   //   값을 주지 않으면 false 로 봅니다(메뉴는 좁게 여는 쪽이 안전합니다).
   isManagerAdmin?: boolean;
+  // 인사 파일 열람(personnel) 보유 — lib/personnelAccess. 모르면 false(좁게).
+  isPersonnel?: boolean;
   // 데이터 조건(MenuDataCondition)의 값. 모르면 해당 항목을 숨깁니다.
   hasMyTrainings?: boolean;
 };
@@ -696,6 +715,16 @@ export function canSeeMenuItem(item: MenuItem, ctx: MenuContext): boolean {
       return hasRole(ctx, item.show.role);
     case "m0OrRole":
       return ctx.isM0 || hasRole(ctx, item.show.role);
+    case "personnel":
+      return ctx.isPersonnel === true;
+    case "personnelStaff":
+      return ctx.isPersonnel === true && !ctx.isM0;
+    case "m0Personnel":
+      return ctx.isM0 && ctx.isPersonnel === true;
+    case "roleOrPersonnel":
+      return hasRole(ctx, item.show.role) || (ctx.isPersonnel === true && !ctx.isM0);
+    case "m0OrRoleOrPersonnel":
+      return ctx.isM0 || hasRole(ctx, item.show.role) || ctx.isPersonnel === true;
     case "managerAdmin":
       return ctx.isManagerAdmin === true;
   }

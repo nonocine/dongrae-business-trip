@@ -13,7 +13,7 @@ export const dynamic = "force-dynamic";
 export async function GET(request: Request) {
   // 권한 — 미통과면 403. (급여대장은 개인정보 → 반드시 게이트)
   try {
-    await requireSalaryAccess();
+    await requireSalaryAccess({ personnel: true });
   } catch {
     return new Response("급여 관리 권한이 없습니다.", { status: 403 });
   }

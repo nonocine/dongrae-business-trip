@@ -35,7 +35,8 @@ import { isMailerConfigured, sendMailWithAttachment } from "@/lib/mailer";
 // =====================================================================
 // 월별 급여 — 생성·조회·수정·확정·확정취소 + 4대보험 EDI 업로드 (급여 2차)
 //   * 계산은 calcMonthlyPayroll 단일 출처(이원화 금지).
-//   * 권한: requireSalaryAccess(M0 또는 accounting). 확정취소만 M0 전용.
+//   * 권한: requireSalaryAccess({ personnel: true }) — 인사 파일 열람 보유자만(2026-10 관장 결정).
+//     확정취소는 그중 M0 전용.
 //   * payroll_records: driver_id, year, month, pay_items/deduct_items(jsonb),
 //     total_pay/total_deduct/net_pay, confirmed_at/confirmed_by, emailed_at.
 // =====================================================================
@@ -228,7 +229,7 @@ export async function generateMonthlyPayroll(input: {
   overwriteDrafts: boolean;
 }): Promise<GenerateResult> {
   try {
-    await requireSalaryAccess();
+    await requireSalaryAccess({ personnel: true });
     const year = Number(input.year);
     const month = Number(input.month);
     if (!Number.isInteger(year) || year < 2000 || year > 2100)
@@ -358,7 +359,7 @@ export async function listMonthlyPayroll(input: {
   year: number;
   month: number;
 }): Promise<MonthlyListResult> {
-  await requireSalaryAccess();
+  await requireSalaryAccess({ personnel: true });
   const year = Number(input.year);
   const month = Number(input.month);
   const ctx = await loadContext(year);
@@ -446,7 +447,7 @@ export async function savePayrollRecord(input: {
   deduct_items: PayItem[];
 }): Promise<{ ok: true } | { ok: false; message: string }> {
   try {
-    await requireSalaryAccess();
+    await requireSalaryAccess({ personnel: true });
     if (!input.recordId) return { ok: false, message: "레코드가 없습니다." };
 
     const { data: cur, error: curErr } = await supabaseAdmin
@@ -499,7 +500,7 @@ export async function confirmMonthlyPayroll(input: {
   | { ok: false; message?: string; warnings?: string[] }
 > {
   try {
-    const who = await requireSalaryAccess();
+    const who = await requireSalaryAccess({ personnel: true });
     const year = Number(input.year);
     const month = Number(input.month);
 
@@ -554,7 +555,7 @@ export async function cancelMonthlyConfirm(input: {
   month: number;
 }): Promise<{ ok: true; canceled: number } | { ok: false; message: string }> {
   try {
-    await requireSalaryAccess({ onlyM0: true });
+    await requireSalaryAccess({ onlyM0: true, personnel: true });
     const year = Number(input.year);
     const month = Number(input.month);
     const { data, error } = await supabaseAdmin
@@ -635,7 +636,7 @@ export async function previewEdiUpload(input: {
   base64: string;
 }): Promise<EdiPreviewResult> {
   try {
-    await requireSalaryAccess();
+    await requireSalaryAccess({ personnel: true });
     const year = Number(input.year);
     const month = Number(input.month);
     if (!EDI_FILE_TYPES.some((t) => t.value === input.fileType))
@@ -723,7 +724,7 @@ export async function applyEdiUpload(input: {
   | { ok: false; message: string }
 > {
   try {
-    await requireSalaryAccess();
+    await requireSalaryAccess({ personnel: true });
     const year = Number(input.year);
     const month = Number(input.month);
     if (input.fileType === "accident")
@@ -844,7 +845,7 @@ export async function listPayslipTargets(input: {
   year: number;
   month: number;
 }): Promise<PayslipTargetsResult> {
-  await requireSalaryAccess();
+  await requireSalaryAccess({ personnel: true });
   const year = Number(input.year);
   const month = Number(input.month);
   const ctx = await loadContext(year);
@@ -912,7 +913,7 @@ export async function sendPayslips(input: {
   driverIds: string[];
 }): Promise<PayslipSendResult> {
   try {
-    await requireSalaryAccess();
+    await requireSalaryAccess({ personnel: true });
     if (!isMailerConfigured()) {
       return { ok: false, notConfigured: true };
     }

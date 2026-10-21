@@ -15,7 +15,8 @@ export const dynamic = "force-dynamic";
 export default async function TrainingsPage() {
   await enforcePasswordChange();
 
-  // 접근: M0(관장·부장·master) 또는 hr(인사) 직무만. 그 외 / 로.
+  // 접근: M0(관장·부장·master) · hr(인사) 직무 · 인사 파일 열람. 그 외 / 로.
+  //   이수 현황판(직원별 이수·수료증)은 인사 파일 열람 보유자에게만 보입니다.
   const access = await resolveTrainingAccess();
   if (!access) redirect("/");
 
@@ -55,6 +56,7 @@ export default async function TrainingsPage() {
         trainings={trainings}
         matrix={matrix}
         isM0={access.isM0}
+        canViewPersonal={access.isPersonnel}
       />
     </div>
   );

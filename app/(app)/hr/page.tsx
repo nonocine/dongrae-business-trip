@@ -8,6 +8,7 @@ import {
 } from "@/app/(app)/hr/actions";
 import { enforcePasswordChange } from "@/app/actions";
 import { kstTodayYmd } from "@/lib/trainings";
+import { resolvePersonnelViewer } from "@/lib/personnelAccess";
 
 export const dynamic = "force-dynamic";
 
@@ -29,9 +30,12 @@ export default async function HrPage({
   //   권한등급(auth_level) 변경 가능 여부 — M0(관장·부장·master) 공유.
   const me = await requireHrAdmin();
   const canManageAuth = me.isM0;
+  // '인사 파일 열람' 직무 칸 — 관장(·master)에게만 보입니다(서버도 setEmployeeRoles 에서 검사).
+  const canGrantPersonnel = !!(await resolvePersonnelViewer())?.canGrantPersonnel;
 
   // 볼 수 있는 탭 — 영역(scope)에서 옵니다.
-  //   인사(records) 영역 = 인사기록카드·계약서·증명서, 채용 영역 = 채용공고.
+  //   인사(records) 영역 = 인사기록카드·계약서·증명서(인사 파일 열람 보유자),
+  //   채용 영역 = 채용공고.
   //   ★ 화면에서 감추는 것과 별개로, 각 액션이 requireHrAdmin(scope) 로
   //     다시 막습니다. 여기서는 조회 자체를 하지 않는 것이 핵심입니다 —
   //     채용 담당자에게 전 직원 인사기록을 내려보내지 않습니다.
@@ -77,6 +81,7 @@ export default async function HrPage({
         recruitmentPostings={recruitmentPostings}
         initialTab={initialTab}
         canManageAuth={canManageAuth}
+        canGrantPersonnel={canGrantPersonnel}
         allowedTabs={allowedTabs}
         today={kstTodayYmd()}
       />

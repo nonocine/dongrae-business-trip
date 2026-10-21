@@ -17,6 +17,7 @@ import { supabaseAdmin } from "@/lib/supabaseAdmin";
 import { HR_DOCUMENTS_BUCKET } from "@/lib/supabase";
 import { isM0Grant } from "@/lib/authLevels";
 import { listRolesForDriver } from "@/lib/employeeRolesServer";
+import { PERSONNEL_DENIED, resolvePersonnelViewer } from "@/lib/personnelAccess";
 import { decodeDataUrl } from "@/lib/recruitmentApplicantDocData";
 import { sendSlack, sendSlackDMDetailed, siteBaseUrl, slackLink } from "@/lib/slack";
 import {
@@ -62,9 +63,12 @@ export function fail(e: unknown): { ok: false; message: string } {
 }
 
 // --- 권한 ---------------------------------------------------------------
-export type ContractAdmin = { name: string; driverId: string | null; isM0: boolean };
+export type ContractAdmin = { name: string; driverId: string | null; isM0: boolean; isPersonnel: boolean };
 
-// 관리자 = M0(관장·부장·master) 또는 hr 직무. (증명서·의무교육과 같은 기준)
+// 계약서 화면 진입 = M0(관장·부장·master) · hr 직무 · 인사 파일 열람(personnel).
+//   ★ 2026-10 관장 결정: 직원별 계약(목록·내용·작성·보내기·PDF·센터장 서명 화면)은
+//     인사 파일 열람 보유자만 — requireContractPersonnel. hr 직무·M0 권한등급만으로는
+//     조항 문구·명절 날짜(직원 정보가 없는 서식) 편집까지만 합니다.
 export async function resolveContractAdmin(): Promise<ContractAdmin | null> {
   const me = await getSession();
   if (!me || me.kind !== "employee" || !me.name.trim()) return null;
@@ -90,13 +94,22 @@ export async function resolveContractAdmin(): Promise<ContractAdmin | null> {
   }
   const isM0 = isM0Grant({ rank, email: g?.email, authLevel });
   const roles = driverId ? await listRolesForDriver(driverId) : [];
-  if (!isM0 && !roles.includes("hr")) return null;
-  return { name: me.name.trim(), driverId, isM0 };
+  const isPersonnel = !!(await resolvePersonnelViewer())?.isPersonnel;
+  if (!isM0 && !roles.includes("hr") && !isPersonnel) return null;
+  return { name: me.name.trim(), driverId, isM0, isPersonnel };
 }
 
+// 서식(조항 문구·명절 날짜)용 — 직원 정보가 없는 동작만 이 게이트로 엽니다.
 export async function requireContractAdmin(): Promise<ContractAdmin> {
   const ctx = await resolveContractAdmin();
   if (!ctx) throw new Error("계약서 관리 권한이 없습니다. (관장·부장 또는 인사 담당자)");
+  return ctx;
+}
+
+// 직원별 계약(목록·내용·작성·보내기·되돌리기·PDF·센터장 서명 화면) — 인사 파일 열람 보유자만.
+export async function requireContractPersonnel(): Promise<ContractAdmin> {
+  const ctx = await resolveContractAdmin();
+  if (!ctx?.isPersonnel) throw new Error(PERSONNEL_DENIED);
   return ctx;
 }
 

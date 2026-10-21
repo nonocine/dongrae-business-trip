@@ -15,6 +15,7 @@ import {
 } from "@/lib/employmentContracts";
 import {
   requireContractAdmin,
+  requireContractPersonnel,
   readCurrentClausesRaw,
   writeSetting,
   namesById,
@@ -40,7 +41,7 @@ async function loadRow(id: string): Promise<Record<string, unknown>> {
 // 수정 폼에 채울 원본 한 건.
 export async function getEmploymentContract(id: string): Promise<Result<{ contract: EmploymentContract }>> {
   try {
-    await requireContractAdmin();
+    await requireContractPersonnel();
     const raw = await loadRow(id);
     const names = await namesById([String(raw.driver_id)]);
     return { ok: true, contract: toContract(raw, names.get(String(raw.driver_id)) ?? "") };
@@ -64,7 +65,7 @@ export type ContractEmployee = {
 // 재직자만. 직위·부서는 lib/appointments.currentAssignment(단일 출처) —
 //   drivers.rank 로 메꾸지 않습니다(직급과 직위는 다른 축).
 export async function listContractEmployees(): Promise<ContractEmployee[]> {
-  await requireContractAdmin();
+  await requireContractPersonnel();
   const [{ data: drivers }, { data: profs }] = await Promise.all([
     supabaseAdmin.from("drivers").select("id, name").order("name"),
     supabaseAdmin
@@ -136,7 +137,7 @@ function validate(input: ContractInput): string | null {
 
 export async function saveContract(input: ContractInput): Promise<Result<{ id: string }>> {
   try {
-    const me = await requireContractAdmin();
+    const me = await requireContractPersonnel();
     const msg = validate(input);
     if (msg) return { ok: false, message: msg };
     const t = (v: string | null | undefined) => (v ?? "").trim() || null;

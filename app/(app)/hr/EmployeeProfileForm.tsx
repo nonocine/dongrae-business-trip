@@ -86,6 +86,7 @@ export default function EmployeeProfileForm({
   driver,
   profile,
   canManageAuth,
+  canGrantPersonnel,
   knownDepartments,
   today,
   onDeleted,
@@ -97,6 +98,7 @@ export default function EmployeeProfileForm({
   profile: EmployeeProfile | null;
   // 권한등급(auth_level) 변경 가능 여부 — 관장(최고권한)만 true.
   canManageAuth: boolean;
+  canGrantPersonnel: boolean; // '인사 파일 열람' 직무 칸 — 관장(·master)에게만
   onDeleted: () => void;
 }) {
   const locked = profile?.is_locked === true;
@@ -583,6 +585,7 @@ export default function EmployeeProfileForm({
               <EmployeeRolesSection
                 initialRoles={roles}
                 readOnly={!canManageAuth}
+                showChiefOnly={canGrantPersonnel}
                 onSave={
                   canManageAuth
                     ? (keys) => setEmployeeRoles(driver.id, keys)

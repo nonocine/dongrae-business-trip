@@ -3,7 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
 import { getMyDriver } from "@/lib/contractServer";
-import { hasHrScope } from "@/app/(app)/hr/actions";
+import { hasPersonnelAccess } from "@/lib/personnelAccess";
 import { resolveDisciplineAdmin, uploadAttachment, removeAttachment, signAttachment, toAward } from "@/lib/hrDisciplineServer";
 import { AWARD_KINDS, isYmd, toAwardSource, type AwardRow, type AwardSource } from "@/lib/hrDiscipline";
 
@@ -31,13 +31,14 @@ export type CardAward = AwardRow & { limited: boolean }; // limited = 포상명�
 
 type Viewer = {
   isM0: boolean;
-  isHr: boolean; // records 영역(인사 담당) — M0 포함
+  isHr: boolean; // 인사 파일 열람(personnel) 보유 — 관장·부장 포함
   isSelf: boolean;
   name: string;
 };
 
 async function viewerFor(driverId: string): Promise<Viewer | null> {
-  const [me, m0, hr] = await Promise.all([getMyDriver(), resolveDisciplineAdmin(), hasHrScope("records")]);
+  // 인사 담당(isHr) = 인사 파일 열람(personnel) 보유자 — 2026-10 관장 결정(hr 직무만으로는 불가).
+  const [me, m0, hr] = await Promise.all([getMyDriver(), resolveDisciplineAdmin(), hasPersonnelAccess()]);
   const isSelf = !!me && me.id === driverId;
   const isM0 = !!m0;
   if (!isSelf && !isM0 && !hr) return null;
