@@ -1,4 +1,4 @@
-import { CONTRACT_ORG, circled, type ContractBlock } from "@/lib/contractCore";
+import { CONTRACT_ORG, circled, employerTitleOf, type ContractBlock } from "@/lib/contractCore";
 
 // =====================================================================
 // 계약서 본문(근로·연봉 공용) — 화면용. PDF(lib/contractPdf)와 같은 블록 배열을
@@ -142,7 +142,7 @@ export default function ContractView({
                     {employeeSigned && <span className="ml-1 text-success">서명 완료</span>}
                   </p>
                   <p>
-                    고용자 : {CONTRACT_ORG.employerTitle} (인)
+                    고용자 : {employerTitleOf(b.employerTitle)} (인)
                     {employerSigned && <span className="ml-1 text-success">서명 완료</span>}
                   </p>
                 </div>

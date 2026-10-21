@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   EDUCATION_DEGREES,
   FAMILY_RELATIONS,
@@ -14,7 +14,13 @@ import {
   type EmployeeTraining,
   type EmployeeAppointment,
 } from "@/lib/supabase";
-import { EMPLOYEE_DOC_SLOTS, type EmployeeDocItem } from "@/lib/employeeDocs";
+import {
+  EMPLOYEE_DOC_MAX_BYTES,
+  EMPLOYEE_DOC_SLOTS,
+  type EmployeeDocFile,
+  type EmployeeDocFiles,
+  type EmployeeDocItem,
+} from "@/lib/employeeDocs";
 import { EMPLOYEE_ROLES } from "@/lib/employeeRoles";
 import { tabBarCls, tabNavCls, tabItemCls } from "@/lib/ui";
 
@@ -1154,119 +1160,151 @@ export function AppointmentTab({
 // =====================================================================
 // 첨부서류 탭 — 직원 인사기록 첨부서류 10종(EMPLOYEE_DOC_SLOTS).
 //   * HR 직원관리 폼과 직원 본인 마이페이지가 공유합니다.
-//   * 업로드/삭제/열람 동작은 콜백으로 주입 — HR/본인 각자의 서버액션을 연결.
-//   * 파일은 즉시 업로드(폼 저장과 무관). path 는 서버가 documents jsonb 에 보관.
+//   * 목록·업로드/교체/삭제/열람 동작은 콜백으로 주입 — HR/본인 각자의 서버액션.
+//   * 파일은 즉시 업로드(폼 저장과 무관). 한 행 = 한 파일(employee_document_files).
+//   * 여러 장 허용(multiple) 서류는 [+ 파일 추가], 나머지는 1개(올리면 교체).
+//   * 필수 서류는 1개 이상이면 충족. 열기(브라우저 보기)와 내려받기(이름 자동) 분리.
 // =====================================================================
 export function EmployeeDocumentsSection({
-  initialDocuments,
   readOnly,
+  onList,
   onUpload,
   onDelete,
   onOpen,
 }: {
-  initialDocuments: Record<string, string>;
   readOnly: boolean;
-  onUpload: (docKey: string, file: File) => Promise<ActionResult>;
-  onDelete: (docKey: string) => Promise<ActionResult>;
-  onOpen: (docKey: string) => Promise<string | null>;
+  onList: () => Promise<EmployeeDocFiles>;
+  onUpload: (docKey: string, file: File, replaceId: string | null) => Promise<ActionResult>;
+  onDelete: (fileId: string) => Promise<ActionResult>;
+  onOpen: (fileId: string, download: boolean) => Promise<string | null>;
 }) {
-  const [uploaded, setUploaded] = useState<Set<string>>(
-    () => new Set(Object.keys(initialDocuments))
-  );
-  const [busyKey, setBusyKey] = useState<string | null>(null);
+  const [files, setFiles] = useState<EmployeeDocFiles | null>(null);
+  // 처리 중 표시 — 서류 key 또는 파일 id.
+  const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
-  function handleUpload(docKey: string, file: File) {
-    if (file.size > 16 * 1024 * 1024) {
+  const reload = useCallback(
+    () =>
+      onList()
+        .then(setFiles)
+        .catch(() => setError("첨부서류 목록을 불러오지 못했습니다.")),
+    [onList]
+  );
+  useEffect(() => {
+    void reload();
+  }, [reload]);
+
+  function run(key: string, task: () => Promise<ActionResult>, failLabel: string) {
+    setError(null);
+    setBusy(key);
+    task()
+      .then((res) => {
+        if (!res.ok) setError(res.message);
+        return reload();
+      })
+      .catch((e: unknown) =>
+        setError(e instanceof Error ? `${failLabel}: ${e.message}` : `${failLabel} 중 오류가 발생했습니다.`)
+      )
+      .finally(() => setBusy(null));
+  }
+
+  function upload(docKey: string, file: File, replaceId: string | null) {
+    if (file.size > EMPLOYEE_DOC_MAX_BYTES) {
       setError("파일 용량은 16MB 이하여야 합니다.");
       return;
     }
-    setError(null);
-    setBusyKey(docKey);
-    onUpload(docKey, file)
-      .then((res) => {
-        if (res.ok) {
-          setUploaded((prev) => new Set(prev).add(docKey));
-        } else {
-          setError(res.message);
-        }
-      })
-      .catch((e: unknown) =>
-        setError(
-          e instanceof Error
-            ? `업로드 실패: ${e.message}`
-            : "업로드 중 오류가 발생했습니다."
-        )
-      )
-      .finally(() => setBusyKey(null));
+    run(replaceId ?? docKey, () => onUpload(docKey, file, replaceId), "업로드 실패");
   }
 
-  function handleDelete(docKey: string) {
-    if (!confirm("첨부 파일을 삭제할까요?")) return;
-    setError(null);
-    setBusyKey(docKey);
-    onDelete(docKey)
-      .then((res) => {
-        if (res.ok) {
-          setUploaded((prev) => {
-            const next = new Set(prev);
-            next.delete(docKey);
-            return next;
-          });
-        } else {
-          setError(res.message);
-        }
-      })
-      .catch((e: unknown) =>
-        setError(
-          e instanceof Error
-            ? `삭제 실패: ${e.message}`
-            : "삭제 중 오류가 발생했습니다."
-        )
-      )
-      .finally(() => setBusyKey(null));
+  function remove(fileId: string) {
+    if (!confirm("이 파일을 삭제할까요?")) return;
+    run(fileId, () => onDelete(fileId), "삭제 실패");
   }
 
-  function handleOpen(docKey: string) {
+  function open(fileId: string, download: boolean) {
     setError(null);
-    setBusyKey(docKey);
-    onOpen(docKey)
+    setBusy(fileId);
+    onOpen(fileId, download)
       .then((url) => {
-        if (url) window.open(url, "_blank", "noopener,noreferrer");
-        else setError("열람 URL을 발급하지 못했습니다.");
+        if (!url) setError("열람 URL을 발급하지 못했습니다.");
+        else if (!download) window.open(url, "_blank", "noopener,noreferrer");
+        else {
+          // 서명 URL 의 download 파라미터가 Content-Disposition: attachment 를 붙입니다.
+          const a = document.createElement("a");
+          a.href = url;
+          a.rel = "noopener";
+          document.body.appendChild(a);
+          a.click();
+          a.remove();
+        }
       })
       .catch(() => setError("열람 중 오류가 발생했습니다."))
-      .finally(() => setBusyKey(null));
+      .finally(() => setBusy(null));
   }
 
   return (
     <div className="space-y-2">
-      <p className="text-xs text-ink-muted">
-        PDF · JPG · PNG · WEBP, 파일당 16MB 이하. 여러 장이면 1개 파일로 합쳐
-        첨부하세요.
-      </p>
-      <ul className="space-y-2">
-        {EMPLOYEE_DOC_SLOTS.map((doc) => (
-          <EmployeeDocRow
-            key={doc.key}
-            doc={doc}
-            uploaded={uploaded.has(doc.key)}
-            busy={busyKey === doc.key}
-            readOnly={readOnly}
-            onPick={(file) => handleUpload(doc.key, file)}
-            onOpen={() => handleOpen(doc.key)}
-            onDelete={() => handleDelete(doc.key)}
-          />
-        ))}
-      </ul>
+      <p className="text-xs text-ink-muted">PDF · JPG · PNG · WEBP, 파일당 16MB 이하.</p>
+      {files === null ? (
+        <p className="text-xs text-ink-hint">불러오는 중…</p>
+      ) : (
+        <ul className="space-y-2">
+          {EMPLOYEE_DOC_SLOTS.map((doc) => (
+            <EmployeeDocRow
+              key={doc.key}
+              doc={doc}
+              files={files[doc.key] ?? []}
+              busy={busy}
+              readOnly={readOnly}
+              onPick={(file, replaceId) => upload(doc.key, file, replaceId)}
+              onOpen={open}
+              onDelete={remove}
+            />
+          ))}
+        </ul>
+      )}
       {error && <p className="text-xs text-stamp">{error}</p>}
     </div>
   );
 }
 
+const DOC_ACCEPT = "application/pdf,image/jpeg,image/png,image/webp";
+
+// 파일 고르기 버튼(label 안에 숨은 input).
+function DocPickButton({
+  label,
+  disabled,
+  onPick,
+}: {
+  label: string;
+  disabled: boolean;
+  onPick: (file: File) => void;
+}) {
+  return (
+    <label
+      className={`cursor-pointer rounded-lg border border-navy bg-card px-3 py-1.5 text-xs font-semibold text-navy hover:bg-navy-soft ${
+        disabled ? "pointer-events-none opacity-60" : ""
+      }`}
+    >
+      {label}
+      <input
+        type="file"
+        accept={DOC_ACCEPT}
+        className="sr-only"
+        disabled={disabled}
+        onChange={(e) => {
+          const f = e.target.files?.[0];
+          e.target.value = "";
+          if (f) onPick(f);
+        }}
+      />
+    </label>
+  );
+}
+
 function EmployeeDocRow({
   doc,
-  uploaded,
+  files,
   busy,
   readOnly,
   onPick,
@@ -1274,15 +1312,17 @@ function EmployeeDocRow({
   onDelete,
 }: {
   doc: EmployeeDocItem;
-  uploaded: boolean;
-  busy: boolean;
+  files: EmployeeDocFile[];
+  busy: string | null;
   readOnly: boolean;
-  onPick: (file: File) => void;
-  onOpen: () => void;
-  onDelete: () => void;
+  onPick: (file: File, replaceId: string | null) => void;
+  onOpen: (fileId: string, download: boolean) => void;
+  onDelete: (fileId: string) => void;
 }) {
+  const anyBusy = busy !== null;
+  const canAdd = !readOnly && (doc.multiple || files.length === 0);
   return (
-    <li className="rounded-lg border border-line bg-card p-3 shadow-sm">
+    <li className="rounded-lg border border-line bg-card p-3 shadow-sm" data-testid={`doc-slot-${doc.key}`}>
       <div className="flex items-center justify-between gap-2">
         <div className="min-w-0">
           <div className="flex items-center gap-1.5">
@@ -1298,52 +1338,72 @@ function EmployeeDocRow({
             )}
           </div>
           <p className="mt-0.5 text-[11px] text-ink-hint">
-            {uploaded ? "업로드됨" : "파일을 선택해주세요"}
+            {files.length > 0
+              ? doc.multiple
+                ? `${files.length}개 업로드됨`
+                : "업로드됨"
+              : "파일을 선택해주세요"}
+            {doc.multiple && " · 여러 장 올릴 수 있습니다"}
           </p>
         </div>
-        <div className="flex shrink-0 items-center gap-1.5">
-          {uploaded && (
-            <button
-              type="button"
-              onClick={onOpen}
-              disabled={busy}
-              className="rounded-lg border border-brand-blue bg-card px-2.5 py-1.5 text-xs font-semibold text-brand-blue hover:bg-brand-blue-soft disabled:opacity-60"
-            >
-              열기 ↗
-            </button>
-          )}
-          {!readOnly && (
-            <label
-              className={`cursor-pointer rounded-lg border border-navy bg-card px-3 py-1.5 text-xs font-semibold text-navy hover:bg-navy-soft ${
-                busy ? "pointer-events-none opacity-60" : ""
-              }`}
-            >
-              {busy ? "처리 중…" : uploaded ? "교체" : "업로드"}
-              <input
-                type="file"
-                accept="application/pdf,image/jpeg,image/png,image/webp"
-                className="sr-only"
-                disabled={busy}
-                onChange={(e) => {
-                  const f = e.target.files?.[0];
-                  e.target.value = "";
-                  if (f) onPick(f);
-                }}
-              />
-            </label>
-          )}
-          {!readOnly && uploaded && (
-            <button
-              type="button"
-              onClick={onDelete}
-              disabled={busy}
-              className="rounded-lg border border-stamp bg-card px-2.5 py-1.5 text-xs font-medium text-stamp hover:bg-stamp-soft disabled:opacity-60"
-            >
-              삭제
-            </button>
-          )}
-        </div>
+        {canAdd && (
+          <div className="shrink-0">
+            <DocPickButton
+              label={busy === doc.key ? "처리 중…" : files.length > 0 ? "+ 파일 추가" : "업로드"}
+              disabled={anyBusy}
+              onPick={(f) => onPick(f, null)}
+            />
+          </div>
+        )}
       </div>
+
+      {files.length > 0 && (
+        <ul className="mt-2 space-y-1.5 border-t border-line pt-2">
+          {files.map((f, i) => (
+            <li key={f.id} className="flex flex-wrap items-center justify-between gap-1.5">
+              <span className="min-w-0 truncate text-xs text-ink-body">
+                {files.length > 1 ? `${i + 1}. ` : ""}
+                {f.file_name ?? `기존 첨부 (${f.ext.toUpperCase() || "파일"})`}
+              </span>
+              <div className="flex shrink-0 items-center gap-1.5">
+                <button
+                  type="button"
+                  onClick={() => onOpen(f.id, false)}
+                  disabled={anyBusy}
+                  className="rounded-lg border border-brand-blue bg-card px-2.5 py-1.5 text-xs font-semibold text-brand-blue hover:bg-brand-blue-soft disabled:opacity-60"
+                >
+                  열기 ↗
+                </button>
+                <button
+                  type="button"
+                  onClick={() => onOpen(f.id, true)}
+                  disabled={anyBusy}
+                  className="rounded-lg border border-line bg-card px-2.5 py-1.5 text-xs font-medium text-ink-body hover:bg-surface disabled:opacity-60"
+                >
+                  내려받기
+                </button>
+                {!readOnly && (
+                  <DocPickButton
+                    label={busy === f.id ? "처리 중…" : "교체"}
+                    disabled={anyBusy}
+                    onPick={(file) => onPick(file, f.id)}
+                  />
+                )}
+                {!readOnly && (
+                  <button
+                    type="button"
+                    onClick={() => onDelete(f.id)}
+                    disabled={anyBusy}
+                    className="rounded-lg border border-stamp bg-card px-2.5 py-1.5 text-xs font-medium text-stamp hover:bg-stamp-soft disabled:opacity-60"
+                  >
+                    삭제
+                  </button>
+                )}
+              </div>
+            </li>
+          ))}
+        </ul>
+      )}
     </li>
   );
 }

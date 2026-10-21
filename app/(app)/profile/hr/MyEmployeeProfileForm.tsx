@@ -1,7 +1,7 @@
 "use client";
 
 import CardAwardsTab from "@/app/(app)/hr/CardAwardsTab";
-import { useEffect, useMemo, useRef, useState, useTransition } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, useTransition } from "react";
 import {
   saveMyProfile,
   uploadMyProfilePhoto,
@@ -11,6 +11,7 @@ import {
   uploadMyStamp,
   uploadMyStampImage,
   deleteMyStamp,
+  listMyDocuments,
   uploadMyDocument,
   deleteMyDocument,
   getMyDocumentUrl,
@@ -113,8 +114,8 @@ export default function MyEmployeeProfileForm({
   const [trainings, setTrainings] = useState<EmployeeTraining[]>(() =>
     normalizeTrainingList(profile?.trainings ?? [])
   );
-  const [appointments, setAppointments] = useState<EmployeeAppointment[]>(
-    () => normalizeAppointmentList(profile?.appointments ?? [])
+  const [appointments] = useState<EmployeeAppointment[]>(() =>
+    normalizeAppointmentList(profile?.appointments ?? [])
   );
 
   // 증명사진 — 마운트 시 1시간 임시 URL 조회
@@ -230,14 +231,16 @@ export default function MyEmployeeProfileForm({
   }
 
   // 첨부서류 — 본인(self) 서버액션을 콜백으로 주입(driver_id 는 세션에서 도출).
-  const onDocUpload = (docKey: string, file: File) => {
+  const onDocList = useCallback(() => listMyDocuments(), []);
+  const onDocUpload = (docKey: string, file: File, replaceId: string | null) => {
     const fd = new FormData();
     fd.set("doc_key", docKey);
     fd.set("file", file);
+    if (replaceId) fd.set("replace_id", replaceId);
     return uploadMyDocument(fd);
   };
-  const onDocDelete = (docKey: string) => deleteMyDocument(docKey);
-  const onDocOpen = (docKey: string) => getMyDocumentUrl(docKey);
+  const onDocDelete = (fileId: string) => deleteMyDocument(fileId);
+  const onDocOpen = (fileId: string, download: boolean) => getMyDocumentUrl(fileId, download);
 
   return (
     <div className="space-y-5">
@@ -311,11 +314,6 @@ export default function MyEmployeeProfileForm({
             type="hidden"
             name="trainings"
             value={JSON.stringify(trainings)}
-          />
-          <input
-            type="hidden"
-            name="appointments"
-            value={JSON.stringify(appointments)}
           />
 
           {/* 기본정보 탭 */}
@@ -675,20 +673,21 @@ export default function MyEmployeeProfileForm({
             />
           </div>
 
-          {/* 인사발령 탭 */}
+          {/* 인사발령 탭 — 본인은 열람만(잠금과 무관). 수정은 관리 화면에서만이며
+              서버(saveMyProfile)도 appointments 를 받지 않습니다. */}
           <div className={tab === "appointment" ? "" : "hidden"}>
             <AppointmentTab
               appointments={appointments}
-              onChange={setAppointments}
-              readOnly={locked}
+              onChange={() => {}}
+              readOnly
             />
           </div>
 
           {/* 첨부서류 탭 */}
           <div className={tab === "documents" ? "" : "hidden"}>
             <EmployeeDocumentsSection
-              initialDocuments={profile?.documents ?? {}}
               readOnly={locked}
+              onList={onDocList}
               onUpload={onDocUpload}
               onDelete={onDocDelete}
               onOpen={onDocOpen}

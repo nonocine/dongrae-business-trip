@@ -89,6 +89,12 @@ export const CONTRACT_ORG = {
   employerTitle: "동래구청소년센터장",
 } as const;
 
+// 계약서 고용자 표기 — 행에 employer_title 이 있으면 그 값(예: 2026 허일수 관장
+//   계약은 협회장), 없으면 기관 기본값.
+export function employerTitleOf(title: string | null | undefined): string {
+  return (title ?? "").trim() || CONTRACT_ORG.employerTitle;
+}
+
 // 두 계약서 목록이 공유하는 요약 행(관리자 목록·직원 카드).
 export type ContractSummary = {
   kind: ContractKind;
@@ -104,6 +110,8 @@ export type ContractSummary = {
   employer_signed_at: string | null;
   delivered_at: string | null;
   has_pdf: boolean;
+  // 종이 체결분(연봉계약서 signing_method='paper') — 내용은 원본 스캔 PDF 로 봅니다.
+  paper: boolean;
   created_at: string;
 };
 
@@ -237,7 +245,7 @@ export type ContractBlock =
   | { kind: "bullet"; text: string } // ○ 줄
   | { kind: "table"; caption?: string; headers: string[]; rows: string[][]; align: ("center" | "right")[] }
   | { kind: "confirm"; no: number; text: string } // 교부 확인 (인)
-  | { kind: "sign"; date: string; employeeName: string };
+  | { kind: "sign"; date: string; employeeName: string; employerTitle?: string }; // 없으면 CONTRACT_ORG.employerTitle
 
 // 원문자 — 화면용(나눔고딕엔 글리프가 없어 PDF 는 원을 직접 그립니다).
 export function circled(n: number): string {

@@ -2,11 +2,12 @@
 
 import CardAwardsTab from "@/app/(app)/hr/CardAwardsTab";
 import DisciplineSummaryPanel from "@/app/(app)/hr/discipline/DisciplineSummaryPanel";
-import { useEffect, useMemo, useState, useTransition } from "react";
+import { useCallback, useEffect, useMemo, useState, useTransition } from "react";
 import {
   saveEmployeeProfile,
   deleteEmployeeProfile,
   getEmployeePhotoUrl,
+  listEmployeeDocuments,
   uploadEmployeeDocument,
   deleteEmployeeDocument,
   getEmployeeDocumentUrl,
@@ -163,17 +164,19 @@ export default function EmployeeProfileForm({
   }, [driver.id]);
 
   // 첨부서류 — HR 서버액션을 콜백으로 주입.
-  const onDocUpload = (docKey: string, file: File) => {
+  const onDocList = useCallback(() => listEmployeeDocuments(driver.id), [driver.id]);
+  const onDocUpload = (docKey: string, file: File, replaceId: string | null) => {
     const fd = new FormData();
     fd.set("driver_id", driver.id);
     fd.set("doc_key", docKey);
     fd.set("file", file);
+    if (replaceId) fd.set("replace_id", replaceId);
     return uploadEmployeeDocument(fd);
   };
-  const onDocDelete = (docKey: string) =>
-    deleteEmployeeDocument(driver.id, docKey);
-  const onDocOpen = (docKey: string) =>
-    getEmployeeDocumentUrl(driver.id, docKey);
+  const onDocDelete = (fileId: string) =>
+    deleteEmployeeDocument(driver.id, fileId);
+  const onDocOpen = (fileId: string, download: boolean) =>
+    getEmployeeDocumentUrl(driver.id, fileId, download);
 
   // 주민번호는 제어 입력 — 입력 즉시 생년월일·성별을 재계산합니다.
   const [rrn, setRrn] = useState(profile?.resident_number ?? "");
@@ -649,8 +652,8 @@ export default function EmployeeProfileForm({
           {/* 첨부서류 탭 */}
           <div className={tab === "documents" ? "" : "hidden"}>
             <EmployeeDocumentsSection
-              initialDocuments={profile?.documents ?? {}}
               readOnly={locked}
+              onList={onDocList}
               onUpload={onDocUpload}
               onDelete={onDocDelete}
               onOpen={onDocOpen}

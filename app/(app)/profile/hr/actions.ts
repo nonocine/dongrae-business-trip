@@ -11,14 +11,11 @@ import {
   parseLicenseInput,
   parseCareerInput,
   parseTrainingInput,
-  parseAppointmentInput,
   uploadProfilePhoto,
   uploadStampImage,
   STAMP_IMAGE_MIME,
   removeHrDocuments,
-  normalizeDocMap,
   signHrDocument,
-  HR_DOCUMENTS_BUCKET,
   type Driver,
   type EmployeeRank,
   type EmployeeProfile,
@@ -26,7 +23,13 @@ import {
 } from "@/lib/supabase";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
 import { decodeDataUrl } from "@/lib/recruitmentApplicantDocData";
-import { isEmployeeDocKey } from "@/lib/employeeDocs";
+import { type EmployeeDocFiles } from "@/lib/employeeDocs";
+import {
+  deleteEmployeeDocFile,
+  employeeDocFileUrl,
+  listEmployeeDocFiles,
+  uploadEmployeeDocFile,
+} from "@/lib/employeeDocsServer";
 import { listRolesForDriver } from "@/lib/employeeRolesServer";
 
 // 세션의 직원 이름으로 drivers row 를 조회합니다.
@@ -123,7 +126,9 @@ export async function saveMyProfile(formData: FormData) {
   const licenses = parseLicenseInput(str("licenses"));
   const career = parseCareerInput(str("career"));
   const trainings = parseTrainingInput(str("trainings"));
-  const appointments = parseAppointmentInput(str("appointments"));
+  // 인사발령(appointments)은 본인이 고칠 수 없습니다(2026-10 관장 지시) — 폼에
+  //   값이 실려 와도 읽지 않고, row 에서 빼서 upsert 가 기존 값을 건드리지 않게 합니다.
+  //   수정은 관리 화면(app/(app)/hr, M0·hr 직무)에서만.
 
   const row = {
     driver_id,
@@ -143,7 +148,6 @@ export async function saveMyProfile(formData: FormData) {
     career,
     // awards: 2026-10 부터 쓰지 않음 — 수상·포상은 hr_awards(app/(app)/hr/awardActions).
     trainings,
-    appointments,
     updated_at: new Date().toISOString(),
   };
 
@@ -448,88 +452,36 @@ export async function deleteMyStamp(): Promise<
 }
 
 // =====================================================================
-// 본인 인사기록 첨부서류 (employee_profiles.documents jsonb)
-//   * HR 관리자용 uploadEmployeeDocument 의 본인(self) 버전.
-//   * driver_id 는 항상 세션에서만 도출(폼 값 신뢰 안 함).
-//   * 경로: employees/{driverId}/docs/{docKey}.{ext} (hr-documents Private 버킷)
+// 본인 인사기록 첨부서류 (employee_document_files — 한 행 = 한 파일)
+//   * 관리자용과 같은 lib/employeeDocsServer 를 씁니다.
+//   * driver_id 는 항상 세션에서만 도출(폼 값 신뢰 안 함) — 남의 파일 id 를
+//     넘겨도 서버 쿼리가 .eq("driver_id", 나) 로 거릅니다.
 //   * 잠긴 카드는 본인도 수정 불가. 종류는 lib/employeeDocs.ts 슬롯.
 // =====================================================================
-const MY_DOC_EXT: Record<string, string> = {
-  "image/jpeg": "jpg",
-  "image/png": "png",
-  "image/webp": "webp",
-  "application/pdf": "pdf",
-};
+const MY_LOCKED = "잠긴 인사기록카드입니다. 수정할 수 없습니다.";
+
+export async function listMyDocuments(): Promise<EmployeeDocFiles> {
+  const driver = await getMyDriver();
+  if (!driver) return {};
+  return listEmployeeDocFiles(driver.id);
+}
 
 export async function uploadMyDocument(
   formData: FormData
-): Promise<
-  | { ok: true; docKey: string; signedUrl: string | null }
-  | { ok: false; message: string }
-> {
+): Promise<{ ok: true } | { ok: false; message: string }> {
   try {
     const driver = await getMyDriver();
     if (!driver) return { ok: false, message: "직원 로그인이 필요합니다." };
-
-    const docKey = String(formData.get("doc_key") ?? "").trim();
-    if (!docKey || !isEmployeeDocKey(docKey)) {
-      return { ok: false, message: "허용되지 않은 서류 종류입니다." };
-    }
-
-    const file = formData.get("file");
-    if (!(file instanceof File) || file.size === 0) {
-      return { ok: false, message: "업로드할 파일을 선택해주세요." };
-    }
-    if (file.size > 16 * 1024 * 1024) {
-      return { ok: false, message: "파일 용량은 16MB 이하여야 합니다." };
-    }
-    const ext = MY_DOC_EXT[file.type];
-    if (!ext) {
-      return {
-        ok: false,
-        message: "PDF, JPG, PNG, WEBP 형식만 업로드할 수 있습니다.",
-      };
-    }
-
-    const { data: prev, error: pErr } = await supabaseAdmin
-      .from("employee_profiles")
-      .select("documents, is_locked")
-      .eq("driver_id", driver.id)
-      .maybeSingle();
-    if (pErr) throw new Error(pErr.message);
-    if (prev && (prev as { is_locked?: unknown }).is_locked === true) {
-      return { ok: false, message: "잠긴 인사기록카드입니다. 수정할 수 없습니다." };
-    }
-    const prevDocs = normalizeDocMap(
-      (prev as { documents?: unknown } | null)?.documents
-    );
-    const oldPath = prevDocs[docKey] ?? null;
-
-    const newPath = `employees/${driver.id}/docs/${docKey}.${ext}`;
-    const { error: upErr } = await supabaseAdmin.storage
-      .from(HR_DOCUMENTS_BUCKET)
-      .upload(newPath, file, { contentType: file.type, upsert: true });
-    if (upErr) return { ok: false, message: `업로드 실패: ${upErr.message}` };
-
-    const nextDocs = { ...prevDocs, [docKey]: newPath };
-    const { error: dbErr } = await supabaseAdmin
-      .from("employee_profiles")
-      .upsert(
-        {
-          driver_id: driver.id,
-          documents: nextDocs,
-          updated_at: new Date().toISOString(),
-        },
-        { onConflict: "driver_id" }
-      );
-    if (dbErr) throw new Error(dbErr.message);
-
-    if (oldPath && oldPath !== newPath) {
-      await removeHrDocuments([oldPath]);
-    }
-
-    revalidatePath("/profile/hr");
-    return { ok: true, docKey, signedUrl: await signHrDocument(newPath) };
+    const res = await uploadEmployeeDocFile({
+      driverId: driver.id,
+      docKey: String(formData.get("doc_key") ?? "").trim(),
+      file: formData.get("file"),
+      uploadedBy: driver.name,
+      replaceId: String(formData.get("replace_id") ?? "").trim() || null,
+      lockedMessage: MY_LOCKED,
+    });
+    if (res.ok) revalidatePath("/profile/hr");
+    return res;
   } catch (e) {
     return {
       ok: false,
@@ -540,40 +492,14 @@ export async function uploadMyDocument(
 }
 
 export async function deleteMyDocument(
-  docKey: string
+  fileId: string
 ): Promise<{ ok: true } | { ok: false; message: string }> {
   try {
     const driver = await getMyDriver();
     if (!driver) return { ok: false, message: "직원 로그인이 필요합니다." };
-    if (!docKey) return { ok: false, message: "서류 종류가 누락되었습니다." };
-
-    const { data: prev, error: pErr } = await supabaseAdmin
-      .from("employee_profiles")
-      .select("documents, is_locked")
-      .eq("driver_id", driver.id)
-      .maybeSingle();
-    if (pErr) throw new Error(pErr.message);
-    if (!prev) return { ok: true };
-    if ((prev as { is_locked?: unknown }).is_locked === true) {
-      return { ok: false, message: "잠긴 인사기록카드입니다. 수정할 수 없습니다." };
-    }
-    const prevDocs = normalizeDocMap(
-      (prev as { documents?: unknown }).documents
-    );
-    const oldPath = prevDocs[docKey] ?? null;
-    if (!oldPath) return { ok: true };
-    const nextDocs = { ...prevDocs };
-    delete nextDocs[docKey];
-
-    const { error: dbErr } = await supabaseAdmin
-      .from("employee_profiles")
-      .update({ documents: nextDocs, updated_at: new Date().toISOString() })
-      .eq("driver_id", driver.id);
-    if (dbErr) throw new Error(dbErr.message);
-
-    await removeHrDocuments([oldPath]);
-    revalidatePath("/profile/hr");
-    return { ok: true };
+    const res = await deleteEmployeeDocFile({ driverId: driver.id, fileId, lockedMessage: MY_LOCKED });
+    if (res.ok) revalidatePath("/profile/hr");
+    return res;
   } catch (e) {
     return {
       ok: false,
@@ -582,20 +508,14 @@ export async function deleteMyDocument(
   }
 }
 
-// 본인 첨부서류 임시 열람 URL — 1시간. 세션에서 직원 도출.
+// 본인 첨부서류 임시 URL — 1시간. download=true 면 이름을 붙인 내려받기 URL.
 export async function getMyDocumentUrl(
-  docKey: string
+  fileId: string,
+  download: boolean
 ): Promise<string | null> {
   const driver = await getMyDriver();
-  if (!driver || !docKey) return null;
-  const { data, error } = await supabaseAdmin
-    .from("employee_profiles")
-    .select("documents")
-    .eq("driver_id", driver.id)
-    .maybeSingle();
-  if (error || !data) return null;
-  const docs = normalizeDocMap((data as { documents?: unknown }).documents);
-  return signHrDocument(docs[docKey] ?? null);
+  if (!driver) return null;
+  return employeeDocFileUrl({ driverId: driver.id, fileId, download });
 }
 
 // 본인 담당 직무 목록(읽기전용) — 세션에서 직원 도출. 마이페이지 표시용.

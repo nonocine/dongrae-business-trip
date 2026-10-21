@@ -221,6 +221,7 @@ export function toSummary(kind: ContractKind, raw: Record<string, unknown>, name
       period: `${fmtDot(c.contract_start)} ~ ${c.contract_end ? fmtDot(c.contract_end) : "정함 없음"}`,
       year: c.contract_start.slice(0, 4),
       note: null,
+      paper: false,
     };
   }
   const c = toSalaryContract(raw, name);
@@ -231,6 +232,7 @@ export function toSummary(kind: ContractKind, raw: Record<string, unknown>, name
     period: `${fmtDot(c.period_start)} ~ ${fmtDot(c.period_end)}`,
     year: String(c.year),
     note: `연봉 ${won(c.total_annual)}원`,
+    paper: c.signing_method === "paper",
   };
 }
 
@@ -457,6 +459,14 @@ export async function adminPdfCore(
   return { ok: true, base64: Buffer.from(bytes).toString("base64"), filename: filename.replace(".pdf", "_미리보기.pdf"), preview: true };
 }
 
+async function storedPdf(raw: Record<string, unknown>): Promise<Uint8Array> {
+  const path = typeof raw.contract_pdf_url === "string" ? raw.contract_pdf_url : null;
+  if (!path) throw new Error("저장된 PDF 가 없습니다.");
+  const { data, error } = await supabaseAdmin.storage.from(HR_DOCUMENTS_BUCKET).download(path);
+  if (error || !data) throw new Error("저장된 PDF 를 읽지 못했습니다.");
+  return new Uint8Array(await data.arrayBuffer());
+}
+
 async function renderPreviewPdf(kind: ContractKind, raw: Record<string, unknown>): Promise<Uint8Array> {
   const blocks = await blocksFor(kind, raw, true);
   return buildContractPdf(blocks, {
@@ -471,7 +481,10 @@ export async function bulkPreviewPdfCore(kind: ContractKind, ids: string[]): Pro
   const merged = await PDFDocument.create();
   for (const id of ids) {
     const raw = await loadRow(kind, id, ", employee_signature");
-    const one = await PDFDocument.load(await renderPreviewPdf(kind, raw));
+    // 종이 체결분은 다시 그리지 않고 원본 스캔을 그대로 넣습니다.
+    const one = await PDFDocument.load(
+      toSummary(kind, raw, "").paper ? await storedPdf(raw) : await renderPreviewPdf(kind, raw)
+    );
     const pages = await merged.copyPages(one, one.getPageIndices());
     pages.forEach((p) => merged.addPage(p));
   }
@@ -491,11 +504,15 @@ export async function listMineCore(kind: ContractKind, me: { id: string; name: s
     .order("created_at", { ascending: false });
   if (error) throw new Error(error.message);
   return Promise.all(
-    ((data ?? []) as unknown as Record<string, unknown>[]).map(async (r) => ({
-      ...toSummary(kind, r, me.name),
-      // 주민번호는 가린 값(full=false). 전체 번호는 PDF 에만 들어갑니다.
-      blocks: await blocksFor(kind, r, false),
-    }))
+    ((data ?? []) as unknown as Record<string, unknown>[]).map(async (r) => {
+      const s = toSummary(kind, r, me.name);
+      return {
+        ...s,
+        // 주민번호는 가린 값(full=false). 전체 번호는 PDF 에만 들어갑니다.
+        //   종이 체결분은 다시 그리지 않습니다 — 화면이 원본 스캔 PDF 를 받아 보여줍니다.
+        blocks: s.paper ? [] : await blocksFor(kind, r, false),
+      };
+    })
   );
 }
 

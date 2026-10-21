@@ -399,10 +399,14 @@ export type SalaryContract = {
   has_pdf: boolean;
   created_by: string | null;
   created_at: string;
+  // 2026-10: 종이로 체결해 이관한 건은 'paper' — 내용은 원본 스캔(contract_pdf_url)으로 봅니다.
+  signing_method: "electronic" | "paper";
+  employer_title: string | null; // 고용자 표기. null = 동래구청소년센터장(employerTitleOf)
+  note: string | null;
 };
 
 export const SALARY_LIST_COLUMNS =
-  "id, driver_id, year, period_start, period_end, total_annual, amount_in_korean, segments, status, sent_at, employee_signed_at, employer_signed_at, delivered_at, contract_pdf_url, created_by, created_at";
+  "id, driver_id, year, period_start, period_end, total_annual, amount_in_korean, segments, status, sent_at, employee_signed_at, employer_signed_at, delivered_at, contract_pdf_url, created_by, created_at, signing_method, employer_title, note";
 
 export function toSalaryContract(raw: Record<string, unknown>, employeeName: string): SalaryContract {
   const segs = Array.isArray(raw.segments) ? (raw.segments as SalarySegment[]) : [];
@@ -415,6 +419,9 @@ export function toSalaryContract(raw: Record<string, unknown>, employeeName: str
     total_annual: Number(raw.total_annual ?? 0),
     amount_in_korean: String(raw.amount_in_korean ?? ""),
     segments: segs,
+    signing_method: raw.signing_method === "paper" ? "paper" : "electronic",
+    employer_title: typeof raw.employer_title === "string" && raw.employer_title.trim() ? raw.employer_title.trim() : null,
+    note: typeof raw.note === "string" && raw.note.trim() ? raw.note : null,
   };
 }
 
@@ -425,7 +432,9 @@ export function fmtKoreanPlain(ymd: string): string {
 }
 
 export function buildSalaryContractBlocks(input: {
-  contract: Pick<SalaryContract, "period_start" | "period_end" | "total_annual" | "amount_in_korean" | "segments">;
+  contract: Pick<SalaryContract, "period_start" | "period_end" | "total_annual" | "amount_in_korean" | "segments"> & {
+    employer_title?: string | null;
+  };
   employeeName: string;
   clauses: SalaryClauses;
 }): ContractBlock[] {
@@ -447,7 +456,12 @@ export function buildSalaryContractBlocks(input: {
     ...paymentLines(clauses, months, holidayNames).map((text) => ({ kind: "bullet" as const, text })),
     { kind: "heading", text: `5. 연봉재계약의 시기 : ${clauses.renewal}` },
     { kind: "heading", text: `6. 기타 ${clauses.etc}` },
-    { kind: "sign", date: fmtKoreanPlain(c.period_start), employeeName: input.employeeName },
+    {
+      kind: "sign",
+      date: fmtKoreanPlain(c.period_start),
+      employeeName: input.employeeName,
+      employerTitle: c.employer_title ?? undefined,
+    },
   ];
   return b;
 }

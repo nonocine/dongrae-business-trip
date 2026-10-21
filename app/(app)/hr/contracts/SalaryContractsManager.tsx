@@ -186,7 +186,7 @@ export default function SalaryContractsManager({
                           {calc.errors.length ? <span className="text-xs text-stamp">계산 불가</span> : `${won(calc.total)}원`}
                         </td>
                         <td className="px-2 py-2 text-xs">
-                          {existing ? contractStateLabel(existing) : e.contract ? e.contract.status : <span className={badgeNeutral}>없음</span>}
+                          {existing ? `${contractStateLabel(existing)}${existing.paper ? " · 종이 체결" : ""}` : e.contract ? e.contract.status : <span className={badgeNeutral}>없음</span>}
                         </td>
                         <td className="px-2 py-2 text-right">
                           {!e.contract && (

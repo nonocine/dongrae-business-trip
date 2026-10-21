@@ -4,6 +4,7 @@ import { useEffect, useState, useTransition, type ReactNode } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import ContractView from "@/app/components/ContractView";
+import ContractScanView from "@/app/components/ContractScanView";
 import InkSignaturePad, { SignaturePreview } from "@/app/components/InkSignaturePad";
 import {
   bulkPreviewPdf,
@@ -139,7 +140,8 @@ export function ContractList({
   const [msg, setMsg] = useState<Msg>(null);
   const [pending, start] = useTransition();
   const [showVoid, setShowVoid] = useState(false);
-  const [preview, setPreview] = useState<{ c: ContractSummary; blocks: ContractBlock[] } | null>(null);
+  // 종이 체결분은 blocks 대신 원본 스캔(scan, base64)을 띄웁니다.
+  const [preview, setPreview] = useState<{ c: ContractSummary; blocks: ContractBlock[]; scan?: string } | null>(null);
   const [signTarget, setSignTarget] = useState<ContractSummary | null>(null);
   const [picked, setPicked] = useState<Set<string>>(new Set());
   const visible = items.filter((c) => showVoid || c.status !== "void");
@@ -163,6 +165,12 @@ export function ContractList({
   function openPreview(c: ContractSummary) {
     setMsg(null);
     start(async () => {
+      if (c.paper) {
+        const res = await downloadContractPdf(kind, c.id);
+        if (!res.ok) setMsg({ ok: false, text: res.message });
+        else setPreview({ c, blocks: [], scan: res.base64 });
+        return;
+      }
       const res = await getContractBlocks(kind, c.id);
       if (!res.ok) setMsg({ ok: false, text: res.message });
       else setPreview({ c, blocks: res.blocks });
@@ -294,6 +302,7 @@ export function ContractList({
                     <td className="px-2 py-2 text-xs">{c.period}</td>
                     <td className="px-2 py-2">
                       <span className={badge}>{contractStateLabel(c)}</span>
+                      {c.paper && <span className={`ml-1 ${badgeNeutral}`}>종이 체결</span>}
                     </td>
                     <td className="px-2 py-2 text-xs">{kstYmd(c.sent_at) ?? "-"}</td>
                     <td className="px-2 py-2 text-xs">{kstYmd(c.employee_signed_at) ?? "-"}</td>
@@ -376,17 +385,23 @@ export function ContractList({
 
       {preview && (
         <Modal title={`${preview.c.employee_name} — ${label} 내용`} onClose={() => setPreview(null)}>
-          <p className="mb-3 text-xs text-ink-muted">
-            {kind === "employment" ? "화면에서는 주민등록번호 뒷자리를 가립니다. PDF 에는 전체 번호가 들어갑니다. " : ""}
-            {preview.c.status === "draft" ? "작성 중이라 현행 조항 문구로 보입니다." : "보낸 시점의 조항 문구로 고정되어 있습니다."}
-          </p>
-          <div className="rounded-md border border-rule bg-white px-4 py-4">
-            <ContractView
-              blocks={preview.blocks}
-              employeeSigned={!!preview.c.employee_signed_at}
-              employerSigned={!!preview.c.employer_signed_at}
-            />
-          </div>
+          {preview.scan ? (
+            <ContractScanView base64={preview.scan} title={`${preview.c.employee_name} ${label} 원본`} />
+          ) : (
+            <>
+              <p className="mb-3 text-xs text-ink-muted">
+                {kind === "employment" ? "화면에서는 주민등록번호 뒷자리를 가립니다. PDF 에는 전체 번호가 들어갑니다. " : ""}
+                {preview.c.status === "draft" ? "작성 중이라 현행 조항 문구로 보입니다." : "보낸 시점의 조항 문구로 고정되어 있습니다."}
+              </p>
+              <div className="rounded-md border border-rule bg-white px-4 py-4">
+                <ContractView
+                  blocks={preview.blocks}
+                  employeeSigned={!!preview.c.employee_signed_at}
+                  employerSigned={!!preview.c.employer_signed_at}
+                />
+              </div>
+            </>
+          )}
         </Modal>
       )}
 

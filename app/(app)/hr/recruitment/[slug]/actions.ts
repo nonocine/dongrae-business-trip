@@ -491,6 +491,8 @@ export async function updateApplicationStatus(
 //   * drivers(계정) → employee_profiles(인사기록) 생성 후 전환 링크 기록.
 //   * 지원서 첨부서류 중 직원 서류와 동일 key(diploma/transcript/license/
 //     career_cert/award_cert)는 employees/{driverId}/docs/ 로 파일 복사 시도.
+//     복사한 파일은 employee_document_files 에 한 행씩(2026-10 — documents jsonb 는
+//     롤백용으로만 남아 쓰지 않습니다).
 //   * email 은 비워둠 — 출근 시점에 인사기록카드에서 입력(→ 구글 로그인 매칭).
 //   * 순서: drivers → 서류복사 → employee_profiles → 링크. 뒤 단계 실패 시 롤백.
 // =====================================================================
@@ -631,12 +633,31 @@ export async function convertApplicantToEmployee(
       trainings: applicant.trainings ?? [],
       appointments: [],
       auth_level: null, // 기본 팀원 권한
-      documents: employeeDocs,
       updated_at: new Date().toISOString(),
     };
-    const { error: profErr } = await supabaseAdmin
+    const { error: profInsErr } = await supabaseAdmin
       .from("employee_profiles")
       .insert(profileRow);
+    // 5-1) 복사한 첨부서류 → employee_document_files. 실패하면 인사기록 생성 실패와
+    //   똑같이 롤백합니다(파일만 있고 행이 없는 상태를 남기지 않음).
+    let profErr = profInsErr;
+    const docRows = Object.entries(employeeDocs).map(([doc_key, file_path]) => ({
+      driver_id: newDriverId,
+      doc_key,
+      file_path,
+      file_name: null,
+      sort_order: 0,
+      uploaded_by: "채용 지원서에서 이관",
+    }));
+    if (!profErr && docRows.length > 0) {
+      const { error: docErr } = await supabaseAdmin
+        .from("employee_document_files")
+        .insert(docRows);
+      if (docErr) {
+        await supabaseAdmin.from("employee_profiles").delete().eq("driver_id", newDriverId);
+        profErr = docErr;
+      }
+    }
     if (profErr) {
       await supabaseAdmin.from("drivers").delete().eq("id", newDriverId);
       const copied = [

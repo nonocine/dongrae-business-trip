@@ -15,7 +15,7 @@
 import { PDFDocument, rgb, type PDFFont, type PDFImage, type PDFPage } from "pdf-lib";
 import fontkit from "@pdf-lib/fontkit";
 import { regularFont, boldFont, fkFont, fitToFont } from "./pdfFont";
-import { CONTRACT_ORG, type ContractBlock } from "./contractCore";
+import { CONTRACT_ORG, employerTitleOf, type ContractBlock } from "./contractCore";
 
 const INK = rgb(0.1, 0.1, 0.1);
 const LINE = rgb(0.1, 0.1, 0.1);
@@ -321,7 +321,7 @@ export async function buildContractPdf(
         const markX = W - M - widthOf(mark, 11);
         const rowsSign: { label: string; img: PDFImage | null; seal: boolean }[] = [
           { label: `근로자 : ${b.employeeName}`, img: empImg, seal: false },
-          { label: `고용자 : ${CONTRACT_ORG.employerTitle}`, img: bossImg, seal: !!images.employerIsSeal },
+          { label: `고용자 : ${employerTitleOf(b.employerTitle)}`, img: bossImg, seal: !!images.employerIsSeal },
         ];
         for (const r of rowsSign) {
           draw(xLabel, y, r.label, { size: 11 });

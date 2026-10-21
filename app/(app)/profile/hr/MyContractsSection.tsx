@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import ContractView from "@/app/components/ContractView";
+import ContractScanView from "@/app/components/ContractScanView";
 import InkSignaturePad, { SignaturePreview } from "@/app/components/InkSignaturePad";
 import {
   signMyContract,
@@ -16,6 +17,7 @@ import {
   btnPrimary,
   btnSecondary,
   badgeNavy,
+  badgeNeutral,
   badgeSuccess,
   badgeWarning,
   noticeError,
@@ -76,6 +78,20 @@ function ContractCard({ contract: c, savedSignature }: { contract: MyContract; s
   const [pending, start] = useTransition();
   const scrollRef = useRef<HTMLDivElement>(null);
   const finalized = isFinalized(c);
+  // 종이 체결분 — '내용 보기'는 다시 그린 문서가 아니라 원본 스캔(PDF)입니다.
+  const [scan, setScan] = useState<string | null>(null);
+  useEffect(() => {
+    if (!open || !c.paper || scan) return;
+    let alive = true;
+    downloadMyContractPdf(c.kind, c.id).then((res) => {
+      if (!alive) return;
+      if (res.ok) setScan(res.base64);
+      else setMsg({ ok: false, text: res.message });
+    });
+    return () => {
+      alive = false;
+    };
+  }, [open, c.paper, c.kind, c.id, scan]);
 
   // 스크롤 상자 바닥에 닿으면 '끝까지 읽음'. 한 번 닿으면 다시 올려도 유지합니다.
   //   스크롤 이벤트 + 마운트 시 1회 검사(하이드레이션 전에 이미 내려와 있거나,
@@ -127,6 +143,7 @@ function ContractCard({ contract: c, savedSignature }: { contract: MyContract; s
         </div>
         <div className="flex items-center gap-2">
           <span className={badge}>{contractStateLabel(c)}</span>
+          {c.paper && <span className={badgeNeutral}>종이 체결</span>}
           {finalized && (
             <button type="button" onClick={download} disabled={pending} className={btnPrimary}>
               {pending ? "준비 중…" : "PDF 내려받기"}
@@ -138,7 +155,17 @@ function ContractCard({ contract: c, savedSignature }: { contract: MyContract; s
         </div>
       </div>
 
-      {open && (
+      {open && c.paper && (
+        <div className="p-3">
+          {scan ? (
+            <ContractScanView base64={scan} title={`${CONTRACT_KINDS[c.kind].label} 원본`} />
+          ) : (
+            <p className="text-xs text-ink-hint">불러오는 중…</p>
+          )}
+        </div>
+      )}
+
+      {open && !c.paper && (
         <div className="p-3">
           <div
             ref={scrollRef}
