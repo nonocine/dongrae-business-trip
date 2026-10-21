@@ -14,7 +14,10 @@ import {
   bulkPreviewPdfCore,
   bytesToDataUrl,
   readSavedSignature,
+  setContractDateCore,
+  listContractDateChangesCore,
   fail,
+  type ContractDateChange,
   type EmployerSignInput,
   type Result,
 } from "@/lib/contractServer";
@@ -34,6 +37,7 @@ function kindOf(kind: unknown): ContractKind {
 
 function refresh() {
   revalidatePath("/hr/contracts");
+  revalidatePath("/hr"); // 체결·계약일 변경 → 인사기록카드 자동 첨부
   revalidatePath("/profile/hr");
 }
 
@@ -92,6 +96,36 @@ export async function recallContract(kind: ContractKind, id: string): Promise<Re
     const res = await recallContractCore(kindOf(kind), id);
     if (res.ok) refresh();
     return res;
+  } catch (e) {
+    return fail(e);
+  }
+}
+
+// 계약일 수정 — 인사 파일 열람 보유자만(requireContractPersonnel). 사유 필수, 체결 후에도 가능.
+//   서명 시각(보냄·직원 서명·센터장 서명)은 바꾸지 않습니다. 미래·시작일+30일 초과는 화면이 확인만 받습니다.
+export async function setContractDate(
+  kind: ContractKind,
+  id: string,
+  date: string,
+  reason: string
+): Promise<Result<{ pdf: "regenerated" | "kept" | "none"; cardFile: boolean; note: string | null }>> {
+  try {
+    const me = await requireContractPersonnel();
+    const res = await setContractDateCore(kindOf(kind), id, { date, reason }, me);
+    if (res.ok) refresh();
+    return res;
+  } catch (e) {
+    return fail(e);
+  }
+}
+
+export async function getContractDateChanges(
+  kind: ContractKind,
+  id: string
+): Promise<Result<{ changes: ContractDateChange[] }>> {
+  try {
+    await requireContractPersonnel();
+    return { ok: true, changes: await listContractDateChangesCore(kindOf(kind), id) };
   } catch (e) {
     return fail(e);
   }

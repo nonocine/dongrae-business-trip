@@ -180,6 +180,7 @@ export function parseClauses(raw: string | null | undefined): ContractClauses {
 export type EmploymentContract = {
   id: string;
   driver_id: string;
+  contract_date: string | null; // 계약서에 표시되는 계약일(서명란 위 날짜)
   employee_name: string; // drivers.name (조인)
   contract_type: ContractType;
   contract_start: string;
@@ -208,7 +209,7 @@ export type EmploymentContract = {
 // ⚠️ employee_signature(서명 이미지)·contract_pdf_url(경로)은 목록 select 에
 //   넣지 않습니다. 화면에는 "있다/없다" 만 필요합니다.
 export const CONTRACT_LIST_COLUMNS =
-  "id, driver_id, contract_type, contract_start, contract_end, probation_start, probation_end, department, position, duty_content, work_hours, work_days, weekly_hours, workplace, break_time, payment_day, status, sent_at, employee_signed_at, employer_signed_at, delivered_at, contract_pdf_url, created_by, created_at";
+  "id, driver_id, contract_type, contract_start, contract_end, probation_start, probation_end, department, position, duty_content, work_hours, work_days, weekly_hours, workplace, break_time, payment_day, status, sent_at, employee_signed_at, employer_signed_at, delivered_at, contract_pdf_url, created_by, created_at, contract_date, signing_method, document_file_id";
 
 export function toContract(
   raw: Record<string, unknown>,
@@ -264,7 +265,9 @@ export function buildContractBlocks(input: {
   terms: ContractTerms;
   party: ContractParty;
   clauses: ContractClauses;
-  signDate: string | null; // KST YYYY-MM-DD, 미서명이면 null
+  // 서명란 위 날짜 = 계약일(contract_date). 정해지기 전이면 null → 빈칸.
+  //   2026-10 전에는 직원 서명일이었습니다(관장 요청으로 계약일로 통일).
+  signDate: string | null;
 }): ContractBlock[] {
   const { terms: t, party, clauses: c } = input;
   const b: ContractBlock[] = [];

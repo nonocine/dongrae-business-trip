@@ -113,11 +113,17 @@ export type ContractSummary = {
   // 종이 체결분(연봉계약서 signing_method='paper') — 내용은 원본 스캔 PDF 로 봅니다.
   paper: boolean;
   created_at: string;
+  // 계약서에 표시되는 계약일(contract_date). 센터장 서명 때 비어 있으면 그날(KST)로 채웁니다.
+  //   실제 서명 시각(employee_signed_at·employer_signed_at)과 별개이고, 관리자가 사유를 남기고 고칩니다.
+  contract_date: string | null;
+  start_date: string; // 계약 시작일(근로 contract_start / 연봉 period_start) — 수정 확인 문구용
+  // 계약일을 고친 적이 있으면 — 처음 값·마지막 사유·횟수(목록 표시용, 이력은 따로 조회).
+  date_change: { original: string | null; reason: string; count: number } | null;
 };
 
 // 두 테이블에 공통으로 있는 흐름 컬럼.
 export const WORKFLOW_COLUMNS =
-  "id, driver_id, status, sent_at, employee_signed_at, employer_signed_at, delivered_at, contract_pdf_url, created_by, created_at";
+  "id, driver_id, status, sent_at, employee_signed_at, employer_signed_at, delivered_at, contract_pdf_url, created_by, created_at, contract_date";
 
 export function workflowFields(raw: Record<string, unknown>) {
   const str = (v: unknown) => (v == null || v === "" ? null : String(v));
@@ -132,6 +138,7 @@ export function workflowFields(raw: Record<string, unknown>) {
     has_pdf: !!str(raw.contract_pdf_url),
     created_by: str(raw.created_by),
     created_at: String(raw.created_at ?? ""),
+    contract_date: isYmd(raw.contract_date) ? (raw.contract_date as string) : null,
   };
 }
 
@@ -205,6 +212,26 @@ export function kstYmd(iso: string | null | undefined): string | null {
   const t = Date.parse(iso);
   if (Number.isNaN(t)) return null;
   return new Date(t + 9 * 3600 * 1000).toISOString().slice(0, 10);
+}
+
+// ISO 시각 → KST "YYYY-MM-DD HH:mm" (실제 서명 시각 표시).
+export function kstYmdHm(iso: string | null | undefined): string | null {
+  if (!iso) return null;
+  const t = Date.parse(iso);
+  if (Number.isNaN(t)) return null;
+  return new Date(t + 9 * 3600 * 1000).toISOString().slice(0, 16).replace("T", " ");
+}
+
+// 계약일 수정 확인 문구 — 막지 않고 알리기만 합니다(관장 요청).
+//   미래 날짜 · 계약 시작일보다 30일 넘게 늦은 날짜.
+export function contractDateWarnings(date: string, startDate: string, today: string): string[] {
+  const out: string[] = [];
+  if (!isYmd(date)) return out;
+  if (date > today) out.push(`오늘(${fmtDot(today)})보다 뒤 날짜입니다.`);
+  if (isYmd(startDate) && date > addDays(startDate, 30)) {
+    out.push(`계약 시작일(${fmtDot(startDate)})보다 30일 넘게 늦은 날짜입니다.`);
+  }
+  return out;
 }
 
 // "2026년 10월 06일" (근로계약서 서명일 표기)

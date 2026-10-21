@@ -542,6 +542,7 @@ export function paymentLines(c: SalaryClauses, months: number, holidayNames: str
 export type SalaryContract = {
   id: string;
   driver_id: string;
+  contract_date: string | null; // 계약서에 표시되는 계약일(서명란 위 날짜)
   employee_name: string;
   year: number;
   period_start: string;
@@ -564,7 +565,7 @@ export type SalaryContract = {
 };
 
 export const SALARY_LIST_COLUMNS =
-  "id, driver_id, year, period_start, period_end, total_annual, amount_in_korean, segments, status, sent_at, employee_signed_at, employer_signed_at, delivered_at, contract_pdf_url, created_by, created_at, signing_method, employer_title, note";
+  "id, driver_id, year, period_start, period_end, total_annual, amount_in_korean, segments, status, sent_at, employee_signed_at, employer_signed_at, delivered_at, contract_pdf_url, created_by, created_at, signing_method, employer_title, note, contract_date";
 
 export function toSalaryContract(raw: Record<string, unknown>, employeeName: string): SalaryContract {
   const segs = Array.isArray(raw.segments) ? (raw.segments as SalarySegment[]) : [];
@@ -592,6 +593,7 @@ export function fmtKoreanPlain(ymd: string): string {
 export function buildSalaryContractBlocks(input: {
   contract: Pick<SalaryContract, "period_start" | "period_end" | "total_annual" | "amount_in_korean" | "segments"> & {
     employer_title?: string | null;
+    contract_date?: string | null;
   };
   employeeName: string;
   clauses: SalaryClauses;
@@ -616,7 +618,9 @@ export function buildSalaryContractBlocks(input: {
     { kind: "heading", text: `6. 기타 ${clauses.etc}` },
     {
       kind: "sign",
-      date: fmtKoreanPlain(c.period_start),
+      // 서명란 위 날짜 = 계약일(contract_date). 정해지기 전(작성 중 미리보기)이면 빈칸.
+      //   2026-10 전에는 계약 시작일이었습니다(관장 요청으로 계약일로 통일).
+      date: c.contract_date ? fmtKoreanPlain(c.contract_date) : "        년      월      일",
       employeeName: input.employeeName,
       employerTitle: c.employer_title ?? undefined,
     },

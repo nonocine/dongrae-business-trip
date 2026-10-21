@@ -31,6 +31,7 @@ import {
   fmtDot,
   hyphenRrn,
   isPngDataUrl,
+  isYmd,
   kstYmd,
   maskRrn,
   workflowFields,
@@ -54,6 +55,7 @@ import {
   won,
 } from "@/lib/salaryContracts";
 import { buildContractPdf } from "@/lib/contractPdf";
+import { hideAutoContractFile, putAutoContractFile } from "@/lib/employeeDocsServer";
 import { loadOrgSeal } from "@/lib/orgSeal";
 
 export type Result<T = object> = ({ ok: true } & T) | { ok: false; message: string };
@@ -212,7 +214,7 @@ export async function blocksFor(
       terms: row,
       party,
       clauses: parseClauses(clausesRaw),
-      signDate: kstYmd(row.employee_signed_at),
+      signDate: row.contract_date,
     });
   }
   const row = toSalaryContract(raw, "");
@@ -224,7 +226,12 @@ export async function blocksFor(
   });
 }
 
-export function toSummary(kind: ContractKind, raw: Record<string, unknown>, name: string): ContractSummary {
+export function toSummary(
+  kind: ContractKind,
+  raw: Record<string, unknown>,
+  name: string,
+  dateChange: ContractSummary["date_change"] = null
+): ContractSummary {
   const w = workflowFields(raw);
   if (kind === "employment") {
     const c = toContract(raw, name);
@@ -235,7 +242,9 @@ export function toSummary(kind: ContractKind, raw: Record<string, unknown>, name
       period: `${fmtDot(c.contract_start)} ~ ${c.contract_end ? fmtDot(c.contract_end) : "정함 없음"}`,
       year: c.contract_start.slice(0, 4),
       note: null,
-      paper: false,
+      paper: raw.signing_method === "paper",
+      start_date: c.contract_start,
+      date_change: dateChange,
     };
   }
   const c = toSalaryContract(raw, name);
@@ -247,6 +256,8 @@ export function toSummary(kind: ContractKind, raw: Record<string, unknown>, name
     year: String(c.year),
     note: `연봉 ${won(c.total_annual)}원`,
     paper: c.signing_method === "paper",
+    start_date: c.period_start,
+    date_change: dateChange,
   };
 }
 
@@ -296,8 +307,184 @@ export async function listSummaries(kind: ContractKind): Promise<ContractSummary
     .limit(1000);
   if (error) throw new Error(error.message);
   const rows = (data ?? []) as unknown as Record<string, unknown>[];
-  const names = await namesById([...new Set(rows.map((r) => String(r.driver_id)))]);
-  return rows.map((r) => toSummary(kind, r, names.get(String(r.driver_id)) ?? "(알 수 없음)"));
+  const [names, changes] = await Promise.all([
+    namesById([...new Set(rows.map((r) => String(r.driver_id)))]),
+    dateChangeSummaries(kind),
+  ]);
+  return rows.map((r) =>
+    toSummary(kind, r, names.get(String(r.driver_id)) ?? "(알 수 없음)", changes.get(String(r.id)) ?? null)
+  );
+}
+
+// --- 계약일(contract_date) ------------------------------------------------
+//   2026-10 관장 요청: 시스템 서명은 그날로만 찍히지만 실제로는 계약 시작일 무렵 날짜 등이
+//   필요합니다. 계약서에 보이는 날짜는 contract_date 하나이고, 실제 서명 시각
+//   (sent_at·employee_signed_at·employer_signed_at)은 어떤 경로로도 바꾸지 않습니다.
+//   수정은 인사 파일 열람 보유자만(액션의 requireContractPersonnel), 사유를 contract_date_changes 에.
+export type ContractDateChange = {
+  old_date: string | null;
+  new_date: string;
+  reason: string;
+  changed_by: string | null;
+  changed_at: string;
+};
+
+const DATE_CHANGES = "contract_date_changes";
+
+async function dateChangeSummaries(kind: ContractKind): Promise<Map<string, NonNullable<ContractSummary["date_change"]>>> {
+  const out = new Map<string, NonNullable<ContractSummary["date_change"]>>();
+  const { data, error } = await supabaseAdmin
+    .from(DATE_CHANGES)
+    .select("contract_id, old_date, reason, changed_at")
+    .eq("contract_kind", kind)
+    .order("changed_at", { ascending: true });
+  if (error) throw new Error(error.message);
+  for (const r of (data ?? []) as { contract_id: string; old_date: string | null; reason: string }[]) {
+    const prev = out.get(r.contract_id);
+    out.set(r.contract_id, {
+      original: prev ? prev.original : r.old_date,
+      reason: r.reason,
+      count: (prev?.count ?? 0) + 1,
+    });
+  }
+  return out;
+}
+
+export async function listContractDateChangesCore(kind: ContractKind, id: string): Promise<ContractDateChange[]> {
+  const { data, error } = await supabaseAdmin
+    .from(DATE_CHANGES)
+    .select("old_date, new_date, reason, changed_by, changed_at")
+    .eq("contract_kind", kind)
+    .eq("contract_id", id)
+    .order("changed_at", { ascending: false });
+  if (error) throw new Error(error.message);
+  return (data ?? []) as ContractDateChange[];
+}
+
+const kstToday = () => new Date(Date.now() + 9 * 3600 * 1000).toISOString().slice(0, 10);
+
+export async function setContractDateCore(
+  kind: ContractKind,
+  id: string,
+  input: { date: string; reason: string },
+  me: { name: string }
+): Promise<Result<{ pdf: "regenerated" | "kept" | "none"; cardFile: boolean; note: string | null }>> {
+  const date = String(input.date ?? "").trim();
+  const reason = String(input.reason ?? "").replace(/\s+/g, " ").trim().slice(0, 200);
+  if (!isYmd(date)) return { ok: false, message: "계약일을 YYYY-MM-DD 형식으로 입력해주세요." };
+  if (!reason) return { ok: false, message: "계약일을 바꾸는 사유를 적어주세요." };
+
+  const raw = await loadRow(kind, id, ", employee_signature");
+  const w = workflowFields(raw);
+  if (w.status === "void") return { ok: false, message: "무효 처리된 계약서는 계약일을 바꿀 수 없습니다." };
+  if (w.contract_date === date) return { ok: false, message: "지금 계약일과 같은 날짜입니다." };
+
+  // 이력을 먼저 남기고 날짜만 바꿉니다(실패하면 이력을 되돌림). 서명 시각 컬럼은 update 에 넣지 않습니다.
+  const { data: log, error: logErr } = await supabaseAdmin
+    .from(DATE_CHANGES)
+    .insert({ contract_kind: kind, contract_id: id, old_date: w.contract_date, new_date: date, reason, changed_by: me.name })
+    .select("id")
+    .single();
+  if (logErr || !log) throw new Error(logErr?.message ?? "계약일 변경 기록을 남기지 못했습니다.");
+  const { error: upErr, count } = await supabaseAdmin
+    .from(CONTRACT_KINDS[kind].table)
+    .update({ contract_date: date }, { count: "exact" })
+    .eq("id", id)
+    .neq("status", "void");
+  if (upErr || !count) {
+    await supabaseAdmin.from(DATE_CHANGES).delete().eq("id", (log as { id: string }).id);
+    if (upErr) throw new Error(upErr.message);
+    return { ok: false, message: "이미 다른 곳에서 처리되었습니다. 새로고침해주세요." };
+  }
+
+  // 확정된 전자 계약서 — 새 계약일로 PDF 를 다시 만들고, 근로계약서는 카드 첨부도 같은 행에서 교체.
+  //   종이 체결분은 원본 스캔이 본문이라 다시 만들지 않습니다(목록·표시 날짜만 바뀜).
+  const paper = raw.signing_method === "paper";
+  if (paper || !w.employer_signed_at || !w.has_pdf) return { ok: true, pdf: "none", cardFile: false, note: null };
+  const signer = await loadEmployerImage(kind, w.driver_id, w.id);
+  if (!signer) {
+    return {
+      ok: true,
+      pdf: "kept",
+      cardFile: false,
+      note: "센터장 서명 이미지가 보관되기 전(2026-10 이전)에 체결된 건이라 PDF 는 다시 만들지 못했습니다. 목록·표시 날짜만 바뀌었습니다.",
+    };
+  }
+  const bytes = await renderFinalPdf(kind, { ...raw, contract_date: date }, signer);
+  const { error: pdfErr } = await supabaseAdmin.storage
+    .from(HR_DOCUMENTS_BUCKET)
+    .upload(contractPdfPath(kind, w.driver_id, w.id), Buffer.from(bytes), { contentType: "application/pdf", upsert: true });
+  if (pdfErr) throw new Error(`PDF 저장 실패: ${pdfErr.message}`);
+  const cardFile = kind === "employment" ? await syncCardAttachment(raw, bytes) : false;
+  return { ok: true, pdf: "regenerated", cardFile, note: null };
+}
+
+// 센터장 서명 이미지 — 체결 때 PDF 옆에 보관해 두고, 계약일을 고칠 때 같은 서명으로 다시 그립니다.
+//   (2026-10 전 체결분은 보관본이 없습니다 — 기관 직인으로 체결했다면
+//    scripts/backfill-contract-attachments.mts 의 --regen-seal 로 다시 만들 수 있습니다.)
+export type EmployerImage = { bytes: Uint8Array; isSeal: boolean };
+
+function employerImagePath(kind: ContractKind, driverId: string, id: string, isSeal: boolean, png: boolean): string {
+  return contractPdfPath(kind, driverId, id).replace(/\.pdf$/, `.employer-${isSeal ? "seal" : "sign"}.${png ? "png" : "jpg"}`);
+}
+
+export async function saveEmployerImage(kind: ContractKind, driverId: string, id: string, img: EmployerImage): Promise<void> {
+  const png = img.bytes[0] === 0x89 && img.bytes[1] === 0x50;
+  const { error } = await supabaseAdmin.storage
+    .from(HR_DOCUMENTS_BUCKET)
+    .upload(employerImagePath(kind, driverId, id, img.isSeal, png), Buffer.from(img.bytes), {
+      contentType: png ? "image/png" : "image/jpeg",
+      upsert: true,
+    });
+  if (error) throw new Error(error.message);
+}
+
+async function loadEmployerImage(kind: ContractKind, driverId: string, id: string): Promise<EmployerImage | null> {
+  for (const isSeal of [true, false]) {
+    for (const png of [true, false]) {
+      const { data } = await supabaseAdmin.storage
+        .from(HR_DOCUMENTS_BUCKET)
+        .download(employerImagePath(kind, driverId, id, isSeal, png));
+      if (data) return { bytes: new Uint8Array(await data.arrayBuffer()), isSeal };
+    }
+  }
+  return null;
+}
+
+// 확정본 PDF — 양쪽 서명 이미지 + 지금 행의 계약일.
+export async function renderFinalPdf(kind: ContractKind, raw: Record<string, unknown>, signer: EmployerImage): Promise<Uint8Array> {
+  const blocks = await blocksFor(kind, raw, true);
+  return buildContractPdf(blocks, {
+    employee: decodeDataUrl(typeof raw.employee_signature === "string" ? raw.employee_signature : null),
+    employer: signer.bytes,
+    employerIsSeal: signer.isSeal,
+  });
+}
+
+// 체결 근로계약서 → 인사기록카드 '근로계약서' 칸(같은 행 교체, 없으면 새로 붙이고 계약에 연결).
+//   실패해도 계약 체결·계약일 변경은 되돌리지 않습니다 — false 를 돌려 화면에 알립니다.
+export async function syncCardAttachment(raw: Record<string, unknown>, bytes: Uint8Array): Promise<boolean> {
+  try {
+    const driverId = String(raw.driver_id);
+    const id = String(raw.id);
+    const names = await namesById([driverId]);
+    const current = typeof raw.document_file_id === "string" && raw.document_file_id ? raw.document_file_id : null;
+    const fileId = await putAutoContractFile({
+      driverId,
+      contractId: id,
+      employeeName: names.get(driverId) ?? "",
+      bytes,
+      fileId: current,
+    });
+    if (fileId !== current) {
+      const { error } = await supabaseAdmin.from("employment_contracts").update({ document_file_id: fileId }).eq("id", id);
+      if (error) throw new Error(error.message);
+    }
+    return true;
+  } catch (e) {
+    console.warn("[contract] 인사기록카드 첨부 실패:", e instanceof Error ? e.message : e);
+    return false;
+  }
 }
 
 export async function adminBlocks(kind: ContractKind, id: string): Promise<ContractBlock[]> {
@@ -346,6 +533,22 @@ export async function voidContractCore(kind: ContractKind, id: string): Promise<
     .in("status", ["sent", "signed"]);
   if (error) throw new Error(error.message);
   if (!count) return { ok: false, message: "보낸 계약서만 무효로 할 수 있습니다. (작성 중이면 삭제하세요)" };
+  // 인사기록카드에 자동으로 붙은 근로계약서는 카드에서 내립니다(파일·행은 남김).
+  if (kind === "employment") {
+    const { data } = await supabaseAdmin
+      .from("employment_contracts")
+      .select("driver_id, document_file_id")
+      .eq("id", id)
+      .maybeSingle();
+    const r = data as { driver_id?: string; document_file_id?: string | null } | null;
+    if (r?.driver_id && r.document_file_id) {
+      try {
+        await hideAutoContractFile(r.driver_id, r.document_file_id);
+      } catch (e) {
+        console.warn("[contract] 무효 — 카드 첨부 내리기 실패:", e instanceof Error ? e.message : e);
+      }
+    }
+  }
   return { ok: true };
 }
 
@@ -423,12 +626,11 @@ export async function employerSignCore(
     return { ok: false, message: "서명 방식을 다시 선택해주세요. (새로고침 후 다시 시도)" };
   }
 
-  const blocks = await blocksFor(kind, raw, true);
-  const bytes = await buildContractPdf(blocks, {
-    employee: decodeDataUrl(typeof raw.employee_signature === "string" ? raw.employee_signature : null),
-    employer: employerImage,
-    employerIsSeal: input.mode === "seal",
-  });
+  if (!employerImage) return { ok: false, message: "서명 이미지를 읽지 못했습니다. 다시 시도해주세요." };
+  // 계약일이 비어 있으면 오늘(KST)로 — 이미 정해 두었으면 덮어쓰지 않습니다.
+  const contractDate = w.contract_date ?? kstToday();
+  const signer: EmployerImage = { bytes: employerImage, isSeal: input.mode === "seal" };
+  const bytes = await renderFinalPdf(kind, { ...raw, contract_date: contractDate }, signer);
   const path = contractPdfPath(kind, w.driver_id, w.id);
   const { error: upErr } = await supabaseAdmin.storage
     .from(HR_DOCUMENTS_BUCKET)
@@ -440,12 +642,24 @@ export async function employerSignCore(
   const extraCols = kind === "salary" ? { issued_at: now, issued_by: me.name } : {};
   const { error, count } = await supabaseAdmin
     .from(table)
-    .update({ employer_signed_at: now, contract_pdf_url: path, ...extraCols }, { count: "exact" })
+    .update(
+      { employer_signed_at: now, contract_pdf_url: path, ...(w.contract_date ? {} : { contract_date: contractDate }), ...extraCols },
+      { count: "exact" }
+    )
     .eq("id", id)
     .eq("status", "signed")
     .is("employer_signed_at", null);
   if (error) throw new Error(error.message);
   if (!count) return { ok: false, message: "이미 다른 곳에서 처리되었습니다. 새로고침해주세요." };
+
+  // 계약일을 나중에 고칠 때 같은 서명으로 다시 그리도록 보관. 실패해도 체결은 그대로.
+  try {
+    await saveEmployerImage(kind, w.driver_id, w.id, signer);
+  } catch (e) {
+    console.warn("[contract] 센터장 서명 이미지 보관 실패:", e instanceof Error ? e.message : e);
+  }
+  // 전자 근로계약서 → 인사기록카드 자동 첨부(노미현 부장 요청). 연봉계약서는 칸이 없어 붙이지 않습니다.
+  if (kind === "employment") await syncCardAttachment(raw, bytes);
 
   const dmFailed = await dmEmployee(
     w.driver_id,

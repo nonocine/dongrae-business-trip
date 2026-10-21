@@ -15,6 +15,8 @@
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
 import { HR_DOCUMENTS_BUCKET } from "@/lib/supabase";
 import {
+  AUTO_CONTRACT_UPLOADER,
+  VOID_CONTRACT_DOC_KEY,
   EMPLOYEE_DOC_EXT,
   EMPLOYEE_DOC_MAX_BYTES,
   employeeDocDownloadName,
@@ -35,6 +37,7 @@ type FileRow = {
   file_name: string | null;
   sort_order: number;
   created_at: string;
+  uploaded_by: string | null;
 };
 
 const extOf = (path: string) => {
@@ -45,7 +48,7 @@ const extOf = (path: string) => {
 async function rowsFor(driverId: string, docKey?: string): Promise<FileRow[]> {
   let q = supabaseAdmin
     .from(TABLE)
-    .select("id, doc_key, file_path, file_name, sort_order, created_at")
+    .select("id, doc_key, file_path, file_name, sort_order, created_at, uploaded_by")
     .eq("driver_id", driverId);
   if (docKey) q = q.eq("doc_key", docKey);
   const { data, error } = await q
@@ -64,6 +67,7 @@ export async function listEmployeeDocFiles(driverId: string): Promise<EmployeeDo
       sort_order: r.sort_order,
       ext: extOf(r.file_path),
       file_name: r.file_name,
+      auto: r.uploaded_by === AUTO_CONTRACT_UPLOADER,
     };
     (out[r.doc_key] ??= []).push(f);
   }
@@ -113,6 +117,7 @@ export async function uploadEmployeeDocFile(input: {
   if (input.replaceId) {
     target = existing.find((r) => r.id === input.replaceId) ?? null;
     if (!target) return { ok: false, message: "교체할 파일을 찾지 못했습니다. 새로고침해주세요." };
+    if (target.uploaded_by === AUTO_CONTRACT_UPLOADER) return { ok: false, message: AUTO_LOCKED };
   } else if (!slot.multiple) {
     target = existing[0] ?? null;
   }
@@ -169,12 +174,15 @@ export async function deleteEmployeeDocFile(input: {
   if (await isLocked(driverId)) return { ok: false, message: input.lockedMessage };
   const { data, error } = await supabaseAdmin
     .from(TABLE)
-    .select("id, file_path")
+    .select("id, file_path, uploaded_by")
     .eq("id", fileId)
     .eq("driver_id", driverId)
     .maybeSingle();
   if (error) throw new Error(error.message);
   if (!data) return { ok: true };
+  if ((data as { uploaded_by?: unknown }).uploaded_by === AUTO_CONTRACT_UPLOADER) {
+    return { ok: false, message: AUTO_LOCKED };
+  }
   const path = String((data as { file_path: string }).file_path);
   const { error: rmErr } = await supabaseAdmin.storage.from(HR_DOCUMENTS_BUCKET).remove([path]);
   if (rmErr) return { ok: false, message: `파일 삭제 실패: ${rmErr.message}` };
@@ -219,4 +227,74 @@ export async function employeeDocFileUrl(input: {
   );
   // 서명 URL 에 이미 ?token=… 이 있으므로 & 로 잇습니다(lib/mailAttachment.ts 와 같은 이유).
   return `${signed.signedUrl}&download=${encodeURIComponent(name)}`;
+}
+
+// =====================================================================
+// 체결 근로계약서 자동 첨부 (2026-10 노미현 부장 요청) — 계약서 흐름(lib/contractServer)만 부릅니다.
+//   * 파일은 계약서 확정본의 복사본: employees/{driverId}/docs/contract_auto_{계약 id}.pdf
+//     (계약서 원본 경로와 분리 — 카드 쪽 처리가 계약서 PDF 를 건드리지 않게).
+//   * 카드 잠금과 무관하게 붙습니다(시스템 처리). 직원이 손으로 올린 다른 근로계약서는 건드리지 않습니다.
+// =====================================================================
+const AUTO_LOCKED =
+  "동업자씨에서 전자 체결한 근로계약서는 여기서 교체·삭제할 수 없습니다. 계약서 화면에서 확인하세요.";
+
+function autoContractPath(driverId: string, contractId: string): string {
+  return `employees/${driverId}/docs/contract_auto_${contractId}.pdf`;
+}
+
+// 붙이거나(fileId 없음 / 행이 사라졌음) 같은 행의 파일을 새 PDF 로 바꿉니다. 행 id 를 돌려줍니다.
+export async function putAutoContractFile(input: {
+  driverId: string;
+  contractId: string;
+  employeeName: string;
+  bytes: Uint8Array;
+  fileId: string | null;
+}): Promise<string> {
+  const { driverId, contractId, bytes } = input;
+  const path = autoContractPath(driverId, contractId);
+  const { error: upErr } = await supabaseAdmin.storage
+    .from(HR_DOCUMENTS_BUCKET)
+    .upload(path, Buffer.from(bytes), { contentType: "application/pdf", upsert: true });
+  if (upErr) throw new Error(`카드 첨부 저장 실패: ${upErr.message}`);
+  const meta = { file_path: path, mime_type: "application/pdf", size_bytes: bytes.byteLength };
+
+  if (input.fileId) {
+    const { data, error } = await supabaseAdmin
+      .from(TABLE)
+      .update(meta)
+      .eq("id", input.fileId)
+      .eq("driver_id", driverId)
+      .eq("uploaded_by", AUTO_CONTRACT_UPLOADER)
+      .select("id")
+      .maybeSingle();
+    if (error) throw new Error(error.message);
+    if (data) return input.fileId;
+  }
+  const existing = await rowsFor(driverId, "contract");
+  const safe = input.employeeName.replace(/[\\/:*?"<>|\r\n\t]/g, "").trim() || "직원";
+  const { data, error } = await supabaseAdmin
+    .from(TABLE)
+    .insert({
+      ...meta,
+      driver_id: driverId,
+      doc_key: "contract",
+      file_name: `근로계약서(${safe}).pdf`,
+      uploaded_by: AUTO_CONTRACT_UPLOADER,
+      sort_order: existing.reduce((m, r) => Math.max(m, r.sort_order), -1) + 1,
+    })
+    .select("id")
+    .single();
+  if (error || !data) throw new Error(error?.message ?? "카드 첨부 행을 만들지 못했습니다.");
+  return String((data as { id: string }).id);
+}
+
+// 무효 — 카드에서 내립니다(행·파일은 남기고 doc_key 만 화면에 없는 값으로).
+export async function hideAutoContractFile(driverId: string, fileId: string): Promise<void> {
+  const { error } = await supabaseAdmin
+    .from(TABLE)
+    .update({ doc_key: VOID_CONTRACT_DOC_KEY })
+    .eq("id", fileId)
+    .eq("driver_id", driverId)
+    .eq("uploaded_by", AUTO_CONTRACT_UPLOADER);
+  if (error) throw new Error(error.message);
 }

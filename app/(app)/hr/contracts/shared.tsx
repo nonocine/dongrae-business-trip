@@ -13,17 +13,22 @@ import {
   downloadContractPdf,
   employerSignContract,
   getContractBlocks,
+  getContractDateChanges,
   getEmployerSignOptions,
+  setContractDate,
   recallContract,
   sendContract,
   voidContract,
 } from "@/app/(app)/hr/contracts/workflowActions";
-import type { EmployerSignInput } from "@/lib/contractServer";
+import type { ContractDateChange, EmployerSignInput } from "@/lib/contractServer";
 import {
   CONTRACT_KINDS,
+  contractDateWarnings,
   contractStateLabel,
+  fmtDot,
   isFinalized,
   kstYmd,
+  kstYmdHm,
   type ContractBlock,
   type ContractKind,
   type ContractSummary,
@@ -146,6 +151,7 @@ export function ContractList({
   // 종이 체결분은 blocks 대신 원본 스캔(scan, base64)을 띄웁니다.
   const [preview, setPreview] = useState<{ c: ContractSummary; blocks: ContractBlock[]; scan?: string } | null>(null);
   const [signTarget, setSignTarget] = useState<ContractSummary | null>(null);
+  const [dateTarget, setDateTarget] = useState<ContractSummary | null>(null);
   const [picked, setPicked] = useState<Set<string>>(new Set());
   const visible = items.filter((c) => showVoid || c.status !== "void");
   const pickedItems = visible.filter((c) => picked.has(c.id));
@@ -260,10 +266,11 @@ export function ContractList({
                 )}
                 <th className="px-2 py-2">직원</th>
                 <th className="px-2 py-2">기간</th>
+                <th className="px-2 py-2">계약일</th>
                 <th className="px-2 py-2">상태</th>
-                <th className="px-2 py-2">보냄</th>
-                <th className="px-2 py-2">직원 서명</th>
-                <th className="px-2 py-2">센터장 서명</th>
+                <th className="px-2 py-2" title="실제 시각 — 계약일을 고쳐도 바뀌지 않습니다">보냄(실제)</th>
+                <th className="px-2 py-2" title="실제 서명 시각 — 계약일을 고쳐도 바뀌지 않습니다">직원 서명(실제)</th>
+                <th className="px-2 py-2" title="실제 서명 시각 — 계약일을 고쳐도 바뀌지 않습니다">센터장 서명(실제)</th>
                 <th className="px-2 py-2">교부(내려받음)</th>
                 <th className="px-2 py-2 text-right">작업</th>
               </tr>
@@ -303,13 +310,28 @@ export function ContractList({
                       {c.note && <span className="block text-[11px] font-normal text-ink-muted">{c.note}</span>}
                     </td>
                     <td className="px-2 py-2 text-xs">{c.period}</td>
+                    <td className="px-2 py-2 text-xs" data-testid="contract-date">
+                      {c.contract_date ? fmtDot(c.contract_date) : <span className="text-ink-hint">미정</span>}
+                      {c.date_change && (
+                        <span
+                          className="mt-0.5 block text-[10px] text-stamp"
+                          title={`원래 ${c.date_change.original ? fmtDot(c.date_change.original) : "미정"} · 사유: ${c.date_change.reason}`}
+                        >
+                          수정됨{c.date_change.count > 1 ? ` ${c.date_change.count}회` : ""}
+                        </span>
+                      )}
+                    </td>
                     <td className="px-2 py-2">
                       <span className={badge}>{contractStateLabel(c)}</span>
                       {c.paper && <span className={`ml-1 ${badgeNeutral}`}>종이 체결</span>}
                     </td>
-                    <td className="px-2 py-2 text-xs">{kstYmd(c.sent_at) ?? "-"}</td>
-                    <td className="px-2 py-2 text-xs">{kstYmd(c.employee_signed_at) ?? "-"}</td>
-                    <td className="px-2 py-2 text-xs">{kstYmd(c.employer_signed_at) ?? "-"}</td>
+                    <td className="px-2 py-2 text-xs" title={kstYmdHm(c.sent_at) ?? ""}>{kstYmd(c.sent_at) ?? "-"}</td>
+                    <td className="px-2 py-2 text-xs" title={kstYmdHm(c.employee_signed_at) ?? ""}>
+                      {kstYmd(c.employee_signed_at) ?? "-"}
+                    </td>
+                    <td className="px-2 py-2 text-xs" title={kstYmdHm(c.employer_signed_at) ?? ""}>
+                      {kstYmd(c.employer_signed_at) ?? "-"}
+                    </td>
                     <td className="px-2 py-2 text-xs">{kstYmd(c.delivered_at) ?? "-"}</td>
                     <td className="px-2 py-2">
                       <div className="flex flex-wrap justify-end gap-1">
@@ -319,6 +341,11 @@ export function ContractList({
                         <SmallBtn onClick={() => pdf(c)} disabled={pending}>
                           {fin ? "PDF" : "PDF 미리보기"}
                         </SmallBtn>
+                        {c.status !== "void" && (
+                          <SmallBtn onClick={() => setDateTarget(c)} disabled={pending}>
+                            계약일
+                          </SmallBtn>
+                        )}
                         {c.status === "draft" && (
                           <>
                             {onEdit && (
@@ -416,6 +443,19 @@ export function ContractList({
         </Modal>
       )}
 
+      {dateTarget && (
+        <ContractDateDialog
+          kind={kind}
+          contract={dateTarget}
+          onClose={() => setDateTarget(null)}
+          onDone={(text) => {
+            setDateTarget(null);
+            setMsg({ ok: true, text });
+            router.refresh();
+          }}
+        />
+      )}
+
       {signTarget && (
         <EmployerSignDialog
           kind={kind}
@@ -429,6 +469,152 @@ export function ContractList({
         />
       )}
     </section>
+  );
+}
+
+// 계약일 — 계약서에 보이는 날짜(contract_date). 실제 서명 시각은 고칠 수 없고 여기서 함께 보여 줍니다.
+//   사유 필수 · 이력 목록. 미래 날짜·시작일+30일 초과는 막지 않고 확인만 받습니다(관장 요청).
+const kstTodayYmd = () => new Date(Date.now() + 9 * 3600 * 1000).toISOString().slice(0, 10);
+
+function ContractDateDialog({
+  kind,
+  contract: c,
+  onClose,
+  onDone,
+}: {
+  kind: ContractKind;
+  contract: ContractSummary;
+  onClose: () => void;
+  onDone: (text: string) => void;
+}) {
+  const today = kstTodayYmd();
+  const [date, setDate] = useState(c.contract_date ?? today);
+  const [reason, setReason] = useState("");
+  const [err, setErr] = useState<string | null>(null);
+  const [history, setHistory] = useState<ContractDateChange[] | null>(null);
+  const [pending, start] = useTransition();
+  const warnings = contractDateWarnings(date, c.start_date, today);
+
+  useEffect(() => {
+    let alive = true;
+    getContractDateChanges(kind, c.id).then((res) => {
+      if (alive) setHistory(res.ok ? res.changes : []);
+    });
+    return () => {
+      alive = false;
+    };
+  }, [kind, c.id]);
+
+  function save() {
+    setErr(null);
+    if (!reason.trim()) {
+      setErr("계약일을 바꾸는 사유를 적어주세요.");
+      return;
+    }
+    if (warnings.length && !confirm(`${warnings.join("\n")}\n\n이 날짜로 저장할까요?`)) return;
+    start(async () => {
+      const res = await setContractDate(kind, c.id, date, reason);
+      if (!res.ok) {
+        setErr(res.message);
+        return;
+      }
+      const pdfText =
+        res.pdf === "regenerated"
+          ? " 계약서 PDF 를 새 계약일로 다시 만들었습니다."
+          : res.pdf === "kept"
+            ? ` ${res.note ?? ""}`
+            : "";
+      const cardText = res.cardFile ? " 인사기록카드 첨부도 바꿨습니다." : "";
+      onDone(`${c.employee_name} 님 계약일을 ${fmtDot(date)}로 바꿨습니다.${pdfText}${cardText}`);
+    });
+  }
+
+  const row = (label: string, iso: string | null) => (
+    <div className="flex justify-between gap-3">
+      <dt className="text-ink-muted">{label}</dt>
+      <dd className="tabular-nums">{kstYmdHm(iso) ?? "-"}</dd>
+    </div>
+  );
+
+  return (
+    <Modal title={`${c.employee_name} — 계약일`} onClose={onClose}>
+      <div className="space-y-3 text-sm">
+        <section className="rounded-md border border-rule px-3 py-2">
+          <h4 className="mb-1 text-xs font-semibold text-ink">실제 서명 시각 (고칠 수 없음)</h4>
+          <dl className="space-y-0.5 text-xs">
+            {row("보냄", c.sent_at)}
+            {row("직원 서명", c.employee_signed_at)}
+            {row("센터장 서명", c.employer_signed_at)}
+          </dl>
+        </section>
+        <p className="text-xs text-ink-muted">
+          계약서에 보이는 날짜입니다. 지금: <b>{c.contract_date ? fmtDot(c.contract_date) : "미정(센터장 서명 날 자동)"}</b>
+          {c.date_change && (
+            <span className="text-stamp">
+              {" "}
+              · 계약일 수정됨 (원래 {c.date_change.original ? fmtDot(c.date_change.original) : "미정"}, {c.date_change.reason})
+            </span>
+          )}
+        </p>
+        {c.paper && <p className="text-xs text-ink-muted">종이 체결 건이라 원본 스캔은 그대로이고, 목록·표시 날짜만 바뀝니다.</p>}
+        <label className="block">
+          <span className="text-xs font-semibold text-ink">새 계약일</span>
+          <input
+            type="date"
+            className="mt-1 block w-full rounded-md border border-rule px-2 py-1.5"
+            value={date}
+            onChange={(e) => setDate(e.target.value)}
+            data-testid="contract-date-input"
+          />
+        </label>
+        {warnings.length > 0 && (
+          <ul className={`${noticeWarning} list-inside list-disc text-xs`}>
+            {warnings.map((w) => (
+              <li key={w}>{w} (저장은 됩니다)</li>
+            ))}
+          </ul>
+        )}
+        <label className="block">
+          <span className="text-xs font-semibold text-ink">사유 (필수 — 이력에 남습니다)</span>
+          <input
+            className="mt-1 block w-full rounded-md border border-rule px-2 py-1.5"
+            value={reason}
+            maxLength={200}
+            onChange={(e) => setReason(e.target.value)}
+            placeholder="예: 계약 시작일에 맞춤"
+            data-testid="contract-date-reason"
+          />
+        </label>
+        {err && <p className={noticeError}>{err}</p>}
+        <div className="flex justify-end gap-2">
+          <button type="button" className={btnSecondary} onClick={onClose}>
+            닫기
+          </button>
+          <button type="button" className={btnPrimary} onClick={save} disabled={pending}>
+            {pending ? "저장 중…" : "계약일 저장"}
+          </button>
+        </div>
+        <section>
+          <h4 className="mb-1 text-xs font-semibold text-ink">계약일 수정 이력</h4>
+          {history === null ? (
+            <p className="text-xs text-ink-hint">불러오는 중…</p>
+          ) : history.length === 0 ? (
+            <p className="text-xs text-ink-hint">고친 적이 없습니다.</p>
+          ) : (
+            <ul className="space-y-1 text-xs">
+              {history.map((h, i) => (
+                <li key={i} className="rounded border border-rule px-2 py-1">
+                  {h.old_date ? fmtDot(h.old_date) : "미정"} → {fmtDot(h.new_date)} · {h.reason}
+                  <span className="block text-[10px] text-ink-hint">
+                    {h.changed_by ?? "-"} · {kstYmdHm(h.changed_at)}
+                  </span>
+                </li>
+              ))}
+            </ul>
+          )}
+        </section>
+      </div>
+    </Modal>
   );
 }
 

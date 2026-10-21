@@ -1158,12 +1158,14 @@ export function AppointmentTab({
 }
 
 // =====================================================================
-// 첨부서류 탭 — 직원 인사기록 첨부서류 10종(EMPLOYEE_DOC_SLOTS).
+// 첨부서류 탭 — 직원 인사기록 첨부서류 9종(EMPLOYEE_DOC_SLOTS).
 //   * HR 직원관리 폼과 직원 본인 마이페이지가 공유합니다.
 //   * 목록·업로드/교체/삭제/열람 동작은 콜백으로 주입 — HR/본인 각자의 서버액션.
 //   * 파일은 즉시 업로드(폼 저장과 무관). 한 행 = 한 파일(employee_document_files).
 //   * 여러 장 허용(multiple) 서류는 [+ 파일 추가], 나머지는 1개(올리면 교체).
 //   * 필수 서류는 1개 이상이면 충족. 열기(브라우저 보기)와 내려받기(이름 자동) 분리.
+//   * 동업자씨에서 전자 체결한 근로계약서(f.auto)는 자동으로 붙고, 교체·삭제 대신
+//     "계약서 보기"(contractHref)로 계약서 화면에 연결합니다(서버도 교체·삭제를 막음).
 // =====================================================================
 export function EmployeeDocumentsSection({
   readOnly,
@@ -1171,8 +1173,10 @@ export function EmployeeDocumentsSection({
   onUpload,
   onDelete,
   onOpen,
+  contractHref,
 }: {
   readOnly: boolean;
+  contractHref?: string; // 자동 첨부 근로계약서의 "계약서 보기" 링크
   onList: () => Promise<EmployeeDocFiles>;
   onUpload: (docKey: string, file: File, replaceId: string | null) => Promise<ActionResult>;
   onDelete: (fileId: string) => Promise<ActionResult>;
@@ -1256,6 +1260,7 @@ export function EmployeeDocumentsSection({
               files={files[doc.key] ?? []}
               busy={busy}
               readOnly={readOnly}
+              contractHref={contractHref}
               onPick={(file, replaceId) => upload(doc.key, file, replaceId)}
               onOpen={open}
               onDelete={remove}
@@ -1307,6 +1312,7 @@ function EmployeeDocRow({
   files,
   busy,
   readOnly,
+  contractHref,
   onPick,
   onOpen,
   onDelete,
@@ -1315,6 +1321,7 @@ function EmployeeDocRow({
   files: EmployeeDocFile[];
   busy: string | null;
   readOnly: boolean;
+  contractHref?: string;
   onPick: (file: File, replaceId: string | null) => void;
   onOpen: (fileId: string, download: boolean) => void;
   onDelete: (fileId: string) => void;
@@ -1364,6 +1371,11 @@ function EmployeeDocRow({
               <span className="min-w-0 truncate text-xs text-ink-body">
                 {files.length > 1 ? `${i + 1}. ` : ""}
                 {f.file_name ?? `기존 첨부 (${f.ext.toUpperCase() || "파일"})`}
+                {f.auto && (
+                  <span className="ml-1.5 rounded-full bg-success-soft px-1.5 py-0.5 text-[10px] font-semibold text-success">
+                    동업자씨 전자 체결
+                  </span>
+                )}
               </span>
               <div className="flex shrink-0 items-center gap-1.5">
                 <button
@@ -1382,14 +1394,22 @@ function EmployeeDocRow({
                 >
                   내려받기
                 </button>
-                {!readOnly && (
+                {f.auto && contractHref && (
+                  <a
+                    href={contractHref}
+                    className="rounded-lg border border-navy bg-card px-2.5 py-1.5 text-xs font-semibold text-navy hover:bg-navy-soft"
+                  >
+                    계약서 보기
+                  </a>
+                )}
+                {!readOnly && !f.auto && (
                   <DocPickButton
                     label={busy === f.id ? "처리 중…" : "교체"}
                     disabled={anyBusy}
                     onPick={(file) => onPick(file, f.id)}
                   />
                 )}
-                {!readOnly && (
+                {!readOnly && !f.auto && (
                   <button
                     type="button"
                     onClick={() => onDelete(f.id)}

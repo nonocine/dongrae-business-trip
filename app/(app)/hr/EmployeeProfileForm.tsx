@@ -51,6 +51,7 @@ import {
   type ProfileTabKey,
 } from "@/app/(app)/hr/ProfileFormParts";
 import CurrentAssignment from "@/app/(app)/hr/CurrentAssignment";
+import { contractsPath } from "@/lib/contractCore";
 import {
   btnPrimary,
   btnDanger,
@@ -656,6 +657,7 @@ export default function EmployeeProfileForm({
           <div className={tab === "documents" ? "" : "hidden"}>
             <EmployeeDocumentsSection
               readOnly={locked}
+              contractHref={contractsPath({ tab: "employment", driverId: driver.id })}
               onList={onDocList}
               onUpload={onDocUpload}
               onDelete={onDocDelete}

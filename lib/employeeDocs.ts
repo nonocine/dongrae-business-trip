@@ -1,5 +1,5 @@
 // =====================================================================
-// 직원 인사기록 첨부서류 — 코드 고정 10종 슬롯.
+// 직원 인사기록 첨부서류 — 코드 고정 9종 슬롯.
 //   * 채용(lib/recruitmentDocs.ts)의 RECRUITMENT_DOC_SLOTS 패턴을 그대로 본떴습니다.
 //   * 채용과 달리 공고별 편집이 없어 required(필수/선택)를 코드에 고정합니다.
 //   * 표시(HR 인사기록카드·직원 마이페이지)·업로드 검증이 이 단일 출처를 공유합니다.
@@ -8,6 +8,10 @@
 //     (multiple). 파일은 employee_document_files 한 행 = 한 파일(서버:
 //     lib/employeeDocsServer.ts). employee_profiles.documents jsonb 는 롤백용으로만
 //     남아 있고 앱은 읽지 않습니다.
+//   * 2026-10 노미현 부장 요청: 건강진단서 항목 삭제(올라온 파일 0건 확인 후).
+//   * 2026-10: 센터장 서명까지 끝난 전자 근로계약서는 '근로계약서' 칸에 자동으로
+//     붙습니다(uploaded_by = AUTO_CONTRACT_UPLOADER). 이 파일은 카드에서 교체·삭제하지
+//     않고 "계약서 보기"로 엽니다 — 계약일을 고치면 같은 행의 파일이 새 PDF 로 바뀝니다.
 // =====================================================================
 export type EmployeeDocItem = {
   key: string;
@@ -26,7 +30,6 @@ export const EMPLOYEE_DOC_SLOTS: EmployeeDocItem[] = [
   { key: "contract", label: "근로계약서", required: true, multiple: true },
   { key: "bankbook", label: "통장 사본", required: true, multiple: false },
   { key: "criminal_check", label: "성범죄경력조회 회신서", required: true, multiple: false },
-  { key: "health_check", label: "건강진단서", required: false, multiple: false },
   { key: "privacy_consent", label: "개인정보 수집·이용 동의서", required: true, multiple: false },
 ];
 
@@ -46,10 +49,16 @@ export type EmployeeDocFile = {
   sort_order: number;
   ext: string; // "pdf"
   file_name: string | null; // 올린 원본 이름. 이관분은 null
+  auto: boolean; // 동업자씨 전자 체결로 자동 첨부된 근로계약서(교체·삭제 불가)
 };
 
 // docKey → 그 서류의 파일들(sort_order 순).
 export type EmployeeDocFiles = Record<string, EmployeeDocFile[]>;
+
+// 자동 첨부 표시 — employee_document_files.uploaded_by 값.
+export const AUTO_CONTRACT_UPLOADER = "동업자씨 전자 체결";
+// 무효 처리된 계약의 자동 첨부 — 카드에서 내린 행의 doc_key(파일·행은 남김).
+export const VOID_CONTRACT_DOC_KEY = "contract_void";
 
 export const EMPLOYEE_DOC_EXT: Record<string, string> = {
   "image/jpeg": "jpg",

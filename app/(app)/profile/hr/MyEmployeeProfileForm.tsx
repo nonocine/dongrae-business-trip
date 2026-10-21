@@ -687,6 +687,7 @@ export default function MyEmployeeProfileForm({
           <div className={tab === "documents" ? "" : "hidden"}>
             <EmployeeDocumentsSection
               readOnly={locked}
+              contractHref="/profile/hr#contracts"
               onList={onDocList}
               onUpload={onDocUpload}
               onDelete={onDocDelete}
