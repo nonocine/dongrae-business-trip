@@ -1,6 +1,6 @@
 import { runFileBackup } from "@/lib/fileBackupEngine";
 
-// Vercel Cron 전용 — 매일 UTC 19:00 = KST 04:00. hr-documents 파일 증분 백업
+// Vercel Cron 전용 — 매일 UTC 19:00 = KST 04:00. Storage 파일 증분 백업(hr-documents·bangka-media)
 //   (lib/fileBackupEngine). 할 일이 없으면 바로 끝나고, 많으면 240초만 하고 다음 날 이어갑니다.
 //   * 인증: Authorization === `Bearer ${CRON_SECRET}` (기존 Cron 과 동일 패턴).
 //   * Storage 원본은 읽기만 합니다.

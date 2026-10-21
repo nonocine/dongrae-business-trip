@@ -1,7 +1,9 @@
 // =====================================================================
-// 파일 백업 — Storage(hr-documents) → Google Drive, 증분 (2026-10 관장 지시)
+// 파일 백업 — Storage(FILE_BACKUP_SOURCES) → Google Drive, 증분 (2026-10 관장 지시)
+//   * 대상: hr-documents 전체, bangka-media(동래방카 사진·첨부 — tmp/ 업로드 중간 파일 제외).
+//     shared-mail(메일 첨부)은 아직 넣지 않았습니다.
 //   * 위치: ZIP 백업과 같은 공유 드라이브(GDRIVE_BACKUP_FOLDER_ID) 아래
-//     "동업자씨 파일 백업/hr-documents/{원래 경로}".
+//     "동업자씨 파일 백업/{버킷}/{원래 경로}". 버킷들이 한 실행·한 시간 예산을 나눠 씁니다.
 //   * 원본 목록은 file_backup_list(bucket) RPC 1회(service_role 전용 함수).
 //     진행 기록(file_backup_items)과 비교해 새 파일·바뀐 파일(eTag·크기)만 올립니다.
 //     할 일이 없으면 드라이브에 접속하지 않고 바로 끝납니다.
@@ -23,7 +25,12 @@ import { driveAuth } from "@/lib/backupEngine";
 import { directorEmail } from "@/lib/backupCoverage";
 
 export const FILE_BACKUP_ROOT = "동업자씨 파일 백업";
-export const FILE_BACKUP_BUCKET = "hr-documents";
+// 백업할 버킷. exclude 에 맞는 경로는 원본 목록에서 뺍니다(백업도, '원본에서 사라짐' 표시도 안 함).
+export const FILE_BACKUP_SOURCES: readonly { bucket: string; exclude: RegExp | null }[] = [
+  { bucket: "hr-documents", exclude: null },
+  // tmp/ = 동래방카 사진을 서버가 줄이기 전에 잠깐 두는 곳(lib/bangkaMedia) — 곧 지워짐.
+  { bucket: "bangka-media", exclude: /^tmp\// },
+];
 const BUDGET_MS = 240_000;
 const CONCURRENCY = 3;
 const STALE_MS = 30 * 60_000;
@@ -226,6 +233,8 @@ async function notifyFailure(text: string): Promise<void> {
 }
 
 // --- 실행 ----------------------------------------------------------------
+type Todo = { bucket: string; f: SourceFile };
+
 export async function runFileBackup(input: {
   triggeredBy: string;
   rootName?: string; // 시험 때만 다른 이름
@@ -233,7 +242,6 @@ export async function runFileBackup(input: {
   notify?: boolean; // 기본 true
 }): Promise<FileBackupSummary> {
   const started = Date.now();
-  const bucket = FILE_BACKUP_BUCKET;
   const notify = input.notify !== false;
   const base: FileBackupSummary = {
     ok: true,
@@ -285,38 +293,39 @@ export async function runFileBackup(input: {
   };
 
   try {
-    // 2) 원본 목록 · 진행 기록
-    const source = await listSource(bucket);
-    const items = await listItems(bucket);
-    s.scanned = source.length;
+    // 2) 버킷마다 원본 목록 · 진행 기록 → 사라진/다시 나타난 표시 → 할 일
+    const itemsBy = new Map<string, Map<string, ItemRow>>();
+    const todoAll: Todo[] = [];
+    for (const src of FILE_BACKUP_SOURCES) {
+      const bucket = src.bucket;
+      const source = (await listSource(bucket)).filter((f) => !src.exclude?.test(f.name));
+      const items = await listItems(bucket);
+      itemsBy.set(bucket, items);
+      s.scanned += source.length;
 
-    // 원본에서 사라진 파일 / 다시 나타난 파일 표시(드라이브는 그대로)
-    const inSource = new Set(source.map((f) => f.name));
-    const gone = [...items.values()].filter((i) => !inSource.has(i.object_path) && !i.source_missing_at);
-    for (let k = 0; k < gone.length; k += 200) {
-      await supabaseAdmin
-        .from("file_backup_items")
-        .update({ source_missing_at: new Date().toISOString() })
-        .eq("bucket", bucket)
-        .in("object_path", gone.slice(k, k + 200).map((i) => i.object_path));
-    }
-    s.missingMarked = gone.length;
+      // 원본에서 사라진 파일 / 다시 나타난 파일 표시(드라이브는 그대로)
+      const inSource = new Set(source.map((f) => f.name));
+      const gone = [...items.values()].filter((i) => !inSource.has(i.object_path) && !i.source_missing_at);
+      for (let k = 0; k < gone.length; k += 200) {
+        await supabaseAdmin
+          .from("file_backup_items")
+          .update({ source_missing_at: new Date().toISOString() })
+          .eq("bucket", bucket)
+          .in("object_path", gone.slice(k, k + 200).map((i) => i.object_path));
+      }
+      s.missingMarked += gone.length;
 
-    // 3) 할 일 — 새 파일·바뀐 파일
-    const todoAll = source.filter((f) => {
-      const it = items.get(f.name);
-      return !it || it.etag !== f.etag || it.size_bytes !== f.size;
-    });
-    const back = source.filter((f) => {
-      const it = items.get(f.name);
-      return it && it.source_missing_at && it.etag === f.etag && it.size_bytes === f.size;
-    });
-    for (const f of back) {
-      await supabaseAdmin
-        .from("file_backup_items")
-        .update({ source_missing_at: null })
-        .eq("bucket", bucket)
-        .eq("object_path", f.name);
+      for (const f of source) {
+        const it = items.get(f.name);
+        if (!it || it.etag !== f.etag || it.size_bytes !== f.size) todoAll.push({ bucket, f });
+        else if (it.source_missing_at) {
+          await supabaseAdmin
+            .from("file_backup_items")
+            .update({ source_missing_at: null })
+            .eq("bucket", bucket)
+            .eq("object_path", f.name);
+        }
+      }
     }
     const todo = input.maxFiles != null ? todoAll.slice(0, input.maxFiles) : todoAll;
     if (todo.length === 0) {
@@ -324,23 +333,31 @@ export async function runFileBackup(input: {
       return s;
     }
 
-    // 4) 드라이브 — 루트 폴더 · 폴더 캐시
+    // 3) 드라이브 — 루트 폴더 · 버킷별 폴더 캐시(처음 쓸 때 불러옴)
     const { token, folderId } = await driveAuth();
     const rootName = input.rootName ?? FILE_BACKUP_ROOT;
     const rootId = (await findFolder(token, folderId, rootName)) ?? (await createFolder(token, folderId, rootName));
-    const folders = new FolderCache(token, bucket, rootId);
-    await folders.load();
+    const caches = new Map<string, Promise<FolderCache>>();
+    const foldersFor = (bucket: string) => {
+      let c = caches.get(bucket);
+      if (!c) {
+        const fc = new FolderCache(token, bucket, rootId);
+        c = fc.load().then(() => fc);
+        caches.set(bucket, c);
+      }
+      return c;
+    };
 
-    // 5) 동시 3개 — 240초가 지나면 새 파일은 시작하지 않음
+    // 4) 동시 3개 — 240초가 지나면 새 파일은 시작하지 않음
     let next = 0;
-    const one = async (f: SourceFile) => {
-      const prev = items.get(f.name);
+    const one = async ({ bucket, f }: Todo) => {
+      const prev = itemsBy.get(bucket)?.get(f.name);
       const dl = await supabaseAdmin.storage.from(bucket).download(f.name);
       if (dl.error || !dl.data) throw new Error(`원본 읽기 실패: ${dl.error?.message ?? "데이터 없음"}`);
       const bytes = Buffer.from(await dl.data.arrayBuffer());
       const mime = dl.data.type || "application/octet-stream";
       const slash = f.name.lastIndexOf("/");
-      const parentId = await folders.get(slash >= 0 ? f.name.slice(0, slash) : "");
+      const parentId = await (await foldersFor(bucket)).get(slash >= 0 ? f.name.slice(0, slash) : "");
       const fileName = f.name.slice(slash + 1);
 
       let driveId = prev?.drive_file_id ?? null;
@@ -377,11 +394,11 @@ export async function runFileBackup(input: {
     };
     const worker = async () => {
       while (next < todo.length && Date.now() - started < BUDGET_MS) {
-        const f = todo[next++];
+        const t = todo[next++];
         try {
-          await one(f);
+          await one(t);
         } catch (e) {
-          s.failed.push({ path: f.name, message: e instanceof Error ? e.message : String(e) });
+          s.failed.push({ path: `${t.bucket}/${t.f.name}`, message: e instanceof Error ? e.message : String(e) });
         }
       }
     };

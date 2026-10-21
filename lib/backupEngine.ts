@@ -25,6 +25,7 @@ import { applyRetention, retentionIsLive, retentionNote } from "@/lib/backupRete
 //    환경변수)는 DB 에 없고 이 엔진은 테이블만 읽으므로 백업에 들어가지 않습니다
 //    — 키를 settings 등 테이블에 넣지 마세요.
 // ⑤ 2026-10 관장 지시 — 동래방카(bk_*) 3개, 파일 백업 진행 기록 2개
+// ⑥ 2026-10 관장 지시 — 동래방카 콘텐츠(공지·알림장·급식·연간일정) 5개
 // 백업하지 않는 public 테이블은 아래 BACKUP_EXCLUDED 에 이유와 함께 적습니다.
 //   둘 다에 없는 테이블이 생기면 백업 Cron 이 관장에게 DM(lib/backupCoverage).
 export const BACKUP_TABLES: readonly string[] = [
@@ -108,6 +109,11 @@ export const BACKUP_TABLES: readonly string[] = [
   "bk_students", // ⑤ 방과후아카데미 학생 명단
   "bk_guardians", // ⑤ 보호자 로그인 계정(PIN 은 해시 — drivers 와 같은 기준)
   "bk_guardian_students", // ⑤ 보호자 ↔ 학생
+  "bk_posts", // ⑥ 공지·알림장·월간 수업안
+  "bk_post_files", // ⑥ 게시물 첨부(파일은 bangka-media — 파일 백업)
+  "bk_post_reads", // ⑥ 보호자 읽음 확인
+  "bk_meals", // ⑥ 급식
+  "bk_events", // ⑥ 연간일정
   // --- 상조회 ---
   "mutual_members",
   "mutual_ledger",
@@ -142,6 +148,8 @@ export const BACKUP_EXCLUDED: Readonly<Record<string, string>> = {
   mail_messages_backup_20260901: "메일 정리 전 임시 사본(2026-09-01) — 원본은 mail_messages",
   // 다시 받을 수 있는 캐시
   rental_reservations: "대관 시스템에서 매일 다시 받는 사본(rental-sync Cron)",
+  // 뷰(데이터 없음 — 원본 테이블이 백업됨). 점검은 PostgREST 목록을 쓰므로 뷰도 잡힙니다.
+  bk_class_sessions: "뷰 — 동래방카 수업 회차(원본 saem_sessions·saem_programs 는 백업됨)",
   // 공용 인스턴스의 다른 앱(스탬프투어 등)·소유 불명 — 이 저장소 코드가 쓰지 않음
   admins: "다른 앱(스탬프투어) 관리자",
   applications: "다른 앱(스탬프투어) 신청",
