@@ -65,8 +65,8 @@ export function coverageMessage(c: BackupCoverage): string | null {
   return lines.join("\n");
 }
 
-// 관장(drivers.rank='관장', 재직) 의 인사기록카드 email.
-async function directorEmail(): Promise<string | null> {
+// 관장(drivers.rank='관장', 재직) 의 인사기록카드 email. 파일 백업 실패 알림도 씁니다.
+export async function directorEmail(): Promise<string | null> {
   const { data: drv } = await supabaseAdmin
     .from("drivers")
     .select("id")

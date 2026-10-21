@@ -35,7 +35,7 @@ export default async function BackupPage() {
           </h2>
           <p className="mt-1 text-xs text-ink-muted">
             센터 데이터 {BACKUP_TABLES.length}개 테이블을 JSON 으로 내보내
-            ZIP 으로 묶은 뒤 구글 드라이브에 보관합니다. 매월 2일 새벽 3시에
+            ZIP 으로 묶은 뒤 구글 드라이브에 보관합니다. 매주 일요일 새벽 3시에
             자동 실행되며, 필요할 때 아래 버튼으로 즉시 실행할 수 있습니다.
           </p>
         </div>

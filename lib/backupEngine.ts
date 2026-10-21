@@ -2,6 +2,7 @@ import JSZip from "jszip";
 import { JWT } from "google-auth-library";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
 import { sendSlack } from "@/lib/slack";
+import { applyRetention, retentionIsLive, retentionNote } from "@/lib/backupRetention";
 
 // =====================================================================
 // 데이터 백업 엔진 — 화이트리스트 테이블 → JSON → ZIP → Google Drive
@@ -19,6 +20,11 @@ import { sendSlack } from "@/lib/slack";
 // ① 이 저장소 코드가 실제로 참조하는 테이블 (grep 기준 50개)
 // ② 코드 참조는 없지만 이 앱 소유가 확실한 테이블 (6개)
 // ③ 2026-10 백업 점검에서 추가(관장 지시)
+// ④ 2026-10 점검 후속 — "결정 대기" 17개를 관장 결정으로 포함
+//    shared_credentials 는 암호문 그대로입니다. 복호화 키(CREDENTIAL_MASTER_KEY,
+//    환경변수)는 DB 에 없고 이 엔진은 테이블만 읽으므로 백업에 들어가지 않습니다
+//    — 키를 settings 등 테이블에 넣지 마세요.
+// ⑤ 2026-10 관장 지시 — 동래방카(bk_*) 3개, 파일 백업 진행 기록 2개
 // 백업하지 않는 public 테이블은 아래 BACKUP_EXCLUDED 에 이유와 함께 적습니다.
 //   둘 다에 없는 테이블이 생기면 백업 Cron 이 관장에게 DM(lib/backupCoverage).
 export const BACKUP_TABLES: readonly string[] = [
@@ -39,6 +45,18 @@ export const BACKUP_TABLES: readonly string[] = [
   "salary_contracts", // ②
   "certificates_issued", // ②
   "employee_document_files", // ③ 인사기록 첨부서류(한 행 = 한 파일)
+  "hr_awards", // ④ 수상·포상
+  "hr_committees", // ④ 인사위원회
+  "hr_disciplines", // ④ 징계
+  "hr_evaluations", // ④ 근무평정
+  "hr_incident_reports", // ④ 경위서
+  "shared_credentials", // ④ 공용 비밀번호(암호문)
+  "credential_viewers", // ④ 공용 비밀번호 열람자
+  // --- 거래처·명함 ---
+  "business_cards", // ④
+  "business_partners", // ④
+  "partner_contacts", // ④
+  "partner_transaction_logs", // ④
   // --- 기관 대장 ---
   "org_agreements", // ③
   "org_awards", // ③
@@ -81,6 +99,15 @@ export const BACKUP_TABLES: readonly string[] = [
   "saem_attendance",
   "saem_settlements",
   "saem_settlement_items",
+  "saem_club_budget_plans", // ④
+  "saem_club_expenses", // ④
+  "saem_club_monthly_reports", // ④
+  "saem_lecture_certificates", // ④
+  "saem_member_roles", // ④
+  // --- 동래방카 ---
+  "bk_students", // ⑤ 방과후아카데미 학생 명단
+  "bk_guardians", // ⑤ 보호자 로그인 계정(PIN 은 해시 — drivers 와 같은 기준)
+  "bk_guardian_students", // ⑤ 보호자 ↔ 학생
   // --- 상조회 ---
   "mutual_members",
   "mutual_ledger",
@@ -96,17 +123,21 @@ export const BACKUP_TABLES: readonly string[] = [
   "coin_pay_results",
   // --- 공용 메일함 ---
   "mail_messages",
+  "mail_replies", // ④
+  // --- 파일 백업(lib/fileBackupEngine) 진행 기록 ---
+  "file_backup_items", // ⑤ 원본 파일 ↔ Drive 파일
+  "file_backup_folders", // ⑤ 원본 폴더 ↔ Drive 폴더
 ];
 
 // --- 백업 제외 목록 ---------------------------------------------------
 // 운영 DB public 에 있지만 백업하지 않는 테이블 — 테이블마다 이유 한 줄.
 //   BACKUP_TABLES 에도 여기에도 없는 테이블이 생기면 lib/backupCoverage 가 잡아
 //   관장에게 알립니다. 새 테이블을 만들면 둘 중 한 곳에 꼭 적어 주세요.
-//   "결정 대기" 는 2026-10-21 점검 보고에서 포함을 권했으나 관장 결정 전인 것 —
-//   포함하기로 하면 BACKUP_TABLES 로 옮깁니다.
+//   진짜 제외(다른 앱·임시 사본·다시 받을 수 있는 캐시·이 엔진 자신)만 둡니다.
 export const BACKUP_EXCLUDED: Readonly<Record<string, string>> = {
   // 이 엔진 자신·임시 사본
   backup_logs: "백업 엔진 자신의 실행 기록",
+  file_backup_runs: "파일 백업 실행 기록(backup_logs 와 같은 이유)",
   recruitment_scores_backup_v1: "채용 v1.2 점수 임시 백업본(2026-05) — 원본은 recruitment_scores",
   mail_messages_backup_20260901: "메일 정리 전 임시 사본(2026-09-01) — 원본은 mail_messages",
   // 다시 받을 수 있는 캐시
@@ -127,24 +158,6 @@ export const BACKUP_EXCLUDED: Readonly<Record<string, string>> = {
   yangjeong_drivers: "양정 차량 앱 소유",
   yangjeong_driving_logs: "양정 차량 앱 소유",
   yangjeong_settings: "양정 차량 앱 소유",
-  // 결정 대기 — 이 앱이 쓰는 원본 데이터(포함 권장)
-  hr_awards: "결정 대기 — 수상·포상(인사기록)",
-  hr_committees: "결정 대기 — 인사위원회 기록",
-  hr_disciplines: "결정 대기 — 징계 기록",
-  hr_evaluations: "결정 대기 — 근무평정",
-  hr_incident_reports: "결정 대기 — 경위서",
-  business_cards: "결정 대기 — 명함첩",
-  business_partners: "결정 대기 — 거래처",
-  partner_contacts: "결정 대기 — 거래처 담당자",
-  partner_transaction_logs: "결정 대기 — 거래처 거래이력",
-  mail_replies: "결정 대기 — 공용 메일 답장 기록",
-  shared_credentials: "결정 대기 — 공용 비밀번호(암호문. 복호화 키는 환경변수라 백업에 없음)",
-  credential_viewers: "결정 대기 — 공용 비밀번호 열람자 지정",
-  saem_club_budget_plans: "결정 대기 — 동래샘들 동아리 예산계획",
-  saem_club_expenses: "결정 대기 — 동래샘들 동아리 지출",
-  saem_club_monthly_reports: "결정 대기 — 동래샘들 동아리 월보고",
-  saem_lecture_certificates: "결정 대기 — 동래샘들 강의확인증 발급대장",
-  saem_member_roles: "결정 대기 — 동래샘들 회원 역할",
 };
 
 // backup_logs 는 이 엔진이 유일하게 쓰는 테이블입니다.
@@ -406,10 +419,9 @@ export function describeKeyDiagnostics(): string {
   }
 }
 
-async function uploadToDrive(
-  fileName: string,
-  zip: Buffer
-): Promise<{ id: string }> {
+// 드라이브 접근 토큰 + 백업 위치(GDRIVE_BACKUP_FOLDER_ID — 공유 드라이브).
+//   ZIP 백업과 파일 백업(lib/fileBackupEngine)이 함께 씁니다.
+export async function driveAuth(): Promise<{ token: string; folderId: string }> {
   const email = process.env.GDRIVE_SA_EMAIL;
   const rawKey = process.env.GDRIVE_SA_KEY;
   const folderId = process.env.GDRIVE_BACKUP_FOLDER_ID;
@@ -429,6 +441,14 @@ async function uploadToDrive(
   });
   const { token } = await jwt.getAccessToken();
   if (!token) throw new Error("구글 인증 토큰 발급에 실패했습니다.");
+  return { token, folderId };
+}
+
+async function uploadToDrive(
+  fileName: string,
+  zip: Buffer
+): Promise<{ id: string }> {
+  const { token, folderId } = await driveAuth();
 
   // files.create — multipart(메타데이터 + 본문 1회 전송).
   // supportsAllDrives: 공유 드라이브 폴더에도 업로드 가능하도록.
@@ -563,6 +583,29 @@ export async function runBackup(triggeredBy: string): Promise<BackupSummary> {
     const { id: driveFileId } = await uploadToDrive(fileName, buf);
 
     const skipped = dumps.filter((d) => d.error);
+
+    // 3-1) 보관 규칙 정리(lib/backupRetention) — 업로드가 성공한 뒤에만. 실패해도
+    //   백업은 성공으로 둡니다. 정상 정리 결과(지운 파일 이름 등)는 notes(회색 보조
+    //   글씨), 정리 실패만 error_message(빨간 오류)에 남깁니다.
+    let retentionNoteText: string | null = null;
+    let retentionError: string | null = null;
+    let retentionSlack = false; // 슬랙은 실제로 지웠거나 실패했을 때만
+    try {
+      const { token, folderId } = await driveAuth();
+      const r = await applyRetention({ token, folderId, now, protectIds: [driveFileId], live: retentionIsLive(now) });
+      const line = retentionNote(r);
+      if (r.failed.length > 0) retentionError = line;
+      else retentionNoteText = line;
+      retentionSlack = r.trashed.length > 0 || r.failed.length > 0;
+    } catch (e) {
+      retentionError = `보관 정리 실패: ${e instanceof Error ? e.message : String(e)}`;
+      retentionSlack = true;
+    }
+
+    const errors = [
+      skipped.length > 0 ? `일부 테이블 제외: ${skipped.map((s) => s.table).join(", ")}` : null,
+      retentionError,
+    ].filter(Boolean);
     await finish({
       status: "success",
       table_count: okDumps.length,
@@ -570,10 +613,8 @@ export async function runBackup(triggeredBy: string): Promise<BackupSummary> {
       file_name: fileName,
       file_size_bytes: buf.length,
       drive_file_id: driveFileId,
-      error_message:
-        skipped.length > 0
-          ? `일부 테이블 제외: ${skipped.map((s) => s.table).join(", ")}`
-          : null,
+      error_message: errors.length > 0 ? errors.join("\n") : null,
+      notes: retentionNoteText,
     });
 
     // 4) 슬랙 — 완전 격리(sendSlack 은 throw 하지 않음).
@@ -583,7 +624,8 @@ export async function runBackup(triggeredBy: string): Promise<BackupSummary> {
         `파일: ${fileName}\n트리거: ${triggeredBy}` +
         (skipped.length > 0
           ? `\n⚠️ 제외된 테이블: ${skipped.map((s) => s.table).join(", ")}`
-          : "")
+          : "") +
+        (retentionSlack ? `\n🗂️ ${retentionError ?? retentionNoteText}` : "")
     );
 
     return {
@@ -635,6 +677,7 @@ export type BackupLog = {
   file_size_bytes: number | null;
   drive_file_id: string | null;
   error_message: string | null;
+  notes: string | null; // 정상 비고(보관 정리 결과 등) — 화면에 회색 보조 글씨
   triggered_by: string;
 };
 

@@ -10,7 +10,7 @@
     },
     {
       "path": "/api/cron/backup",
-      "schedule": "0 18 1 * *"
+      "schedule": "0 18 * * 6"
     },
     {
       "path": "/api/cron/mail-digest",
@@ -19,6 +19,10 @@
     {
       "path": "/api/cron/rental-sync",
       "schedule": "30 19 * * *"
+    },
+    {
+      "path": "/api/cron/file-backup",
+      "schedule": "0 19 * * *"
     }
   ]
 }

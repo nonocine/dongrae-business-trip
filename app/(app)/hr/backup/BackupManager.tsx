@@ -163,6 +163,24 @@ export default function BackupManager({
                   ))}
               </ul>
             )}
+            {/* 정상 비고(ZIP 보관 정리 결과 등) — 오류가 아니므로 회색 보조 글씨. */}
+            {logs.some((l) => l.notes) && (
+              <ul className="mt-3 space-y-1.5">
+                {logs
+                  .filter((l) => l.notes)
+                  .map((l) => (
+                    <li
+                      key={`n-${l.id}`}
+                      className="whitespace-pre-line text-xs text-ink-muted"
+                    >
+                      <span className="font-semibold">
+                        {fmtKstDateTime(l.started_at)}
+                      </span>{" "}
+                      — {l.notes}
+                    </li>
+                  ))}
+              </ul>
+            )}
           </div>
         )}
       </section>

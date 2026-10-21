@@ -1,7 +1,8 @@
 import { runBackup } from "@/lib/backupEngine";
 import { runBackupCoverageCheck } from "@/lib/backupCoverage";
 
-// Vercel Cron 전용 — 월 1회, UTC 매월 1일 18:00 = KST 매월 2일 03:00 호출.
+// Vercel Cron 전용 — 주 1회, UTC 토요일 18:00 = KST 일요일 03:00 호출.
+//   (2026-10 관장 지시로 월 1회 → 주 1회)
 //   * 인증: Authorization === `Bearer ${CRON_SECRET}` (기존 Cron 과 동일 패턴).
 //   * 백업은 읽기 전용입니다(backup_logs 기록 제외).
 //   * 엔진이 실패를 내부에서 잡아 backup_logs·슬랙에 남기므로, 라우트는
