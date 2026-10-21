@@ -95,7 +95,7 @@ function rowFromCalc(c: SalaryCalc) {
 
 function dupMessage(code?: string): string | null {
   return code === "23505"
-    ? "이 직원의 같은 연도 연봉계약서가 이미 있습니다(직원·연도당 1건 — 무효 건 포함). 목록에서 기존 건을 확인해주세요."
+    ? "이 직원의 같은 연도 연봉계약서가 이미 있습니다(직원·연도당 1건 — 무효 건은 빼고 셉니다). 목록에서 기존 건을 확인해주세요."
     : null;
 }
 

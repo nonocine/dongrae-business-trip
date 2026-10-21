@@ -934,9 +934,11 @@ async function nextDisplayOrder(postingId: string): Promise<number> {
 }
 
 // ---------------------------------------------------------------------
-// 1) 목록 조회 — 누구나 (채점 페이지에서도 필요).
+// 1) 목록 조회 — 관장·부장·채용 직무만 (2026-10: 권한 검사가 없던 것을 막음).
+//   채점 화면은 이 함수를 쓰지 않습니다(위원 신원은 requireInterviewJudge).
 // ---------------------------------------------------------------------
 export async function listJudges(postingId: string): Promise<Judge[]> {
+  await requireHrAdmin("recruitment");
   if (!postingId) return [];
   const { data, error } = await supabaseAdmin
     .from("recruitment_judges")

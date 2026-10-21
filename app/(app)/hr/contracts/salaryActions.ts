@@ -76,7 +76,8 @@ export async function getSalaryWorkspace(year: number): Promise<SalaryWorkspace>
     supabaseAdmin.from("employee_salary_profiles").select("driver_id, grade, step, start_month, end_month, extra").eq("year", y),
     supabaseAdmin.from("drivers").select("id, name"),
     supabaseAdmin.from("employee_profiles").select("driver_id, employment_status"),
-    supabaseAdmin.from(TABLE).select("id, driver_id, status").eq("year", y),
+    // 직원·연도당 '살아 있는' 계약 1건 — 무효(void) 건은 빼고 봅니다(무효 후 다시 작성 가능).
+    supabaseAdmin.from(TABLE).select("id, driver_id, status").eq("year", y).neq("status", "void"),
     readCurrentClausesRaw("salary"),
   ]);
   const nameById = new Map((drivers ?? []).map((d) => [String((d as { id: string }).id), String((d as { name: string }).name)]));

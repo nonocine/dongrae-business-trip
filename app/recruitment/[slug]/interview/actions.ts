@@ -14,12 +14,14 @@ import {
   requireInterviewJudge,
   getInterviewJudgeContext,
 } from "@/app/(app)/hr/recruitment/[slug]/actions";
+import { hasHrScope } from "@/app/(app)/hr/actions";
 import { INTERVIEW_ITEMS, INTERVIEW_MAX } from "@/lib/recruitmentScore";
 
 // =====================================================================
 // 면접 채점 — /recruitment/[slug]/interview
-//   * 공개 접근 (외부 심사위원도 URL 받아서 접속).
-//   * 인증 없음 — 심사위원 이름과 서명 이미지로 본인 식별.
+//   * 외부 심사위원도 URL 받아서 접속(외부위원 로그인 → 서명 쿠키).
+//   * 지원자 정보가 나가는 액션은 모두 서버에서 위원 신원을 확인합니다
+//     (requireInterviewJudge / getInterviewJudgeContext).
 //   * 정상 운영 환경에서는 면접관에게 직접 URL 안내하여 사용.
 // =====================================================================
 
@@ -66,12 +68,21 @@ export async function getInterviewPosting(
 
 // 면접 대상자 — 서류합격 이후 단계.
 //   * reviewerName 이 주어지면 본인이 이미 채점한 지원자 표시(scored=true).
+//   * 2026-10: 지원자 이름·생년월일이 나가므로 서버에서 신원을 확인합니다.
+//     통과 = 이 공고의 심사위원(외부위원 서명 쿠키 / 배정된 내부위원 직원 로그인 —
+//     requireInterviewJudge 와 같은 판정) 또는 관장·부장·채용 직무(hasHrScope).
+//     그 외(로그인 없음·일반 직원)는 거부합니다. 메시지에 "로그인" 이 들어가면
+//     화면이 외부위원 로그인 안내를 띄웁니다.
 export async function listInterviewCandidates(
   slug: string,
   reviewerName: string
 ): Promise<InterviewCandidate[]> {
   const p = await getInterviewPosting(slug);
   if (!p) return [];
+  const judge = await getInterviewJudgeContext(p.id);
+  if (!judge && !(await hasHrScope("recruitment"))) {
+    throw new Error("외부위원 로그인이 필요합니다. 이 공고의 심사위원만 면접 대상자를 볼 수 있습니다.");
+  }
 
   const { data: apps, error } = await supabaseAdmin
     .from("recruitment_applications")
@@ -96,7 +107,6 @@ export async function listInterviewCandidates(
     // 본인 점수는 위원 신원(reviewer_id = recruitment_judges.id, UUID) 기준으로 조회.
     //   외부·내부 위원 모두 reviewer_id 로 저장되므로 이름 표기 차이에 영향받지 않음.
     //   신원 확인이 안 되는 경우(미인증)에만 입력 이름(reviewer_name)으로 폴백.
-    const judge = await getInterviewJudgeContext(p.id);
     const rn = reviewerName.trim();
     if (judge || rn.length > 0) {
       const base = supabaseAdmin
