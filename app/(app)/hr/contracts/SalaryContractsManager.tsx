@@ -1,6 +1,7 @@
 "use client";
 
 import { useMemo, useState, useTransition } from "react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import ContractView from "@/app/components/ContractView";
 import {
@@ -13,7 +14,7 @@ import {
   type SalaryEmployee,
 } from "@/app/(app)/hr/contracts/salaryActions";
 import { ContractList, Modal, type Msg } from "@/app/(app)/hr/contracts/shared";
-import { contractStateLabel, type ContractSummary } from "@/lib/contractCore";
+import { contractStateLabel, contractsPath, type ContractFocus, type ContractSummary } from "@/lib/contractCore";
 import {
   DEFAULT_SALARY_CLAUSES,
   amountInKorean,
@@ -36,6 +37,7 @@ import {
   btnSecondary,
   btnDanger,
   badgeNeutral,
+  linkCls,
   noticeError,
   noticeSuccess,
   noticeWarning,
@@ -57,10 +59,12 @@ export default function SalaryContractsManager({
   workspace: ws,
   contracts,
   isM0,
+  focus = null,
 }: {
   workspace: SalaryWorkspace;
   contracts: ContractSummary[];
   isM0: boolean;
+  focus?: ContractFocus | null; // ?driver= 로 한 직원만 걸러 보는 중(workspace·contracts 는 이미 걸러져 옴)
 }) {
   const router = useRouter();
   const [pending, start] = useTransition();
@@ -117,7 +121,7 @@ export default function SalaryContractsManager({
 
   return (
     <div className="space-y-6">
-      <HolidayPanel year={ws.year} holidays={ws.holidays} />
+      <HolidayPanel year={ws.year} holidays={ws.holidays} driverId={focus?.driverId ?? null} />
 
       <section className={panelToneCls("yellow")}>
         <h3 className={sectionTitleCls("yellow")}>{ws.year}년 연봉계약서 작성</h3>
@@ -129,7 +133,9 @@ export default function SalaryContractsManager({
         {holidayMissing && <p className={`mt-2 ${noticeWarning}`}>{ws.year}년 설·추석 날짜를 먼저 넣어야 명절휴가비를 계산할 수 있습니다.</p>}
         {msg && <p className={`mt-3 ${msg.ok ? noticeSuccess : noticeError}`}>{msg.text}</p>}
         {ws.employees.length === 0 ? (
-          <p className="py-6 text-center text-sm text-ink-hint">{ws.year}년 급여설정이 있는 재직 직원이 없습니다.</p>
+          <p className="py-6 text-center text-sm text-ink-hint">
+            {focus ? `${focus.name} 님은 ${ws.year}년 급여설정이 없습니다.` : `${ws.year}년 급여설정이 있는 재직 직원이 없습니다.`}
+          </p>
         ) : (
           <>
             <div className="mt-3 flex flex-wrap items-center gap-2 text-xs">
@@ -209,7 +215,14 @@ export default function SalaryContractsManager({
         )}
       </section>
 
-      <ContractList kind="salary" items={contracts} isM0={isM0} onEdit={editDraft} bulk />
+      <ContractList
+        kind="salary"
+        items={contracts}
+        isM0={isM0}
+        onEdit={editDraft}
+        bulk
+        emptyNotice={focus ? <FocusEmptySalary focus={focus} year={ws.year} emp={ws.employees[0] ?? null} onWrite={setEditor} /> : undefined}
+      />
 
       <SalaryClauseEditor initial={ws.clauses} />
 
@@ -233,7 +246,46 @@ export default function SalaryContractsManager({
 }
 
 // 연도 선택 + 설·추석 날짜(음력이라 해마다 입력).
-function HolidayPanel({ year, holidays }: { year: number; holidays: HolidayDates }) {
+// 한 직원만 걸러 볼 때 그 직원 연봉계약서가 없으면 — 급여설정이 없으면 급여 기준 관리로,
+//   있으면 바로 [미리보기·작성](위 직원 표의 버튼과 같은 창).
+function FocusEmptySalary({
+  focus,
+  year,
+  emp,
+  onWrite,
+}: {
+  focus: ContractFocus;
+  year: number;
+  emp: SalaryEmployee | null;
+  onWrite: (e: { emp: SalaryEmployee; id: null; segments: SegmentInput[] }) => void;
+}) {
+  return (
+    <div className="py-6 text-center text-sm text-ink-body">
+      <p>
+        {focus.name} 님의 {year}년 연봉계약서가 아직 없습니다.
+      </p>
+      {emp ? (
+        <button
+          type="button"
+          className={`mt-3 ${btnPrimary}`}
+          onClick={() => onWrite({ emp, id: null, segments: emp.defaultSegments.map((s) => ({ ...s })) })}
+        >
+          미리보기·작성
+        </button>
+      ) : (
+        <p className="mt-2 text-ink-muted">
+          {year}년 급여설정이 필요합니다 →{" "}
+          <Link href="/hr/salary" className={linkCls}>
+            급여 기준 관리
+          </Link>
+          에서 {focus.name} 님의 급여 구간을 먼저 넣어 주세요.
+        </p>
+      )}
+    </div>
+  );
+}
+
+function HolidayPanel({ year, holidays, driverId }: { year: number; holidays: HolidayDates; driverId: string | null }) {
   const router = useRouter();
   const [seol, setSeol] = useState(holidays.seol ?? "");
   const [chuseok, setChuseok] = useState(holidays.chuseok ?? "");
@@ -251,7 +303,7 @@ function HolidayPanel({ year, holidays }: { year: number; holidays: HolidayDates
           <select
             className={inputCls}
             value={year}
-            onChange={(e) => router.push(`/hr/contracts?tab=salary&year=${e.target.value}`)}
+            onChange={(e) => router.push(contractsPath({ tab: "salary", year: e.target.value, driverId }))}
           >
             {[...new Set([...years, year])].sort().map((y) => (
               <option key={y} value={y}>

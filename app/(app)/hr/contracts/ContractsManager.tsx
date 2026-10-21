@@ -10,7 +10,7 @@ import {
   type ContractInput,
 } from "@/app/(app)/hr/contracts/actions";
 import { ContractList, type Msg } from "@/app/(app)/hr/contracts/shared";
-import { periodLabel, type ContractSummary } from "@/lib/contractCore";
+import { periodLabel, type ContractFocus, type ContractSummary } from "@/lib/contractCore";
 import {
   CONTRACT_DEFAULTS,
   DEFAULT_CONTRACT_CLAUSES,
@@ -116,11 +116,13 @@ export default function ContractsManager({
   employees,
   clauses,
   isM0,
+  focus = null,
 }: {
   contracts: ContractSummary[];
   employees: ContractEmployee[];
   clauses: ContractClauses;
   isM0: boolean;
+  focus?: ContractFocus | null; // ?driver= 로 한 직원만 걸러 보는 중
 }) {
   const router = useRouter();
   const [form, setForm] = useState<FormState>(emptyForm);
@@ -216,7 +218,7 @@ export default function ContractsManager({
   return (
     <div className="space-y-6">
       {/* ---------- 작성 ---------- */}
-      <section className={panelToneCls("yellow")}>
+      <section id="contract-form" className={`${panelToneCls("yellow")} scroll-mt-4`}>
         <h3 className={sectionTitleCls("yellow")}>{form.id ? "계약서 수정 (작성 중)" : "계약서 작성"}</h3>
         <p className="mt-1 text-xs text-ink-muted">
           사람마다 달라지는 2·3조만 입력합니다. 성명·주민등록번호·주소는 인사기록카드에서 자동으로
@@ -371,7 +373,38 @@ export default function ContractsManager({
       </section>
 
       {/* ---------- 목록(공용) ---------- */}
-      <ContractList kind="employment" items={contracts} isM0={isM0} onEdit={editDraft} />
+      <ContractList
+        kind="employment"
+        items={contracts}
+        isM0={isM0}
+        onEdit={editDraft}
+        emptyNotice={
+          focus ? (
+            <div className="py-6 text-center text-sm text-ink-body">
+              {empById.has(focus.driverId) ? (
+                <>
+                  <p>{focus.name} 님의 근로계약서가 아직 없습니다.</p>
+                  <button
+                    type="button"
+                    className={`mt-3 ${btnPrimary}`}
+                    onClick={() => {
+                      setForm(emptyForm());
+                      pickEmployee(focus.driverId);
+                      document.getElementById("contract-form")?.scrollIntoView({ behavior: "smooth", block: "start" });
+                    }}
+                  >
+                    {focus.name} 님 근로계약서 작성하기
+                  </button>
+                </>
+              ) : (
+                <p className="text-ink-hint">
+                  {focus.name} 님의 근로계약서가 없고, 작성 대상 직원 목록에도 없습니다(퇴사·계정 상태를 확인하세요).
+                </p>
+              )}
+            </div>
+          ) : undefined
+        }
+      />
 
       {/* ---------- 조항 문구 ---------- */}
       <ClauseEditor initial={clauses} />

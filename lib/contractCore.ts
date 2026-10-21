@@ -283,5 +283,20 @@ export const clauseLines = (v: unknown, fb: string[]): string[] => {
   return out.length > 0 ? out : fb;
 };
 
+// 관리자 계약서 화면을 한 직원 것만 걸러 볼 때(/hr/contracts?driver={id}).
+export type ContractFocus = { driverId: string; name: string };
+
+// 계약서 화면 주소 — 탭·연도·걸러 볼 직원. 인사기록카드 직원 행·슬랙 알림 링크도 이걸로 만듭니다.
+export function contractsPath(input: { tab?: "employment" | "salary"; year?: number | string | null; driverId?: string | null }): string {
+  const sp = new URLSearchParams();
+  if (input.tab === "salary") {
+    sp.set("tab", "salary");
+    if (input.year) sp.set("year", String(input.year));
+  }
+  if (input.driverId) sp.set("driver", input.driverId);
+  const qs = sp.toString();
+  return `/hr/contracts${qs ? `?${qs}` : ""}`;
+}
+
 // 직원 카드 한 장 = 요약 + 화면용 블록(주민번호 가림).
 export type MyContract = ContractSummary & { blocks: ContractBlock[] };

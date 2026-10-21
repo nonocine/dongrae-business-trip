@@ -1,12 +1,13 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import { enforcePasswordChange } from "@/app/actions";
-import { resolveContractAdmin, listSummaries } from "@/lib/contractServer";
+import { resolveContractAdmin, listSummaries, namesById } from "@/lib/contractServer";
 import { listContractEmployees, getContractClauses } from "@/app/(app)/hr/contracts/actions";
 import { getSalaryWorkspace } from "@/app/(app)/hr/contracts/salaryActions";
 import ContractsManager from "@/app/(app)/hr/contracts/ContractsManager";
 import SalaryContractsManager from "@/app/(app)/hr/contracts/SalaryContractsManager";
-import { tabBarCls, tabNavCls, tabItemCls } from "@/lib/ui";
+import { tabBarCls, tabNavCls, tabItemCls, linkCls, noticeWarning } from "@/lib/ui";
+import { contractsPath, type ContractFocus } from "@/lib/contractCore";
 
 export const dynamic = "force-dynamic";
 
@@ -15,7 +16,14 @@ export const dynamic = "force-dynamic";
 //   메뉴가 늘어나지 않게 '계약서' 한 자리에 두고 탭으로 나눴습니다.
 //   흐름(보내기·직원 서명·센터장 서명·PDF·교부)은 두 탭이 같은 부품(./shared)을 씁니다.
 //   접근: M0(관장·부장) 또는 hr(인사) 직무. 그 밖은 페이지 자체를 렌더하지 않습니다.
+//   ?driver={id}: 그 직원 것만 걸러 봅니다(인사기록카드 직원 행·슬랙 서명 알림 링크).
+//     권한은 그대로 — 거르는 것은 보기 편의일 뿐, 접근 범위는 바뀌지 않습니다.
 // =====================================================================
+
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+const contractsHref = (tab: "employment" | "salary", year: number, driverId?: string | null) =>
+  contractsPath({ tab, year, driverId });
 
 const TABS = [
   { key: "employment", label: "근로계약서" },
@@ -25,7 +33,7 @@ const TABS = [
 export default async function ContractsPage({
   searchParams,
 }: {
-  searchParams: Promise<{ tab?: string; year?: string }>;
+  searchParams: Promise<{ tab?: string; year?: string; driver?: string }>;
 }) {
   await enforcePasswordChange();
   const access = await resolveContractAdmin();
@@ -34,6 +42,10 @@ export default async function ContractsPage({
   const params = await searchParams;
   const tab = params.tab === "salary" ? "salary" : "employment";
   const year = Math.min(2100, Math.max(2020, Number(params.year) || new Date().getFullYear()));
+  // 걸러 볼 직원 — 형식이 틀리거나 없는 직원이면 거르지 않고 안내만 합니다.
+  const rawDriver = (params.driver ?? "").trim();
+  const driverName = UUID.test(rawDriver) ? (await namesById([rawDriver])).get(rawDriver) : undefined;
+  const focus: ContractFocus | null = driverName ? { driverId: rawDriver, name: driverName } : null;
 
   return (
     <div className="mx-auto w-full max-w-5xl px-4 py-6">
@@ -56,7 +68,7 @@ export default async function ContractsPage({
           {TABS.map((t) => (
             <Link
               key={t.key}
-              href={t.key === "salary" ? `/hr/contracts?tab=salary&year=${year}` : "/hr/contracts"}
+              href={contractsHref(t.key, year, focus?.driverId)}
               aria-current={t.key === tab ? "page" : undefined}
               className={tabItemCls(t.key === tab)}
             >
@@ -66,32 +78,60 @@ export default async function ContractsPage({
         </nav>
       </div>
 
+      {focus && (
+        <div className="mb-5 flex flex-wrap items-center gap-2 rounded-lg border border-navy bg-navy-soft px-4 py-2.5 text-sm">
+          <span className="font-semibold text-navy">{focus.name} 님의 계약서만 보는 중</span>
+          <span className="text-ink-hint">·</span>
+          <Link href={contractsHref(tab, year)} className={linkCls}>
+            전체 보기
+          </Link>
+        </div>
+      )}
+      {rawDriver && !focus && (
+        <p className={`mb-5 ${noticeWarning}`}>
+          주소의 직원을 찾지 못해 전체 목록을 보여 줍니다.{" "}
+          <Link href={contractsHref(tab, year)} className={linkCls}>
+            전체 보기
+          </Link>
+        </p>
+      )}
+
       {tab === "employment" ? (
-        <EmploymentTab isM0={access.isM0} />
+        <EmploymentTab isM0={access.isM0} focus={focus} />
       ) : (
-        <SalaryTab isM0={access.isM0} year={year} />
+        <SalaryTab isM0={access.isM0} year={year} focus={focus} />
       )}
     </div>
   );
 }
 
-async function EmploymentTab({ isM0 }: { isM0: boolean }) {
+async function EmploymentTab({ isM0, focus }: { isM0: boolean; focus: ContractFocus | null }) {
   const [contracts, employees, clauses] = await Promise.all([
     listSummaries("employment"),
     listContractEmployees(),
     getContractClauses(),
   ]);
-  return <ContractsManager contracts={contracts} employees={employees} clauses={clauses} isM0={isM0} />;
+  return (
+    <ContractsManager
+      contracts={focus ? contracts.filter((c) => c.driver_id === focus.driverId) : contracts}
+      employees={employees}
+      clauses={clauses}
+      isM0={isM0}
+      focus={focus}
+    />
+  );
 }
 
-async function SalaryTab({ isM0, year }: { isM0: boolean; year: number }) {
+async function SalaryTab({ isM0, year, focus }: { isM0: boolean; year: number; focus: ContractFocus | null }) {
   const [workspace, contracts] = await Promise.all([getSalaryWorkspace(year), listSummaries("salary")]);
+  const mine = (id: string) => !focus || id === focus.driverId;
   return (
     <SalaryContractsManager
-      key={year}
-      workspace={workspace}
-      contracts={contracts.filter((c) => c.year === String(year))}
+      key={`${year}:${focus?.driverId ?? ""}`}
+      workspace={{ ...workspace, employees: workspace.employees.filter((e) => mine(e.driverId)) }}
+      contracts={contracts.filter((c) => c.year === String(year) && mine(c.driver_id))}
       isM0={isM0}
+      focus={focus}
     />
   );
 }

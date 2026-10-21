@@ -8,6 +8,7 @@ import PasswordMigrationCard from "@/app/(app)/hr/PasswordMigrationCard";
 import CurrentAssignment from "@/app/(app)/hr/CurrentAssignment";
 import RowChevron from "@/app/components/RowChevron";
 import type { Driver, EmployeeProfile } from "@/lib/supabase";
+import { contractsPath } from "@/lib/contractCore";
 import type { RecruitmentPostingAdmin } from "@/app/(app)/hr/actions";
 import {
   cardCls,
@@ -396,11 +397,11 @@ function EmployeeChecklistCard({
             const active = d.id === selectedId;
             const resigned = statusOf(d.id) === "resigned";
             return (
-              <li key={d.id}>
+              <li key={d.id} className="flex items-stretch gap-1">
                 <button
                   type="button"
                   onClick={() => onSelect(d.id)}
-                  className={`flex w-full items-center justify-between rounded-md px-2.5 py-2 text-left text-sm transition ${
+                  className={`flex min-w-0 flex-1 items-center justify-between rounded-md px-2.5 py-2 text-left text-sm transition ${
                     active
                       ? "bg-navy-soft ring-1 ring-navy"
                       : "hover:bg-surface"
@@ -441,6 +442,14 @@ function EmployeeChecklistCard({
                     {has ? "입력됨" : "미입력"}
                   </span>
                 </button>
+                {/* 그 직원 계약서만 걸러 보기(/hr/contracts?driver=). 행 버튼(카드 열기)과 따로 둡니다. */}
+                <Link
+                  href={contractsPath({ driverId: d.id })}
+                  title={`${d.name} 님의 계약서만 보기`}
+                  className="flex shrink-0 items-center rounded-md px-2 text-[11px] font-semibold text-navy hover:bg-navy-soft"
+                >
+                  계약서
+                </Link>
               </li>
             );
           })}

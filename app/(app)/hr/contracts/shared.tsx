@@ -128,12 +128,14 @@ export function ContractList({
   isM0,
   onEdit,
   bulk = false,
+  emptyNotice,
 }: {
   kind: ContractKind;
   items: ContractSummary[];
   isM0: boolean;
   onEdit?: (item: ContractSummary) => void;
   bulk?: boolean; // 일괄 선택(미리보기·발송) 사용
+  emptyNotice?: ReactNode; // 직원별로 걸러 볼 때, 계약서가 없으면 빈 목록 대신 보일 안내
 }) {
   const router = useRouter();
   const label = CONTRACT_KINDS[kind].label;
@@ -239,7 +241,7 @@ export function ContractList({
       )}
       {msg && <p className={`mt-3 ${msg.ok ? noticeSuccess : noticeError}`}>{msg.text}</p>}
       {visible.length === 0 ? (
-        <p className="py-6 text-center text-sm text-ink-hint">아직 작성한 {label}가 없습니다.</p>
+        emptyNotice ?? <p className="py-6 text-center text-sm text-ink-hint">아직 작성한 {label}가 없습니다.</p>
       ) : (
         <div className="mt-3 overflow-x-auto">
           <table className="w-full min-w-[780px] text-sm">

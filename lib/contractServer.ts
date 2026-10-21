@@ -24,6 +24,7 @@ import {
   CONTRACT_ORG,
   checkSignature,
   clauseSnapshotKey,
+  contractsPath,
   contractPdfFilename,
   contractPdfPath,
   fmtDot,
@@ -556,9 +557,19 @@ export async function signMineCore(
       .eq("driver_id", me.id);
   }
   try {
+    // 링크는 서명한 직원 것만 걸러 본 계약서 화면(?driver=) — 그 직원 탭·연도로 바로.
+    let year: number | null = null;
+    if (kind === "salary") {
+      const { data: y } = await supabaseAdmin.from(CONTRACT_KINDS[kind].table).select("year").eq("id", id).maybeSingle();
+      year = (y as { year?: number } | null)?.year ?? null;
+    }
+    const path = contractsPath({ tab: kind, year, driverId: me.id });
+    const base = siteBaseUrl();
     await sendSlack(
       "SLACK_WEBHOOK_ADMIN",
-      `✍️ ${me.name} 님이 ${CONTRACT_KINDS[kind].label}에 서명했습니다. 센터장 서명 대기 (/hr/contracts)`
+      `✍️ ${me.name} 님이 ${CONTRACT_KINDS[kind].label}에 서명했습니다. 센터장 서명 대기 ${
+        base ? slackLink(`${base}${path}`, `${me.name} 님 계약서 열기`) : `(${path})`
+      }`
     );
   } catch {
     /* 알림 격리 */
