@@ -43,6 +43,10 @@ const M0_OR_ROLE = [
   ["facility-rentals", "facility"],
   ["accounting-salary", "accounting"],
   ["accounting-leave-plans", "accounting"],
+  ["bangka-members", "bangka"],
+  ["bangka-posts", "bangka"],
+  ["bangka-meals", "bangka"],
+  ["bangka-events", "bangka"],
 ] as const;
 
 for (const [key, role] of M0_OR_ROLE) {
@@ -109,9 +113,10 @@ assert(
 //   시설·회계가 나오고(가드가 isM0 를 받아주므로), 채용은 관리자 영역이 맡아
 //   나오지 않습니다. 인사 그룹은 상벌·인사위원회·인사평가(M0 전용, 관장 지시)
 //   때문에 나옵니다 — 그 두 항목이 생기며 이 기대값이 낡아 있었습니다.
+//   방과후아카데미도 가드가 isM0 || bangka 라 나옵니다.
 const m0NoRole = roleMenuGroupsFor(ctx(true, []), "card").map((g) => g.group);
 assert(
-  JSON.stringify(m0NoRole) === JSON.stringify(["facility", "accounting", "hr"]),
+  JSON.stringify(m0NoRole) === JSON.stringify(["facility", "accounting", "hr", "bangka"]),
   `직무 없는 M0 의 담당 업무 그룹이 예상과 다릅니다: ${m0NoRole.join(",")}`,
 );
 

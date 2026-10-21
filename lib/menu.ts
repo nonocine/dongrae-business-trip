@@ -56,6 +56,7 @@ export const MENU_GROUPS = [
   "hr", // 담당 업무 › 인사
   "mutual", // 담당 업무 › 상조회
   "recruitment", // 담당 업무 › 채용
+  "bangka", // 담당 업무 › 방과후아카데미
   "admin", // 관리자 영역 — M0
   "legacy", // 활동일지 계열 — 5단계에서 하단으로 내립니다
 ] as const;
@@ -68,6 +69,7 @@ export const MENU_GROUP_LABEL: Record<MenuGroup, string> = {
   hr: "인사",
   mutual: "상조회",
   recruitment: "채용",
+  bangka: "방과후아카데미",
   admin: "관리자 영역",
   legacy: "활동일지",
 };
@@ -439,6 +441,47 @@ export const MENU_ITEMS: MenuItem[] = [
     show: { kind: "role", role: "recruitment" },
   },
 
+  // ---------- 담당 업무 › 방과후아카데미 ----------
+  {
+    // 동래방카(학부모앱) 명단·초대 링크. 가드(lib/bangkaAccess)가
+    //   `isM0 || bangka` 이므로 m0OrRole — 직무 없는 관장에게도 보입니다.
+    key: "bangka-members",
+    group: "bangka",
+    label: "학생·보호자 관리",
+    href: "/bangka/members",
+    icon: "🎒",
+    desc: "방과후아카데미 학생·보호자 명단, 동래방카 초대 링크",
+    show: { kind: "m0OrRole", role: "bangka" },
+  },
+  // 동래방카 콘텐츠 — 가드는 같은 lib/bangkaAccess(BangkaShell).
+  {
+    key: "bangka-posts",
+    group: "bangka",
+    label: "공지·알림장",
+    href: "/bangka/posts",
+    icon: "📣",
+    desc: "동래방카 공지·알림장·월간 수업안 작성, 읽음 확인",
+    show: { kind: "m0OrRole", role: "bangka" },
+  },
+  {
+    key: "bangka-meals",
+    group: "bangka",
+    label: "급식",
+    href: "/bangka/meals",
+    icon: "🍱",
+    desc: "월별 급식 메뉴·사진(식단표 붙여넣기 일괄 입력)",
+    show: { kind: "m0OrRole", role: "bangka" },
+  },
+  {
+    key: "bangka-events",
+    group: "bangka",
+    label: "연간일정",
+    href: "/bangka/events",
+    icon: "🗓️",
+    desc: "방과후아카데미 연간 일정",
+    show: { kind: "m0OrRole", role: "bangka" },
+  },
+
   // ---------- 관리자 영역 — M0 ----------
   {
     key: "admin-mail",
@@ -680,6 +723,7 @@ export const ROLE_MENU_GROUPS: readonly MenuGroup[] = [
   "hr",
   "mutual",
   "recruitment",
+  "bangka",
 ];
 
 export function roleMenuGroupsFor(

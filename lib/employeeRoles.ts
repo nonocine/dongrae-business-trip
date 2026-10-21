@@ -32,6 +32,12 @@ export const EMPLOYEE_ROLES: EmployeeRole[] = [
     label: "상조회",
     description: "회비·장부·경조사 지출",
   },
+  {
+    // 방과후아카데미 학부모앱(동래방카) — 학생·보호자 명단·초대 링크.
+    key: "bangka",
+    label: "방과후아카데미",
+    description: "학생·보호자 관리(동래방카)",
+  },
 ];
 
 // 정의된 직무 key 인지 검증 (저장 시 허용 key 체크).
