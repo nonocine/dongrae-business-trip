@@ -17,6 +17,9 @@ import { ContractList, Modal, type Msg } from "@/app/(app)/hr/contracts/shared";
 import { contractStateLabel, contractsPath, type ContractFocus, type ContractSummary } from "@/lib/contractCore";
 import {
   DEFAULT_SALARY_CLAUSES,
+  SALARY_AMOUNT_KEYS,
+  SALARY_AMOUNT_LABEL,
+  hasOverrides,
   amountInKorean,
   buildSalaryContractBlocks,
   computeSalaryContract,
@@ -24,6 +27,7 @@ import {
   type CertLevel,
   type HolidayDates,
   type SalaryClauses,
+  type SalaryAmountKey,
   type SegmentInput,
 } from "@/lib/salaryContracts";
 import {
@@ -70,7 +74,12 @@ export default function SalaryContractsManager({
   const [pending, start] = useTransition();
   const [msg, setMsg] = useState<Msg>(null);
   const [picked, setPicked] = useState<Set<string>>(new Set());
-  const [editor, setEditor] = useState<{ emp: SalaryEmployee; id: string | null; segments: SegmentInput[] } | null>(null);
+  const [editor, setEditor] = useState<{
+    emp: SalaryEmployee;
+    id: string | null;
+    segments: SegmentInput[];
+    reason?: string; // 다시 열 때 지난 금액 수정 사유
+  } | null>(null);
 
   const calcFor = (segments: SegmentInput[]) =>
     computeSalaryContract({ year: ws.year, segments, gradeRows: ws.gradeRows, config: ws.config, holidays: ws.holidays });
@@ -113,7 +122,7 @@ export default function SalaryContractsManager({
       const emp =
         ws.employees.find((e) => e.driverId === res.driverId) ??
         ({ driverId: res.driverId, name: item.employee_name, defaultSegments: res.segments, contract: { id: item.id, status: res.status } } as SalaryEmployee);
-      setEditor({ emp, id: item.id, segments: res.segments });
+      setEditor({ emp, id: item.id, segments: res.segments, reason: res.overrideReason });
     });
   }
 
@@ -232,6 +241,8 @@ export default function SalaryContractsManager({
           emp={editor.emp}
           id={editor.id}
           initial={editor.segments}
+          initialReason={editor.reason ?? ""}
+          canEditAmounts={isM0}
           calcFor={calcFor}
           onClose={() => setEditor(null)}
           onSaved={(text) => {
@@ -351,6 +362,8 @@ function SegmentEditor({
   emp,
   id,
   initial,
+  initialReason,
+  canEditAmounts,
   calcFor,
   onClose,
   onSaved,
@@ -359,11 +372,14 @@ function SegmentEditor({
   emp: SalaryEmployee;
   id: string | null;
   initial: SegmentInput[];
+  initialReason: string;
+  canEditAmounts: boolean; // 항목 금액 직접 수정 — 관장·부장(M0)만
   calcFor: (s: SegmentInput[]) => ReturnType<typeof computeSalaryContract>;
   onClose: () => void;
   onSaved: (text: string) => void;
 }) {
   const [segs, setSegs] = useState<SegmentInput[]>(initial);
+  const [reason, setReason] = useState(initialReason);
   const [err, setErr] = useState<string | null>(null);
   const [pending, start] = useTransition();
   const calc = calcFor(segs);
@@ -372,6 +388,22 @@ function SegmentEditor({
   function upd(i: number, patch: Partial<SegmentInput>) {
     setSegs((cur) => cur.map((s, j) => (j === i ? { ...s, ...patch } : s)));
   }
+
+  // 항목 금액 직접 수정 — 빈칸으로 지우면 그 항목은 계산값으로 돌아갑니다.
+  function setAmount(i: number, key: SalaryAmountKey, raw: string) {
+    setSegs((cur) =>
+      cur.map((s, j) => {
+        if (j !== i) return s;
+        const next = { ...(s.overrides ?? {}) };
+        const n = Number(raw.replace(/[^\d]/g, ""));
+        if (raw.trim() === "" || !Number.isFinite(n)) delete next[key];
+        else next[key] = n;
+        return { ...s, overrides: Object.keys(next).length ? next : undefined };
+      })
+    );
+  }
+  const overridden = !calc.errors.length && hasOverrides(calc.segments);
+  const revertAmounts = () => setSegs((cur) => cur.map(({ overrides: _o, ...s }) => (void _o, s)));
 
   const blocks = calc.errors.length
     ? []
@@ -390,7 +422,13 @@ function SegmentEditor({
   function save() {
     setErr(null);
     start(async () => {
-      const res = await saveSalaryContract({ id, driverId: emp.driverId, year: ws.year, segments: segs });
+      const res = await saveSalaryContract({
+        id,
+        driverId: emp.driverId,
+        year: ws.year,
+        segments: segs,
+        overrideReason: overridden ? reason : null,
+      });
       if (!res.ok) {
         setErr(res.message);
         return;
@@ -497,6 +535,90 @@ function SegmentEditor({
         </button>
       </div>
 
+      {!calc.errors.length && (
+        <div className="mt-4">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <h4 className="text-sm font-semibold text-ink">항목 금액(구간 합계, 원)</h4>
+            {overridden && (
+              <button type="button" className={btnSecondary} onClick={revertAmounts} data-testid="salary-revert-amounts">
+                계산값으로 되돌리기
+              </button>
+            )}
+          </div>
+          <p className="mt-1 text-[11px] text-ink-hint">
+            {canEditAmounts
+              ? "계산값과 실제 금액이 다르면 칸을 직접 고치세요(빈칸 = 계산값). 고친 칸은 빨간 테두리와 원래 계산값이 함께 보이고, 합계·연봉액·한글 금액이 따라 바뀝니다."
+              : "항목 금액 직접 수정은 관장·부장만 할 수 있습니다."}
+          </p>
+          <div className="mt-2 overflow-x-auto">
+            <table className="w-full min-w-[820px] text-xs" data-testid="amount-editor">
+              <thead>
+                <tr className={tableHeadCls}>
+                  <th className="px-1 py-1.5 text-left">구간</th>
+                  {SALARY_AMOUNT_KEYS.map((k) => (
+                    <th key={k} className="px-1 py-1.5 text-right">
+                      {SALARY_AMOUNT_LABEL[k]}
+                    </th>
+                  ))}
+                  <th className="px-1 py-1.5 text-right">합계</th>
+                </tr>
+              </thead>
+              <tbody>
+                {calc.segments.map((cs, i) => (
+                  <tr key={i} className={tableRowCls}>
+                    <td className="px-1 py-1 whitespace-nowrap text-ink-muted">
+                      {cs.start_month}~{cs.end_month}월
+                    </td>
+                    {SALARY_AMOUNT_KEYS.map((k) => {
+                      const orig = cs.computed?.[k];
+                      const changed = orig != null;
+                      return (
+                        <td key={k} className="px-1 py-1 align-top">
+                          <input
+                            className={`${cellIn} text-right tabular-nums ${changed ? "border-stamp ring-1 ring-stamp" : ""}`}
+                            inputMode="numeric"
+                            readOnly={!canEditAmounts}
+                            value={cs[k] as number}
+                            onChange={(e) => setAmount(i, k, e.target.value)}
+                            aria-label={`${cs.start_month}~${cs.end_month}월 ${SALARY_AMOUNT_LABEL[k]}`}
+                          />
+                          {changed && (
+                            <span className="mt-0.5 block text-right text-[10px] text-stamp" title="계산값과 다름">
+                              계산 {won(orig)}
+                            </span>
+                          )}
+                        </td>
+                      );
+                    })}
+                    <td className="px-1 py-1 text-right font-semibold tabular-nums">{won(cs.total)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          <ul className="mt-2 space-y-0.5 text-[11px] text-ink-muted" data-testid="transport-basis">
+            {calc.segments.map((cs, i) => (
+              <li key={i}>
+                {cs.start_month}~{cs.end_month}월 교통보조비: {cs.transport_basis ?? "대상 아님"}
+              </li>
+            ))}
+          </ul>
+          {overridden && (
+            <label className="mt-3 block">
+              <span className={labelCls}>수정 사유 (필수 — 계약서 기록에 남습니다)</span>
+              <input
+                className={inputCls}
+                value={reason}
+                maxLength={200}
+                onChange={(e) => setReason(e.target.value)}
+                placeholder="예: 2026년 8월 권고안 교통보조비 인상분 반영"
+                data-testid="salary-override-reason"
+              />
+            </label>
+          )}
+        </div>
+      )}
+
       {calc.errors.length > 0 ? (
         <div className={`mt-3 ${noticeError}`}>
           {calc.errors.map((e) => (
@@ -515,7 +637,13 @@ function SegmentEditor({
       )}
       {err && <p className={`mt-3 ${noticeError}`}>{err}</p>}
       <div className="mt-4 flex gap-2">
-        <button type="button" className={btnPrimary} disabled={pending || calc.errors.length > 0} onClick={save} data-testid="salary-save">
+        <button
+          type="button"
+          className={btnPrimary}
+          disabled={pending || calc.errors.length > 0 || (overridden && !reason.trim())}
+          onClick={save}
+          data-testid="salary-save"
+        >
           {pending ? "저장 중…" : id ? "수정 저장" : "작성 중으로 저장"}
         </button>
         <button type="button" className={btnSecondary} onClick={onClose} disabled={pending}>

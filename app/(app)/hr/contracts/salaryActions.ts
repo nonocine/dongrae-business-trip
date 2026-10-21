@@ -6,18 +6,21 @@ import { CONTRACT_KINDS, isYmd } from "@/lib/contractCore";
 import {
   SALARY_HOLIDAYS_KEY,
   SALARY_LIST_COLUMNS,
-  amountInKorean,
-  computeSalaryContract,
   mergeProfileSegments,
   parseSalaryClauses,
   toSalaryContract,
   type ConfigMap,
   type GradeRow,
   type HolidayDates,
-  type SalaryCalc,
   type SalaryClauses,
   type SegmentInput,
 } from "@/lib/salaryContracts";
+import {
+  OVERRIDE_NOTE_PREFIX,
+  loadCalcInputs,
+  saveSalaryContractCore,
+  type SalaryContractInput,
+} from "@/lib/salaryContractServer";
 import {
   requireContractAdmin,
   readCurrentClausesRaw,
@@ -30,39 +33,13 @@ import {
 // =====================================================================
 // 연봉계약서 전용 관리자 액션 — 계산 재료·작성·일괄 작성·명절 날짜·조항 (M0 또는 hr)
 //   * 보내기·서명·PDF·일괄 발송·일괄 미리보기는 근로계약서와 공용 ./workflowActions.
-//   * 금액은 언제나 서버가 DB(호봉표·salary_config·명절 날짜)로 다시 계산해 저장합니다.
-//     화면이 보낸 숫자는 믿지 않고, 화면에서 받는 건 구간(호봉·월·자격)과 가족수당 월액뿐.
+//   * 금액은 언제나 서버가 DB(호봉표·salary_config·명절 날짜)로 다시 계산해 저장합니다
+//     (lib/salaryContractServer). 화면에서 받는 건 구간 입력과, 관장·부장이 작성 중 단계에서
+//     직접 고친 항목 금액(사유 필수)뿐.
 //   * DB 제약 UNIQUE(driver_id, year) — 직원·연도당 1건(무효 건 포함).
 // =====================================================================
 
 const TABLE = CONTRACT_KINDS.salary.table;
-
-async function loadCalcInputs(year: number): Promise<{ gradeRows: GradeRow[]; config: ConfigMap; holidays: HolidayDates }> {
-  const [{ data: grades, error: gErr }, { data: cfg, error: cErr }, holidaysRaw] = await Promise.all([
-    supabaseAdmin.from("salary_grade_table").select("grade, step, base_salary, effective_from").eq("year", year),
-    supabaseAdmin.from("salary_config").select("config_key, config_value").eq("year", year),
-    readSetting(SALARY_HOLIDAYS_KEY),
-  ]);
-  if (gErr) throw new Error(gErr.message);
-  if (cErr) throw new Error(cErr.message);
-  const config: ConfigMap = {};
-  for (const r of cfg ?? []) config[String((r as { config_key: string }).config_key)] = Number((r as { config_value: unknown }).config_value);
-  return {
-    gradeRows: ((grades ?? []) as GradeRow[]).map((g) => ({ ...g, step: Number(g.step), base_salary: Number(g.base_salary) })),
-    config,
-    holidays: readHolidays(holidaysRaw, year),
-  };
-}
-
-function readHolidays(raw: string | null, year: number): HolidayDates {
-  try {
-    const o = raw ? (JSON.parse(raw) as Record<string, { seol?: string; chuseok?: string }>) : {};
-    const y = o[String(year)] ?? {};
-    return { seol: isYmd(y.seol) ? y.seol : null, chuseok: isYmd(y.chuseok) ? y.chuseok : null };
-  } catch {
-    return { seol: null, chuseok: null };
-  }
-}
 
 type ProfileRow = {
   driver_id: string;
@@ -126,80 +103,14 @@ export async function getSalaryWorkspace(year: number): Promise<SalaryWorkspace>
   return { year: y, ...inputs, clauses: parseSalaryClauses(clausesRaw), employees };
 }
 
-function cleanSegments(input: SegmentInput[]): SegmentInput[] {
-  return (input ?? []).slice(0, 12).map((s) => ({
-    start_month: Math.trunc(Number(s.start_month)),
-    end_month: Math.trunc(Number(s.end_month)),
-    grade: String(s.grade ?? "").trim(),
-    step: Math.trunc(Number(s.step)),
-    cert_level: (["1", "2", "3"].includes(String(s.cert_level)) ? String(s.cert_level) : "") as SegmentInput["cert_level"],
-    meal: s.meal !== false,
-    transport: s.transport !== false,
-    mgmt_target: s.mgmt_target == null ? undefined : !!s.mgmt_target,
-    family_monthly: Math.max(0, Math.trunc(Number(s.family_monthly) || 0)),
-  }));
-}
-
-function rowFromCalc(c: SalaryCalc) {
-  return {
-    year: c.year,
-    period_start: c.period_start,
-    period_end: c.period_end,
-    base_salary: c.totals.base,
-    meal_allowance: c.totals.meal,
-    qualification_allowance: c.totals.cert,
-    family_allowance: c.totals.family,
-    management_allowance: c.totals.mgmt,
-    holiday_bonus: c.totals.holiday,
-    transport_allowance: c.totals.transport,
-    total_annual: c.total,
-    segments: c.segments,
-    amount_in_korean: amountInKorean(c.total),
-  };
-}
-
-function dupMessage(code?: string): string | null {
-  return code === "23505"
-    ? "이 직원의 같은 연도 연봉계약서가 이미 있습니다(직원·연도당 1건 — 무효 건 포함). 목록에서 기존 건을 확인해주세요."
-    : null;
-}
-
-export type SalaryContractInput = {
-  id?: string | null;
-  driverId: string;
-  year: number;
-  segments: SegmentInput[];
-};
+export type { SalaryContractInput } from "@/lib/salaryContractServer";
 
 export async function saveSalaryContract(input: SalaryContractInput): Promise<Result<{ id: string; total: number }>> {
   try {
     const me = await requireContractAdmin();
-    if (!input.driverId) return { ok: false, message: "직원을 선택해주세요." };
-    const year = Math.trunc(Number(input.year));
-    const inputs = await loadCalcInputs(year);
-    const calc = computeSalaryContract({ year, segments: cleanSegments(input.segments), ...inputs });
-    if (calc.errors.length) return { ok: false, message: calc.errors.join(" / ") };
-    const row = rowFromCalc(calc);
-    if (input.id) {
-      const { error, count } = await supabaseAdmin
-        .from(TABLE)
-        .update(row, { count: "exact" })
-        .eq("id", input.id)
-        .eq("driver_id", input.driverId)
-        .eq("status", "draft");
-      if (error) return { ok: false, message: dupMessage(error.code) ?? error.message };
-      if (!count) return { ok: false, message: "작성 중인 계약서만 고칠 수 있습니다. (보낸 뒤라면 먼저 발송을 취소하세요)" };
-      revalidatePath("/hr/contracts");
-      return { ok: true, id: input.id, total: calc.total };
-    }
-    const { data, error } = await supabaseAdmin
-      .from(TABLE)
-      .insert({ ...row, driver_id: input.driverId, status: "draft", created_by: me.name })
-      .select("id")
-      .single();
-    if (error) return { ok: false, message: dupMessage(error.code) ?? error.message };
-    revalidatePath("/hr/contracts");
-    return { ok: true, id: String((data as { id: string }).id), total: calc.total };
+    const res = await saveSalaryContractCore(input, me);
+    if (res.ok) revalidatePath("/hr/contracts");
+    return res;
   } catch (e) {
     return fail(e);
   }
@@ -240,7 +151,7 @@ export async function bulkCreateSalaryDrafts(
 // 수정 폼용 — 저장된 구간을 입력 형태로.
 export async function getSalaryContractForEdit(
   id: string
-): Promise<Result<{ driverId: string; year: number; segments: SegmentInput[]; status: string }>> {
+): Promise<Result<{ driverId: string; year: number; segments: SegmentInput[]; status: string; overrideReason: string }>> {
   try {
     await requireContractAdmin();
     const { data, error } = await supabaseAdmin.from(TABLE).select(SALARY_LIST_COLUMNS).eq("id", id).maybeSingle();
@@ -262,7 +173,12 @@ export async function getSalaryContractForEdit(
         transport: s.transport,
         mgmt_target: s.mgmt_target,
         family_monthly: s.family_monthly,
+        ...(s.overrides ? { overrides: s.overrides } : {}),
       })),
+      // 다시 열면 지난번 수정 사유를 채워 둡니다("금액 직접 수정: 사유 (이름, 날짜)" → 사유).
+      overrideReason: c.note?.startsWith(OVERRIDE_NOTE_PREFIX)
+        ? c.note.slice(OVERRIDE_NOTE_PREFIX.length).replace(/\s*\([^()]*\)$/, "")
+        : "",
     };
   } catch (e) {
     return fail(e);

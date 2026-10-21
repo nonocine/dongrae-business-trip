@@ -42,6 +42,7 @@ import {
   badgeDanger,
   noticeError,
   noticeSuccess,
+  noticeWarning,
 } from "@/lib/ui";
 
 // =====================================================================
@@ -395,6 +396,14 @@ export function ContractList({
                 {kind === "employment" ? "화면에서는 주민등록번호 뒷자리를 가립니다. PDF 에는 전체 번호가 들어갑니다. " : ""}
                 {preview.c.status === "draft" ? "작성 중이라 현행 조항 문구로 보입니다." : "보낸 시점의 조항 문구로 고정되어 있습니다."}
               </p>
+              {kind === "salary" && (preview.c.status === "sent" || preview.c.status === "signed") && (
+                <p className={`mb-3 ${noticeWarning}`}>
+                  보낸 뒤에는 금액을 수정할 수 없습니다.{" "}
+                  {preview.c.status === "sent"
+                    ? "직원 서명 전이면 [발송 취소]로 작성 중으로 되돌린 뒤 고치세요."
+                    : "고치려면 무효 처리 후 다시 작성해야 합니다."}
+                </p>
+              )}
               <div className="rounded-md border border-rule bg-white px-4 py-4">
                 <ContractView
                   blocks={preview.blocks}

@@ -13,8 +13,13 @@
 //     · 구간 = employee_salary_profiles 의 월 구간. 호봉·자격·급식/교통·관리업무
 //       대상·가족수당이 같고 이어진 구간은 하나로 합칩니다(급여대장용으로 8월에 쪼갠 행 등).
 //       수당 대상·금액은 급여 계산(lib/salary.calcMonthlyPayroll)과 같은 extra 에서 읽습니다.
-//     · 급식비 = meal_allowance × 개월, 교통보조비 = transport_allowance × 개월
-//       (급수별 transport_allowance_12/34/56/7 은 쓰지 않음 — 실제 계약서가 전부 5만원)
+//     · 급식비 = meal_allowance × 개월
+//     · 교통보조비 = 구간 급수의 월액 × 개월 — 월별 급여와 같은 lib/salary.transportAllowanceKey
+//       (1~2급/3~4급/5~6급/7급 → transport_allowance_12/34/56/7, 8월 권고안). 급수를 못 읽거나
+//       그 급수 key 가 salary_config 에 없을 때만 일괄 transport_allowance 로 대신합니다.
+//       (2026-10 정정 — 처음엔 2026 종이 계약서가 전부 5만원이라 일괄 key 만 썼습니다.
+//        이미 체결한 계약은 저장된 금액 그대로이고 다시 계산하지 않습니다.)
+//       구간마다 근거("7급 기준 120,000원/월")를 transport_basis 에 남깁니다.
 //     · 자격수당 = cert_allowance_{extra.cert_level} × 개월
 //     · 관리업무수당 = 기본급(구간 합) × mgmt_allowance_rate, extra.mgmt_target 인 구간만,
 //       10원 미만 절사. (2026-10: 처음엔 "1~4급"으로 판정했으나 급여 계산과 같은
@@ -40,7 +45,7 @@ import {
   type ContractBlock,
   type ContractStatus,
 } from "./contractCore";
-import { pickEffectiveBase } from "./salary";
+import { pickEffectiveBase, transportAllowanceKey } from "./salary";
 
 export const SALARY_HOLIDAYS_KEY = "salary_contract_holidays";
 
@@ -57,7 +62,39 @@ export type SegmentInput = {
   transport: boolean;
   mgmt_target?: boolean; // 관리업무수당 대상(extra.mgmt_target). 옛 저장분엔 없을 수 있음
   family_monthly: number;
+  // 작성 중 단계에서 관장·부장이 직접 고친 항목 금액(구간 합계 기준, 원). 없으면 계산값.
+  //   2026-10: 교통보조비 인상처럼 계산값과 실제 금액이 다를 때 — 고치면 사유가 note 에 남습니다.
+  overrides?: SalaryOverrides;
 };
+
+// 직접 고칠 수 있는 항목(구간 합계 금액).
+export const SALARY_AMOUNT_KEYS = ["base", "meal_amt", "cert", "transport_amt", "holiday", "family", "mgmt"] as const;
+export type SalaryAmountKey = (typeof SALARY_AMOUNT_KEYS)[number];
+export type SalaryOverrides = Partial<Record<SalaryAmountKey, number>>;
+export const SALARY_AMOUNT_LABEL: Record<SalaryAmountKey, string> = {
+  base: "기본급",
+  meal_amt: "급식비",
+  cert: "자격수당",
+  transport_amt: "교통보조비",
+  holiday: "명절휴가비",
+  family: "가족수당",
+  mgmt: "관리업무수당",
+};
+
+// 저장·계산 전에 고친 금액을 정리합니다 — 정한 항목만, 0 이상 정수만.
+export function cleanOverrides(v: unknown): SalaryOverrides | undefined {
+  if (!v || typeof v !== "object") return undefined;
+  const out: SalaryOverrides = {};
+  for (const k of SALARY_AMOUNT_KEYS) {
+    const n = Number((v as Record<string, unknown>)[k]);
+    if ((v as Record<string, unknown>)[k] != null && Number.isFinite(n) && n >= 0) out[k] = Math.round(n);
+  }
+  return Object.keys(out).length ? out : undefined;
+}
+
+export function hasOverrides(segs: { overrides?: SalaryOverrides }[]): boolean {
+  return segs.some((s) => !!s.overrides && Object.keys(s.overrides).length > 0);
+}
 
 export type SalarySegment = SegmentInput & {
   months: number;
@@ -71,6 +108,8 @@ export type SalarySegment = SegmentInput & {
   family: number;
   mgmt: number;
   total: number;
+  computed?: SalaryOverrides; // 직접 고친 항목의 원래 계산값(화면 "계산값과 다름" 표시용)
+  transport_basis?: string; // 교통보조비 근거 — "7급 기준 120,000원/월"
 };
 
 export type HolidayDates = { seol: string | null; chuseok: string | null };
@@ -203,7 +242,17 @@ export function computeSalaryContract(input: {
     return v;
   };
   const meal = need("meal_allowance");
-  const transport = need("transport_allowance");
+  // 교통보조비 월액 — 구간 급수의 key, 없으면 일괄 key.
+  const transportFor = (grade: string): { monthly: number; basis: string } => {
+    const key = transportAllowanceKey(grade);
+    const v = key ? config[key] : undefined;
+    if (key && v != null && Number.isFinite(v)) return { monthly: v, basis: `${grade} 기준 ${won(v)}원/월` };
+    const flat = need("transport_allowance");
+    return {
+      monthly: flat,
+      basis: `일괄 ${won(flat)}원/월(${key ? `${grade} 기준값 없음` : "급수를 읽지 못함"})`,
+    };
+  };
   const holidayRate = need("holiday_bonus_rate") / 2; // 명절 1회분
   const mgmtRate = need("mgmt_allowance_rate");
 
@@ -235,21 +284,36 @@ export function computeSalaryContract(input: {
     const mgmt = mgmtOn ? floor10Rate(base, mgmtRate) : 0;
     const family = Math.max(0, Math.round(Number(s.family_monthly) || 0)) * months;
     const meal_amt = s.meal ? meal * months : 0;
-    const transport_amt = s.transport ? transport * months : 0;
-    const total = base + meal_amt + cert + transport_amt + holiday + family + mgmt;
+    const tr = s.transport ? transportFor(s.grade) : null;
+    const transport_amt = tr ? tr.monthly * months : 0;
+    // 직접 고친 금액이 있으면 그 값을 쓰고, 원래 계산값은 computed 에 남깁니다.
+    const amounts: Record<SalaryAmountKey, number> = { base, meal_amt, cert, transport_amt, holiday, family, mgmt };
+    const overrides = cleanOverrides(s.overrides);
+    const computed: SalaryOverrides = {};
+    for (const k of SALARY_AMOUNT_KEYS) {
+      const o = overrides?.[k];
+      if (o != null && o !== amounts[k]) {
+        computed[k] = amounts[k];
+        amounts[k] = o;
+      }
+    }
+    const kept = overrides
+      ? (Object.fromEntries(Object.entries(overrides).filter(([k]) => k in computed)) as SalaryOverrides)
+      : undefined;
+    const total = SALARY_AMOUNT_KEYS.reduce((a, k) => a + amounts[k], 0);
+    const { overrides: _drop, ...rest } = s;
+    void _drop;
     return {
-      ...s,
+      ...rest,
+      ...(kept && Object.keys(kept).length ? { overrides: kept } : {}),
       months,
       monthly_base,
-      base,
-      meal_amt,
-      cert,
-      transport_amt,
-      holiday,
-      holidays: inSeg.map((h) => h.name),
-      family,
-      mgmt,
+      ...amounts,
+      // 명절휴가비를 0 으로 고치면 그 구간 명절은 지급방법 문구에서 빠집니다.
+      holidays: amounts.holiday === 0 ? [] : inSeg.map((h) => h.name),
       total,
+      ...(Object.keys(computed).length ? { computed } : {}),
+      ...(tr ? { transport_basis: tr.basis } : {}),
     };
   });
 
