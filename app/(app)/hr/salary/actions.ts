@@ -6,6 +6,7 @@ import { resolveSalaryAccess, requireSalaryAccess } from "@/lib/salaryAccess";
 import {
   currentEffectiveFrom,
   normalizeSalaryExtra,
+  pickConfigRow,
   validateMonthRanges,
   type SalaryGradeRow,
   type SalaryConfigRow,
@@ -47,6 +48,7 @@ function toConfigRow(raw: Record<string, unknown>): SalaryConfigRow {
     config_key: String(raw.config_key ?? ""),
     config_value: Number(raw.config_value ?? 0),
     label: (raw.label as string | null) ?? null,
+    effective_month: Number(raw.effective_month ?? 1) || 1,
   };
 }
 function toSalaryProfileRow(
@@ -132,16 +134,23 @@ export async function createSalaryYear(
           .insert(rows);
         if (error) throw new Error(error.message);
       }
+      // 기준값도 같은 이유로 **이전 해 12월에 적용되던 값**만 새 해 1월부터로 복사합니다
+      //   (연중 변경 이력은 그 해에만 남깁니다).
       const { data: configs } = await supabaseAdmin
         .from("salary_config")
-        .select("config_key, config_value, label")
+        .select("config_key, config_value, label, effective_month")
         .eq("year", copyFromYear);
-      if (configs && configs.length > 0) {
-        const rows = configs.map((r) => ({
+      const srcConfigs = (configs ?? []).map((r) => toConfigRow(r as Record<string, unknown>));
+      const decRows = [...new Set(srcConfigs.map((r) => r.config_key))]
+        .map((key) => pickConfigRow(srcConfigs, key, 12))
+        .filter((r): r is SalaryConfigRow => r != null);
+      if (decRows.length > 0) {
+        const rows = decRows.map((r) => ({
           year: y,
-          config_key: String((r as { config_key: unknown }).config_key ?? ""),
-          config_value: Number((r as { config_value: unknown }).config_value ?? 0),
-          label: (r as { label: unknown }).label as string | null,
+          config_key: r.config_key,
+          config_value: r.config_value,
+          label: r.label,
+          effective_month: 1,
         }));
         const { error } = await supabaseAdmin
           .from("salary_config")
@@ -306,24 +315,33 @@ export async function listConfig(year: number): Promise<SalaryConfigRow[]> {
   const { data, error } = await supabaseAdmin
     .from("salary_config")
     .select("*")
-    .eq("year", year);
+    .eq("year", year)
+    .order("config_key")
+    .order("effective_month");
   if (error) throw new Error(error.message);
   return (data ?? []).map((r) => toConfigRow(r as Record<string, unknown>));
 }
 
+// 기준값 저장 — 언제나 **새 행 추가**입니다(기존 행을 고치지 않음).
+//   * 값을 바꿀 때: 같은 key 에 새 금액 + 적용 시작 월(1~12) 행을 더합니다. 그 달부터 새 값이
+//     쓰이고 이전 달은 이전 행 그대로(확정된 월별 급여·체결된 계약은 저장된 금액 그대로).
+//   * 새 기준(key) 추가도 같은 함수 — 적용 시작 월 기본 1월.
+//   * (year, key, effective_month) 가 이미 있으면 거절 — 잘못 넣었으면 그 행을 지우고 다시.
+//   * 라벨을 비우면 같은 key 의 기존 라벨을 이어 씁니다.
 export async function saveConfigRow(input: {
-  id: string | null;
   year: number;
   config_key: string;
   config_value: number;
   label: string;
+  effective_month: number;
 }): Promise<{ ok: true } | { ok: false; message: string }> {
   try {
     await requireSalaryAccess();
     const year = Number(input.year);
     const key = input.config_key.trim();
     const value = Number(input.config_value);
-    const label = input.label.trim();
+    const month = Number(input.effective_month);
+    let label = input.label.trim();
     if (!Number.isInteger(year) || year <= 0)
       return { ok: false, message: "연도가 올바르지 않습니다." };
     if (!key) return { ok: false, message: "기준 key 를 입력해주세요." };
@@ -335,42 +353,34 @@ export async function saveConfigRow(input: {
     }
     if (!Number.isFinite(value))
       return { ok: false, message: "값(숫자)을 입력해주세요." };
+    if (!Number.isInteger(month) || month < 1 || month > 12)
+      return { ok: false, message: "적용 시작 월은 1~12월 중에서 골라주세요." };
 
-    // (year, config_key) 중복 방지 — 자기 자신 제외.
-    const { data: dup } = await supabaseAdmin
+    const { data: same, error: sErr } = await supabaseAdmin
       .from("salary_config")
-      .select("id")
+      .select("effective_month, label")
       .eq("year", year)
       .eq("config_key", key);
-    const conflict = (dup ?? []).some(
-      (r) => String((r as { id: unknown }).id) !== (input.id ?? "")
-    );
-    if (conflict) {
+    if (sErr) throw new Error(sErr.message);
+    if ((same ?? []).some((r) => Number((r as { effective_month: unknown }).effective_month) === month)) {
       return {
         ok: false,
-        message: `${year}년 '${key}' 기준이 이미 있습니다.`,
+        message: `${year}년 '${key}' ${month}월 적용 값이 이미 있습니다. 잘못 넣었으면 그 행을 삭제한 뒤 다시 넣어주세요.`,
       };
     }
-
-    if (input.id) {
-      const { error } = await supabaseAdmin
-        .from("salary_config")
-        .update({
-          config_key: key,
-          config_value: value,
-          label: label || null,
-        })
-        .eq("id", input.id);
-      if (error) throw new Error(error.message);
-    } else {
-      const { error } = await supabaseAdmin.from("salary_config").insert({
-        year,
-        config_key: key,
-        config_value: value,
-        label: label || null,
-      });
-      if (error) throw new Error(error.message);
+    if (!label) {
+      label =
+        ((same ?? []).map((r) => (r as { label: string | null }).label).find((l) => !!l) as string | undefined) ?? "";
     }
+
+    const { error } = await supabaseAdmin.from("salary_config").insert({
+      year,
+      config_key: key,
+      config_value: value,
+      label: label || null,
+      effective_month: month,
+    });
+    if (error) throw new Error(error.message);
     revalidatePath("/hr/salary");
     return { ok: true };
   } catch (e) {

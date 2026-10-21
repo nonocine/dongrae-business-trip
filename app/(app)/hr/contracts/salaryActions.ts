@@ -8,8 +8,9 @@ import {
   SALARY_LIST_COLUMNS,
   mergeProfileSegments,
   parseSalaryClauses,
+  splitSegmentsByConfig,
   toSalaryContract,
-  type ConfigMap,
+  type ConfigRows,
   type GradeRow,
   type HolidayDates,
   type SalaryClauses,
@@ -61,7 +62,7 @@ export type SalaryWorkspace = {
   year: number;
   holidays: HolidayDates;
   gradeRows: GradeRow[];
-  config: ConfigMap;
+  configRows: ConfigRows; // salary_config 그해 행(적용 시작 월 포함)
   clauses: SalaryClauses;
   employees: SalaryEmployee[];
 };
@@ -95,7 +96,11 @@ export async function getSalaryWorkspace(year: number): Promise<SalaryWorkspace>
       return {
         driverId,
         name: nameById.get(driverId) ?? "(알 수 없음)",
-        defaultSegments: mergeProfileSegments(rows.map((r) => ({ ...r, step: Number(r.step), extra: r.extra as never }))),
+        // 급여설정 구간 → 같은 조건끼리 합친 뒤, 수당 단가가 바뀌는 달(예: 교통보조비 8월)에서 다시 나눕니다.
+        defaultSegments: splitSegmentsByConfig(
+          mergeProfileSegments(rows.map((r) => ({ ...r, step: Number(r.step), extra: r.extra as never }))),
+          inputs.configRows
+        ),
         contract: c ? { id: String(c.id), status: String(c.status) } : null,
       };
     })

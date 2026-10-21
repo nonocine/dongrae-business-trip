@@ -18,32 +18,31 @@ import {
   cleanOverrides,
   computeSalaryContract,
   hasOverrides,
-  type ConfigMap,
+  splitSegmentsByConfig,
+  type ConfigRows,
   type GradeRow,
   type HolidayDates,
   type SalaryCalc,
   type SegmentInput,
 } from "@/lib/salaryContracts";
 import { readSetting, type Result } from "@/lib/contractServer";
+import { loadSalaryConfigRows } from "@/lib/salaryConfigServer";
 
 const TABLE = CONTRACT_KINDS.salary.table;
 export const OVERRIDE_NOTE_PREFIX = "금액 직접 수정: ";
 
 export async function loadCalcInputs(
   year: number
-): Promise<{ gradeRows: GradeRow[]; config: ConfigMap; holidays: HolidayDates }> {
-  const [{ data: grades, error: gErr }, { data: cfg, error: cErr }, holidaysRaw] = await Promise.all([
+): Promise<{ gradeRows: GradeRow[]; configRows: ConfigRows; holidays: HolidayDates }> {
+  const [{ data: grades, error: gErr }, configRows, holidaysRaw] = await Promise.all([
     supabaseAdmin.from("salary_grade_table").select("grade, step, base_salary, effective_from").eq("year", year),
-    supabaseAdmin.from("salary_config").select("config_key, config_value").eq("year", year),
+    loadSalaryConfigRows(year),
     readSetting(SALARY_HOLIDAYS_KEY),
   ]);
   if (gErr) throw new Error(gErr.message);
-  if (cErr) throw new Error(cErr.message);
-  const config: ConfigMap = {};
-  for (const r of cfg ?? []) config[String((r as { config_key: string }).config_key)] = Number((r as { config_value: unknown }).config_value);
   return {
     gradeRows: ((grades ?? []) as GradeRow[]).map((g) => ({ ...g, step: Number(g.step), base_salary: Number(g.base_salary) })),
-    config,
+    configRows,
     holidays: readHolidays(holidaysRaw, year),
   };
 }
@@ -114,8 +113,9 @@ export async function saveSalaryContractCore(
 ): Promise<Result<{ id: string; total: number }>> {
   if (!input.driverId) return { ok: false, message: "직원을 선택해주세요." };
   const year = Math.trunc(Number(input.year));
-  const segments = cleanSegments(input.segments);
   const inputs = await loadCalcInputs(year);
+  // 수당 단가가 바뀌는 달에서 구간을 나눠 저장합니다(화면과 같은 함수 — 이미 나뉘었으면 그대로).
+  const segments = splitSegmentsByConfig(cleanSegments(input.segments), inputs.configRows);
   const calc = computeSalaryContract({ year, segments, ...inputs });
   if (calc.errors.length) return { ok: false, message: calc.errors.join(" / ") };
 

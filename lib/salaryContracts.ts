@@ -13,14 +13,15 @@
 //     · 구간 = employee_salary_profiles 의 월 구간. 호봉·자격·급식/교통·관리업무
 //       대상·가족수당이 같고 이어진 구간은 하나로 합칩니다(급여대장용으로 8월에 쪼갠 행 등).
 //       수당 대상·금액은 급여 계산(lib/salary.calcMonthlyPayroll)과 같은 extra 에서 읽습니다.
-//     · 급식비 = meal_allowance × 개월
-//     · 교통보조비 = 구간 급수의 월액 × 개월 — 월별 급여와 같은 lib/salary.transportAllowanceKey
-//       (1~2급/3~4급/5~6급/7급 → transport_allowance_12/34/56/7, 8월 권고안). 급수를 못 읽거나
-//       그 급수 key 가 salary_config 에 없을 때만 일괄 transport_allowance 로 대신합니다.
-//       (2026-10 정정 — 처음엔 2026 종이 계약서가 전부 5만원이라 일괄 key 만 썼습니다.
-//        이미 체결한 계약은 저장된 금액 그대로이고 다시 계산하지 않습니다.)
-//       구간마다 근거("7급 기준 120,000원/월")를 transport_basis 에 남깁니다.
-//     · 자격수당 = cert_allowance_{extra.cert_level} × 개월
+//     · 수당 단가는 **달마다 그 달 값**입니다(2026-10 관장 원칙: 수당은 언제든 바뀔 수 있다).
+//       salary_config 의 적용 시작 월(effective_month)을 lib/salary.salaryConfigForMonth 한
+//       규칙으로 읽고, 값이 바뀌는 달에서 구간을 자동으로 나눕니다(splitSegmentsByConfig —
+//       승급 구간과 함께). 이미 체결한 계약은 저장된 금액 그대로이고 다시 계산하지 않습니다.
+//     · 급식비 = 달마다 meal_allowance 의 합
+//     · 교통보조비 = 달마다 구간 급수의 월액 합 — 월별 급여와 같은 lib/salary.transportAllowanceKey
+//       (1~2급/3~4급/5~6급/7급 → transport_allowance_12/34/56/7). 그 달에 급수 key 가 없으면
+//       그 달의 일괄 transport_allowance. 근거("7급 120,000원/월 (8월~)")를 transport_basis 에.
+//     · 자격수당 = 달마다 cert_allowance_{extra.cert_level} 의 합
 //     · 관리업무수당 = 기본급(구간 합) × mgmt_allowance_rate, extra.mgmt_target 인 구간만,
 //       10원 미만 절사. (2026-10: 처음엔 "1~4급"으로 판정했으나 급여 계산과 같은
 //       mgmt_target 으로 맞춤 — 현재 데이터에선 대상자 같음: 노미현·허일수)
@@ -45,7 +46,12 @@ import {
   type ContractBlock,
   type ContractStatus,
 } from "./contractCore";
-import { pickEffectiveBase, transportAllowanceKey } from "./salary";
+import {
+  pickEffectiveBase,
+  resolveTransportAllowance,
+  salaryConfigForMonth,
+  type ConfigValueRow,
+} from "./salary";
 
 export const SALARY_HOLIDAYS_KEY = "salary_contract_holidays";
 
@@ -109,12 +115,13 @@ export type SalarySegment = SegmentInput & {
   mgmt: number;
   total: number;
   computed?: SalaryOverrides; // 직접 고친 항목의 원래 계산값(화면 "계산값과 다름" 표시용)
-  transport_basis?: string; // 교통보조비 근거 — "7급 기준 120,000원/월"
+  transport_basis?: string; // 교통보조비 근거 — "7급 120,000원/월 (8월~)"
 };
 
 export type HolidayDates = { seol: string | null; chuseok: string | null };
 export type GradeRow = { grade: string; step: number; base_salary: number; effective_from: string };
-export type ConfigMap = Record<string, number>;
+// salary_config 그해 행들(적용 시작 월 포함). 달마다 값은 salaryConfigForMonth 로 고릅니다.
+export type ConfigRows = ConfigValueRow[];
 
 export type SalaryTotals = {
   base: number;
@@ -209,14 +216,87 @@ const HOLIDAY_ORDER: [keyof HolidayDates, string][] = [
   ["chuseok", "추석"],
 ];
 
+// 대상 여부가 없는 옛 저장분만 예전 규칙(1~4급)으로 관리업무수당 대상을 정합니다.
+function mgmtOn(s: SegmentInput): boolean {
+  const gn = gradeNumber(s.grade);
+  return s.mgmt_target ?? (gn != null && gn >= 1 && gn <= 4);
+}
+
+// 한 달에 쓰는 수당 단가(null = 그 달 기준값 없음).
+type MonthRates = {
+  meal: number | null;
+  cert: number | null;
+  transport: ReturnType<typeof resolveTransportAllowance>;
+  mgmtRate: number | null;
+  holidayRate: number | null;
+};
+
+function monthRates(rows: ConfigRows, s: SegmentInput, m: number): MonthRates {
+  const cfg = salaryConfigForMonth(rows, m);
+  const v = (k: string) => (cfg[k] != null && Number.isFinite(cfg[k]) ? cfg[k] : null);
+  return {
+    meal: v("meal_allowance"),
+    cert: s.cert_level ? v(`cert_allowance_${s.cert_level}`) : 0,
+    transport: resolveTransportAllowance(rows, s.grade, m),
+    mgmtRate: v("mgmt_allowance_rate"),
+    holidayRate: v("holiday_bonus_rate"),
+  };
+}
+
+// 이 구간 금액에 영향을 주는 단가만 비교합니다(대상 아닌 수당이 바뀌어도 나누지 않음).
+function ratesKey(s: SegmentInput, r: MonthRates): string {
+  return JSON.stringify([
+    s.meal ? r.meal : null,
+    r.cert,
+    s.transport ? (r.transport?.value ?? null) : null,
+    mgmtOn(s) ? r.mgmtRate : null,
+    r.holidayRate,
+  ]);
+}
+
+// 수당 단가가 바뀌는 달에서 구간을 나눕니다(승급 구간은 입력 그대로 두고 그 안에서 한 번 더).
+//   예) 6급 1~12월 → 1~7월(교통 50,000) / 8~12월(130,000).
+//   * 금액을 직접 고친 구간은 나누지 않습니다 — 고친 금액이 구간 합계 기준이라 쪼개면
+//     어느 쪽 금액인지 알 수 없습니다. 그런 구간도 금액은 달마다 단가로 더해 맞게 나옵니다.
+//   * 이미 나뉜 구간에 다시 돌려도 그대로입니다(화면·저장 양쪽에서 부름).
+export function splitSegmentsByConfig(segments: SegmentInput[], rows: ConfigRows): SegmentInput[] {
+  const out: SegmentInput[] = [];
+  for (const s of segments) {
+    const valid = s.start_month >= 1 && s.end_month <= 12 && s.start_month <= s.end_month;
+    if (!valid || hasOverrides([s])) {
+      out.push(s);
+      continue;
+    }
+    let cur: SegmentInput = { ...s };
+    let prevKey = ratesKey(s, monthRates(rows, s, s.start_month));
+    for (let m = s.start_month + 1; m <= s.end_month; m++) {
+      const k = ratesKey(s, monthRates(rows, s, m));
+      if (k === prevKey) continue;
+      out.push({ ...cur, end_month: m - 1 });
+      cur = { ...s, start_month: m };
+      prevKey = k;
+    }
+    out.push(cur);
+  }
+  return out;
+}
+
+// 교통보조비 근거 한 줄 — "7급 120,000원/월 (8월~)".
+function transportBasisText(grade: string, t: NonNullable<MonthRates["transport"]>): string {
+  if (!t.fallback) return `${grade} ${won(t.value)}원/월 (${t.from}월~)`;
+  return gradeNumber(grade) == null
+    ? `일괄 ${won(t.value)}원/월 (${t.from}월~, 급수를 읽지 못함)`
+    : `${grade} 일괄 ${won(t.value)}원/월 (${t.from}월~)`;
+}
+
 export function computeSalaryContract(input: {
   year: number;
   segments: SegmentInput[];
   gradeRows: GradeRow[];
-  config: ConfigMap;
+  configRows: ConfigRows;
   holidays: HolidayDates;
 }): SalaryCalc {
-  const { year, config, holidays } = input;
+  const { year, configRows, holidays } = input;
   const errors: string[] = [];
   const segs = [...input.segments].sort((a, b) => a.start_month - b.start_month);
   if (segs.length === 0) errors.push("구간이 없습니다. 급여설정(직원별 급여 구간)을 먼저 입력해주세요.");
@@ -233,28 +313,14 @@ export function computeSalaryContract(input: {
   const period_start = `${year}-${pad2(startMonth)}-01`;
   const period_end = lastDayOfMonth(year, endMonth);
 
-  const need = (key: string): number => {
-    const v = config[key];
-    if (v == null || !Number.isFinite(v)) {
-      errors.push(`급여 설정값 ${key} 가 ${year}년에 없습니다.`);
+  // 그 달 기준값이 없으면 오류로 모으고 0 으로 계산을 이어갑니다.
+  const need = (m: number, key: string, v: number | null): number => {
+    if (v == null) {
+      errors.push(`급여 설정값 ${key} 가 ${year}년 ${m}월에 없습니다.`);
       return 0;
     }
     return v;
   };
-  const meal = need("meal_allowance");
-  // 교통보조비 월액 — 구간 급수의 key, 없으면 일괄 key.
-  const transportFor = (grade: string): { monthly: number; basis: string } => {
-    const key = transportAllowanceKey(grade);
-    const v = key ? config[key] : undefined;
-    if (key && v != null && Number.isFinite(v)) return { monthly: v, basis: `${grade} 기준 ${won(v)}원/월` };
-    const flat = need("transport_allowance");
-    return {
-      monthly: flat,
-      basis: `일괄 ${won(flat)}원/월(${key ? `${grade} 기준값 없음` : "급수를 읽지 못함"})`,
-    };
-  };
-  const holidayRate = need("holiday_bonus_rate") / 2; // 명절 1회분
-  const mgmtRate = need("mgmt_allowance_rate");
 
   const holidayMonths: { name: string; month: number }[] = [];
   for (const [key, name] of HOLIDAY_ORDER) {
@@ -274,18 +340,46 @@ export function computeSalaryContract(input: {
     if (mb == null) errors.push(`호봉표에 ${year}년 ${s.grade} ${s.step}호봉이 없습니다.`);
     const monthly_base = mb ?? 0;
     const base = monthly_base * months;
-    const certKey = s.cert_level ? `cert_allowance_${s.cert_level}` : null;
-    const cert = certKey ? need(certKey) * months : 0;
+
+    // 수당은 달마다 그 달 단가로 더합니다.
+    let meal_amt = 0;
+    let cert = 0;
+    let transport_amt = 0;
+    const mgmtRates: number[] = [];
+    const runs: { from: number; to: number; text: string }[] = [];
+    for (let m = s.start_month; m <= s.end_month; m++) {
+      const r = monthRates(configRows, s, m);
+      if (s.meal) meal_amt += need(m, "meal_allowance", r.meal);
+      if (s.cert_level) cert += need(m, `cert_allowance_${s.cert_level}`, r.cert);
+      if (s.transport) {
+        if (!r.transport) need(m, "transport_allowance", null);
+        else {
+          transport_amt += r.transport.value;
+          const text = transportBasisText(s.grade, r.transport);
+          const last = runs[runs.length - 1];
+          if (last && last.text === text) last.to = m;
+          else runs.push({ from: m, to: m, text });
+        }
+      }
+      if (mgmtOn(s)) mgmtRates.push(need(m, "mgmt_allowance_rate", r.mgmtRate));
+    }
     const inSeg = holidayMonths.filter((h) => h.month >= s.start_month && h.month <= s.end_month);
-    const holiday = inSeg.reduce((acc) => acc + floor10Rate(monthly_base, holidayRate), 0);
-    // 대상 여부가 없는 옛 저장분만 예전 규칙(1~4급)으로 대신합니다.
-    const gn = gradeNumber(s.grade);
-    const mgmtOn = s.mgmt_target ?? (gn != null && gn >= 1 && gn <= 4);
-    const mgmt = mgmtOn ? floor10Rate(base, mgmtRate) : 0;
+    const holiday = inSeg.reduce((acc, h) => {
+      const rate = need(h.month, "holiday_bonus_rate", monthRates(configRows, s, h.month).holidayRate) / 2; // 명절 1회분
+      return acc + floor10Rate(monthly_base, rate);
+    }, 0);
+    // 관리업무수당 — 요율이 구간 내내 같으면(보통) 구간 기본급 합 × 요율, 다르면 달마다.
+    const mgmt = !mgmtRates.length
+      ? 0
+      : mgmtRates.every((x) => x === mgmtRates[0])
+        ? floor10Rate(base, mgmtRates[0])
+        : mgmtRates.reduce((a, x) => a + floor10Rate(monthly_base, x), 0);
     const family = Math.max(0, Math.round(Number(s.family_monthly) || 0)) * months;
-    const meal_amt = s.meal ? meal * months : 0;
-    const tr = s.transport ? transportFor(s.grade) : null;
-    const transport_amt = tr ? tr.monthly * months : 0;
+    const transport_basis = !s.transport
+      ? null
+      : runs.length <= 1
+        ? (runs[0]?.text ?? "기준값 없음")
+        : runs.map((x) => `${x.from}~${x.to}월 ${x.text}`).join(" / ");
     // 직접 고친 금액이 있으면 그 값을 쓰고, 원래 계산값은 computed 에 남깁니다.
     const amounts: Record<SalaryAmountKey, number> = { base, meal_amt, cert, transport_amt, holiday, family, mgmt };
     const overrides = cleanOverrides(s.overrides);
@@ -313,7 +407,7 @@ export function computeSalaryContract(input: {
       holidays: amounts.holiday === 0 ? [] : inSeg.map((h) => h.name),
       total,
       ...(Object.keys(computed).length ? { computed } : {}),
-      ...(tr ? { transport_basis: tr.basis } : {}),
+      ...(transport_basis ? { transport_basis } : {}),
     };
   });
 

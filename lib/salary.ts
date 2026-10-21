@@ -9,7 +9,9 @@
 //       연중에 발효되므로 같은 (year, grade, step) 에 발효월이 다른 행이 여럿
 //       있습니다(2026: 01-01 구 단가 / 08-01 신 단가). 기본급을 끌어올 때는
 //       반드시 급여월 기준으로 유효한 발효분을 골라야 합니다 → pickEffectiveBase.
-//     - salary_config(id, year, config_key text, config_value numeric, label text)
+//     - salary_config(id, year, config_key text, config_value numeric, label text,
+//                     effective_month int) — UNIQUE(year, config_key, effective_month).
+//       ⚠️ 같은 key 에 적용 시작 월이 다른 행이 여럿입니다 → salaryConfigForMonth.
 //     - employee_salary_profiles(id, driver_id, year, grade text, step int,
 //                                start_month int, end_month int, extra jsonb)
 // =====================================================================
@@ -87,7 +89,81 @@ export type SalaryConfigRow = {
   config_key: string;
   config_value: number;
   label: string | null;
+  // 적용 시작 월(1~12). 수당은 연중에 바뀔 수 있어 같은 key 에 행이 여럿입니다
+  //   (예: 교통보조비 1월 50,000 → 8월 직급별). 값을 고칠 땐 행을 새로 더합니다.
+  effective_month: number;
 };
+
+// =====================================================================
+// 월별 기준값 조회 — 단일 규칙(관장 원칙: 수당은 언제든 바뀔 수 있다, 2026-10)
+//   * m월 값 = 같은 key 중 effective_month ≤ m 인 행에서 가장 큰 것.
+//   * 직급별 교통보조비(transport_allowance_12/34/56/7)가 그 달에 없으면 그 달의
+//     일괄 transport_allowance 로 대신합니다(2026: 1~7월은 일괄 5만원, 8월부터 직급별).
+//   * 월별 급여·연봉계약서·기준값 화면 미리보기가 모두 이 함수들을 씁니다.
+//     서버에서 DB 를 읽는 쪽은 lib/salaryConfigServer(getSalaryConfig).
+// =====================================================================
+export type ConfigValueRow = Pick<
+  SalaryConfigRow,
+  "config_key" | "config_value" | "effective_month"
+>;
+
+export const TRANSPORT_GRADE_KEYS = [
+  "transport_allowance_12",
+  "transport_allowance_34",
+  "transport_allowance_56",
+  "transport_allowance_7",
+] as const;
+
+// 그 달에 적용되는 행(없으면 null). effective_month 가 비면 1월로 봅니다.
+export function pickConfigRow<T extends ConfigValueRow>(
+  rows: T[],
+  key: string,
+  month: number
+): T | null {
+  let best: T | null = null;
+  for (const r of rows) {
+    const eff = Number(r.effective_month) || 1;
+    if (r.config_key !== key || eff > month) continue;
+    if (!best || eff > (Number(best.effective_month) || 1)) best = r;
+  }
+  return best;
+}
+
+// 그 달의 기준값 맵(key → 값). 계산 엔진(calcMonthlyPayroll 등)에 그대로 넘깁니다.
+export function salaryConfigForMonth(
+  rows: ConfigValueRow[],
+  month: number
+): Record<string, number> {
+  const out: Record<string, number> = {};
+  for (const key of new Set(rows.map((r) => r.config_key))) {
+    const r = pickConfigRow(rows, key, month);
+    if (r) out[key] = Number(r.config_value);
+  }
+  const flat = out["transport_allowance"];
+  if (flat != null) {
+    for (const k of TRANSPORT_GRADE_KEYS) if (out[k] == null) out[k] = flat;
+  }
+  return out;
+}
+
+// 교통보조비 — 그 달·그 급수에 쓰는 값과 근거(어느 key, 몇 월부터).
+//   fallback=true 면 직급별 값이 없어 일괄 transport_allowance 를 쓴 것입니다.
+export function resolveTransportAllowance(
+  rows: ConfigValueRow[],
+  grade: string,
+  month: number
+): { value: number; key: string; from: number; fallback: boolean } | null {
+  const gradeKey = transportAllowanceKey(grade);
+  const own = gradeKey ? pickConfigRow(rows, gradeKey, month) : null;
+  const row = own ?? pickConfigRow(rows, "transport_allowance", month);
+  if (!row) return null;
+  return {
+    value: Number(row.config_value),
+    key: row.config_key,
+    from: Number(row.effective_month) || 1,
+    fallback: !own,
+  };
+}
 
 // 직원별 급여 설정 행(월 구간 단위). 연중 호봉 변동 시 여러 행으로 나눕니다.
 export type EmployeeSalaryProfileRow = {
@@ -365,9 +441,9 @@ export function calcMonthlyPayroll(input: {
   }
   add(payItems, "family_allowance", "가족수당", Math.round(extra.family_allowance));
   if (extra.transport_target) {
-    // 급수 구간별 차등(8월 권고안). 구간 key 가 salary_config 에 아직 없으면
-    //   cfg 가 0 을 돌려주고 add 가 줄을 빼므로 명세가 깨지지 않습니다.
-    //   급수를 구간으로 읽을 수 없는 예외에서만 옛 단일 key 로 폴백합니다.
+    // 급수 구간별 차등(8월 권고안). config 는 salaryConfigForMonth 로 만든 그 달
+    //   맵이라, 그 달에 직급별 key 가 없으면 이미 일괄 transport_allowance 값이
+    //   채워져 있습니다. 급수를 구간으로 읽을 수 없을 때도 일괄 key 를 씁니다.
     const transportKey = transportAllowanceKey(grade ?? "");
     add(
       payItems,

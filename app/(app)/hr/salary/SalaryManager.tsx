@@ -26,6 +26,7 @@ import {
   validateMonthRanges,
   calcMonthlyPayroll,
   estimateInsuranceByRate,
+  salaryConfigForMonth,
   type SalaryGradeRow,
   type SalaryConfigRow,
   type EmployeeSalaryProfileRow,
@@ -520,15 +521,18 @@ function GradeEditRow({
   );
 }
 
+// 기준값 입력 줄 — 새 기준 추가(key·라벨까지) 또는 [값 변경](금액·적용 시작 월만).
 function ConfigEditRow({
   form,
   setForm,
+  keyEditable,
   onSave,
   onCancel,
   pending,
 }: {
-  form: { key: string; label: string; value: string };
-  setForm: (f: { key: string; label: string; value: string }) => void;
+  form: { key: string; label: string; value: string; month: number };
+  setForm: (f: { key: string; label: string; value: string; month: number }) => void;
+  keyEditable: boolean;
   onSave: () => void;
   onCancel: () => void;
   pending: boolean;
@@ -536,20 +540,28 @@ function ConfigEditRow({
   return (
     <tr className="border-b border-line bg-navy-soft/30">
       <td className="px-2 py-2">
-        <input
-          value={form.key}
-          onChange={(e) => setForm({ ...form, key: e.target.value })}
-          placeholder="meal_allowance"
-          className={`${inCls} font-mono`}
-        />
+        {keyEditable ? (
+          <input
+            value={form.key}
+            onChange={(e) => setForm({ ...form, key: e.target.value })}
+            placeholder="meal_allowance"
+            className={`${inCls} font-mono`}
+          />
+        ) : (
+          <span className="font-mono text-xs">{form.key}</span>
+        )}
       </td>
       <td className="px-2 py-2">
-        <input
-          value={form.label}
-          onChange={(e) => setForm({ ...form, label: e.target.value })}
-          placeholder="급식비(월)"
-          className={inCls}
-        />
+        {keyEditable ? (
+          <input
+            value={form.label}
+            onChange={(e) => setForm({ ...form, label: e.target.value })}
+            placeholder="급식비(월)"
+            className={inCls}
+          />
+        ) : (
+          <span className="text-sm">{form.label || "-"}</span>
+        )}
       </td>
       <td className="px-2 py-2">
         <input
@@ -557,6 +569,7 @@ function ConfigEditRow({
           step="any"
           value={form.value}
           onChange={(e) => setForm({ ...form, value: e.target.value })}
+          placeholder="새 값"
           className={`${inCls} text-right font-mono`}
         />
         {isRateKey(form.key.trim()) && (
@@ -564,6 +577,23 @@ function ConfigEditRow({
             요율(소수 입력) = {formatRate(Number(form.value))}
           </p>
         )}
+      </td>
+      <td className="px-2 py-2">
+        <label className="flex items-center gap-1 text-xs text-ink-muted">
+          <select
+            value={form.month}
+            onChange={(e) => setForm({ ...form, month: Number(e.target.value) })}
+            className={inCls}
+            aria-label="적용 시작 월"
+          >
+            {MONTHS.map((m) => (
+              <option key={m} value={m}>
+                {m}월
+              </option>
+            ))}
+          </select>
+          <span className="whitespace-nowrap">부터</span>
+        </label>
       </td>
       <td className="px-2 py-2">
         <div className="flex justify-end gap-1">
@@ -590,6 +620,9 @@ function ConfigEditRow({
 
 // =====================================================================
 // 급여 기준값 섹션
+//   * 수당은 연중 언제든 바뀔 수 있습니다(관장 원칙, 2026-10). 값을 고치지 않고
+//     [값 변경]으로 "새 금액 + 적용 시작 월" 행을 더합니다. 이력은 항목 옆에
+//     "1월 50,000 → 8월 120,000" 으로 보이고, 잘못 넣은 행은 이력에서 지웁니다.
 // =====================================================================
 function ConfigSection({
   year,
@@ -600,42 +633,60 @@ function ConfigSection({
   configs: SalaryConfigRow[];
   onRefresh: () => void;
 }) {
-  const sorted = useMemo(
-    () => [...configs].sort((a, b) => a.config_key.localeCompare(b.config_key)),
-    [configs]
-  );
-  const [editId, setEditId] = useState<string | null>(null);
+  // key 별로 묶고 적용 시작 월 순서로.
+  const groups = useMemo(() => {
+    const m = new Map<string, SalaryConfigRow[]>();
+    for (const r of configs) m.set(r.config_key, [...(m.get(r.config_key) ?? []), r]);
+    return [...m.entries()]
+      .sort(([a], [b]) => a.localeCompare(b))
+      .map(([key, rows]) => ({
+        key,
+        rows: [...rows].sort((a, b) => a.effective_month - b.effective_month),
+      }));
+  }, [configs]);
+  // "지금 값" 기준 월 — 올해면 이번 달, 지난해는 12월, 다음 해는 1월.
+  const now = new Date(Date.now() + 9 * 3600 * 1000);
+  const nowYear = now.getUTCFullYear();
+  const refMonth = year === nowYear ? now.getUTCMonth() + 1 : year < nowYear ? 12 : 1;
+
+  const [editKey, setEditKey] = useState<string | null>(null); // "new" = 새 기준
   const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
   const [pending, start] = useTransition();
-  const [form, setForm] = useState({ key: "", label: "", value: "" });
+  const [form, setForm] = useState({ key: "", label: "", value: "", month: 1 });
 
   function beginAdd() {
-    setEditId("new");
-    setForm({ key: "", label: "", value: "" });
+    setEditKey("new");
+    setForm({ key: "", label: "", value: "", month: 1 });
     setMsg(null);
   }
-  function beginEdit(r: SalaryConfigRow) {
-    setEditId(r.id);
+  function beginChange(key: string, rows: SalaryConfigRow[]) {
+    setEditKey(key);
+    const last = rows[rows.length - 1];
     setForm({
-      key: r.config_key,
-      label: r.label ?? "",
-      value: String(r.config_value),
+      key,
+      label: rows.find((r) => r.label)?.label ?? "",
+      value: "",
+      month: Math.min(12, Math.max(refMonth, (last?.effective_month ?? 0) + 1)),
     });
     setMsg(null);
   }
   function save() {
     setMsg(null);
+    if (form.value.trim() === "") {
+      setMsg({ ok: false, text: "새 값을 입력해주세요." });
+      return;
+    }
     start(async () => {
       const res = await saveConfigRow({
-        id: editId === "new" ? null : editId,
         year,
         config_key: form.key,
         config_value: Number(form.value),
         label: form.label,
+        effective_month: form.month,
       });
       if (res.ok) {
-        setEditId(null);
-        setMsg({ ok: true, text: "저장되었습니다." });
+        setEditKey(null);
+        setMsg({ ok: true, text: `저장되었습니다. ${form.month}월분부터 새 값이 쓰입니다.` });
         onRefresh();
       } else {
         setMsg({ ok: false, text: res.message });
@@ -643,7 +694,8 @@ function ConfigSection({
     });
   }
   function remove(r: SalaryConfigRow) {
-    if (!confirm(`'${r.label || r.config_key}' 기준을 삭제할까요?`)) return;
+    const v = formatConfigValue(r.config_key, r.config_value);
+    if (!confirm(`'${r.label || r.config_key}' ${r.effective_month}월부터 ${v} 행을 삭제할까요?\n(이미 확정된 월별 급여·체결된 계약서 금액은 바뀌지 않습니다)`)) return;
     setMsg(null);
     start(async () => {
       const res = await deleteConfigRow(r.id);
@@ -656,13 +708,14 @@ function ConfigSection({
     });
   }
 
-  const editRow = (key: string) => (
+  const editRow = (rowKey: string, keyEditable: boolean) => (
     <ConfigEditRow
-      key={key}
+      key={rowKey}
       form={form}
       setForm={setForm}
+      keyEditable={keyEditable}
       onSave={save}
-      onCancel={() => setEditId(null)}
+      onCancel={() => setEditKey(null)}
       pending={pending}
     />
   );
@@ -671,15 +724,17 @@ function ConfigSection({
     <section className={cardCls}>
       <div className="mb-3 flex items-center justify-between">
         <h3 className="text-sm font-bold text-ink">{year}년 급여 기준값</h3>
-        {editId !== "new" && (
+        {editKey !== "new" && (
           <button type="button" onClick={beginAdd} className={btnSecondary}>
             + 기준 추가
           </button>
         )}
       </div>
       <p className="mb-3 text-xs text-ink-hint">
-        수당 단가·요율 등 급여 계산에 쓰이는 기준값입니다. 수당 종류가 늘면 새
-        기준(key)을 추가하세요. (요율은 소수로 입력 — 예: 4.5% → 0.045)
+        수당 단가·요율 등 급여 계산에 쓰이는 기준값입니다. 금액이 바뀌면 [값 변경]에서 새
+        금액과 적용 시작 월을 넣으세요 — 그 달부터 새 값, 이전 달은 이전 값으로 계산합니다.
+        확정된 월별 급여와 체결된 계약서는 저장된 금액 그대로입니다. (요율은 소수로 입력 —
+        예: 4.5% → 0.045)
       </p>
 
       {msg && (
@@ -689,51 +744,68 @@ function ConfigSection({
       )}
 
       <div className="overflow-x-auto">
-        <table className="w-full min-w-[620px] border-collapse">
+        <table className="w-full min-w-[760px] border-collapse">
           <thead>
             <tr className="border-b border-line">
               <th className={thCls}>key</th>
               <th className={thCls}>이름(라벨)</th>
-              <th className={`${thCls} text-right`}>값</th>
+              <th className={`${thCls} text-right`}>{refMonth}월 값</th>
+              <th className={thCls}>적용 이력</th>
               <th className={`${thCls} text-right`}>관리</th>
             </tr>
           </thead>
           <tbody>
-            {editId === "new" && editRow("new")}
-            {sorted.map((r) =>
-              editId === r.id ? (
-                editRow(r.id)
-              ) : (
-                <tr key={r.id} className="border-b border-line/60">
-                  <td className={`${tdCls} font-mono text-xs`}>{r.config_key}</td>
-                  <td className={tdCls}>{r.label ?? "-"}</td>
+            {editKey === "new" && editRow("new", true)}
+            {groups.map(({ key, rows }) => {
+              const current = [...rows].reverse().find((r) => r.effective_month <= refMonth) ?? null;
+              const label = rows.find((r) => r.label)?.label ?? null;
+              return [
+                <tr key={key} className="border-b border-line/60">
+                  <td className={`${tdCls} font-mono text-xs`}>{key}</td>
+                  <td className={tdCls}>{label ?? "-"}</td>
                   <td className={`${tdCls} text-right font-mono`}>
-                    {formatConfigValue(r.config_key, r.config_value)}
+                    {current ? formatConfigValue(key, current.config_value) : (
+                      <span className="text-xs text-ink-hint">{rows[0]?.effective_month}월부터</span>
+                    )}
                   </td>
-                  <td className={`${tdCls} text-right`}>
-                    <div className="flex justify-end gap-1">
-                      <button
-                        type="button"
-                        onClick={() => beginEdit(r)}
-                        className="rounded border border-line px-2 py-1 text-xs text-ink-muted hover:bg-surface"
-                      >
-                        수정
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => remove(r)}
-                        className="rounded border border-stamp px-2 py-1 text-xs text-stamp hover:bg-stamp-soft"
-                      >
-                        삭제
-                      </button>
+                  <td className={tdCls}>
+                    <div className="flex flex-wrap items-center gap-1 text-xs" data-testid={`config-history-${key}`}>
+                      {rows.map((r, i) => (
+                        <span key={r.id} className="inline-flex items-center gap-1">
+                          {i > 0 && <span className="text-ink-hint">→</span>}
+                          <span className="rounded border border-line px-1.5 py-0.5 font-mono">
+                            {r.effective_month}월 {formatConfigValue(key, r.config_value)}
+                            <button
+                              type="button"
+                              onClick={() => remove(r)}
+                              disabled={pending}
+                              className="ml-1 text-stamp hover:underline disabled:opacity-60"
+                              aria-label={`${r.effective_month}월 행 삭제`}
+                              title="이 행 삭제(잘못 넣은 값)"
+                            >
+                              ×
+                            </button>
+                          </span>
+                        </span>
+                      ))}
                     </div>
                   </td>
-                </tr>
-              )
-            )}
-            {sorted.length === 0 && editId !== "new" && (
+                  <td className={`${tdCls} text-right`}>
+                    <button
+                      type="button"
+                      onClick={() => beginChange(key, rows)}
+                      className="whitespace-nowrap rounded border border-line px-2 py-1 text-xs text-ink-muted hover:bg-surface"
+                    >
+                      값 변경
+                    </button>
+                  </td>
+                </tr>,
+                editKey === key ? editRow(`${key}-edit`, false) : null,
+              ];
+            })}
+            {groups.length === 0 && editKey !== "new" && (
               <tr>
-                <td colSpan={4} className="py-8 text-center text-sm text-ink-hint">
+                <td colSpan={5} className="py-8 text-center text-sm text-ink-hint">
                   {year}년 기준값이 없습니다. “+ 기준 추가”로 입력하세요.
                 </td>
               </tr>
@@ -818,12 +890,6 @@ function EmployeeSalarySection({
 }) {
   const [selected, setSelected] = useState<string>("");
 
-  // 계산 엔진용 config 맵(key→값). 연도 기준값이 없으면 미리보기 계산 불가.
-  const configMap = useMemo(() => {
-    const m: Record<string, number> = {};
-    for (const c of configs) m[c.config_key] = c.config_value;
-    return m;
-  }, [configs]);
 
   // 직원별 기존 행 수(요약 배지).
   const countByDriver = useMemo(() => {
@@ -886,7 +952,7 @@ function EmployeeSalarySection({
           key={`${selectedEmp.driver_id}-${year}`}
           year={year}
           grades={grades}
-          config={configMap}
+          configs={configs}
           employee={selectedEmp}
           existingRows={rows.filter((r) => r.driver_id === selectedEmp.driver_id)}
           onRefresh={onRefresh}
@@ -910,14 +976,15 @@ function EmployeeSalarySection({
 function EmployeeSalaryEditor({
   year,
   grades,
-  config,
+  configs,
   employee,
   existingRows,
   onRefresh,
 }: {
   year: number;
   grades: SalaryGradeRow[];
-  config: Record<string, number>;
+  // 기준값 행(적용 시작 월 포함). 미리보기는 구간 마지막 달 값으로 계산합니다.
+  configs: SalaryConfigRow[];
   employee: SalaryEmployee;
   existingRows: EmployeeSalaryProfileRow[];
   onRefresh: () => void;
@@ -982,7 +1049,7 @@ function EmployeeSalaryEditor({
   }, [editRows]);
 
   // 월 급여 미리보기 — 선택 구간의 기본급 + extra 로 공용 계산 엔진 호출.
-  const hasConfig = Object.keys(config).length > 0;
+  const hasConfig = configs.length > 0;
   const pIdx = Math.min(previewIdx, editRows.length - 1);
   const previewRow = editRows[pIdx] ?? null;
   const previewBase = previewRow ? baseOf(previewRow.grade, previewRow.step) : null;
@@ -993,12 +1060,12 @@ function EmployeeSalaryEditor({
     return calcMonthlyPayroll({
       baseSalary: previewBase,
       extra: previewRow.extra,
-      config,
+      config: salaryConfigForMonth(configs, previewRow.end_month),
       // 교통보조비 급수 구간 판정 — 명세서 계산과 같은 입력을 줍니다.
       grade: previewRow.grade,
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [hasConfig, previewBase, config, previewRow, previewExtraKey]);
+  }, [hasConfig, previewBase, configs, previewRow, previewExtraKey]);
 
   function save() {
     setMsg(null);
@@ -1098,7 +1165,7 @@ function EmployeeSalaryEditor({
               ? estimateInsuranceByRate({
                   baseSalary: base,
                   extra: r.extra,
-                  config,
+                  config: salaryConfigForMonth(configs, r.end_month),
                   grade: r.grade,
                 })
               : null;
@@ -1443,7 +1510,7 @@ function EmployeeSalaryEditor({
         ) : (
           <PayrollPreview
             preview={preview}
-            label={`구간 ${pIdx + 1} 기준 (${previewRow?.start_month}~${previewRow?.end_month}월)`}
+            label={`구간 ${pIdx + 1} 기준 (${previewRow?.start_month}~${previewRow?.end_month}월 · 수당은 ${previewRow?.end_month}월 단가)`}
           />
         )}
       </div>

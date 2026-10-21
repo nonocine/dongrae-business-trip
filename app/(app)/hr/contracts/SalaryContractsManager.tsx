@@ -23,6 +23,7 @@ import {
   amountInKorean,
   buildSalaryContractBlocks,
   computeSalaryContract,
+  splitSegmentsByConfig,
   won,
   type CertLevel,
   type HolidayDates,
@@ -82,7 +83,7 @@ export default function SalaryContractsManager({
   } | null>(null);
 
   const calcFor = (segments: SegmentInput[]) =>
-    computeSalaryContract({ year: ws.year, segments, gradeRows: ws.gradeRows, config: ws.config, holidays: ws.holidays });
+    computeSalaryContract({ year: ws.year, segments, gradeRows: ws.gradeRows, configRows: ws.configRows, holidays: ws.holidays });
 
   const totals = useMemo(
     () => new Map(ws.employees.map((e) => [e.driverId, calcFor(e.defaultSegments)])),
@@ -378,7 +379,9 @@ function SegmentEditor({
   onClose: () => void;
   onSaved: (text: string) => void;
 }) {
-  const [segs, setSegs] = useState<SegmentInput[]>(initial);
+  // 수당 단가가 바뀌는 달(예: 교통보조비 8월)에서 나눠 둔 구간으로 시작합니다. 입력 중에는
+  //   나누지 않고(타이핑마다 구간이 쪼개지지 않게), 저장할 때 서버가 같은 함수로 다시 나눕니다.
+  const [segs, setSegs] = useState<SegmentInput[]>(() => splitSegmentsByConfig(initial, ws.configRows));
   const [reason, setReason] = useState(initialReason);
   const [err, setErr] = useState<string | null>(null);
   const [pending, start] = useTransition();
@@ -403,7 +406,8 @@ function SegmentEditor({
     );
   }
   const overridden = !calc.errors.length && hasOverrides(calc.segments);
-  const revertAmounts = () => setSegs((cur) => cur.map(({ overrides: _o, ...s }) => (void _o, s)));
+  const revertAmounts = () =>
+    setSegs((cur) => splitSegmentsByConfig(cur.map(({ overrides: _o, ...s }) => (void _o, s)), ws.configRows));
 
   const blocks = calc.errors.length
     ? []

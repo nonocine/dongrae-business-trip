@@ -11,6 +11,7 @@ import {
   recalcTotals,
   rangeIncludesMonth,
   isEmployedInMonth,
+  salaryConfigForMonth,
   resolveTeam,
   effectiveTeamValue,
   TEAM_LABEL,
@@ -18,6 +19,7 @@ import {
   type PayrollRecord,
   type PayrollTeam,
   type SalaryExtra,
+  type ConfigValueRow,
 } from "@/lib/salary";
 import {
   parseEdiBuffer,
@@ -26,6 +28,7 @@ import {
   type EdiUpdateKey,
 } from "@/lib/salaryEdi";
 import { buildPayslipPdf } from "@/lib/salaryPayslip";
+import { loadSalaryConfigRows } from "@/lib/salaryConfigServer";
 import { loadPayrollRecords, toPayrollRecord } from "@/lib/payrollData";
 import { isMailerConfigured, sendMailWithAttachment } from "@/lib/mailer";
 
@@ -63,21 +66,19 @@ type GenContext = {
   // `${grade}::${step}` → 발효분 목록. 기본급은 급여월 기준으로 골라 씁니다
   //   (연중 인상분이 과거로 소급되지 않게) → pickEffectiveBase.
   gradeMap: Map<string, GradeBase[]>;
-  configMap: Record<string, number>;
+  // salary_config 그해 전체 행 — 달마다 configFor 로 그 달 값을 고릅니다(수당 연중 변경).
+  configRows: ConfigValueRow[];
   profilesByDriver: Map<string, ProfileRow[]>;
   empByDriver: Map<string, EmpMeta>;
 };
 
 async function loadContext(year: number): Promise<GenContext> {
-  const [gradeRes, configRes, profRes, driverRes, empRes] = await Promise.all([
+  const [gradeRes, configRows, profRes, driverRes, empRes] = await Promise.all([
     supabaseAdmin
       .from("salary_grade_table")
       .select("grade, step, base_salary, effective_from")
       .eq("year", year),
-    supabaseAdmin
-      .from("salary_config")
-      .select("config_key, config_value")
-      .eq("year", year),
+    loadSalaryConfigRows(year),
     supabaseAdmin
       .from("employee_salary_profiles")
       .select("driver_id, grade, step, start_month, end_month, extra")
@@ -100,11 +101,6 @@ async function loadContext(year: number): Promise<GenContext> {
       base_salary: Number(r.base_salary ?? 0),
     });
     gradeMap.set(key, list);
-  }
-  const configMap: Record<string, number> = {};
-  for (const c of configRes.data ?? []) {
-    const r = c as Record<string, unknown>;
-    configMap[String(r.config_key ?? "")] = Number(r.config_value ?? 0);
   }
   const profilesByDriver = new Map<string, ProfileRow[]>();
   for (const p of profRes.data ?? []) {
@@ -145,7 +141,12 @@ async function loadContext(year: number): Promise<GenContext> {
       resignation_date: st?.date ?? null,
     });
   }
-  return { gradeMap, configMap, profilesByDriver, empByDriver };
+  return { gradeMap, configRows, profilesByDriver, empByDriver };
+}
+
+// 그 달의 기준값 맵 — lib/salary.salaryConfigForMonth 단일 규칙.
+function configFor(ctx: GenContext, month: number): Record<string, number> {
+  return salaryConfigForMonth(ctx.configRows, month);
 }
 
 // 해당 월을 포함하는 급여 설정 구간(없으면 null). 비겹침 전제라 첫 일치.
@@ -198,7 +199,8 @@ function computeFromProfile(
   const calc = calcMonthlyPayroll({
     baseSalary: base,
     extra: prof.extra,
-    config: ctx.configMap,
+    // 기준값도 급여월 기준(교통보조비 8월 인상 등이 7월로 소급되지 않게).
+    config: configFor(ctx, month),
     // 교통보조비는 8월부터 급수 구간별 차등 — 급수를 함께 넘깁니다.
     grade: prof.grade,
   });
@@ -641,7 +643,7 @@ export async function previewEdiUpload(input: {
 
     const buffer = Buffer.from(input.base64, "base64");
     const ctx = await loadContext(year);
-    const parsed = ediEntriesToUpdates(buffer, input.fileType, ctx.configMap);
+    const parsed = ediEntriesToUpdates(buffer, input.fileType, configFor(ctx, month));
     const { idByName, profOf } = buildMatchers(ctx, month);
 
     const diffs: EdiDiffRow[] = [];
@@ -734,7 +736,7 @@ export async function applyEdiUpload(input: {
 
     const buffer = Buffer.from(input.base64, "base64");
     const ctx = await loadContext(year);
-    const parsed = ediEntriesToUpdates(buffer, input.fileType, ctx.configMap);
+    const parsed = ediEntriesToUpdates(buffer, input.fileType, configFor(ctx, month));
     const { idByName, profOf } = buildMatchers(ctx, month);
 
     const updatedNames: string[] = [];
