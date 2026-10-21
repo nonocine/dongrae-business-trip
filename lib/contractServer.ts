@@ -30,6 +30,7 @@ import {
   contractPdfPath,
   fmtDot,
   hyphenRrn,
+  contractDateOptions,
   isPngDataUrl,
   isYmd,
   kstYmd,
@@ -214,7 +215,7 @@ export async function blocksFor(
       terms: row,
       party,
       clauses: parseClauses(clausesRaw),
-      signDate: row.contract_date,
+      signDate: row.contract_date ?? row.contract_start,
     });
   }
   const row = toSalaryContract(raw, "");
@@ -317,8 +318,9 @@ export async function listSummaries(kind: ContractKind): Promise<ContractSummary
 }
 
 // --- 계약일(contract_date) ------------------------------------------------
-//   2026-10 관장 요청: 시스템 서명은 그날로만 찍히지만 실제로는 계약 시작일 무렵 날짜 등이
-//   필요합니다. 계약서에 보이는 날짜는 contract_date 하나이고, 실제 서명 시각
+//   2026-10 관장 결정: 계약일은 무조건 첫 출근일(계약 시작일) 또는 그 달 1일 — 작성·저장 때
+//   시작일로 자동으로 넣고(contractCore.defaultContractDate), 고칠 때도 그 두 값만 받습니다.
+//   계약서에 보이는 날짜는 contract_date 하나이고, 실제 서명 시각
 //   (sent_at·employee_signed_at·employer_signed_at)은 어떤 경로로도 바꾸지 않습니다.
 //   수정은 인사 파일 열람 보유자만(액션의 requireContractPersonnel), 사유를 contract_date_changes 에.
 export type ContractDateChange = {
@@ -361,7 +363,10 @@ export async function listContractDateChangesCore(kind: ContractKind, id: string
   return (data ?? []) as ContractDateChange[];
 }
 
-const kstToday = () => new Date(Date.now() + 9 * 3600 * 1000).toISOString().slice(0, 10);
+// 계약 시작일 — 근로 contract_start / 연봉 period_start.
+function startDateOf(kind: ContractKind, raw: Record<string, unknown>): string {
+  return String((kind === "employment" ? raw.contract_start : raw.period_start) ?? "");
+}
 
 export async function setContractDateCore(
   kind: ContractKind,
@@ -376,6 +381,11 @@ export async function setContractDateCore(
 
   const raw = await loadRow(kind, id, ", employee_signature");
   const w = workflowFields(raw);
+  // 관장 원칙 — 계약일은 계약 시작일 또는 그 달 1일만.
+  const options = contractDateOptions(startDateOf(kind, raw));
+  if (!options.includes(date)) {
+    return { ok: false, message: `계약일은 계약 시작일 또는 그 달 1일만 고를 수 있습니다. (${options.join(" / ")})` };
+  }
   if (w.status === "void") return { ok: false, message: "무효 처리된 계약서는 계약일을 바꿀 수 없습니다." };
   if (w.contract_date === date) return { ok: false, message: "지금 계약일과 같은 날짜입니다." };
 
@@ -411,9 +421,11 @@ export async function setContractDateCore(
     };
   }
   const bytes = await renderFinalPdf(kind, { ...raw, contract_date: date }, signer);
+  // 지금 행이 가리키는 확정본 경로에 씁니다(소급 재생성으로 경로가 바뀐 건도 "계약서 보기"와 카드가 같은 PDF).
+  const pdfPath = typeof raw.contract_pdf_url === "string" && raw.contract_pdf_url ? raw.contract_pdf_url : contractPdfPath(kind, w.driver_id, w.id);
   const { error: pdfErr } = await supabaseAdmin.storage
     .from(HR_DOCUMENTS_BUCKET)
-    .upload(contractPdfPath(kind, w.driver_id, w.id), Buffer.from(bytes), { contentType: "application/pdf", upsert: true });
+    .upload(pdfPath, Buffer.from(bytes), { contentType: "application/pdf", upsert: true });
   if (pdfErr) throw new Error(`PDF 저장 실패: ${pdfErr.message}`);
   const cardFile = kind === "employment" ? await syncCardAttachment(raw, bytes) : false;
   return { ok: true, pdf: "regenerated", cardFile, note: null };
@@ -627,8 +639,9 @@ export async function employerSignCore(
   }
 
   if (!employerImage) return { ok: false, message: "서명 이미지를 읽지 못했습니다. 다시 시도해주세요." };
-  // 계약일이 비어 있으면 오늘(KST)로 — 이미 정해 두었으면 덮어쓰지 않습니다.
-  const contractDate = w.contract_date ?? kstToday();
+  // 계약일이 비어 있으면 계약 시작일로 — 서명한 날짜가 계약일이 되면 안 됩니다(관장 원칙).
+  //   이미 정해 두었으면 덮어쓰지 않습니다.
+  const contractDate = w.contract_date ?? startDateOf(kind, raw);
   const signer: EmployerImage = { bytes: employerImage, isSeal: input.mode === "seal" };
   const bytes = await renderFinalPdf(kind, { ...raw, contract_date: contractDate }, signer);
   const path = contractPdfPath(kind, w.driver_id, w.id);

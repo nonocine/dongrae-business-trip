@@ -23,7 +23,7 @@ import {
 import type { ContractDateChange, EmployerSignInput } from "@/lib/contractServer";
 import {
   CONTRACT_KINDS,
-  contractDateWarnings,
+  contractDateOptions,
   contractStateLabel,
   fmtDot,
   isFinalized,
@@ -473,8 +473,8 @@ export function ContractList({
 }
 
 // 계약일 — 계약서에 보이는 날짜(contract_date). 실제 서명 시각은 고칠 수 없고 여기서 함께 보여 줍니다.
-//   사유 필수 · 이력 목록. 미래 날짜·시작일+30일 초과는 막지 않고 확인만 받습니다(관장 요청).
-const kstTodayYmd = () => new Date(Date.now() + 9 * 3600 * 1000).toISOString().slice(0, 10);
+//   관장 원칙: 계약일은 계약 시작일 또는 그 달 1일 — 두 값 중에서만 고릅니다(서버도 그 외 거부).
+//   사유 필수 · 이력 목록.
 
 function ContractDateDialog({
   kind,
@@ -487,13 +487,12 @@ function ContractDateDialog({
   onClose: () => void;
   onDone: (text: string) => void;
 }) {
-  const today = kstTodayYmd();
-  const [date, setDate] = useState(c.contract_date ?? today);
+  const options = contractDateOptions(c.start_date);
+  const [date, setDate] = useState(c.contract_date && options.includes(c.contract_date) ? c.contract_date : options[0] ?? "");
   const [reason, setReason] = useState("");
   const [err, setErr] = useState<string | null>(null);
   const [history, setHistory] = useState<ContractDateChange[] | null>(null);
   const [pending, start] = useTransition();
-  const warnings = contractDateWarnings(date, c.start_date, today);
 
   useEffect(() => {
     let alive = true;
@@ -511,7 +510,6 @@ function ContractDateDialog({
       setErr("계약일을 바꾸는 사유를 적어주세요.");
       return;
     }
-    if (warnings.length && !confirm(`${warnings.join("\n")}\n\n이 날짜로 저장할까요?`)) return;
     start(async () => {
       const res = await setContractDate(kind, c.id, date, reason);
       if (!res.ok) {
@@ -548,7 +546,7 @@ function ContractDateDialog({
           </dl>
         </section>
         <p className="text-xs text-ink-muted">
-          계약서에 보이는 날짜입니다. 지금: <b>{c.contract_date ? fmtDot(c.contract_date) : "미정(센터장 서명 날 자동)"}</b>
+          계약서에 보이는 날짜입니다. 지금: <b>{fmtDot(c.contract_date ?? c.start_date)}</b>
           {c.date_change && (
             <span className="text-stamp">
               {" "}
@@ -557,23 +555,17 @@ function ContractDateDialog({
           )}
         </p>
         {c.paper && <p className="text-xs text-ink-muted">종이 체결 건이라 원본 스캔은 그대로이고, 목록·표시 날짜만 바뀝니다.</p>}
-        <label className="block">
-          <span className="text-xs font-semibold text-ink">새 계약일</span>
-          <input
-            type="date"
-            className="mt-1 block w-full rounded-md border border-rule px-2 py-1.5"
-            value={date}
-            onChange={(e) => setDate(e.target.value)}
-            data-testid="contract-date-input"
-          />
-        </label>
-        {warnings.length > 0 && (
-          <ul className={`${noticeWarning} list-inside list-disc text-xs`}>
-            {warnings.map((w) => (
-              <li key={w}>{w} (저장은 됩니다)</li>
+        <fieldset>
+          <legend className="text-xs font-semibold text-ink">새 계약일 — 계약 시작일 또는 그 달 1일</legend>
+          <div className="mt-1 flex flex-wrap gap-3" data-testid="contract-date-options">
+            {options.map((o, i) => (
+              <label key={o} className="flex items-center gap-1.5">
+                <input type="radio" name="contract-date" checked={date === o} onChange={() => setDate(o)} />
+                {i === 0 ? "계약 시작일" : "그 달 1일"} ({fmtDot(o)})
+              </label>
             ))}
-          </ul>
-        )}
+          </div>
+        </fieldset>
         <label className="block">
           <span className="text-xs font-semibold text-ink">사유 (필수 — 이력에 남습니다)</span>
           <input

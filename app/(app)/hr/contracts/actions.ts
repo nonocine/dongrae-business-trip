@@ -4,7 +4,7 @@ import { revalidatePath } from "next/cache";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
 import { kstTodayYmd } from "@/lib/trainings";
 import { currentAssignment } from "@/lib/appointments";
-import { CONTRACT_KINDS, isYmd } from "@/lib/contractCore";
+import { CONTRACT_KINDS, defaultContractDate, isYmd } from "@/lib/contractCore";
 import {
   CONTRACT_LIST_COLUMNS,
   parseClauses,
@@ -158,17 +158,22 @@ export async function saveContract(input: ContractInput): Promise<Result<{ id: s
       break_time: t(input.breakTime),
       payment_day: t(input.paymentDay),
     };
+    // 계약일 = 계약 시작일(또는 그 달 1일) — 관장 원칙. 시작일을 바꾸면 따라 바뀝니다.
     if (input.id) {
       const cur = await loadRow(input.id);
       if (cur.status !== "draft") return { ok: false, message: "작성 중인 계약서만 고칠 수 있습니다. (보낸 뒤라면 먼저 발송을 취소하세요)" };
-      const { error } = await supabaseAdmin.from(TABLE).update(row).eq("id", input.id).eq("status", "draft");
+      const { error } = await supabaseAdmin
+        .from(TABLE)
+        .update({ ...row, contract_date: defaultContractDate(row.contract_start, cur.contract_date as string | null) })
+        .eq("id", input.id)
+        .eq("status", "draft");
       if (error) throw new Error(error.message);
       revalidatePath("/hr/contracts");
       return { ok: true, id: input.id };
     }
     const { data, error } = await supabaseAdmin
       .from(TABLE)
-      .insert({ ...row, status: "draft", created_by: me.name })
+      .insert({ ...row, contract_date: row.contract_start, status: "draft", created_by: me.name })
       .select("id")
       .single();
     if (error) throw new Error(error.message);

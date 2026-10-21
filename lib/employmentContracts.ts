@@ -265,8 +265,8 @@ export function buildContractBlocks(input: {
   terms: ContractTerms;
   party: ContractParty;
   clauses: ContractClauses;
-  // 서명란 위 날짜 = 계약일(contract_date). 정해지기 전이면 null → 빈칸.
-  //   2026-10 전에는 직원 서명일이었습니다(관장 요청으로 계약일로 통일).
+  // 서명란 위 날짜 = 계약일(contract_date, 없으면 계약 시작일 — 관장 원칙).
+  //   2026-10 전에는 직원 서명일이었습니다.
   signDate: string | null;
 }): ContractBlock[] {
   const { terms: t, party, clauses: c } = input;

@@ -618,9 +618,9 @@ export function buildSalaryContractBlocks(input: {
     { kind: "heading", text: `6. 기타 ${clauses.etc}` },
     {
       kind: "sign",
-      // 서명란 위 날짜 = 계약일(contract_date). 정해지기 전(작성 중 미리보기)이면 빈칸.
-      //   2026-10 전에는 계약 시작일이었습니다(관장 요청으로 계약일로 통일).
-      date: c.contract_date ? fmtKoreanPlain(c.contract_date) : "        년      월      일",
+      // 서명란 위 날짜 = 계약일(contract_date). 정해지기 전(작성 중 미리보기)이면 계약 시작일 —
+      //   관장 원칙: 계약일은 시작일 또는 그 달 1일.
+      date: fmtKoreanPlain(c.contract_date ?? c.period_start),
       employeeName: input.employeeName,
       employerTitle: c.employer_title ?? undefined,
     },

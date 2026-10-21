@@ -11,7 +11,7 @@
 // =====================================================================
 
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
-import { CONTRACT_KINDS, isYmd } from "@/lib/contractCore";
+import { CONTRACT_KINDS, defaultContractDate, isYmd } from "@/lib/contractCore";
 import {
   SALARY_HOLIDAYS_KEY,
   amountInKorean,
@@ -129,7 +129,13 @@ export async function saveSalaryContractCore(
   const kstDay = new Date(Date.now() + 9 * 3600 * 1000).toISOString().slice(0, 10);
   const note = overridden ? `${OVERRIDE_NOTE_PREFIX}${reason} (${me.name}, ${kstDay})` : null;
 
-  const row = { ...rowFromCalc(calc), note };
+  // 계약일 = 계약 시작일(또는 그 달 1일) — 관장 원칙. 시작일을 바꾸면 따라 바뀝니다.
+  let currentDate: string | null = null;
+  if (input.id) {
+    const { data: cur } = await supabaseAdmin.from(TABLE).select("contract_date").eq("id", input.id).maybeSingle();
+    currentDate = (cur as { contract_date?: string | null } | null)?.contract_date ?? null;
+  }
+  const row = { ...rowFromCalc(calc), note, contract_date: defaultContractDate(calc.period_start, currentDate) };
   if (input.id) {
     const { error, count } = await supabaseAdmin
       .from(TABLE)

@@ -222,16 +222,19 @@ export function kstYmdHm(iso: string | null | undefined): string | null {
   return new Date(t + 9 * 3600 * 1000).toISOString().slice(0, 16).replace("T", " ");
 }
 
-// 계약일 수정 확인 문구 — 막지 않고 알리기만 합니다(관장 요청).
-//   미래 날짜 · 계약 시작일보다 30일 넘게 늦은 날짜.
-export function contractDateWarnings(date: string, startDate: string, today: string): string[] {
-  const out: string[] = [];
-  if (!isYmd(date)) return out;
-  if (date > today) out.push(`오늘(${fmtDot(today)})보다 뒤 날짜입니다.`);
-  if (isYmd(startDate) && date > addDays(startDate, 30)) {
-    out.push(`계약 시작일(${fmtDot(startDate)})보다 30일 넘게 늦은 날짜입니다.`);
-  }
-  return out;
+// --- 계약일 원칙 (2026-10 관장 결정) -------------------------------------
+//   계약일은 무조건 첫 출근일(계약 시작일) 또는 그 달 1일. 서명한 날짜가 계약일이 되면 안 됩니다.
+//   근로계약서 시작일 = contract_start, 연봉계약서 시작일 = period_start.
+export function contractDateOptions(startDate: string): string[] {
+  if (!isYmd(startDate)) return [];
+  const first = `${startDate.slice(0, 8)}01`;
+  return first === startDate ? [startDate] : [startDate, first];
+}
+
+// 작성·저장 때 넣을 계약일 — 지금 값이 새 시작일의 선택지(시작일·그 달 1일)면 유지, 아니면 시작일.
+//   작성 중 시작일을 바꾸면 계약일도 따라 바뀝니다.
+export function defaultContractDate(startDate: string, current: string | null | undefined): string {
+  return current && contractDateOptions(startDate).includes(current) ? current : startDate;
 }
 
 // "2026년 10월 06일" (근로계약서 서명일 표기)
