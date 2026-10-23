@@ -14,6 +14,7 @@ import {
   parseCareerInput,
   parseTrainingInput,
   parseAppointmentInput,
+  normalizeAppointmentList,
   signHrDocument,
   type Driver,
   type EmployeeRank,
@@ -42,6 +43,8 @@ import { isEmployeeRoleKey } from "@/lib/employeeRoles";
 import { listRolesForDriver } from "@/lib/employeeRolesServer";
 import { resolvePersonnelViewer } from "@/lib/personnelAccess";
 import { PERSONNEL_ROLE_KEY } from "@/lib/personnel";
+import { mergeAdminAppointments } from "@/lib/appointments";
+import { withAppointmentIds } from "@/lib/appointmentsServer";
 
 // =====================================================================
 // HR 영역 접근 게이트
@@ -277,7 +280,7 @@ export async function saveEmployeeProfile(formData: FormData) {
   // 잠긴 카드는 수정 불가 (관장도 잠금 해제 전에는 수정 불가).
   const { data: existing, error: exErr } = await supabaseAdmin
     .from("employee_profiles")
-    .select("is_locked")
+    .select("is_locked, appointments")
     .eq("driver_id", driver_id)
     .maybeSingle();
   if (exErr) throw new Error(exErr.message);
@@ -315,7 +318,16 @@ export async function saveEmployeeProfile(formData: FormData) {
   const licenses = parseLicenseInput(str("licenses"));
   const career = parseCareerInput(str("career"));
   const trainings = parseTrainingInput(str("trainings"));
-  const appointments = parseAppointmentInput(str("appointments"));
+  // 인사발령 — 폼은 확정된 발령만 편집합니다. 직원이 올린 대기·반려 건은 DB 값을
+  //   그대로 살립니다(확정·반려는 appointmentReviewActions 버튼으로만).
+  const appointments = withAppointmentIds(
+    mergeAdminAppointments(
+      parseAppointmentInput(str("appointments")),
+      normalizeAppointmentList(
+        (existing as { appointments?: unknown } | null)?.appointments ?? []
+      )
+    )
+  );
 
   const row = {
     driver_id,

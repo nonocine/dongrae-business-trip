@@ -15,7 +15,7 @@
 // =====================================================================
 
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
-import { currentAssignment } from "@/lib/appointments";
+import { confirmedAppointments, currentAssignment } from "@/lib/appointments";
 import { evaluateTraining, needsTargetList } from "@/lib/trainings";
 import { loadTrainingTargets } from "@/lib/trainingRoster";
 import { activePromotionBlock, DISCIPLINE_LABEL, isDisciplineKind } from "@/lib/hrDiscipline";
@@ -64,7 +64,8 @@ export async function collectMaterials(driverId: string, year: number, half: Per
 
   // --- 근무 ---
   const { current } = currentAssignment(p.appointments, asOf);
-  const appts = (Array.isArray(p.appointments) ? p.appointments : []) as Record<string, unknown>[];
+  // 확정된 발령만(직원이 올린 확인 대기·반려 건 제외) — lib/appointments.
+  const appts = confirmedAppointments<Record<string, unknown>>(p.appointments);
   const appointmentsInPeriod = appts
     .map((a) => ({
       date: String(a.effective_date ?? ""),

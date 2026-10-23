@@ -126,9 +126,9 @@ export async function saveMyProfile(formData: FormData) {
   const licenses = parseLicenseInput(str("licenses"));
   const career = parseCareerInput(str("career"));
   const trainings = parseTrainingInput(str("trainings"));
-  // 인사발령(appointments)은 본인이 고칠 수 없습니다(2026-10 관장 지시) — 폼에
-  //   값이 실려 와도 읽지 않고, row 에서 빼서 upsert 가 기존 값을 건드리지 않게 합니다.
-  //   수정은 관리 화면(app/(app)/hr, M0·hr 직무)에서만.
+  // 인사발령(appointments)은 여기서 받지 않습니다 — 폼에 값이 실려 와도 읽지 않고,
+  //   row 에서 빼서 upsert 가 기존 값을 건드리지 않게 합니다. 본인 입력은
+  //   ./appointmentActions(확인 대기로만), 확정은 관리 화면에서.
 
   const row = {
     driver_id,

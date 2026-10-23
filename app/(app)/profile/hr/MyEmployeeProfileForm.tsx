@@ -18,6 +18,7 @@ import {
   getMyEmployeeRoles,
 } from "@/app/(app)/profile/hr/actions";
 import SignaturePad from "@/app/components/SignaturePad";
+import MyAppointmentsPanel from "@/app/(app)/profile/hr/MyAppointmentsPanel";
 import {
   parseResidentNumber,
   normalizeEducationList,
@@ -41,7 +42,6 @@ import {
   LicenseTab,
   CareerTab,
   TrainingTab,
-  AppointmentTab,
   EmployeeDocumentsSection,
   EmployeeRolesSection,
   type ProfileTabKey,
@@ -673,13 +673,12 @@ export default function MyEmployeeProfileForm({
             />
           </div>
 
-          {/* 인사발령 탭 — 본인은 열람만(잠금과 무관). 수정은 관리 화면에서만이며
-              서버(saveMyProfile)도 appointments 를 받지 않습니다. */}
+          {/* 인사발령 탭 — 본인 입력은 확인 대기로만(잠금과 무관). 저장은 패널 버튼이
+              appointmentActions 로 바로 하며, saveMyProfile 은 appointments 를 받지 않습니다. */}
           <div className={tab === "appointment" ? "" : "hidden"}>
-            <AppointmentTab
-              appointments={appointments}
-              onChange={() => {}}
-              readOnly
+            <MyAppointmentsPanel
+              initialAppointments={appointments}
+              joinDate={profile?.join_date ?? null}
             />
           </div>
 

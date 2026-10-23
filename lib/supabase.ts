@@ -559,7 +559,24 @@ export type EmployeeAppointment = {
   duty: string;
   effective_date: string;
   note: string;
+  // --- 본인 입력·확정 흐름(2026-10) — jsonb 안의 칸이라 DB 변경 없음. 규칙은 lib/appointments.
+  //   status 가 없으면 확정(confirmed)으로 봅니다(기존 항목). 미확정(pending)·반려(rejected)는
+  //   현재 소속·증명서·평가 등 어디에도 쓰지 않습니다.
+  id?: string;
+  status?: AppointmentStatus;
+  requested_at?: string; // 본인이 올린 시각(ISO)
+  requested_by?: string; // 올린 사람 이름
+  original_id?: string; // 수정 요청이면 원래(확정) 발령의 id
+  confirmed_at?: string;
+  confirmed_by?: string;
+  rejected_at?: string;
+  rejected_by?: string;
+  reject_reason?: string;
+  notified_at?: string; // 확정 권한자에게 슬랙 DM 을 보낸 시각(하루 한 번 묶음 판정)
 };
+
+export const APPOINTMENT_STATUSES = ["confirmed", "pending", "rejected"] as const;
+export type AppointmentStatus = (typeof APPOINTMENT_STATUSES)[number];
 
 export type EmployeeProfile = {
   id: string;
@@ -942,7 +959,36 @@ function normalizeAppointmentItem(item: unknown): EmployeeAppointment {
     duty: String(o.duty ?? "").trim(),
     effective_date: String(o.effective_date ?? "").trim(),
     note: String(o.note ?? "").trim(),
+    // 확정 흐름 칸 — 값이 있을 때만 싣습니다(없던 칸을 빈 문자열로 만들지 않음).
+    //   예전에는 여기서 빠져 관리 화면 저장 때 사라졌습니다.
+    ...pickAppointmentMeta(o),
   };
+}
+
+const APPOINTMENT_META_KEYS = [
+  "id",
+  "requested_at",
+  "requested_by",
+  "original_id",
+  "confirmed_at",
+  "confirmed_by",
+  "rejected_at",
+  "rejected_by",
+  "reject_reason",
+  "notified_at",
+] as const;
+
+function pickAppointmentMeta(
+  o: Record<string, unknown>
+): Partial<EmployeeAppointment> {
+  const out: Partial<EmployeeAppointment> = {};
+  for (const k of APPOINTMENT_META_KEYS) {
+    const v = typeof o[k] === "string" ? (o[k] as string).trim() : "";
+    if (v) out[k] = v;
+  }
+  if ((APPOINTMENT_STATUSES as readonly unknown[]).includes(o.status))
+    out.status = o.status as AppointmentStatus;
+  return out;
 }
 
 export function normalizeAppointmentList(

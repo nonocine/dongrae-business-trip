@@ -10,6 +10,7 @@ import {
   currentAssignment,
   formatAssignment,
   fmtAssignmentDate,
+  pendingAppointmentCount,
 } from "@/lib/appointments";
 
 export default function CurrentAssignment({
@@ -22,6 +23,8 @@ export default function CurrentAssignment({
   variant: "card" | "compact";
 }) {
   const { current, upcoming } = currentAssignment(appointments, today);
+  // 직원이 올린 확인 대기 발령 — 현재 소속 계산에는 안 들어가고 표시만(확정 알림).
+  const pending = pendingAppointmentCount(appointments);
   const text = formatAssignment(current);
   const upcomingText = upcoming
     ? `${fmtAssignmentDate(upcoming.effectiveDate)}부터 ${
@@ -40,6 +43,14 @@ export default function CurrentAssignment({
         {upcomingText && (
           <span className="ml-1 text-navy" title={`발령 예정 — ${upcomingText}`}>
             · 예정
+          </span>
+        )}
+        {pending > 0 && (
+          <span
+            className="ml-1 font-semibold text-warning"
+            title="직원이 올린 인사발령 — 인사발령 탭에서 확정·반려"
+          >
+            · 확인 대기 {pending}
           </span>
         )}
       </span>
@@ -65,6 +76,11 @@ export default function CurrentAssignment({
           {upcoming
             ? "발효된 발령기록 없음 — 아래 예정 발령이 발효되기 전까지 현재 소속을 알 수 없습니다."
             : "발령기록 없음 — 인사발령을 입력해주세요"}
+        </p>
+      )}
+      {pending > 0 && (
+        <p className="text-xs font-semibold text-warning">
+          직원이 올린 인사발령 확인 대기 {pending}건 — 인사발령 탭에서 확정·반려하세요.
         </p>
       )}
       {upcomingText && (

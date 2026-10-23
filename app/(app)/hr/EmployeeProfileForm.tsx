@@ -51,6 +51,8 @@ import {
   type ProfileTabKey,
 } from "@/app/(app)/hr/ProfileFormParts";
 import CurrentAssignment from "@/app/(app)/hr/CurrentAssignment";
+import AppointmentReviewPanel from "@/app/(app)/hr/AppointmentReviewPanel";
+import { isConfirmedAppointment } from "@/lib/appointments";
 import { contractsPath } from "@/lib/contractCore";
 import {
   btnPrimary,
@@ -203,9 +205,26 @@ export default function EmployeeProfileForm({
   const [trainings, setTrainings] = useState<EmployeeTraining[]>(() =>
     normalizeTrainingList(profile?.trainings ?? [])
   );
-  const [appointments, setAppointments] = useState<EmployeeAppointment[]>(
-    () => normalizeAppointmentList(profile?.appointments ?? [])
+  // 인사발령 — 폼(AppointmentTab)은 확정된 발령만 편집합니다. 직원이 올린 대기·반려
+  //   건은 AppointmentReviewPanel 에서 확정·반려만(서버 저장도 DB 대기 건을 살림).
+  //   apptBase = 마지막으로 서버와 맞춘 확정 목록 — 저장 안 한 변경(dirty) 판정용.
+  const [allAppointments] = useState<EmployeeAppointment[]>(() =>
+    normalizeAppointmentList(profile?.appointments ?? [])
   );
+  const [appointments, setAppointments] = useState<EmployeeAppointment[]>(() =>
+    allAppointments.filter(isConfirmedAppointment)
+  );
+  const [apptBase, setApptBase] = useState(appointments);
+  const [apptReview, setApptReview] = useState<EmployeeAppointment[]>(() =>
+    allAppointments.filter((a) => !isConfirmedAppointment(a))
+  );
+  const apptDirty = JSON.stringify(appointments) !== JSON.stringify(apptBase);
+  function applyAppointments(all: EmployeeAppointment[]) {
+    const confirmed = all.filter(isConfirmedAppointment);
+    setAppointments(confirmed);
+    setApptBase(confirmed);
+    setApptReview(all.filter((a) => !isConfirmedAppointment(a)));
+  }
 
   // 증명사진 — 마운트 시 1시간 임시 URL 조회 (관장은 조회만)
   const [photoUrl, setPhotoUrl] = useState<string | null>(null);
@@ -284,6 +303,7 @@ export default function EmployeeProfileForm({
             startTransition(async () => {
               try {
                 await saveEmployeeProfile(formData);
+                setApptBase(appointments);
                 setOk("저장되었습니다.");
               } catch (e) {
                 setError(
@@ -644,7 +664,14 @@ export default function EmployeeProfileForm({
           </div>
 
           {/* 인사발령 탭 */}
-          <div className={tab === "appointment" ? "" : "hidden"}>
+          <div className={`space-y-3 ${tab === "appointment" ? "" : "hidden"}`}>
+            <AppointmentReviewPanel
+              driverId={driver.id}
+              items={apptReview}
+              confirmed={appointments}
+              dirty={apptDirty}
+              onApplied={applyAppointments}
+            />
             <AppointmentTab
               appointments={appointments}
               onChange={setAppointments}

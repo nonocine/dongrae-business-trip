@@ -7,7 +7,8 @@ import RecruitmentPostingsTab from "@/app/(app)/hr/RecruitmentPostingsTab";
 import PasswordMigrationCard from "@/app/(app)/hr/PasswordMigrationCard";
 import CurrentAssignment from "@/app/(app)/hr/CurrentAssignment";
 import RowChevron from "@/app/components/RowChevron";
-import type { Driver, EmployeeProfile } from "@/lib/supabase";
+import type { Driver, EmployeeAppointment, EmployeeProfile } from "@/lib/supabase";
+import { confirmedAppointments } from "@/lib/appointments";
 import { contractsPath } from "@/lib/contractCore";
 import type { RecruitmentPostingAdmin } from "@/app/(app)/hr/actions";
 import {
@@ -234,7 +235,8 @@ function RecordsTab({
   const knownDepartments = useMemo(() => {
     const out: string[] = [];
     for (const p of profiles) {
-      for (const a of p.appointments ?? []) {
+      // 확정된 발령만 — 직원이 올린 대기 건의 부서명이 선택지에 섞이지 않게.
+      for (const a of confirmedAppointments<EmployeeAppointment>(p.appointments)) {
         const d = (a?.department ?? "").trim();
         if (d) out.push(d);
       }

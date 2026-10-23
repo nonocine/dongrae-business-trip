@@ -20,9 +20,22 @@
 //      (예: 직급 팀원 · 발령 직위 팀장).
 //   5) 최신 발령의 빈 칸을 이전 발령에서 끌어오지 않습니다. 관장·부장처럼
 //      부서를 비워 둔 발령은 "부서 없음"이 그 사람의 현재 상태입니다.
+//   6) 확정된 발령만 셉니다. 직원이 마이페이지에서 올린 발령(status "pending")과
+//      반려된 것("rejected")은 확정 권한자(관장·부장·personnel)가 [확정] 하기
+//      전까지 현재 소속·증명서·평가·연가계획 어디에도 쓰지 않습니다.
+//      status 가 없는 기존 항목은 확정으로 봅니다.
 // =====================================================================
 
-import type { EmployeeAppointment } from "@/lib/supabase";
+// ■ 본인 입력·확정 흐름(2026-10, 노미현 부장 공지 "입사 발령은 본인이 기록")
+//   * 직원 본인: 추가 → pending. pending·rejected 는 본인이 수정·삭제.
+//     confirmed 는 못 고치고 [수정 요청] → 바뀐 내용을 pending 으로 따로 올리며
+//     original_id 로 원 항목을 가리킵니다(원본은 확정 때까지 그대로).
+//   * 확정 권한자: [확정] → confirmed(수정 요청이면 원본 자리를 바뀐 내용으로 교체),
+//     [반려(사유)] → rejected(본인 화면에 사유 표시).
+//   * 서버 액션: 본인용 app/(app)/profile/hr/appointmentActions.ts,
+//     확정·반려 app/(app)/hr/appointmentReviewActions.ts.
+
+import type { AppointmentStatus, EmployeeAppointment } from "@/lib/supabase";
 
 export type Assignment = {
   type: string;
@@ -56,16 +69,38 @@ function toAssignment(raw: unknown): Assignment {
   };
 }
 
+// 발령 하나의 상태 — status 가 없거나 모르는 값이면 확정(기존 항목).
+export function appointmentStatusOf(raw: unknown): AppointmentStatus {
+  const s = (raw as { status?: unknown } | null)?.status;
+  return s === "pending" || s === "rejected" ? s : "confirmed";
+}
+
+export function isConfirmedAppointment(raw: unknown): boolean {
+  return appointmentStatusOf(raw) === "confirmed";
+}
+
+// 확정된 발령만 — 현재 소속·출력물·다른 기능은 반드시 이것을 거칩니다.
+export function confirmedAppointments<T>(appointments: unknown): T[] {
+  if (!Array.isArray(appointments)) return [];
+  return (appointments as T[]).filter(isConfirmedAppointment);
+}
+
+// 확인 대기(pending) 건수 — 목록 배지용.
+export function pendingAppointmentCount(appointments: unknown): number {
+  if (!Array.isArray(appointments)) return 0;
+  return appointments.filter((a) => appointmentStatusOf(a) === "pending").length;
+}
+
 export function currentAssignment(
   appointments: unknown,
   todayYmd: string,
 ): AssignmentState {
-  if (!Array.isArray(appointments) || appointments.length === 0)
-    return { current: null, upcoming: null };
+  const list = confirmedAppointments<unknown>(appointments);
+  if (list.length === 0) return { current: null, upcoming: null };
 
   // 날짜 오름차순, 같은 날짜는 배열 순서 유지(뒤쪽이 나중) — 안정 정렬을
   //   엔진에 맡기지 않고 원래 인덱스로 직접 비교합니다.
-  const items = appointments
+  const items = list
     .map((raw, idx) => ({ a: toAssignment(raw), idx }))
     .sort(
       (x, y) =>
@@ -107,4 +142,117 @@ export function formatAssignment(a: Assignment | null): string | null {
 // "YYYY-MM-DD" → "YYYY.MM.DD" (예정 표시용).
 export function fmtAssignmentDate(ymd: string | null): string {
   return ymd ? ymd.replaceAll("-", ".") : "";
+}
+
+// --- 본인 입력·확정 흐름 순수 변환 (서버 액션과 관리 화면이 같이 씀) -------------
+
+// 본인이 고칠 수 있는 칸만 — status·확정 정보 등은 서버가 붙입니다(위조 차단).
+export const APPOINTMENT_EDITABLE_KEYS = [
+  "type",
+  "title",
+  "department",
+  "duty",
+  "effective_date",
+  "note",
+] as const;
+
+// 입사 발령이 있는가 — 확정·대기 모두 셉니다(대기 중이면 다시 안내하지 않음).
+//   반려된 것은 다시 올려야 하므로 세지 않습니다.
+export function hasJoinAppointment(appointments: unknown): boolean {
+  if (!Array.isArray(appointments)) return false;
+  return appointments.some(
+    (a) =>
+      (a as { type?: unknown } | null)?.type === "입사" &&
+      appointmentStatusOf(a) !== "rejected",
+  );
+}
+
+// 확정 — pending 하나를 confirmed 로. 수정 요청(original_id)이면 원본 자리를
+//   바뀐 내용으로 바꾸고 요청 항목은 지웁니다(원본 id 유지). 대상이 없거나
+//   pending 이 아니면 throw.
+export function applyConfirmAppointment(
+  list: EmployeeAppointment[],
+  id: string,
+  by: string,
+  atIso: string,
+): EmployeeAppointment[] {
+  const idx = list.findIndex((a) => a.id === id);
+  if (idx < 0) throw new Error("확정할 발령을 찾을 수 없습니다. 새로고침 후 다시 시도하세요.");
+  const req = list[idx];
+  if (appointmentStatusOf(req) !== "pending")
+    throw new Error("확인 대기 중인 발령만 확정할 수 있습니다.");
+  const fields = Object.fromEntries(
+    APPOINTMENT_EDITABLE_KEYS.map((k) => [k, req[k]]),
+  ) as Pick<EmployeeAppointment, (typeof APPOINTMENT_EDITABLE_KEYS)[number]>;
+  const stamp = { status: "confirmed" as const, confirmed_at: atIso, confirmed_by: by };
+
+  if (req.original_id) {
+    const oi = list.findIndex((a) => a.id === req.original_id);
+    if (oi < 0 || !isConfirmedAppointment(list[oi]))
+      throw new Error("수정 요청의 원래 발령이 없어졌습니다. 반려 후 새로 올리게 해 주세요.");
+    const replaced: EmployeeAppointment = {
+      ...fields,
+      id: list[oi].id,
+      requested_at: req.requested_at,
+      requested_by: req.requested_by,
+      ...stamp,
+    };
+    return list
+      .map((a, i) => (i === oi ? replaced : a))
+      .filter((_, i) => i !== idx);
+  }
+  const confirmed: EmployeeAppointment = {
+    ...fields,
+    id: req.id,
+    requested_at: req.requested_at,
+    requested_by: req.requested_by,
+    ...stamp,
+  };
+  return list.map((a, i) => (i === idx ? confirmed : a));
+}
+
+// 반려 — pending 하나를 rejected 로(사유 필수). 본인이 고쳐 다시 올리거나 지웁니다.
+export function applyRejectAppointment(
+  list: EmployeeAppointment[],
+  id: string,
+  by: string,
+  atIso: string,
+  reason: string,
+): EmployeeAppointment[] {
+  const why = reason.trim();
+  if (!why) throw new Error("반려 사유를 적어 주세요.");
+  const idx = list.findIndex((a) => a.id === id);
+  if (idx < 0) throw new Error("반려할 발령을 찾을 수 없습니다. 새로고침 후 다시 시도하세요.");
+  if (appointmentStatusOf(list[idx]) !== "pending")
+    throw new Error("확인 대기 중인 발령만 반려할 수 있습니다.");
+  return list.map((a, i) =>
+    i === idx
+      ? { ...a, status: "rejected" as const, rejected_at: atIso, rejected_by: by, reject_reason: why }
+      : a,
+  );
+}
+
+// 관리 화면 저장 — 폼이 보낸 확정 목록 + DB 의 미확정(대기·반려) 항목.
+//   폼은 미확정 항목을 편집하지 않으므로(확정·반려 버튼으로만), 폼을 연 뒤
+//   직원이 새로 올린 대기 건이 관리자 저장으로 지워지지 않게 DB 값을 살립니다.
+export function mergeAdminAppointments(
+  submitted: EmployeeAppointment[],
+  stored: EmployeeAppointment[],
+): EmployeeAppointment[] {
+  // 폼 쪽에 id 가 없는 항목(폼을 연 뒤 서버가 id 를 붙인 경우 등)은 내용이 같은
+  //   저장본의 id 를 이어받습니다 — 새 id 가 붙으면 수정 요청의 original_id 가 끊깁니다.
+  const key = (a: EmployeeAppointment) =>
+    APPOINTMENT_EDITABLE_KEYS.map((k) => a[k] ?? "").join("");
+  const taken = new Set(submitted.map((a) => a.id).filter(Boolean));
+  const spare = stored.filter(
+    (a) => a.id && !taken.has(a.id) && isConfirmedAppointment(a),
+  );
+  const confirmed = submitted.filter(isConfirmedAppointment).map((a) => {
+    if (a.id) return a;
+    const i = spare.findIndex((b) => key(b) === key(a));
+    if (i < 0) return a;
+    const [hit] = spare.splice(i, 1);
+    return { ...a, id: hit.id };
+  });
+  return [...confirmed, ...stored.filter((a) => !isConfirmedAppointment(a))];
 }

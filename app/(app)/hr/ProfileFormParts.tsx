@@ -940,7 +940,7 @@ export function TrainingTab({
 // =====================================================================
 // 인사발령
 // =====================================================================
-function emptyAppointment(): EmployeeAppointment {
+export function emptyAppointment(): EmployeeAppointment {
   return {
     type: "입사",
     title: "",
@@ -966,7 +966,6 @@ export function AppointmentTab({
   /** 조직 전체의 기존 부서명(다른 직원 발령에 쓰인 값 포함). */
   knownDepartments?: string[];
 }) {
-  const fieldCls = fieldClsOf(readOnly);
   function update(idx: number, patch: Partial<EmployeeAppointment>) {
     onChange(appointments.map((e, i) => (i === idx ? { ...e, ...patch } : e)));
   }
@@ -980,20 +979,6 @@ export function AppointmentTab({
       ),
     [knownDepartments, appointments]
   );
-  // "직접 입력"을 눌렀지만 아직 값을 안 적은 행(값이 비어 있어도 입력칸 유지).
-  const [customRows, setCustomRows] = useState<Set<number>>(new Set());
-  const isCustom = (idx: number, value: string) => {
-    const v = value.trim();
-    // 목록에 없는 기존 값은 자동으로 직접입력 모드로 열어 준다(과거 표기 보존).
-    return customRows.has(idx) || (v !== "" && !deptOptions.includes(v));
-  };
-  const setCustom = (idx: number, on: boolean) =>
-    setCustomRows((prev) => {
-      const next = new Set(prev);
-      if (on) next.add(idx);
-      else next.delete(idx);
-      return next;
-    });
 
   return (
     <div className="space-y-3">
@@ -1023,137 +1008,161 @@ export function AppointmentTab({
                 onChange(appointments.filter((_, i) => i !== idx))
               }
             >
-              <div>
-                <label className={subLabelCls}>발령 유형</label>
-                <select
-                  value={apt.type}
-                  onChange={(e) =>
-                    update(idx, {
-                      type: e.target.value as EmployeeAppointment["type"],
-                    })
-                  }
-                  disabled={readOnly}
-                  className={`mt-0.5 ${fieldCls}`}
-                >
-                  {APPOINTMENT_TYPES.map((t) => (
-                    <option key={t} value={t}>
-                      {t}
-                    </option>
-                  ))}
-                </select>
-              </div>
-              <div>
-                <label className={subLabelCls}>직위 / 직책</label>
-                <input
-                  type="text"
-                  value={apt.title}
-                  onChange={(e) => update(idx, { title: e.target.value })}
-                  readOnly={readOnly}
-                  placeholder="팀장"
-                  className={`mt-0.5 font-semibold ${fieldCls}`}
-                />
-              </div>
-              <div>
-                <label className={subLabelCls}>담당업무 (선택)</label>
-                <input
-                  type="text"
-                  value={apt.duty}
-                  onChange={(e) => update(idx, { duty: e.target.value })}
-                  readOnly={readOnly}
-                  placeholder="시설관리, 회계, 청소년사업"
-                  className={`mt-0.5 ${fieldCls}`}
-                />
-                <p className="mt-0.5 text-[11px] text-ink-hint">
-                  증명서 「직위 및 담당업무」에 “팀장(시설관리)”처럼 함께 표기됩니다.
-                </p>
-              </div>
-              {/* DP-1. 부서 — 선택식 + 직접 입력 병행(오타·표기 흔들림 방지). */}
-              <div>
-                <label className={subLabelCls}>부서</label>
-                {isCustom(idx, apt.department) ? (
-                  <div className="mt-0.5 flex gap-1">
-                    <input
-                      type="text"
-                      value={apt.department}
-                      onChange={(e) =>
-                        update(idx, { department: e.target.value })
-                      }
-                      readOnly={readOnly}
-                      placeholder="새 부서명"
-                      className={fieldCls}
-                      autoFocus={customRows.has(idx)}
-                    />
-                    {!readOnly && (
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setCustom(idx, false);
-                          update(idx, { department: "" });
-                        }}
-                        className="shrink-0 rounded-md border border-line px-2 text-xs text-ink-muted hover:bg-surface"
-                        title="목록에서 고르기"
-                      >
-                        목록
-                      </button>
-                    )}
-                  </div>
-                ) : (
-                  <select
-                    value={apt.department}
-                    onChange={(e) => {
-                      if (e.target.value === DEPT_CUSTOM) {
-                        setCustom(idx, true);
-                        update(idx, { department: "" });
-                        return;
-                      }
-                      setCustom(idx, false);
-                      update(idx, { department: e.target.value });
-                    }}
-                    disabled={readOnly}
-                    className={`mt-0.5 ${fieldCls}`}
-                  >
-                    <option value="">(부서 없음)</option>
-                    {deptOptions.map((d) => (
-                      <option key={d} value={d}>
-                        {d}
-                      </option>
-                    ))}
-                    {!readOnly && (
-                      <option value={DEPT_CUSTOM}>+ 직접 입력…</option>
-                    )}
-                  </select>
-                )}
-                <p className="mt-0.5 text-[11px] text-ink-hint">
-                  관장·부장처럼 팀 소속이 없으면 (부서 없음)으로 두세요.
-                </p>
-              </div>
-              <div>
-                <label className={subLabelCls}>발령일</label>
-                <input
-                  type="date"
-                  value={apt.effective_date}
-                  onChange={(e) =>
-                    update(idx, { effective_date: e.target.value })
-                  }
-                  readOnly={readOnly}
-                  className={`mt-0.5 ${fieldCls}`}
-                />
-              </div>
-              <div className="sm:col-span-2">
-                <label className={subLabelCls}>비고 (선택)</label>
-                <textarea
-                  value={apt.note}
-                  onChange={(e) => update(idx, { note: e.target.value })}
-                  readOnly={readOnly}
-                  rows={2}
-                  className={`mt-0.5 resize-y ${fieldCls}`}
-                />
-              </div>
+              <AppointmentFields
+                apt={apt}
+                onPatch={(patch) => update(idx, patch)}
+                readOnly={readOnly}
+                deptOptions={deptOptions}
+              />
             </ItemCard>
           ))}
         </ul>
       )}
     </div>
+  );
+}
+
+// 발령 한 건의 입력칸 — 관리 화면 AppointmentTab 과 직원 본인 입력
+//   (app/(app)/profile/hr/MyAppointmentsPanel)이 같이 씁니다. 2열 그리드 안에 놓입니다.
+export function AppointmentFields({
+  apt,
+  onPatch,
+  readOnly,
+  deptOptions,
+}: {
+  apt: EmployeeAppointment;
+  onPatch: (patch: Partial<EmployeeAppointment>) => void;
+  readOnly: boolean;
+  deptOptions: string[];
+}) {
+  const fieldCls = fieldClsOf(readOnly);
+  // "직접 입력"을 눌렀지만 아직 값을 안 적은 상태(값이 비어 있어도 입력칸 유지).
+  const [customOn, setCustomOn] = useState(false);
+  const v = apt.department.trim();
+  // 목록에 없는 기존 값은 자동으로 직접입력 모드로 열어 준다(과거 표기 보존).
+  const isCustom = customOn || (v !== "" && !deptOptions.includes(v));
+
+  return (
+    <>
+      <div>
+        <label className={subLabelCls}>발령 유형</label>
+        <select
+          value={apt.type}
+          onChange={(e) =>
+            onPatch({ type: e.target.value as EmployeeAppointment["type"] })
+          }
+          disabled={readOnly}
+          className={`mt-0.5 ${fieldCls}`}
+        >
+          {APPOINTMENT_TYPES.map((t) => (
+            <option key={t} value={t}>
+              {t}
+            </option>
+          ))}
+        </select>
+      </div>
+      <div>
+        <label className={subLabelCls}>직위 / 직책</label>
+        <input
+          type="text"
+          value={apt.title}
+          onChange={(e) => onPatch({ title: e.target.value })}
+          readOnly={readOnly}
+          placeholder="팀장"
+          className={`mt-0.5 font-semibold ${fieldCls}`}
+        />
+      </div>
+      <div>
+        <label className={subLabelCls}>담당업무 (선택)</label>
+        <input
+          type="text"
+          value={apt.duty}
+          onChange={(e) => onPatch({ duty: e.target.value })}
+          readOnly={readOnly}
+          placeholder="시설관리, 회계, 청소년사업"
+          className={`mt-0.5 ${fieldCls}`}
+        />
+        <p className="mt-0.5 text-[11px] text-ink-hint">
+          증명서 「직위 및 담당업무」에 “팀장(시설관리)”처럼 함께 표기됩니다.
+        </p>
+      </div>
+      {/* DP-1. 부서 — 선택식 + 직접 입력 병행(오타·표기 흔들림 방지). */}
+      <div>
+        <label className={subLabelCls}>부서</label>
+        {isCustom ? (
+          <div className="mt-0.5 flex gap-1">
+            <input
+              type="text"
+              value={apt.department}
+              onChange={(e) => onPatch({ department: e.target.value })}
+              readOnly={readOnly}
+              placeholder="새 부서명"
+              className={fieldCls}
+              autoFocus={customOn}
+            />
+            {!readOnly && (
+              <button
+                type="button"
+                onClick={() => {
+                  setCustomOn(false);
+                  onPatch({ department: "" });
+                }}
+                className="shrink-0 rounded-md border border-line px-2 text-xs text-ink-muted hover:bg-surface"
+                title="목록에서 고르기"
+              >
+                목록
+              </button>
+            )}
+          </div>
+        ) : (
+          <select
+            value={apt.department}
+            onChange={(e) => {
+              if (e.target.value === DEPT_CUSTOM) {
+                setCustomOn(true);
+                onPatch({ department: "" });
+                return;
+              }
+              setCustomOn(false);
+              onPatch({ department: e.target.value });
+            }}
+            disabled={readOnly}
+            className={`mt-0.5 ${fieldCls}`}
+          >
+            <option value="">(부서 없음)</option>
+            {deptOptions.map((d) => (
+              <option key={d} value={d}>
+                {d}
+              </option>
+            ))}
+            {!readOnly && <option value={DEPT_CUSTOM}>+ 직접 입력…</option>}
+          </select>
+        )}
+        <p className="mt-0.5 text-[11px] text-ink-hint">
+          관장·부장처럼 팀 소속이 없으면 (부서 없음)으로 두세요.
+        </p>
+      </div>
+      <div>
+        <label className={subLabelCls}>발령일</label>
+        <input
+          type="date"
+          value={apt.effective_date}
+          onChange={(e) => onPatch({ effective_date: e.target.value })}
+          readOnly={readOnly}
+          className={`mt-0.5 ${fieldCls}`}
+        />
+      </div>
+      <div className="sm:col-span-2">
+        <label className={subLabelCls}>비고 (선택)</label>
+        <textarea
+          value={apt.note}
+          onChange={(e) => onPatch({ note: e.target.value })}
+          readOnly={readOnly}
+          rows={2}
+          className={`mt-0.5 resize-y ${fieldCls}`}
+        />
+      </div>
+    </>
   );
 }
 
