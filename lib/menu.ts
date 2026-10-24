@@ -623,6 +623,18 @@ export const MENU_ITEMS: MenuItem[] = [
     show: { kind: "m0" },
   },
   {
+    // 관장 결정(docs/PRESS_AUTOMATION.md): 기자 명단은 관장 전용.
+    //   부장·personnel 은 보지 않습니다 → m0 가 아니라 managerAdmin.
+    //   가드도 같은 기준(isManagerAdmin, app/(app)/press).
+    key: "admin-press",
+    group: "admin",
+    label: "보도자료 기자",
+    href: "/press",
+    icon: "📰",
+    desc: "우리 센터 기사를 쓴 기자 명단·기사 목록",
+    show: { kind: "managerAdmin" },
+  },
+  {
     // 상단 가로 네비를 걷어내면서(2026-09) 여기로 옮긴 항목입니다.
     //   예전에는 헤더 네비와 계정 메뉴에만 있어 사이드바에서는 갈 수 없었습니다.
     //   ★ 조건이 managerAdmin 인 이유는 위 MenuVisibility 주석 참고 —
