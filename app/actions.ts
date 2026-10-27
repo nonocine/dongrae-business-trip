@@ -29,6 +29,7 @@ import {
   type TransportType,
 } from "@/lib/supabase";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
+import { isTripBucket, tripRefPath } from "@/lib/tripStorage";
 import {
   GOOGLE_SESSION_COOKIE,
   parseGoogleSession,
@@ -139,11 +140,14 @@ export async function logoutCurrent() {
 // =====================================================================
 // Storage helpers
 // =====================================================================
+// 올린 파일의 버킷 안 경로 목록을 돌려줍니다(DB 에 그대로 저장).
+//   trip-photos·trip-receipts 는 비공개 버킷 — 공개 URL 을 만들지 않습니다.
+//   보기는 /api/activity-file(보기 권한 확인 → 1시간 서명 URL), lib/tripStorage.ts 참고.
 async function uploadFiles(
   bucket: string,
   files: File[]
 ): Promise<string[]> {
-  const urls: string[] = [];
+  const keys: string[] = [];
   for (const file of files) {
     if (!file || file.size === 0) continue;
     const ext = file.name.split(".").pop()?.toLowerCase() || "bin";
@@ -156,10 +160,9 @@ async function uploadFiles(
         upsert: false,
       });
     if (error) throw new Error(`파일 업로드 실패: ${error.message}`);
-    const { data } = supabaseAdmin.storage.from(bucket).getPublicUrl(key);
-    urls.push(data.publicUrl);
+    keys.push(key);
   }
-  return urls;
+  return keys;
 }
 
 // =====================================================================
@@ -240,16 +243,9 @@ export async function createBusinessTrip(formData: FormData) {
   redirect(`/trips/${data.id}`);
 }
 
-function extractStorageKey(publicUrl: string, bucket: string): string | null {
-  const marker = `/${bucket}/`;
-  const idx = publicUrl.indexOf(marker);
-  if (idx < 0) return null;
-  const tail = publicUrl.slice(idx + marker.length);
-  try {
-    return decodeURIComponent(tail);
-  } catch {
-    return tail;
-  }
+// 저장된 값(경로 또는 예전 공개 URL) → 지울 때 쓰는 버킷 안 경로.
+function extractStorageKey(ref: string, bucket: string): string | null {
+  return isTripBucket(bucket) ? tripRefPath(ref, bucket) : null;
 }
 
 export async function deleteBusinessTrip(formData: FormData) {

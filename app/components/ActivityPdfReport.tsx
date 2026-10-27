@@ -11,6 +11,7 @@ import {
   pdfTdStyle,
   pdfThStyle,
 } from "@/app/components/pdfReportStyles";
+import { activityFileUrl } from "@/lib/tripStorage";
 
 function formatKoreanDate(d: string | null) {
   if (!d) return "-";
@@ -50,7 +51,8 @@ export default function ActivityPdfReport({
   drivingLog?: DrivingLog | null;
   settings?: Settings | null;
 }) {
-  const photos = activity.photos.slice(0, 4);
+  // 비공개 버킷 — 서버가 보기 권한 확인 후 직접 내려받은 사진(같은 출처라 PDF 캡처에 그대로 들어감).
+  const photos = activity.photos.slice(0, 4).map((r) => activityFileUrl(activity.id, "trip-photos", r, { raw: true }));
   const a = activity;
 
   const rows: { label: string; value: string }[] = [];

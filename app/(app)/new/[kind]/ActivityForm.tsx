@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { createActivity, updateActivity } from "@/app/actions";
+import { activityFileUrl, type TripBucket } from "@/lib/tripStorage";
 import { btnPrimary, btnSecondary, cardCls } from "@/lib/ui";
 import {
   DEFAULT_DEPARTURE,
@@ -135,6 +136,8 @@ export default function ActivityForm({
   const [certFiles, setCertFiles] = useState<File[]>([]);
   // 수정 모드 — 그대로 둘 기존 첨부(빼면 저장 시 Storage 에서도 삭제됩니다).
   const [keptPhotos, setKeptPhotos] = useState<string[]>(activity?.photos ?? []);
+  // 기존 첨부 열람 주소(비공개 버킷 — /api/activity-file).
+  const viewUrlOf = (bucket: TripBucket) => (ref: string) => (activity ? activityFileUrl(activity.id, bucket, ref) : ref);
   const [keptReceipts, setKeptReceipts] = useState<string[]>(
     activity?.receipts ?? []
   );
@@ -844,7 +847,8 @@ export default function ActivityForm({
               className="relative aspect-square overflow-hidden rounded-lg border border-line bg-surface"
             >
               {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img src={src} alt="" className="h-full w-full object-cover" />
+              {/* 기존 첨부는 비공개 버킷 — 보기 권한 확인 후 서명 URL 로 엽니다(src 는 저장된 경로). */}
+              <img src={activity ? activityFileUrl(activity.id, "trip-photos", src) : src} alt="" className="h-full w-full object-cover" />
               <button
                 type="button"
                 onClick={() =>
@@ -905,6 +909,7 @@ export default function ActivityForm({
           label="영수증"
           files={receiptFiles}
           existing={keptReceipts}
+          viewUrl={viewUrlOf("trip-receipts")}
           onRemoveExisting={(u) =>
             setKeptReceipts(keptReceipts.filter((x) => x !== u))
           }
@@ -919,6 +924,7 @@ export default function ActivityForm({
           label={certificateLabel}
           files={certFiles}
           existing={keptCerts}
+          viewUrl={viewUrlOf("trip-receipts")}
           onRemoveExisting={(u) =>
             setKeptCerts(keptCerts.filter((x) => x !== u))
           }
@@ -965,6 +971,7 @@ function FileListField({
   label,
   files,
   existing = [],
+  viewUrl,
   onRemoveExisting,
   onChange,
   onRemove,
@@ -973,6 +980,8 @@ function FileListField({
   files: File[];
   /** 수정 모드에서 그대로 둘 기존 첨부 URL. */
   existing?: string[];
+  /** 기존 첨부(저장된 경로) → 열람 주소. */
+  viewUrl?: (ref: string) => string;
   onRemoveExisting?: (url: string) => void;
   onChange: (e: React.ChangeEvent<HTMLInputElement>) => void;
   onRemove: (i: number) => void;
@@ -987,7 +996,7 @@ function FileListField({
             className="flex items-center justify-between gap-2 rounded-lg border border-line bg-surface px-3 py-2 text-sm"
           >
             <a
-              href={u}
+              href={viewUrl ? viewUrl(u) : u}
               target="_blank"
               rel="noreferrer"
               className="truncate text-ink-body hover:underline"

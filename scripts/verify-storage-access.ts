@@ -7,14 +7,16 @@
 //        · hr-documents: 폴더별(수료증·지원서·인사서류·강사서류·도장·명함·직인) 기존 파일
 //          내려받기(downloadHrImage) + 1시간 서명 URL(signHrDocument) 열기
 //        · hr-documents: 시험 파일 업로드(uploadStampImage)→서명 URL→삭제(removeHrDocuments)
-//        · trip-photos·trip-receipts: 시험 파일 업로드→공개 URL 열기→삭제 (앱 uploadFiles 와 같은 호출)
+//        · trip-photos·trip-receipts(동업자씨)·report-photos·program-plans(byct): 시험 파일 업로드→
+//          1시간 서명 URL 열기→공개 URL 상태→삭제. 비공개 전환 후 `-- --private` 로 돌리면
+//          "공개 URL 은 안 열려야 함"을 검사 (docs/TRIP_STORAGE_PUBLIC_URL.md)
 //        · 기관 직인 로드(loadOrgSeal)
 //     B. anon 키(브라우저 번들에 있는 키)로 할 수 있는 일 — 정책 상태를 보여 줌
 //        · 정책 제거 전: 열려 있음(현재 상태 기록용)
 //        · 정책 제거 후: `-- --locked` 로 돌리면 "막혀 있어야 함"을 검사
 //
 //   시험 파일은 __selftest/ 아래에만 만들고 끝나면 지웁니다. 기존 파일은 읽기만 합니다.
-//   실행: npx tsx scripts/verify-storage-access.ts [--locked]
+//   실행: npx tsx scripts/verify-storage-access.ts [--locked] [--private]
 // =====================================================================
 
 import { readFileSync } from "node:fs";
@@ -25,6 +27,8 @@ for (const line of readFileSync(".env.local", "utf8").split(/\r?\n/)) {
 }
 
 const LOCKED = process.argv.includes("--locked");
+// 4개 첨부 버킷을 비공개로 바꾼 뒤: 공개 URL 이 막혔는지 검사(전에는 상태만 기록).
+const PRIVATE = process.argv.includes("--private");
 let failed = 0;
 function check(ok: boolean, label: string, detail = "") {
   console.log(`${ok ? "  ✓" : "  ✗"} ${label}${detail ? ` — ${detail}` : ""}`);
@@ -100,18 +104,21 @@ function check(ok: boolean, label: string, detail = "") {
   await removeHrDocuments([testPath]);
   check((await downloadHrImage(testPath)) === null, "삭제(removeHrDocuments) 후 없음");
 
-  console.log("\nA. service_role 경로 — 출장 사진·영수증(공개 버킷)");
-  for (const bucket of ["trip-photos", "trip-receipts"]) {
+  console.log(`\nA. service_role 경로 — 첨부 버킷 4개(${PRIVATE ? "비공개 전환 후: 공개 URL 막혀야 함" : "공개 URL 상태는 기록만"})`);
+  //   앱은 서명 URL(1시간)로만 엽니다 — 동업자씨 /api/activity-file, byct /api/admin/storage-file.
+  for (const bucket of ["trip-photos", "trip-receipts", "report-photos", "program-plans"]) {
     const key = `__selftest_${Date.now()}.png`;
     const { error } = await supabaseAdmin.storage.from(bucket).upload(key, PNG, { contentType: "image/png", upsert: false });
     check(!error, `${bucket}: 업로드`, error?.message ?? "");
+    const { data: signed } = await supabaseAdmin.storage.from(bucket).createSignedUrl(key, 60);
+    const rs = signed?.signedUrl ? await fetch(signed.signedUrl) : null;
+    check(rs?.status === 200, `${bucket}: 서명 URL 열림`, String(rs?.status ?? "발급 실패"));
     const pub = supabaseAdmin.storage.from(bucket).getPublicUrl(key).data.publicUrl;
     const r = await fetch(pub);
-    check(r.status === 200, `${bucket}: 공개 URL 표시`, String(r.status));
+    if (PRIVATE) check(r.status !== 200, `${bucket}: 공개 URL 막힘`, String(r.status));
+    else console.log(`  · ${bucket}: 공개 URL = ${r.status === 200 ? "열림(공개 버킷)" : `안 열림(${r.status})`}`);
     const { error: rmErr } = await supabaseAdmin.storage.from(bucket).remove([key]);
     check(!rmErr, `${bucket}: 삭제`, rmErr?.message ?? "");
-    const r2 = await fetch(pub + `?t=${Date.now()}`);
-    check(r2.status !== 200, `${bucket}: 삭제 후 공개 URL 안 열림`, String(r2.status));
   }
 
   console.log(`\nB. anon 키(브라우저에 노출된 키)로 가능한 일 — ${LOCKED ? "막혀 있어야 함(--locked)" : "현재 상태 기록"}`);

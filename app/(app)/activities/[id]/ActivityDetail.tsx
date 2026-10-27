@@ -16,6 +16,7 @@ import {
 import { deleteActivity } from "@/app/actions";
 import ActivityPdfReport from "@/app/components/ActivityPdfReport";
 import { generateTripPdf } from "@/lib/pdf";
+import { activityFileUrl, type TripBucket } from "@/lib/tripStorage";
 
 function formatDate(d: string | null) {
   if (!d) return "-";
@@ -251,15 +252,17 @@ export default function ActivityDetail({
       )}
 
       {a.photos.length > 0 && (
-        <FileGallery title={`사진자료 (${a.photos.length}장)`} urls={a.photos} />
+        <FileGallery title={`사진자료 (${a.photos.length}장)`} urls={a.photos} activityId={a.id} bucket="trip-photos" />
       )}
       {a.receipts.length > 0 && (
-        <FileGallery title={`영수증 (${a.receipts.length}장)`} urls={a.receipts} />
+        <FileGallery title={`영수증 (${a.receipts.length}장)`} urls={a.receipts} activityId={a.id} bucket="trip-receipts" />
       )}
       {a.certificate.length > 0 && (
         <FileGallery
           title={`${a.kind === "education" ? "교육 자료" : "수료증"} (${a.certificate.length}장)`}
           urls={a.certificate}
+          activityId={a.id}
+          bucket="trip-receipts"
         />
       )}
 
@@ -341,12 +344,25 @@ function Block({ label, content }: { label: string; content: string }) {
   );
 }
 
-function FileGallery({ title, urls }: { title: string; urls: string[] }) {
+// 첨부는 비공개 버킷 — /api/activity-file 이 보기 권한 확인 후 1시간 서명 URL 로 엽니다.
+function FileGallery({
+  title,
+  urls,
+  activityId,
+  bucket,
+}: {
+  title: string;
+  urls: string[];
+  activityId: string;
+  bucket: TripBucket;
+}) {
   return (
     <section className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
       <h3 className="text-sm font-semibold text-slate-900">{title}</h3>
       <div className="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-3">
-        {urls.map((src, i) => (
+        {urls.map((ref, i) => {
+          const src = activityFileUrl(activityId, bucket, ref);
+          return (
           <a
             key={i}
             href={src}
@@ -361,7 +377,8 @@ function FileGallery({ title, urls }: { title: string; urls: string[] }) {
               className="h-full w-full object-cover"
             />
           </a>
-        ))}
+          );
+        })}
       </div>
     </section>
   );
