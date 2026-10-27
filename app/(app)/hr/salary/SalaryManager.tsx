@@ -36,15 +36,13 @@ import {
 import MonthlyPayrollSection from "@/app/(app)/hr/salary/MonthlyPayroll";
 import {
   cardCls,
-  tabBarCls,
-  tabNavCls,
-  tabItemCls,
   btnPrimary,
   btnSecondary,
   btnDanger,
   noticeError,
   noticeSuccess,
 } from "@/lib/ui";
+import Tabs, { type TabItem } from "@/app/components/Tabs";
 
 const inCls =
   "block w-full rounded-md border border-line bg-card px-2.5 py-1.5 text-sm text-ink-body shadow-sm placeholder:text-ink-hint focus:border-navy focus:outline-none focus:ring-1 focus:ring-navy";
@@ -136,29 +134,19 @@ export default function SalaryManager({
       </section>
 
       {/* 섹션 탭 */}
-      <div className={tabBarCls}>
-        <nav className={tabNavCls}>
-          {(
-            [
-              { key: "monthly", label: "월별 급여" },
-              { key: "grade", label: "호봉표" },
-              { key: "config", label: "급여 기준값" },
-              { key: "employee", label: "직원별 급여 설정" },
-            ] as { key: SectionKey; label: string }[]
-          )
-            .filter((t) => canViewPersonal || (t.key !== "monthly" && t.key !== "employee"))
-            .map((t) => (
-            <button
-              key={t.key}
-              type="button"
-              onClick={() => setSection(t.key)}
-              className={tabItemCls(t.key === section)}
-            >
-              {t.label}
-            </button>
-          ))}
-        </nav>
-      </div>
+      <Tabs
+        ariaLabel="급여"
+        value={section}
+        onChange={setSection}
+        items={(
+          [
+            { key: "monthly", label: "월별 급여", icon: "banknote" },
+            { key: "grade", label: "호봉표", icon: "table" },
+            { key: "config", label: "급여 기준값", icon: "sliders" },
+            { key: "employee", label: "직원별 급여 설정", icon: "userCog" },
+          ] satisfies TabItem<SectionKey>[]
+        ).filter((t) => canViewPersonal || (t.key !== "monthly" && t.key !== "employee"))}
+      />
 
       {!canViewPersonal && (
         <p className="text-xs text-ink-hint">

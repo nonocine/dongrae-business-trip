@@ -22,7 +22,7 @@ import {
   type EmployeeDocItem,
 } from "@/lib/employeeDocs";
 import { EMPLOYEE_ROLES } from "@/lib/employeeRoles";
-import { tabBarCls, tabNavCls, tabItemCls } from "@/lib/ui";
+import Tabs from "@/app/components/Tabs";
 
 // 서버액션 결과(공통) — { ok } 판별 유니온.
 type ActionResult = { ok: true } | { ok: false; message: string };
@@ -60,21 +60,15 @@ export function ProfileTabs({
   current: ProfileTabKey;
   onChange: (t: ProfileTabKey) => void;
 }) {
+  // 카드 안의 섹션 전환 — 인사 관리(상위 탭) 아래에 놓이므로 하위(segment) 탭입니다.
   return (
-    <div className={tabBarCls}>
-      <nav className={tabNavCls}>
-        {PROFILE_TABS.map((t) => (
-          <button
-            key={t.key}
-            type="button"
-            onClick={() => onChange(t.key)}
-            className={tabItemCls(t.key === current)}
-          >
-            {t.label}
-          </button>
-        ))}
-      </nav>
-    </div>
+    <Tabs
+      variant="segment"
+      ariaLabel="인사기록카드 항목"
+      value={current}
+      onChange={onChange}
+      items={PROFILE_TABS}
+    />
   );
 }
 

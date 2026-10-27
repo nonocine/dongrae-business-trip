@@ -1,27 +1,19 @@
 "use client";
 
-import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { tabBarCls, tabNavCls, tabItemCls } from "@/lib/ui";
+import Tabs, { type TabItem } from "@/app/components/Tabs";
 
-const TABS = [
-  { href: "/bangka/posts", label: "공지·알림장" },
-  { href: "/bangka/meals", label: "급식" },
-  { href: "/bangka/events", label: "연간일정" },
-  { href: "/bangka/absences", label: "공결" },
+const TABS: TabItem[] = [
+  { key: "/bangka/posts", href: "/bangka/posts", label: "공지·알림장", icon: "megaphone" },
+  { key: "/bangka/meals", href: "/bangka/meals", label: "급식", icon: "tray" },
+  { key: "/bangka/events", href: "/bangka/events", label: "연간일정", icon: "calendar" },
+  { key: "/bangka/absences", href: "/bangka/absences", label: "공결", icon: "fileCheck" },
 ];
 
-export default function BangkaContentTabs() {
+// pendingAbsences — 처리할 공결 수(신청·담임 확인 대기). 0 이면 배지 없음.
+export default function BangkaContentTabs({ pendingAbsences }: { pendingAbsences: number }) {
   const path = usePathname() ?? "";
-  return (
-    <div className={tabBarCls}>
-      <nav className={tabNavCls}>
-        {TABS.map((t) => (
-          <Link key={t.href} href={t.href} className={tabItemCls(path.startsWith(t.href))}>
-            {t.label}
-          </Link>
-        ))}
-      </nav>
-    </div>
-  );
+  const items = TABS.map((t) => (t.key === "/bangka/absences" ? { ...t, badge: pendingAbsences } : t));
+  const current = TABS.find((t) => path.startsWith(t.key))?.key ?? "";
+  return <Tabs ariaLabel="동래방카 콘텐츠" value={current} items={items} />;
 }

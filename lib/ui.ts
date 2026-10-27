@@ -98,16 +98,8 @@ export const linkCls =
 export const rowLinkCls =
   "group cursor-pointer transition-colors hover:bg-surface focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-navy";
 
-// --- 탭 --- 활성 탭 하단 굵은 인디케이터+글자 굵게, 비활성 muted+hover 배경.
-export const tabBarCls = "overflow-x-auto border-b border-line";
-export const tabNavCls = "flex min-w-max gap-1";
-export function tabItemCls(active: boolean): string {
-  return `relative -mb-px whitespace-nowrap rounded-t-md border-b-2 px-3 py-2 text-sm transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-navy ${
-    active
-      ? "border-navy font-bold text-navy"
-      : "border-transparent font-semibold text-ink-muted hover:bg-surface hover:text-ink"
-  }`;
-}
+// --- 탭 --- 클래스 문자열은 없앴습니다(2026-10). 탭은 app/components/Tabs 부품만 씁니다
+//   — 상위(primary)/하위(segment) 위계·움직임·키보드·배지가 한 곳에 있습니다.
 
 // --- 배지 ---
 const badgeBase =

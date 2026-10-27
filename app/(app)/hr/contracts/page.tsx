@@ -6,8 +6,9 @@ import { listContractEmployees, getContractClauses } from "@/app/(app)/hr/contra
 import { getSalaryWorkspace, getSalaryTemplates } from "@/app/(app)/hr/contracts/salaryActions";
 import ContractsManager, { ClauseEditor } from "@/app/(app)/hr/contracts/ContractsManager";
 import SalaryContractsManager, { HolidayPanel, SalaryClauseEditor } from "@/app/(app)/hr/contracts/SalaryContractsManager";
-import { tabBarCls, tabNavCls, tabItemCls, linkCls, noticeWarning } from "@/lib/ui";
+import { linkCls, noticeWarning } from "@/lib/ui";
 import { contractsPath, type ContractFocus } from "@/lib/contractCore";
+import Tabs from "@/app/components/Tabs";
 
 export const dynamic = "force-dynamic";
 
@@ -28,8 +29,8 @@ const contractsHref = (tab: "employment" | "salary", year: number, driverId?: st
   contractsPath({ tab, year, driverId });
 
 const TABS = [
-  { key: "employment", label: "근로계약서" },
-  { key: "salary", label: "연봉계약서" },
+  { key: "employment", label: "근로계약서", icon: "filePen" },
+  { key: "salary", label: "연봉계약서", icon: "banknote" },
 ] as const;
 
 export default async function ContractsPage({
@@ -65,20 +66,12 @@ export default async function ContractsPage({
         </Link>
       </div>
 
-      <div className={`${tabBarCls} mb-5`}>
-        <nav className={tabNavCls} aria-label="계약서 종류">
-          {TABS.map((t) => (
-            <Link
-              key={t.key}
-              href={contractsHref(t.key, year, focus?.driverId)}
-              aria-current={t.key === tab ? "page" : undefined}
-              className={tabItemCls(t.key === tab)}
-            >
-              {t.label}
-            </Link>
-          ))}
-        </nav>
-      </div>
+      <Tabs
+        ariaLabel="계약서 종류"
+        className="mb-5"
+        value={tab}
+        items={TABS.map((t) => ({ ...t, href: contractsHref(t.key, year, focus?.driverId) }))}
+      />
 
       {focus && (
         <div className="mb-5 flex flex-wrap items-center gap-2 rounded-lg border border-navy bg-navy-soft px-4 py-2.5 text-sm">

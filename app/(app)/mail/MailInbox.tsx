@@ -3,7 +3,6 @@
 import { useCallback, useEffect, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import {
-  badgeNavy,
   badgeNeutral,
   badgeWarning,
   btnPrimary,
@@ -15,9 +14,6 @@ import {
   noticeError,
   noticeSuccess,
   noticeWarning,
-  tabBarCls,
-  tabItemCls,
-  tabNavCls,
 } from "@/lib/ui";
 import { fmtKstMonthDayTime } from "@/lib/datetime";
 import {
@@ -71,6 +67,7 @@ import {
   trashMail,
 } from "./actions";
 import Button from "@/app/components/Button";
+import Tabs from "@/app/components/Tabs";
 
 // 수신일 표기 — "2026-08-07 14:03". 값이 없으면 "-".
 function formatReceived(iso: string | null): string {
@@ -773,44 +770,25 @@ export default function MailInbox({
             · 필터는 서버(getMailList)에서 걸리며 상태·담당자·검색과 AND 로 겹칩니다.
             · 배지는 "안읽음(opened_at IS NULL)" 건수. 다른 필터를 걸어도 바뀌지
               않습니다 — 그래야 "그 분류에 몇 건 남았나" 로 읽힙니다. 0이면 숨깁니다.
-            · 좁은 화면에서는 tabBarCls 의 overflow-x-auto 로 가로 스크롤됩니다.
+            · 좁은 화면에서는 Tabs 가 가로 스크롤합니다(양끝 흐림).
             · 보낸메일함에서는 감춥니다 — 분류는 '받은' 메일의 축이라, 보낸 것을
               보는 동안 받은 메일 건수가 떠 있으면 무엇을 세는 숫자인지 헷갈립니다.
               (휴지통은 받은 메일이므로 그대로 둡니다.) */}
       {!sentView && (
-      <div className={tabBarCls}>
-        <nav className={tabNavCls} aria-label="분류">
-          {categoryTabs.map((t) => {
-            const active = filters.category === t.key;
-            // 분류별 로고색 — 기타·전체는 색이 없어(undefined) 기존 무채색 그대로.
-            const color = MAIL_CATEGORY_INDEX_COLOR[t.key];
-            return (
-              <button
-                key={t.key || "__all__"}
-                type="button"
-                aria-current={active ? "page" : undefined}
-                className={tabItemCls(active)}
-                // 선택 칸의 밑줄만 그 분류 색으로 바꿉니다(굵기·글자 강조는 그대로).
-                //   tabItemCls 가 이미 border-navy 를 갖고 있어 클래스로 덮으면
-                //   생성 순서에 따라 이길지가 갈립니다 — 인라인이라야 확실합니다.
-                style={active && color ? { borderColor: color } : undefined}
-                onClick={() => pushFilters({ category: t.key })}
-              >
-                {t.label}
-                {t.count > 0 && (
-                  <span
-                    className={`ml-1.5 ${active ? badgeNavy : badgeNeutral}`}
-                    // 배지는 배경을 채우지 않고 숫자(글자)색만 입힙니다.
-                    style={color ? { color } : undefined}
-                  >
-                    {t.count}
-                  </span>
-                )}
-              </button>
-            );
-          })}
-        </nav>
-      </div>
+      <Tabs
+        variant="segment"
+        ariaLabel="분류"
+        value={filters.category}
+        onChange={(key) => pushFilters({ category: key })}
+        hideZeroCount
+        items={categoryTabs.map((t) => ({
+          key: t.key,
+          label: t.label,
+          count: t.count,
+          // 분류별 로고색은 점 하나로만 — 선택 표시는 모든 분류가 같은 흰 알약입니다.
+          dot: MAIL_CATEGORY_INDEX_COLOR[t.key],
+        }))}
+      />
       )}
 
       {/* 모달이 열려 있을 때는 모달 안에서 같은 메시지를 보여줍니다(중복 방지). */}

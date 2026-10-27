@@ -13,9 +13,6 @@ import {
   badgeWarning,
   noticeError,
   noticeSuccess,
-  tabBarCls,
-  tabNavCls,
-  tabItemCls,
   splitRecruitmentFields,
   fieldBadgeCls,
 } from "@/lib/ui";
@@ -38,6 +35,7 @@ import {
   type AppStatus,
   type ScoreEntry,
 } from "./actions";
+import Tabs from "@/app/components/Tabs";
 
 // 상태 라벨 — actions.ts(use server) 에서 값(객체) export 가 금지되므로
 // 유일한 소비자인 이 파일에 정의합니다.
@@ -114,31 +112,16 @@ export default function ScreeningDashboard({
         </div>
       </header>
 
-      <div className={tabBarCls}>
-        <nav className={tabNavCls}>
-          <button
-            type="button"
-            onClick={() => setTab("list")}
-            className={tabItemCls(tab === "list")}
-          >
-            지원자 목록
-          </button>
-          <button
-            type="button"
-            onClick={() => setTab("detail")}
-            className={tabItemCls(tab === "detail")}
-          >
-            지원자 상세·채점
-          </button>
-          <button
-            type="button"
-            onClick={() => setTab("final")}
-            className={tabItemCls(tab === "final")}
-          >
-            최종 집계
-          </button>
-        </nav>
-      </div>
+      <Tabs
+        ariaLabel="전형 관리"
+        value={tab}
+        onChange={setTab}
+        items={[
+          { key: "list", label: "지원자 목록", icon: "list" },
+          { key: "detail", label: "지원자 상세·채점", icon: "clipboardList" },
+          { key: "final", label: "최종 집계", icon: "chart" },
+        ]}
+      />
 
       {tab === "list" && (
         <ApplicantListView

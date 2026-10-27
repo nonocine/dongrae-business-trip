@@ -40,6 +40,7 @@ import {
   badgeDanger,
   badgeSuccess,
 } from "@/lib/ui";
+import Tabs from "@/app/components/Tabs";
 
 type View = "source" | "person";
 
@@ -262,30 +263,16 @@ export default function PayoutManager({ data }: { data: PayoutData }) {
             전체 기간
           </button>
           <span aria-hidden className="h-5 w-px bg-line" />
-          <div className="flex gap-1">
-            <button
-              type="button"
-              onClick={() => setView("source")}
-              className={
-                view === "source"
-                  ? "rounded-lg border border-navy bg-navy px-3 py-1.5 text-sm font-semibold text-white"
-                  : "rounded-lg border border-line bg-card px-3 py-1.5 text-sm font-medium text-ink-body hover:bg-surface"
-              }
-            >
-              재원별 보기
-            </button>
-            <button
-              type="button"
-              onClick={() => setView("person")}
-              className={
-                view === "person"
-                  ? "rounded-lg border border-navy bg-navy px-3 py-1.5 text-sm font-semibold text-white"
-                  : "rounded-lg border border-line bg-card px-3 py-1.5 text-sm font-medium text-ink-body hover:bg-surface"
-              }
-            >
-              사람별 보기
-            </button>
-          </div>
+          <Tabs
+            variant="segment"
+            ariaLabel="보기"
+            value={view}
+            onChange={setView}
+            items={[
+              { key: "source", label: "재원별 보기" },
+              { key: "person", label: "사람별 보기" },
+            ]}
+          />
           <a href={exportHref} className={`${btnSecondary} ml-auto`}>
             엑셀 내려받기
           </a>

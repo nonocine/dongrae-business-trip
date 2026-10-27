@@ -36,6 +36,7 @@ import ProgramRegistryManager from "./ProgramRegistryManager";
 import StaffTrainingTab from "./StaffTrainingTab";
 import ProgramResultForm, { type CarryOver } from "./ProgramResultForm";
 import { fmtKstDateTime } from "@/lib/datetime";
+import Tabs, { type TabItem } from "@/app/components/Tabs";
 
 type Tab =
   | "overview"
@@ -47,14 +48,14 @@ type Tab =
   | "report";
 // key 는 저장·집계와 무관한 화면 상태값이라 라벨만 바꿔도 안전하다.
 //   ("사업실적 입력" → "청소년 활동" 은 라벨 변경일 뿐 key 는 programs 그대로)
-const tabs: { key: Tab; label: string }[] = [
-  { key: "overview", label: "실적 현황" },
-  { key: "programs", label: "청소년 활동" },
-  { key: "promotions", label: "홍보·대외협력" },
-  { key: "coinpay", label: "동전PAY" },
-  { key: "onna", label: "온나" },
-  { key: "trainings", label: "종사자 교육" },
-  { key: "report", label: "종합보고서" },
+const tabs: TabItem<Tab>[] = [
+  { key: "overview", label: "실적 현황", icon: "chart" },
+  { key: "programs", label: "청소년 활동", icon: "sparkles" },
+  { key: "promotions", label: "홍보·대외협력", icon: "megaphone" },
+  { key: "coinpay", label: "동전PAY", icon: "coins" },
+  { key: "onna", label: "온나", icon: "house" },
+  { key: "trainings", label: "종사자 교육", icon: "presentation" },
+  { key: "report", label: "종합보고서", icon: "fileText" },
 ];
 // 홍보 채널(구분). 자동 수집(인스타그램="SNS", 블로그="블로그")도 여기 있는
 //   값만 씁니다 — 채널이 늘어도 새 구분값을 만들지 않습니다.
@@ -606,22 +607,7 @@ export default function BusinessResultsDashboard({
           </div>
         </div>
       </section>
-      <nav
-        className="overflow-x-auto rounded-xl border border-line bg-card p-1 shadow-sm"
-        aria-label="사업실적 메뉴"
-      >
-        <div className="flex min-w-max gap-1">
-          {tabs.map((item) => (
-            <button
-              key={item.key}
-              onClick={() => setTab(item.key)}
-              className={`rounded-lg px-4 py-2.5 text-sm font-semibold ${tab === item.key ? "bg-navy text-white" : "text-ink-muted hover:bg-surface"}`}
-            >
-              {item.label}
-            </button>
-          ))}
-        </div>
-      </nav>
+      <Tabs ariaLabel="사업실적 메뉴" value={tab} onChange={setTab} items={tabs} />
       {notice && (
         <p className={notice.ok ? noticeSuccess : noticeError}>
           {notice.text}

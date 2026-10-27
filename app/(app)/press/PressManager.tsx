@@ -17,9 +17,6 @@ import {
   noticeError,
   noticeSuccess,
   rowLinkCls,
-  tabBarCls,
-  tabItemCls,
-  tabNavCls,
   tableHeadCls,
   tableRowCls,
 } from "@/lib/ui";
@@ -38,6 +35,7 @@ import {
   type ManualFieldsInput,
   type PressActionResult,
 } from "./actions";
+import Tabs from "@/app/components/Tabs";
 
 type Tab = "reporters" | "articles";
 
@@ -99,16 +97,15 @@ export default function PressManager({
 
   return (
     <div className="space-y-4">
-      <div className={tabBarCls}>
-        <nav className={tabNavCls}>
-          <button type="button" className={tabItemCls(tab === "reporters")} onClick={() => switchTab("reporters")}>
-            기자 <span className="text-xs font-medium">{reporters.length}</span>
-          </button>
-          <button type="button" className={tabItemCls(tab === "articles")} onClick={() => switchTab("articles")}>
-            기사 <span className="text-xs font-medium">{articles.length}</span>
-          </button>
-        </nav>
-      </div>
+      <Tabs
+        ariaLabel="보도자료"
+        value={tab}
+        onChange={switchTab}
+        items={[
+          { key: "reporters", label: "기자", icon: "contact", count: reporters.length },
+          { key: "articles", label: "기사", icon: "newspaper", count: articles.length },
+        ]}
+      />
       {tab === "reporters" ? (
         <ReportersTab reporters={reporters} articles={articles} today={today} />
       ) : (

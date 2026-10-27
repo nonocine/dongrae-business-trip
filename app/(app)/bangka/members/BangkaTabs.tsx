@@ -1,30 +1,24 @@
 "use client";
 
-import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { tabBarCls, tabNavCls, tabItemCls } from "@/lib/ui";
-
-const TABS = [
-  { href: "/bangka/members", label: "학생", exact: true },
-  { href: "/bangka/members/guardians", label: "보호자" },
-  { href: "/bangka/members/bulk", label: "일괄 등록" },
-];
+import Tabs from "@/app/components/Tabs";
 
 export default function BangkaTabs() {
   const path = usePathname() ?? "";
+  const current = path.startsWith("/bangka/members/guardians")
+    ? "guardians"
+    : path.startsWith("/bangka/members/bulk")
+      ? "bulk"
+      : "students";
   return (
-    <div className={tabBarCls}>
-      <nav className={tabNavCls}>
-        {TABS.map((t) => (
-          <Link
-            key={t.href}
-            href={t.href}
-            className={tabItemCls(t.exact ? path === t.href : path.startsWith(t.href))}
-          >
-            {t.label}
-          </Link>
-        ))}
-      </nav>
-    </div>
+    <Tabs
+      ariaLabel="학생·보호자 관리"
+      value={current}
+      items={[
+        { key: "students", href: "/bangka/members", label: "학생", icon: "backpack" },
+        { key: "guardians", href: "/bangka/members/guardians", label: "보호자", icon: "users" },
+        { key: "bulk", href: "/bangka/members/bulk", label: "일괄 등록", icon: "fileUp" },
+      ]}
+    />
   );
 }

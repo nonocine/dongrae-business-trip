@@ -38,8 +38,8 @@ import {
   noticeSuccess,
   panelToneCls,
   sectionTitleCls,
-  tabItemCls,
 } from "@/lib/ui";
+import Tabs from "@/app/components/Tabs";
 
 // =====================================================================
 // 공결 처리 — 신청 목록 → [담임 확인] → [팀장 결재] / [반려(사유)].
@@ -83,16 +83,18 @@ export default function AbsencesManager({
   return (
     <div className="space-y-4">
       <div className={`${panelToneCls("blue")} space-y-3`}>
-        <div className="flex flex-wrap items-center gap-1">
-          <Link href={href("pending", null)} className={tabItemCls(view === "pending")}>
-            처리할 공결
-          </Link>
-          <Link href={href("all", monthNav)} className={tabItemCls(view === "all")}>
-            전체(월별)
-          </Link>
-          <Link href={href("phone", monthNav)} className={tabItemCls(view === "phone")}>
-            전화공결관리대장
-          </Link>
+        <div className="flex flex-wrap items-center gap-2">
+          <Tabs
+            variant="segment"
+            ariaLabel="공결 보기"
+            className="min-w-0 max-w-full"
+            value={view}
+            items={[
+              { key: "pending", href: href("pending", null), label: "처리할 공결" },
+              { key: "all", href: href("all", monthNav), label: "전체(월별)" },
+              { key: "phone", href: href("phone", monthNav), label: "전화공결관리대장" },
+            ]}
+          />
           <button type="button" onClick={() => setPhoneOpen((v) => !v)} className={`ml-auto ${phoneOpen ? btnSecondary : btnPrimary}`}>
             {phoneOpen ? "닫기" : "전화 공결 입력"}
           </button>
@@ -116,7 +118,7 @@ export default function AbsencesManager({
           </div>
         )}
         <p className="text-xs text-ink-muted">
-          담임 확인은 방과후아카데미 담당자 누구나, 팀장 결재·반려(담임 확인 뒤)는 관장·부장·팀장이 합니다.
+          담임 확인은 방과후아카데미 담당자 누구나, 팀장 결재·반려(담임 확인 뒤)는 관장·부장 또는 방과후아카데미 팀장이 합니다.
           {canApprove ? " 지금 로그인한 계정은 결재할 수 있습니다." : ""}
         </p>
       </div>

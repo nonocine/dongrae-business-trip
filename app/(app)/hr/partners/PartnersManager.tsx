@@ -45,10 +45,8 @@ import {
   badgeNeutral,
   badgeNavy,
   badgeWarning,
-  tabBarCls,
-  tabNavCls,
-  tabItemCls,
 } from "@/lib/ui";
+import Tabs from "@/app/components/Tabs";
 
 // 거래처 관리 — 분야별 목록·등록/수정·상세(담당자 여러 명 관리).
 //   * 명함첩이 "받은편지함"이라면 여기는 "정리된 주소록"입니다. 명함이 없어도
@@ -532,27 +530,17 @@ ${l.occurred_on} ${l.content}
         </div>
 
         {/* 분야별 탭 — 인수인계 때 "시설만"·"학교만" 뽑아보는 축 */}
-        <div className={`${tabBarCls} mt-3`}>
-          <nav className={tabNavCls}>
-            <button
-              type="button"
-              className={tabItemCls(tab === "전체")}
-              onClick={() => setTab("전체")}
-            >
-              전체 {visible.length}
-            </button>
-            {PARTNER_CATEGORIES.map((cat) => (
-              <button
-                key={cat}
-                type="button"
-                className={tabItemCls(tab === cat)}
-                onClick={() => setTab(cat)}
-              >
-                {cat} {counts[cat]}
-              </button>
-            ))}
-          </nav>
-        </div>
+        <Tabs
+          variant="segment"
+          ariaLabel="거래처 분야"
+          className="mt-3"
+          value={tab}
+          onChange={setTab}
+          items={[
+            { key: "전체" as CategoryTab, label: "전체", count: visible.length },
+            ...PARTNER_CATEGORIES.map((cat) => ({ key: cat as CategoryTab, label: cat, count: counts[cat] })),
+          ]}
+        />
       </section>
 
       {msg && (

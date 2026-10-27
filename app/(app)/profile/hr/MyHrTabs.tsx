@@ -1,19 +1,19 @@
 "use client";
 
 import { useEffect, useState, type ReactNode } from "react";
-import { tabBarCls, tabNavCls, tabItemCls } from "@/lib/ui";
+import Tabs, { type TabItem } from "@/app/components/Tabs";
 
 // 마이페이지(내 인사기록) 탭 껍데기 — 데이터는 서버에서 받아 children 으로 꽂습니다
 // (프레젠테이션 전용, 서버 액션·조회 로직과 무관).
 export type MyHrTabKey = "info" | "contracts" | "certs" | "trainings" | "leave" | "discipline";
 
-const TABS: { key: MyHrTabKey; label: string }[] = [
-  { key: "info", label: "내 정보" },
-  { key: "contracts", label: "내 계약서" },
-  { key: "certs", label: "증명서" },
-  { key: "trainings", label: "내 의무교육" },
-  { key: "leave", label: "연차 사용계획서" },
-  { key: "discipline", label: "경위서" },
+const TABS: TabItem<MyHrTabKey>[] = [
+  { key: "info", label: "내 정보", icon: "user" },
+  { key: "contracts", label: "내 계약서", icon: "filePen" },
+  { key: "certs", label: "증명서", icon: "stamp" },
+  { key: "trainings", label: "내 의무교육", icon: "bookOpen" },
+  { key: "leave", label: "연차 사용계획서", icon: "calendarCheck" },
+  { key: "discipline", label: "경위서", icon: "fileText" },
 ];
 
 // 해시 → 탭 키. 새 해시(#info/#certs/#trainings)와 함께, 기존 북마크·대시보드
@@ -90,24 +90,7 @@ export default function MyHrTabs({
 
   return (
     <div>
-      <div className={tabBarCls}>
-        <nav className={tabNavCls} role="tablist" aria-label="내 인사기록">
-          {TABS.map((t) => (
-            <button
-              key={t.key}
-              type="button"
-              role="tab"
-              id={`myhr-tab-${t.key}`}
-              aria-selected={t.key === tab}
-              aria-controls={`myhr-panel-${t.key}`}
-              onClick={() => select(t.key)}
-              className={tabItemCls(t.key === tab)}
-            >
-              {t.label}
-            </button>
-          ))}
-        </nav>
-      </div>
+      <Tabs ariaLabel="내 인사기록" idPrefix="myhr" value={tab} onChange={select} items={TABS} />
 
       {/* 패널은 모두 마운트한 채 숨김만 전환 — 인적사항에 작성 중인 내용이
           탭을 옮겨도 사라지지 않게 합니다. */}

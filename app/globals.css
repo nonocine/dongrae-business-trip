@@ -73,6 +73,13 @@
   --edge-green: #79c691;
   --edge-yellow: #f7da77;
 
+  /* 탭(app/components/Tabs.tsx) — 하위 탭 트랙·상위 탭 hover 면.
+     글자 대비(WCAG 4.5:1): 트랙 위 비선택 글자 #4b5563 = 6.6:1,
+     hover 면 위 --ink-muted = 4.4 → hover 때 글자를 --ink 로 올립니다. */
+  --tab-track: #eef0f3;
+  --tab-hover: #f2f4f7;
+  --tab-ink: #4b5563;
+
   /* 하위 호환 — 기존 코드가 참조하는 변수명 유지 */
   --background: var(--canvas);
   --foreground: var(--ink);
@@ -131,6 +138,9 @@
   --color-edge-red: var(--edge-red);
   --color-edge-green: var(--edge-green);
   --color-edge-yellow: var(--edge-yellow);
+  --color-tab-track: var(--tab-track);
+  --color-tab-hover: var(--tab-hover);
+  --color-tab-ink: var(--tab-ink);
 
   /* 하위 호환 */
   --color-surface-border: var(--surface-border);

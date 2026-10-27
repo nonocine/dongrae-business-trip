@@ -17,11 +17,9 @@ import {
   sectionTitleCls,
   btnSecondary,
   inputCls,
-  tabBarCls,
-  tabNavCls,
-  tabItemCls,
   type RuleTone,
 } from "@/lib/ui";
+import Tabs, { type TabItem } from "@/app/components/Tabs";
 
 export type TabKey = "records" | "contracts" | "certificates" | "recruitment";
 
@@ -54,7 +52,7 @@ export default function HrDashboard({
   return (
     <div className="space-y-6">
       {allowedTabs.includes("records") && <QuickAccess onTab={setTab} />}
-      <Tabs current={tab} onChange={setTab} allowedTabs={allowedTabs} />
+      <HrTabs current={tab} onChange={setTab} allowedTabs={allowedTabs} />
 
       {tab === "records" && (
         <RecordsTab
@@ -108,7 +106,7 @@ export default function HrDashboard({
 // =====================================================================
 // 탭
 // =====================================================================
-function Tabs({
+function HrTabs({
   current,
   onChange,
   allowedTabs,
@@ -117,32 +115,18 @@ function Tabs({
   onChange: (t: TabKey) => void;
   allowedTabs: TabKey[];
 }) {
-  const tabs: { key: TabKey; label: string }[] = [
-    { key: "records", label: "인사기록카드" },
-    { key: "contracts", label: "계약서" },
-    { key: "certificates", label: "증명서 발급" },
-    { key: "recruitment", label: "채용공고" },
-  ].filter((t) => allowedTabs.includes(t.key as TabKey)) as {
-    key: TabKey;
-    label: string;
-  }[];
+  const tabs = (
+    [
+      { key: "records", label: "인사기록카드", icon: "idCard" },
+      { key: "contracts", label: "계약서", icon: "filePen" },
+      { key: "certificates", label: "증명서 발급", icon: "stamp" },
+      { key: "recruitment", label: "채용공고", icon: "megaphone" },
+    ] satisfies TabItem<TabKey>[]
+  ).filter((t) => allowedTabs.includes(t.key));
   // 볼 수 있는 탭이 하나뿐이면 탭 줄 자체를 숨깁니다(고를 것이 없습니다).
   if (tabs.length <= 1) return null;
   return (
-    <div className={tabBarCls}>
-      <nav className={tabNavCls}>
-        {tabs.map((t) => (
-          <button
-            key={t.key}
-            type="button"
-            onClick={() => onChange(t.key)}
-            className={tabItemCls(t.key === current)}
-          >
-            {t.label}
-          </button>
-        ))}
-      </nav>
-    </div>
+    <Tabs ariaLabel="인사 관리" value={current} onChange={onChange} items={tabs} />
   );
 }
 

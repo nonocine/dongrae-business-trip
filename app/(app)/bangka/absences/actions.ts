@@ -68,6 +68,17 @@ export async function listAbsences(f: AbsenceFilter): Promise<AbsenceView[]> {
   }));
 }
 
+// 처리할 공결 수 — 상단 '공결' 탭 배지. '처리할 공결' 목록(view=pending)과 같은 조건.
+export async function countPendingAbsences(): Promise<number> {
+  await requireBangkaAccess();
+  const { count, error } = await supabaseAdmin
+    .from("bk_absences")
+    .select("id", { count: "exact", head: true })
+    .in("status", ["submitted", "teacher_checked"]);
+  if (error) return 0;
+  return count ?? 0;
+}
+
 type StudentPick = { id: string; name: string; school: string | null; grade: string | null; school_class: string | null; class_code: string };
 export async function listActiveStudents(): Promise<StudentPick[]> {
   await requireBangkaAccess();
@@ -107,7 +118,7 @@ export async function teacherCheckAbsence(id: string): Promise<Result> {
 export async function approveAbsence(id: string): Promise<Result> {
   try {
     const me = await requireBangkaAccess();
-    if (!canApproveAbsence(me)) return { ok: false, message: "팀장 결재는 관장·부장·팀장만 할 수 있습니다." };
+    if (!canApproveAbsence(me)) return { ok: false, message: "팀장 결재는 관장·부장 또는 방과후아카데미 팀장만 할 수 있습니다." };
     await transition(id, ["teacher_checked"], { status: "approved", approved_by: me.name, approved_at: new Date().toISOString(), reject_reason: null });
     revalidatePath(BASE);
     return { ok: true };

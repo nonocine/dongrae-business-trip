@@ -339,7 +339,7 @@ export const MAIL_CATEGORY_BADGE: Record<string, string> = {
   기타: "bg-surface text-ink-muted",
 };
 
-// 분류 인덱스(공용 메일함 목록 위 한 줄)의 로고색 — 배지 숫자와 선택 칸 밑줄에만.
+// 분류 인덱스(공용 메일함 목록 위 한 줄)의 로고색 — 분류 이름 앞 작은 점 하나에만.
 //   * globals.css 의 로고 4색 토큰(--logo-*)을 그대로 참조합니다. 새 색·새 토큰 없음.
 //   * 9분류를 4색에 배분하다 보니 계열이 같은 칸끼리 색을 공유합니다.
 //       공문 파랑(행정) / 청소년활동·방카·토요늘봄 초록(사업) /
@@ -347,12 +347,10 @@ export const MAIL_CATEGORY_BADGE: Record<string, string> = {
 //     사업 3칸이 나란히 초록이지만, 색은 "어느 계열인가" 를 알리는 신호이고
 //     칸을 가르는 것은 이름입니다 — 4색 밖으로 나가지 않는 쪽을 택했습니다.
 //   * "광고"·"기타"·"전체" 는 일부러 넣지 않습니다 — 급히 볼 칸이 아니거나
-//     AI가 판단하지 못한 칸이라 강조하지 않고 기존 무채색 그대로 둡니다.
-//   * 클래스(text-logo-blue)가 아니라 CSS 변수 문자열인 이유:
-//     lib/ui 의 tabItemCls·badgeNeutral 이 이미 border-*/text-* 를 갖고 있어
-//     같은 유틸리티를 덧붙이면 어느 쪽이 이길지 클래스 나열 순서가 아니라
-//     생성된 CSS 순서에 달립니다. 인라인 style 은 항상 이기고, 공용 탭 상수를
-//     건드리지 않아 HR·시설·관리자 탭에는 영향이 없습니다.
+//     AI가 판단하지 못한 칸이라 강조하지 않고 점 없이 둡니다.
+//   * 2026-10 탭 통일(app/components/Tabs) 뒤로 선택 표시는 모든 탭이 같은 흰 알약입니다.
+//     분류 색이 선택 표시까지 바꾸면 '선택'과 '분류'가 한 신호에 섞여 둘 다 흐려집니다.
+//   * CSS 변수 문자열인 이유: Tabs 의 dot 이 인라인 style(backgroundColor)로 받습니다.
 export const MAIL_CATEGORY_INDEX_COLOR: Record<string, string> = {
   공문: "var(--logo-blue)",
   청소년활동: "var(--logo-green)",

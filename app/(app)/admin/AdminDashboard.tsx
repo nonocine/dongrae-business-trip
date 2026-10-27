@@ -28,14 +28,12 @@ import {
   inputCls,
   btnPrimary,
   btnSecondary,
-  tabBarCls,
-  tabNavCls,
-  tabItemCls,
   badgeSuccess,
   badgeNeutral,
   noticeError,
   noticeSuccess,
 } from "@/lib/ui";
+import Tabs from "@/app/components/Tabs";
 
 type TabKey = "dashboard" | "activities" | "employees";
 
@@ -61,7 +59,7 @@ export default function AdminDashboard({
     <div className="space-y-6">
       <StatCardsGrid stats={stats} />
 
-      <Tabs current={tab} onChange={setTab} />
+      <AdminTabs current={tab} onChange={setTab} />
 
       {tab === "dashboard" && <DashboardTab stats={stats} />}
       {tab === "activities" && <ActivityListTab activities={activities} />}
@@ -121,33 +119,24 @@ function StatCard({
 // =====================================================================
 // 탭
 // =====================================================================
-function Tabs({
+function AdminTabs({
   current,
   onChange,
 }: {
   current: TabKey;
   onChange: (t: TabKey) => void;
 }) {
-  const tabs: { key: TabKey; label: string }[] = [
-    { key: "dashboard", label: "대시보드" },
-    { key: "activities", label: "활동 목록" },
-    { key: "employees", label: "직원 관리" },
-  ];
   return (
-    <div className={tabBarCls}>
-      <nav className={tabNavCls}>
-        {tabs.map((t) => (
-          <button
-            key={t.key}
-            type="button"
-            onClick={() => onChange(t.key)}
-            className={tabItemCls(t.key === current)}
-          >
-            {t.label}
-          </button>
-        ))}
-      </nav>
-    </div>
+    <Tabs
+      ariaLabel="관리자"
+      value={current}
+      onChange={onChange}
+      items={[
+        { key: "dashboard", label: "대시보드", icon: "dashboard" },
+        { key: "activities", label: "활동 목록", icon: "list" },
+        { key: "employees", label: "직원 관리", icon: "userCog" },
+      ]}
+    />
   );
 }
 

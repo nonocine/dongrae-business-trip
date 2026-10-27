@@ -55,6 +55,7 @@ import {
   noticeSuccess,
   noticeWarning,
 } from "@/lib/ui";
+import Tabs from "@/app/components/Tabs";
 
 const inputCls =
   "w-full rounded-md border border-rule bg-card px-3 py-2 text-sm text-ink-body shadow-sm focus:border-navy focus:outline-none focus:ring-1 focus:ring-navy";
@@ -596,28 +597,18 @@ function TeacherForm({
         지정하세요. 계정·비밀번호는 그대로 유지됩니다.
       </p>
 
-      <div className="mt-3 flex gap-1 rounded-lg bg-surface p-1 text-sm">
-        <button
-          type="button"
-          onClick={() => setMode("new")}
-          className={`flex-1 rounded-md px-3 py-1.5 font-semibold ${
-            mode === "new" ? "bg-card text-navy shadow-sm" : "text-ink-muted"
-          }`}
-        >
-          신규 등록
-        </button>
-        <button
-          type="button"
-          onClick={() => setMode("existing")}
-          className={`flex-1 rounded-md px-3 py-1.5 font-semibold ${
-            mode === "existing"
-              ? "bg-card text-navy shadow-sm"
-              : "text-ink-muted"
-          }`}
-        >
-          기존 강사에서 추가
-        </button>
-      </div>
+      <Tabs
+        variant="segment"
+        stretch
+        ariaLabel="강사 등록 방식"
+        className="mt-3"
+        value={mode}
+        onChange={setMode}
+        items={[
+          { key: "new", label: "신규 등록" },
+          { key: "existing", label: "기존 강사에서 추가" },
+        ]}
+      />
 
       {mode === "new" ? (
         <form

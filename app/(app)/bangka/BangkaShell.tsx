@@ -4,12 +4,14 @@ import { enforcePasswordChange } from "@/app/actions";
 import { resolveBangkaAccess } from "@/lib/bangkaAccess";
 import BangkaContentTabs from "@/app/(app)/bangka/BangkaContentTabs";
 import { linkCls } from "@/lib/ui";
+import { countPendingAbsences } from "@/app/(app)/bangka/absences/actions";
 
 // 방과후아카데미 콘텐츠(공지·알림장 / 급식 / 연간일정 / 공결) 공통 틀 — 접근 가드 + 상단 탭.
 //   권한은 학생·보호자 관리와 같습니다(M0 또는 bangka 직무 — lib/bangkaAccess).
 export default async function BangkaShell({ children }: { children: React.ReactNode }) {
   await enforcePasswordChange();
   if (!(await resolveBangkaAccess())) redirect("/");
+  const pendingAbsences = await countPendingAbsences();
   return (
     <div className="mx-auto w-full max-w-6xl px-4 py-6">
       <div className="mb-4 flex flex-wrap items-end justify-between gap-2">
@@ -22,7 +24,7 @@ export default async function BangkaShell({ children }: { children: React.ReactN
           학생·보호자 관리 →
         </Link>
       </div>
-      <BangkaContentTabs />
+      <BangkaContentTabs pendingAbsences={pendingAbsences} />
       <div className="mt-5">{children}</div>
     </div>
   );

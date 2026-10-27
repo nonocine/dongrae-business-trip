@@ -40,10 +40,8 @@ import {
   badgeWarning,
   badgeNavy,
   linkCls,
-  tabBarCls,
-  tabNavCls,
-  tabItemCls,
 } from "@/lib/ui";
+import Tabs from "@/app/components/Tabs";
 
 // 명함첩 — 촬영/업로드 → AI 판독 → 확인·수정 → 저장, 그리고 목록·상세·수정·삭제.
 //   * 이미지는 브라우저에서 압축(긴 변 1600px·JPEG)한 뒤에만 서버로 보냅니다.
@@ -591,24 +589,18 @@ export default function CardsManager({
             이후 양쪽은 각자 수정됩니다(자동 동기화 없음).
           </p>
 
-          <div className={`${tabBarCls} mt-3`}>
-            <nav className={tabNavCls}>
-              <button
-                type="button"
-                className={tabItemCls(linkMode === "new")}
-                onClick={() => setLinkMode("new")}
-              >
-                새 거래처로 등록
-              </button>
-              <button
-                type="button"
-                className={tabItemCls(linkMode === "existing")}
-                onClick={() => setLinkMode("existing")}
-              >
-                기존 거래처에 담당자 추가
-              </button>
-            </nav>
-          </div>
+          <Tabs
+            variant="segment"
+            stretch
+            ariaLabel="거래처 연결 방식"
+            className="mt-3"
+            value={linkMode}
+            onChange={setLinkMode}
+            items={[
+              { key: "new", label: "새 거래처로 등록" },
+              { key: "existing", label: "기존 거래처에 담당자 추가" },
+            ]}
+          />
 
           {linkMode === "new" ? (
             <>

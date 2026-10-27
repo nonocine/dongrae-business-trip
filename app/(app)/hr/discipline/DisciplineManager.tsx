@@ -42,9 +42,6 @@ import {
   sectionTitleCls,
   tableHeadCls,
   tableRowCls,
-  tabBarCls,
-  tabNavCls,
-  tabItemCls,
   inputCls,
   labelCls,
   btnPrimary,
@@ -59,6 +56,7 @@ import {
   noticeSuccess,
   noticeWarning,
 } from "@/lib/ui";
+import Tabs, { type TabItem } from "@/app/components/Tabs";
 
 // =====================================================================
 // 상벌·인사위원회 — 관장·부장 전용 화면(/hr/discipline).
@@ -129,10 +127,10 @@ export default function DisciplineManager({
   initialTab: TabKey;
 }) {
   const [tab, setTab] = useState<TabKey>(initialTab);
-  const TABS: { key: TabKey; label: string }[] = [
-    { key: "records", label: "상벌" },
-    { key: "incidents", label: `경위서 (${board.incidents.length})` },
-    { key: "committees", label: `인사위원회 (${board.committees.length})` },
+  const TABS: TabItem<TabKey>[] = [
+    { key: "records", label: "상벌", icon: "trophy" },
+    { key: "incidents", label: "경위서", icon: "fileText", count: board.incidents.length },
+    { key: "committees", label: "인사위원회", icon: "gavel", count: board.committees.length },
   ];
   return (
     <div className="space-y-5">
@@ -140,15 +138,7 @@ export default function DisciplineManager({
         이 화면의 내용(징계·포상·경위서·인사위원회)은 관장·부장만 봅니다. 직원 본인은 포상 등록과 경위서 제출만 하고,
         제출한 내용은 볼 수 없습니다.
       </p>
-      <div className={tabBarCls}>
-        <nav className={tabNavCls} role="tablist" aria-label="상벌·인사위원회">
-          {TABS.map((t) => (
-            <button key={t.key} type="button" role="tab" aria-selected={t.key === tab} onClick={() => setTab(t.key)} className={tabItemCls(t.key === tab)}>
-              {t.label}
-            </button>
-          ))}
-        </nav>
-      </div>
+      <Tabs ariaLabel="상벌·인사위원회" value={tab} onChange={setTab} items={TABS} />
       {tab === "records" && <RecordsTab employees={employees} board={board} initialDriverId={initialDriverId} />}
       {tab === "incidents" && <IncidentsTab board={board} employees={employees} />}
       {tab === "committees" && <CommitteesTab board={board} employees={employees} />}

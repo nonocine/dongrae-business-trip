@@ -14,9 +14,6 @@ import {
   badgeWarning,
   noticeError,
   noticeSuccess,
-  tabBarCls,
-  tabNavCls,
-  tabItemCls,
 } from "@/lib/ui";
 import Button from "@/app/components/Button";
 import { fmtKstDateTime } from "@/lib/datetime";
@@ -41,6 +38,7 @@ import {
   type RentalFacilityFilter,
 } from "@/lib/rental";
 import { syncRentalsNow } from "./actions";
+import Tabs from "@/app/components/Tabs";
 
 // 표 스타일 — 운행기록·증명서 대장과 같은 값을 씁니다.
 const thCls =
@@ -207,20 +205,13 @@ export default function RentalReservationsView({
   return (
     <div className="space-y-4">
       {/* 1차 축 — 시설(센터 본관 / 사직동 온나) */}
-      <div className={tabBarCls}>
-        <nav className={tabNavCls}>
-          {FACILITY_TABS.map((f) => (
-            <button
-              key={f}
-              type="button"
-              onClick={() => goto({ facility: f })}
-              className={tabItemCls(facility === f)}
-            >
-              {RENTAL_FACILITY_TAB_LABELS[f]}
-            </button>
-          ))}
-        </nav>
-      </div>
+      <Tabs
+        variant="segment"
+        ariaLabel="시설"
+        value={facility}
+        onChange={(f) => goto({ facility: f })}
+        items={FACILITY_TABS.map((f) => ({ key: f, label: RENTAL_FACILITY_TAB_LABELS[f] }))}
+      />
 
       <section className={panelToneCls("blue")}>
         {/* 요약 — 선택한 시설 탭 기준. 건수·이용인원은 확정 건만 셉니다. */}
