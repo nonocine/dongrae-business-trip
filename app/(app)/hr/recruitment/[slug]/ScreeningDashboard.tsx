@@ -626,8 +626,8 @@ function ApplicantSummary({
       </SubSection>
 
       <SubSection title="학력">
-        {a.education_invalid ? (
-          <p className="text-xs font-semibold text-stamp">학력 정보 확인 필요</p>
+        {a.invalid_fields.includes("education") ? (
+          <InvalidField label="학력" />
         ) : a.education.length === 0 ? (
           <Empty />
         ) : (
@@ -648,7 +648,9 @@ function ApplicantSummary({
       </SubSection>
 
       <SubSection title="자격증">
-        {a.licenses.length === 0 ? (
+        {a.invalid_fields.includes("licenses") ? (
+          <InvalidField label="자격증" />
+        ) : a.licenses.length === 0 ? (
           <Empty />
         ) : (
           <ul className="space-y-1.5 text-xs">
@@ -666,7 +668,9 @@ function ApplicantSummary({
       </SubSection>
 
       <SubSection title="경력">
-        {a.career.length === 0 ? (
+        {a.invalid_fields.includes("career") ? (
+          <InvalidField label="경력" />
+        ) : a.career.length === 0 ? (
           <Empty />
         ) : (
           <ul className="space-y-1.5 text-xs">
@@ -687,7 +691,9 @@ function ApplicantSummary({
       </SubSection>
 
       <SubSection title="수상">
-        {a.awards.length === 0 ? (
+        {a.invalid_fields.includes("awards") ? (
+          <InvalidField label="수상" />
+        ) : a.awards.length === 0 ? (
           <Empty />
         ) : (
           <ul className="space-y-1.5 text-xs">
@@ -703,7 +709,9 @@ function ApplicantSummary({
       </SubSection>
 
       <SubSection title="교육이수">
-        {a.trainings.length === 0 ? (
+        {a.invalid_fields.includes("trainings") ? (
+          <InvalidField label="교육이수" />
+        ) : a.trainings.length === 0 ? (
           <Empty />
         ) : (
           <ul className="space-y-1.5 text-xs">
@@ -792,6 +800,11 @@ function SubSection({
 
 function Empty() {
   return <p className="text-xs text-ink-hint">— 작성된 내용이 없습니다 —</p>;
+}
+
+// 저장된 형식이 깨져 읽지 못한 칸(서버 로그에 지원서 id 기록).
+function InvalidField({ label }: { label: string }) {
+  return <p className="text-xs font-semibold text-stamp">{label} 정보 확인 필요</p>;
 }
 
 function StatementBlock({

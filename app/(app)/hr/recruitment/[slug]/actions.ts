@@ -83,6 +83,13 @@ export type AdminDocLink = {
   required: boolean;
 };
 
+export type ApplicantHistoryField =
+  | "education"
+  | "licenses"
+  | "career"
+  | "awards"
+  | "trainings";
+
 export type AdminApplicant = {
   application_id: string;
   applicant_id: string;
@@ -95,8 +102,8 @@ export type AdminApplicant = {
   address: string | null;
   photo_url: string | null;
   education: EmployeeEducation[];
-  // 저장된 학력 데이터 형식이 깨져 읽지 못함 — 화면에 "학력 정보 확인 필요" 표시.
-  education_invalid: boolean;
+  // 저장된 형식이 깨져 읽지 못한 이력 칸 — 화면에 "○○ 정보 확인 필요" 표시(그 칸은 빈 목록).
+  invalid_fields: ApplicantHistoryField[];
   licenses: EmployeeLicense[];
   career: EmployeeCareer[];
   awards: EmployeeAward[];
@@ -279,18 +286,24 @@ export async function listApplicantsForAdmin(
       }
     }
 
-    // 지원자 한 명의 학력 데이터가 깨져도 목록 전체가 멈추지 않게 — 그 지원자만 표시.
-    let education: EmployeeEducation[] = [];
-    let educationInvalid = false;
-    try {
-      education = parseEducationInput(jsonbToString(app.education));
-    } catch (e) {
-      educationInvalid = true;
-      console.error(
-        `[recruitment] 학력 데이터 형식 오류 — posting=${slug} application=${String(r.id ?? "")}:`,
-        (e as Error).message
-      );
-    }
+    // 지원자 한 명의 이력 데이터(학력·자격증·경력·수상·교육이수)가 깨져도 목록 전체가
+    //   멈추지 않게 — 그 칸만 빈 목록 + invalid_fields 로 표시하고 서버 로그에 남깁니다.
+    const invalidFields: ApplicantHistoryField[] = [];
+    const safeParse = <T,>(
+      field: ApplicantHistoryField,
+      parse: (raw: string | null) => T[]
+    ): T[] => {
+      try {
+        return parse(jsonbToString(app[field]));
+      } catch (e) {
+        invalidFields.push(field);
+        console.error(
+          `[recruitment] ${field} 데이터 형식 오류 — posting=${slug} application=${String(r.id ?? "")}:`,
+          (e as Error).message
+        );
+        return [];
+      }
+    };
 
     result.push({
       application_id: String(r.id ?? ""),
@@ -303,12 +316,12 @@ export async function listApplicantsForAdmin(
       gender: (app.gender as "M" | "F" | null) ?? null,
       address: (app.address as string | null) ?? null,
       photo_url: photoUrl,
-      education,
-      education_invalid: educationInvalid,
-      licenses: parseLicenseInput(jsonbToString(app.licenses)),
-      career: parseCareerInput(jsonbToString(app.career)),
-      awards: parseAwardInput(jsonbToString(app.awards)),
-      trainings: parseTrainingInput(jsonbToString(app.trainings)),
+      education: safeParse("education", parseEducationInput),
+      licenses: safeParse("licenses", parseLicenseInput),
+      career: safeParse("career", parseCareerInput),
+      awards: safeParse("awards", parseAwardInput),
+      trainings: safeParse("trainings", parseTrainingInput),
+      invalid_fields: invalidFields,
       motivation: (app.motivation as string | null) ?? null,
       self_development: (app.self_development as string | null) ?? null,
       career_summary: (app.career_summary as string | null) ?? null,
