@@ -31,9 +31,10 @@ function SummaryTile({
   unit?: string;
 }) {
   return (
-    <div className="rounded-lg border border-line bg-surface px-3 py-2.5">
+    // 큰 글씨·큰 숫자에서 단위(km)가 칸 밖으로 나가지 않게 — 숫자·단위가 칸 안에서 줄바꿈
+    <div className="min-w-0 rounded-lg border border-line bg-surface px-3 py-2.5">
       <p className="text-[11px] font-medium text-ink-muted">{label}</p>
-      <p className="mt-0.5 text-lg font-bold text-ink">
+      <p className="mt-0.5 flex flex-wrap items-baseline text-lg font-bold text-ink [overflow-wrap:anywhere]">
         {value}
         {unit && (
           <span className="ml-0.5 text-xs font-semibold text-ink-muted">

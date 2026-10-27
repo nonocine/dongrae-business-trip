@@ -126,15 +126,17 @@ export default function ClubDashboard({
       {/* 도구 줄 — 제목·설명은 페이지 머리글(page.tsx)에 이미 있고 사이드바가
           현재 위치를 보여주므로 여기서 반복하지 않습니다(관장 피드백). */}
       <section className={`${panelCls} flex flex-wrap items-center justify-between gap-3`}>
-        <div className="flex items-center gap-2">
-          <button type="button" onClick={() => moveMonth(-1)} className={btnSecondary}>
-            이전 달
+        {/* 폰(특히 큰 글씨)에서는 세 칸이 줄 폭을 나눠 쓰게 — 버튼 글은 "이전"/"다음"으로 줄이고
+            고정 최소폭은 PC 에서만 */}
+        <div className="flex w-full min-w-0 items-center justify-between gap-2 sm:w-auto sm:justify-start">
+          <button type="button" aria-label="이전 달" onClick={() => moveMonth(-1)} className={`${btnSecondary} shrink-0 px-3 sm:px-4`}>
+            이전<span className="hidden sm:inline"> 달</span>
           </button>
-          <strong className="min-w-[7.5rem] text-center text-base text-navy">
+          <strong className="min-w-0 flex-1 text-center text-base text-navy sm:min-w-[7.5rem] sm:flex-none">
             {year}년 {month}월
           </strong>
-          <button type="button" onClick={() => moveMonth(1)} className={btnSecondary}>
-            다음 달
+          <button type="button" aria-label="다음 달" onClick={() => moveMonth(1)} className={`${btnSecondary} shrink-0 px-3 sm:px-4`}>
+            다음<span className="hidden sm:inline"> 달</span>
           </button>
         </div>
         <Link href="/business-results" className={btnSecondary}>

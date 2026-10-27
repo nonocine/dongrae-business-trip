@@ -147,6 +147,14 @@ async function measure(page: Page, mobile: boolean) {
         const b = box.getBoundingClientRect();
         if (r.right > b.right + 1 || r.left < b.left - 1) cardEscapes.push(`${desc(el)} → 카드 ${desc(box).slice(0, 40)}`);
       }
+      // 글자 넘침: 상자는 제자리인데 안의 글(띄어쓰기 없는 큰 금액 등)이 상자 밖으로 삐져나감.
+      //   요소 자체는 안 넘쳐서 위 두 검사에 안 잡힘(2026-10 비품관리 "취득가액 합").
+      for (const el of all) {
+        const s = getComputedStyle(el);
+        if (s.display === "inline" || s.overflowX !== "visible" || !visible(el) || clippedByAncestor(el)) continue;
+        if (![...el.childNodes].some((n) => n.nodeType === 3 && n.textContent!.trim())) continue;
+        if (el.scrollWidth > el.clientWidth + 1) cardEscapes.push(`글자 ${desc(el)} (${el.scrollWidth}>${el.clientWidth}px)`);
+      }
     }
     const clipped: string[] = [];
     for (const el of all) {

@@ -104,14 +104,15 @@ export default function MealsCalendar({ ym, meals, todayYmd }: { ym: string; mea
                 key={d}
                 type="button"
                 onClick={() => pick(d)}
-                className={`min-h-[3.5rem] rounded-md border p-1 text-left align-top sm:min-h-[6.5rem] ${
+                className={`min-h-[3.5rem] min-w-0 rounded-md border p-1 text-left align-top sm:min-h-[6.5rem] ${
                   selected === d ? "border-navy ring-2 ring-navy/40" : "border-line"
                 } ${d === todayYmd ? "bg-warning-soft" : "bg-card"} hover:bg-surface`}
               >
                 <span className={`text-xs font-bold ${dow === 0 ? "text-stamp" : dow === 6 ? "text-navy" : "text-ink"}`}>
                   {Number(d.slice(8))}
                 </span>
-                <span className="ml-1 text-[10px]">
+                {/* 폰: 칸이 좁아(특히 큰 글씨) 표시(●📷)는 날짜 아래 줄로 */}
+                <span className="block text-[10px] leading-tight sm:ml-1 sm:inline">
                   {meal?.menu_text ? <span className="text-success">●</span> : null}
                   {meal?.photo_url ? "📷" : null}
                 </span>

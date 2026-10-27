@@ -335,7 +335,7 @@ export default function AssetManager({
         </div>
 
         {/* 집계 카드 */}
-        <div className="mt-3 grid grid-cols-3 gap-3">
+        <div className="mt-3 grid grid-cols-3 gap-2 sm:gap-3">
           <StatTile label="건수" value={`${agg.count.toLocaleString("ko-KR")}건`} />
           <StatTile label="수량 합" value={`${agg.qty.toLocaleString("ko-KR")}`} />
           <StatTile label="취득가액 합" value={`${formatNum(agg.amount)}원`} />
@@ -492,9 +492,10 @@ export default function AssetManager({
 
 function StatTile({ label, value }: { label: string; value: string }) {
   return (
-    <div className="rounded-lg border border-line bg-surface/60 px-3 py-2">
+    // 세 칸이 폰 폭을 나눠 써 큰 금액이 칸을 뚫던 문제 — 칸 안에서 줄바꿈, 폰은 한 단계 작은 글자
+    <div className="min-w-0 rounded-lg border border-line bg-surface/60 px-2 py-2 sm:px-3">
       <p className="text-[11px] text-ink-muted">{label}</p>
-      <p className="mt-0.5 font-mono text-base font-bold text-ink">{value}</p>
+      <p className="mt-0.5 font-mono text-sm font-bold text-ink [overflow-wrap:anywhere] sm:text-base">{value}</p>
     </div>
   );
 }

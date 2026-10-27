@@ -203,12 +203,13 @@ export default function PayoutManager({ data }: { data: PayoutData }) {
               className={`${inputCls} w-40`}
             />
           </label>
-          <label className={labelCls}>
+          {/* 사업·재원 선택칸: 폰(큰 글씨)에서는 줄 전체 폭 — 최소폭이 화면보다 커져 카드를 뚫던 문제 */}
+          <label className={`${labelCls} w-full sm:w-auto`}>
             사업
             <select
               value={projectId}
               onChange={(e) => setProjectId(e.target.value)}
-              className={`${inputCls} min-w-44`}
+              className={`${inputCls} w-full sm:w-auto sm:min-w-44`}
             >
               <option value="">전체 사업</option>
               {data.projects.map((p) => (
@@ -218,12 +219,12 @@ export default function PayoutManager({ data }: { data: PayoutData }) {
               ))}
             </select>
           </label>
-          <label className={labelCls}>
+          <label className={`${labelCls} w-full sm:w-auto`}>
             재원(정산)
             <select
               value={settlementId}
               onChange={(e) => setSettlementId(e.target.value)}
-              className={`${inputCls} min-w-64`}
+              className={`${inputCls} w-full sm:w-auto sm:min-w-64`}
             >
               <option value="">전체 재원</option>
               {data.settlements.map((s) => (
