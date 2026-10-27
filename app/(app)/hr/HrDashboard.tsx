@@ -346,7 +346,7 @@ function RecordsTab({
 
 // 재직/퇴사 필터 버튼 스타일.
 function filterBtnCls(active: boolean): string {
-  return `rounded-full px-3 py-1 text-xs font-semibold transition ${
+  return `min-h-10 rounded-full px-3 py-1 text-xs sm:min-h-0 font-semibold transition ${
     active
       ? "bg-navy text-white"
       : "border border-line bg-card text-ink-muted hover:bg-surface"

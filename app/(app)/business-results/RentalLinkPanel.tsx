@@ -176,7 +176,7 @@ export default function RentalLinkPanel({
         </p>
       )}
 
-      <div className="mt-3 grid gap-2 sm:grid-cols-[2fr_1fr_1.3fr_.8fr_1fr_auto]">
+      <div className="mt-3 grid grid-cols-1 gap-2 sm:grid-cols-[2fr_1fr_1.3fr_.8fr_1fr_auto]">
         <select
           className={inCls}
           value={name}

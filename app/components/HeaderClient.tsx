@@ -60,7 +60,7 @@ export default function HeaderClient({
             type="button"
             onClick={() => setMobileOpen(true)}
             aria-label="메뉴 열기"
-            className="-ml-1 rounded-md p-1.5 text-xl leading-none text-ink-muted hover:bg-surface md:hidden"
+            className="-ml-1 inline-flex h-10 w-10 items-center justify-center rounded-md text-xl leading-none text-ink-muted hover:bg-surface md:hidden"
           >
             ☰
           </button>

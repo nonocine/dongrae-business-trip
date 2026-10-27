@@ -330,7 +330,7 @@ function AgreementForm({
       <div className="mt-3">
         <AttachmentPanel kind="agreements" recordId={form.id} files={files} queue={queue} setQueue={setQueue} />
       </div>
-      <div className="mt-3 grid gap-3 sm:grid-cols-2">
+      <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2">
         <div className="sm:col-span-2">
           <label className={labelCls}>
             기관명 <span className="text-stamp">*</span>

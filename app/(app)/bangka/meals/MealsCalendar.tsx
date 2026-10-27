@@ -203,7 +203,7 @@ function DayEditor({
           닫기
         </button>
       </div>
-      <div className="grid gap-4 md:grid-cols-[1fr_16rem]">
+      <div className="grid grid-cols-1 gap-4 md:grid-cols-[1fr_16rem]">
         <div className="space-y-3">
           <label className="block">
             <span className={labelCls}>메뉴(한 줄에 하나)</span>

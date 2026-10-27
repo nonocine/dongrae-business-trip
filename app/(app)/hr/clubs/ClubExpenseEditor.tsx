@@ -221,7 +221,7 @@ export default function ClubExpenseEditor({
                   <tr key={r.id} className={tableRowCls}>
                     <td colSpan={7} className="py-2">
                       <div className={`${blockCls} space-y-2`}>
-                        <div className="grid gap-2 sm:grid-cols-3">
+                        <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
                           <label className={labelCls}>
                             집행일
                             <input

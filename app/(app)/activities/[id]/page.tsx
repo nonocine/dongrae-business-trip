@@ -7,7 +7,6 @@ import {
   getDrivingLog,
   getSession,
   getSettings,
-  isManagerAdmin,
 } from "@/app/actions";
 
 export const dynamic = "force-dynamic";
@@ -19,11 +18,7 @@ export default async function ActivityDetailPage({
 }) {
   const { id } = await params;
   await enforcePasswordChange();
-  const [activity, session, canManageAll] = await Promise.all([
-    getActivity(id),
-    getSession(),
-    isManagerAdmin(),
-  ]);
+  const [activity, session] = await Promise.all([getActivity(id), getSession()]);
   if (!activity || !session) redirect("/");
 
   const [drivingLog, settings] = activity.driving_log_id
@@ -45,7 +40,6 @@ export default async function ActivityDetailPage({
         activity={activity}
         drivingLog={drivingLog}
         settings={settings}
-        isAdmin={canManageAll}
         sessionName={session.name}
       />
     </div>

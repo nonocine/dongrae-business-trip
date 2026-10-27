@@ -95,6 +95,8 @@ export type AdminApplicant = {
   address: string | null;
   photo_url: string | null;
   education: EmployeeEducation[];
+  // 저장된 학력 데이터 형식이 깨져 읽지 못함 — 화면에 "학력 정보 확인 필요" 표시.
+  education_invalid: boolean;
   licenses: EmployeeLicense[];
   career: EmployeeCareer[];
   awards: EmployeeAward[];
@@ -277,6 +279,19 @@ export async function listApplicantsForAdmin(
       }
     }
 
+    // 지원자 한 명의 학력 데이터가 깨져도 목록 전체가 멈추지 않게 — 그 지원자만 표시.
+    let education: EmployeeEducation[] = [];
+    let educationInvalid = false;
+    try {
+      education = parseEducationInput(jsonbToString(app.education));
+    } catch (e) {
+      educationInvalid = true;
+      console.error(
+        `[recruitment] 학력 데이터 형식 오류 — posting=${slug} application=${String(r.id ?? "")}:`,
+        (e as Error).message
+      );
+    }
+
     result.push({
       application_id: String(r.id ?? ""),
       applicant_id: String(r.applicant_id ?? ""),
@@ -288,7 +303,8 @@ export async function listApplicantsForAdmin(
       gender: (app.gender as "M" | "F" | null) ?? null,
       address: (app.address as string | null) ?? null,
       photo_url: photoUrl,
-      education: parseEducationInput(jsonbToString(app.education)),
+      education,
+      education_invalid: educationInvalid,
       licenses: parseLicenseInput(jsonbToString(app.licenses)),
       career: parseCareerInput(jsonbToString(app.career)),
       awards: parseAwardInput(jsonbToString(app.awards)),

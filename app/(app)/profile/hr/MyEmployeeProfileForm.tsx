@@ -359,7 +359,7 @@ export default function MyEmployeeProfileForm({
                       type="button"
                       onClick={handlePhotoDelete}
                       disabled={photoUploading}
-                      className="rounded-lg border border-stamp bg-card px-3 py-1.5 text-xs font-medium text-stamp hover:bg-stamp-soft disabled:opacity-60"
+                      className="min-h-10 rounded-lg border border-stamp bg-card px-3 py-1.5 text-xs font-medium text-stamp hover:bg-stamp-soft disabled:opacity-60 sm:min-h-0"
                     >
                       삭제
                     </button>
@@ -404,7 +404,7 @@ export default function MyEmployeeProfileForm({
                       setStampModal(true);
                     }}
                     disabled={stampPending}
-                    className="rounded-lg border border-navy bg-card px-3 py-1.5 text-xs font-semibold text-navy hover:bg-navy-soft disabled:opacity-60"
+                    className="min-h-10 rounded-lg border border-navy bg-card px-3 py-1.5 text-xs font-semibold text-navy hover:bg-navy-soft disabled:opacity-60 sm:min-h-0"
                   >
                     {stampUrl ? "다시 그리기" : "사인(도장) 그리기"}
                   </button>
@@ -427,7 +427,7 @@ export default function MyEmployeeProfileForm({
                       stampFileRef.current?.click();
                     }}
                     disabled={stampPending}
-                    className="rounded-lg border border-navy bg-card px-3 py-1.5 text-xs font-semibold text-navy hover:bg-navy-soft disabled:opacity-60"
+                    className="min-h-10 rounded-lg border border-navy bg-card px-3 py-1.5 text-xs font-semibold text-navy hover:bg-navy-soft disabled:opacity-60 sm:min-h-0"
                   >
                     도장 이미지 업로드
                   </button>
@@ -436,7 +436,7 @@ export default function MyEmployeeProfileForm({
                       type="button"
                       onClick={handleStampDelete}
                       disabled={stampPending}
-                      className="rounded-lg border border-stamp bg-card px-3 py-1.5 text-xs font-medium text-stamp hover:bg-stamp-soft disabled:opacity-60"
+                      className="min-h-10 rounded-lg border border-stamp bg-card px-3 py-1.5 text-xs font-medium text-stamp hover:bg-stamp-soft disabled:opacity-60 sm:min-h-0"
                     >
                       삭제
                     </button>

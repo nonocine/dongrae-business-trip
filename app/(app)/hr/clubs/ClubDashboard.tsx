@@ -157,7 +157,7 @@ export default function ClubDashboard({
         <Summary label="보고 확정" value={`${confirmed}/${data.clubs.length}`} />
       </section>
 
-      <section className="grid gap-4 lg:grid-cols-2">
+      <section className="grid grid-cols-1 gap-4 lg:grid-cols-2">
         <TeacherForm
           pending={pending}
           instructors={data.instructors}
@@ -494,7 +494,7 @@ function TeacherList({
                     {deactivationNote(teacher)}
                   </span>
                 )}
-                <div className="ml-auto flex shrink-0 flex-wrap gap-2">
+                <div className="flex w-full flex-wrap gap-2 sm:ml-auto sm:w-auto sm:shrink-0">
                   <InviteReissueButton
                     instructorId={teacher.id}
                     name={teacher.name}
@@ -621,7 +621,7 @@ function TeacherForm({
             setEmail("");
           }}
         >
-          <div className="grid gap-2 sm:grid-cols-2">
+          <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
             <input
               value={name}
               onChange={(e) => setName(e.target.value)}
@@ -724,7 +724,7 @@ function ClubForm({
       <p className="mt-1 text-xs text-ink-muted">
         {year}년 동아리와 담당 동아리샘을 연결합니다.
       </p>
-      <div className="mt-3 grid gap-2 sm:grid-cols-2">
+      <div className="mt-3 grid grid-cols-1 gap-2 sm:grid-cols-2">
         <input
           value={name}
           onChange={(e) => setName(e.target.value)}
@@ -1002,7 +1002,7 @@ function ClubCard({
                     editingId === session.id ? (
                       <tr key={session.id} className={tableRowCls}>
                         <td colSpan={7} className="py-2">
-                          <div className="grid gap-2 sm:grid-cols-2">
+                          <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
                             <input
                               type="date"
                               value={editDate}
@@ -1237,7 +1237,7 @@ function ClubCard({
           <summary className="cursor-pointer text-sm font-semibold text-navy">
             활동·예산 추가
           </summary>
-          <div className="mt-3 grid gap-3 lg:grid-cols-2">
+          <div className="mt-3 grid grid-cols-1 gap-3 lg:grid-cols-2">
             <div className="grid grid-cols-2 gap-2">
               <input
                 type="date"

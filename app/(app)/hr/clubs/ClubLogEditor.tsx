@@ -218,7 +218,7 @@ export default function ClubLogEditor({
                             <span className="font-semibold">계획(참고)</span>{" "}
                             {s.planContent || "계획 내용 없음"}
                           </p>
-                          <div className="grid gap-2 sm:grid-cols-4">
+                          <div className="grid grid-cols-1 gap-2 sm:grid-cols-4">
                             <label className={labelCls}>
                               활동일
                               <input

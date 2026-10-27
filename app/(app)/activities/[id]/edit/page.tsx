@@ -6,7 +6,6 @@ import {
   getActivity,
   getSession,
   getSettings,
-  isManagerAdmin,
   listDriverNames,
 } from "@/app/actions";
 import { ACTIVITY_ICON, ACTIVITY_LABEL } from "@/lib/supabase";
@@ -14,7 +13,7 @@ import { ACTIVITY_ICON, ACTIVITY_LABEL } from "@/lib/supabase";
 export const dynamic = "force-dynamic";
 
 // 활동 수정 — '활동 작성' 폼(ActivityForm)을 그대로 재사용하고 기존 값만 프리필합니다.
-//   * 권한은 삭제와 동일: 관리자(구글 관장·master) 또는 본인이 작성한 활동.
+//   * 권한: 작성자 본인만(관장·부장도 다른 직원 활동은 보기만 — 상세로 돌려보냄).
 //     화면 진입 단계에서 한 번, 저장 시 updateActivity 에서 다시 검증합니다.
 export default async function EditActivityPage({
   params,
@@ -24,14 +23,10 @@ export default async function EditActivityPage({
   const { id } = await params;
   await enforcePasswordChange();
 
-  const [activity, session, canManageAll] = await Promise.all([
-    getActivity(id),
-    getSession(),
-    isManagerAdmin(),
-  ]);
+  const [activity, session] = await Promise.all([getActivity(id), getSession()]);
   if (!activity || !session) redirect("/");
 
-  const canEdit = canManageAll || session.name === activity.author;
+  const canEdit = session.name === activity.author;
   if (!canEdit) redirect(`/activities/${id}`);
 
   const [employees, settings] = await Promise.all([

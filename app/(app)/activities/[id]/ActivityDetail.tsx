@@ -33,18 +33,16 @@ export default function ActivityDetail({
   activity,
   drivingLog,
   settings,
-  isAdmin,
   sessionName,
 }: {
   activity: Activity;
   drivingLog: DrivingLog | null;
   settings: Settings | null;
-  isAdmin: boolean;
   sessionName: string | null;
 }) {
-  // 수정 권한 = 삭제 권한. 관리자(구글 관장·master) 또는 본인이 작성한 활동.
-  //   서버(updateActivity/deleteActivity)에서도 같은 가드로 다시 검증합니다.
-  const canDelete = isAdmin || (sessionName !== null && sessionName === activity.author);
+  // 수정·삭제 버튼은 작성자 본인에게만. 관장·부장은 다른 직원 활동을 보기만 합니다.
+  //   서버(updateActivity)도 본인만 허용합니다. 관리자 삭제는 /admin 표에서만.
+  const canDelete = sessionName !== null && sessionName === activity.author;
   const canEdit = canDelete;
   const router = useRouter();
   const reportRef = useRef<HTMLDivElement>(null);

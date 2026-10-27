@@ -208,7 +208,7 @@ function AbsenceDetail({ row: r, canApprove, onChanged }: { row: AbsenceView; ca
   const canReject = r.status === "submitted" || (r.status === "teacher_checked" && canApprove);
   return (
     <div className="mb-3 space-y-3 rounded-lg border border-rule bg-card p-3 text-sm">
-      <dl className="grid gap-x-4 gap-y-1 sm:grid-cols-[7rem_1fr]">
+      <dl className="grid grid-cols-1 gap-x-4 gap-y-1 sm:grid-cols-[7rem_1fr]">
         <dt className="text-ink-muted">학생</dt>
         <dd>
           {r.student?.name} ·{" "}
@@ -319,7 +319,7 @@ function PhoneAbsenceForm({ students, todayYmd, onDone }: { students: Student[];
     >
       <h3 className={sectionTitleCls("yellow")}>전화 공결 입력</h3>
       <p className="text-xs text-ink-muted">확인자는 &lsquo;선생님(받은 직원)&rsquo; 으로 기록되고 곧바로 담임 확인 상태가 됩니다. 증빙자료는 저장 후 목록에서 [증빙 추가] 로 붙이세요.</p>
-      <div className="grid gap-3 sm:grid-cols-4">
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-4">
         <label className="sm:col-span-2">
           <span className={labelCls}>학생</span>
           <select value={f.studentId} onChange={set("studentId")} className={inputCls} required>

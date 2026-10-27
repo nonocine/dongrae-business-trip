@@ -9,6 +9,7 @@
     "lint": "eslint",
     "test:e2e": "playwright test",
     "test:e2e:ui": "playwright test --ui",
+    "test:mobile-overflow": "tsx scripts/test-mobile-overflow.mts",
     "test:docs": "tsx scripts/test-recruitment-docs.ts",
     "test:salary": "tsx scripts/test-salary-calc.ts",
     "test:effective": "node --import tsx scripts/test-salary-effective.ts",

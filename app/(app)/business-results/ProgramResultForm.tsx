@@ -185,7 +185,7 @@ export default function ProgramResultForm({
   }
 
   return (
-    <form className="mt-4 grid gap-3 md:grid-cols-3" onSubmit={onSubmit}>
+    <form className="mt-4 grid grid-cols-1 gap-3 md:grid-cols-3" onSubmit={onSubmit}>
       <input type="hidden" name="id" value={editing?.id ?? ""} />
       <input type="hidden" name="year" value={year} />
       <input

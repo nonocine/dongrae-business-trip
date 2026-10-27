@@ -35,6 +35,7 @@ import {
   type GoogleSession,
 } from "@/lib/googleAuth";
 import { verifyPayload } from "@/lib/signedCookie";
+import { ctxIsM0, resolveAuthContext } from "@/lib/authContext";
 import { TRUSTED_DEVICE_COOKIE } from "@/lib/pin";
 
 // =====================================================================
@@ -105,6 +106,13 @@ async function requireAdmin() {
   if (!(await isManagerAdmin())) {
     redirect("/");
   }
+}
+
+// 다른 직원의 활동·운행일지를 "보기만" 할 수 있는 사람 — M0(관장·부장·master).
+//   수정·삭제 권한과는 별개입니다(수정은 작성자 본인만, 삭제는 본인 + 관리자 화면의 관장·master).
+async function canViewOthersRecords(): Promise<boolean> {
+  const g = await getGoogleSession();
+  return ctxIsM0(await resolveAuthContext(g, g ? null : await getSession()));
 }
 
 async function requireSession(): Promise<Session> {
@@ -823,7 +831,7 @@ async function setSettingValue(key: string, value: string): Promise<void> {
 // SEC-2: 로그인 필수. supabaseAdmin 은 RLS 를 우회하므로, export 된 서버 액션은
 //   상위 페이지 게이트와 별개로 여기서도 세션을 확인합니다(직접 호출 방어).
 export async function getDrivingLog(id: string): Promise<DrivingLog | null> {
-  await requireSession();
+  const session = await requireSession();
   if (!id) return null;
   const { data, error } = await supabaseAdmin
     .from("driving_logs")
@@ -832,7 +840,10 @@ export async function getDrivingLog(id: string): Promise<DrivingLog | null> {
     .maybeSingle();
   if (error) return null;
   if (!data) return null;
-  return normalizeDrivingLog(data as Record<string, unknown>);
+  // 운행자 본인 또는 M0 만 — 활동 상세와 같은 기준(활동에서 만든 운행일지는 운행자 = 활동 작성자).
+  const log = normalizeDrivingLog(data as Record<string, unknown>);
+  if (log.driver !== session.name && !(await canViewOthersRecords())) return null;
+  return log;
 }
 
 // =====================================================================
@@ -1050,9 +1061,8 @@ export async function createActivity(formData: FormData) {
 
 // =====================================================================
 // 활동 수정 (레거시 활동일지)
-//   * 권한은 삭제(deleteActivity)와 완전히 동일합니다 — 관리자(구글 관장·master)
-//     또는 본인이 작성한 활동. 새 권한 체계를 만들지 않고 같은 가드를 서버에서
-//     다시 검증합니다. 화면의 [수정] 버튼 노출 조건도 [삭제]와 같은 식입니다.
+//   * 권한: 작성자 본인만. 관장·부장도 다른 직원 활동은 보기만 합니다(getActivity).
+//     화면의 [수정] 버튼·수정 화면도 같은 기준이고, 서버에서 다시 검증합니다.
 //   * 수정 대상이 아닌 것: 활동 유형(activity_type)·작성자(author)·차량
 //     운행일지(driving_logs)·누적거리(settings.initial_mileage).
 //     → 운행일지가 연결된 활동은 이동수단도 잠급니다(폼·서버 양쪽).
@@ -1083,10 +1093,9 @@ export async function updateActivity(
     if (fetchErr) return { ok: false, message: fetchErr.message };
     if (!row) return { ok: false, message: "수정할 활동을 찾을 수 없습니다." };
 
-    // 권한 재검증 — deleteActivity 와 같은 가드.
-    const canManageAll = await isManagerAdmin();
+    // 권한 재검증 — 작성자 본인만(관리자 예외 없음).
     const owner = (row as { author: string }).author;
-    if (!canManageAll && owner !== session.name) {
+    if (owner !== session.name) {
       return { ok: false, message: "본인 활동만 수정할 수 있습니다." };
     }
 
@@ -1398,8 +1407,9 @@ export async function getActivity(id: string): Promise<Activity | null> {
   if (error) throw new Error(error.message);
   if (!data) return null;
 
+  // 본인 활동 또는 M0(관장·부장·master) 보기. 수정·삭제 권한은 따로 봅니다.
   const a = normalizeActivity(data as Record<string, unknown>);
-  if (session.kind === "employee" && a.author !== session.name) return null;
+  if (a.author !== session.name && !(await canViewOthersRecords())) return null;
   return a;
 }
 
@@ -1416,7 +1426,8 @@ export async function deleteActivity(formData: FormData) {
   if (fetchErr) throw new Error(fetchErr.message);
   if (!row) throw new Error("삭제할 활동을 찾을 수 없습니다.");
 
-  // 권한: 관리자(구글 관장·master) 또는 본인 활동
+  // 권한: 본인 활동, 또는 관리자 화면(/admin) 표의 [삭제] — 관장·master 예외는 그 화면용.
+  //   활동 상세 화면의 [삭제] 버튼은 작성자에게만 보입니다(ActivityDetail).
   const canManageAll = await isManagerAdmin();
   if (!canManageAll && (row as { author: string }).author !== session.name) {
     throw new Error("본인 활동만 삭제할 수 있습니다.");

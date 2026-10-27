@@ -121,7 +121,7 @@ export default function CoinPayTab({
 
   return (
     <div className="space-y-4">
-      <section className="grid gap-3 sm:grid-cols-3">
+      <section className="grid grid-cols-1 gap-3 sm:grid-cols-3">
         {cards.map((card) => (
           <article key={card.label} className={cardCls}>
             <div
@@ -161,7 +161,7 @@ export default function CoinPayTab({
         </p>
         <form
           key={editing?.id ?? "new"}
-          className="mt-4 grid gap-3 md:grid-cols-3"
+          className="mt-4 grid grid-cols-1 gap-3 md:grid-cols-3"
           onSubmit={submit}
         >
           <input type="hidden" name="id" value={editing?.id ?? ""} />

@@ -208,7 +208,7 @@ function SheetView({ driverId, year, half, onSaved }: { driverId: string; year: 
           </Fold>
           <Fold title="교육훈련" summary={trainingSummary(m.training)} testId="fold-training">
             <p className="font-semibold">의무교육 {m.training.mandatory.completed}/{m.training.mandatory.target} · 이수 {m.training.mandatory.hours}시간</p>
-            <ul className="mt-1 grid gap-x-4 sm:grid-cols-2">
+            <ul className="mt-1 grid grid-cols-1 gap-x-4 sm:grid-cols-2">
               {m.training.mandatory.items.map((t, i) => (
                 <li key={i} className={t.completed ? "" : "text-stamp"}>
                   {t.completed ? "✓" : "✗"} {t.name}
@@ -375,7 +375,7 @@ function ScoreForm({ sheet, driverId, year, half, onSaved }: { sheet: Evaluation
         {confirmed ? <span className={badgeSuccess}>확정</span> : ev ? <span className={badgeWarning}>작성 중</span> : <span className={badgeNeutral}>미평정</span>}
       </div>
       <p className="mt-1 text-xs text-ink-muted">센터 평정 기준표가 규정에 없어 점수는 자동으로 매기지 않습니다. 각 칸을 평정자가 넣고, 총점만 자동으로 합산합니다.</p>
-      <div className="mt-3 grid gap-3 sm:grid-cols-3">
+      <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-3">
         {field("score_duty", "근무사항")}
         {field("score_training", "교육훈련사항")}
         {field("score_career", "경력사항")}

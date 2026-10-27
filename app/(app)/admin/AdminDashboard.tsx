@@ -517,7 +517,7 @@ function ActivityRow({ activity }: { activity: Activity }) {
           action={(formData) => {
             if (
               !confirm(
-                `${a.start_date ?? ""} ${locationOf(a)} 활동을 삭제하시겠습니까?\n첨부된 사진/영수증/수료증도 함께 삭제됩니다.`
+                `${a.author} 직원의 활동입니다.\n${a.start_date ?? ""} ${locationOf(a)} 활동을 삭제하시겠습니까?\n첨부된 사진/영수증/수료증도 함께 삭제됩니다.`
               )
             )
               return;

@@ -277,7 +277,7 @@ function ItemRow({
                 type="button"
                 onClick={() => onResult(r.value)}
                 disabled={readOnly}
-                className={`rounded border px-2 py-1 text-xs font-semibold transition disabled:opacity-50 ${
+                className={`min-h-10 rounded border px-2 py-1 text-xs sm:min-h-0 font-semibold transition disabled:opacity-50 ${
                   active
                     ? activeCls
                     : "border-line text-ink-muted hover:bg-surface"

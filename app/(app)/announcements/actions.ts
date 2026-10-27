@@ -3,7 +3,7 @@
 import { randomUUID } from "node:crypto";
 import { revalidatePath } from "next/cache";
 import { getSession, getGoogleSession } from "@/app/actions";
-import { isM0Grant } from "@/lib/authLevels";
+import { ctxIsM0, resolveAuthContext, type AuthContext } from "@/lib/authContext";
 import {
   signHrDocument,
   removeHrDocuments,
@@ -74,81 +74,10 @@ function normalizeAnnouncement(raw: Record<string, unknown>): Announcement {
   };
 }
 
-// =====================================================================
-// 현재 세션의 권한 컨텍스트 — M0 판정·작성자 식별에 사용.
-//   * 구글 세션: email·rank·driverId. 비번 세션: name 으로 drivers 조회.
-//   * 공유비번 admin: 최고관리자로 M0 인정.
-// =====================================================================
-type AuthContext = {
-  rank: string | null;
-  email: string | null;
-  authLevel: string | null;
-  driverId: string | null;
-  name: string;
-};
-
+// 현재 세션의 권한 컨텍스트 — 판정 본체는 lib/authContext(공용).
 async function getAuthContext(): Promise<AuthContext | null> {
   const g = await getGoogleSession();
-  if (g) {
-    const driverId = g.driverId ?? null;
-    let authLevel: string | null = null;
-    if (driverId) {
-      const { data } = await supabaseAdmin
-        .from("employee_profiles")
-        .select("auth_level")
-        .eq("driver_id", driverId)
-        .maybeSingle();
-      authLevel =
-        ((data as { auth_level?: unknown } | null)?.auth_level as
-          | string
-          | null) ?? null;
-    }
-    return {
-      rank: g.rank ?? null,
-      email: g.email,
-      authLevel,
-      driverId,
-      name: g.driverName ?? g.name,
-    };
-  }
-
-  const s = await getSession();
-  if (s && s.kind === "employee") {
-    const { data: drv } = await supabaseAdmin
-      .from("drivers")
-      .select("id, rank")
-      .eq("name", s.name)
-      .maybeSingle();
-    const driverId =
-      ((drv as { id?: unknown } | null)?.id as string | null) ?? null;
-    const rank =
-      ((drv as { rank?: unknown } | null)?.rank as string | null) ?? null;
-    let authLevel: string | null = null;
-    if (driverId) {
-      const { data: prof } = await supabaseAdmin
-        .from("employee_profiles")
-        .select("auth_level")
-        .eq("driver_id", driverId)
-        .maybeSingle();
-      authLevel =
-        ((prof as { auth_level?: unknown } | null)?.auth_level as
-          | string
-          | null) ?? null;
-    }
-    return { rank, email: null, authLevel, driverId, name: s.name };
-  }
-
-  // SEC-3b: 공유비번 admin 분기 제거. 구글 관장·master 는 위 구글 세션 경로에서
-  //   rank/authLevel 로 M0 판정되므로 별도 분기가 필요 없습니다.
-  return null;
-}
-
-function ctxIsM0(ctx: AuthContext): boolean {
-  return isM0Grant({
-    rank: ctx.rank,
-    email: ctx.email,
-    authLevel: ctx.authLevel,
-  });
+  return resolveAuthContext(g, g ? null : await getSession());
 }
 
 // M0 게이트 — 통과 시 작성자 정보 반환, 아니면 throw.

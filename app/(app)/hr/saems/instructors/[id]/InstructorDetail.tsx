@@ -711,7 +711,7 @@ function DocsSection({
                     type="button"
                     onClick={() => pick(sl.key)}
                     disabled={rowBusy}
-                    className="rounded border border-navy px-2.5 py-1 text-xs font-semibold text-navy hover:bg-navy-soft disabled:opacity-50"
+                    className="min-h-10 rounded border border-navy px-2.5 py-1 text-xs font-semibold text-navy hover:bg-navy-soft disabled:opacity-50 sm:min-h-0"
                   >
                     {rowBusy ? "업로드 중…" : "업로드"}
                   </button>

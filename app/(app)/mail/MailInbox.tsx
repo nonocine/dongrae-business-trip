@@ -650,7 +650,7 @@ export default function MailInbox({
       {/* 파랑: 조회 조건(상태·분류·검색) */}
       <section className={panelToneCls("blue")}>
         <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
-          <div className="grid flex-1 gap-2 sm:grid-cols-3">
+          <div className="grid grid-cols-1 flex-1 gap-2 sm:grid-cols-3">
             <label className={labelCls}>
               상태
               <select
@@ -1271,7 +1271,7 @@ export default function MailInbox({
 
             {/* 담당자·상태·첨부 — 본문에 자리를 내주기 위해 한 줄로 압축 */}
             <div className="shrink-0 border-b border-line px-4 py-3 sm:px-5">
-              <div className="grid gap-2 sm:grid-cols-2">
+              <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
                 <label className={labelCls}>
                   담당자
                   <select
@@ -1537,7 +1537,7 @@ export default function MailInbox({
                     </p>
                   )}
 
-                  <div className="mt-3 grid gap-2 sm:grid-cols-2">
+                  <div className="mt-3 grid grid-cols-1 gap-2 sm:grid-cols-2">
                     <label className={labelCls}>
                       받는사람
                       <input

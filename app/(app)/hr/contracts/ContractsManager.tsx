@@ -225,7 +225,7 @@ export default function ContractsManager({
           들어가고(주민번호는 PDF 에만), 나머지 조항은 아래 [조항 문구]에서 관리합니다.
         </p>
 
-        <div className="mt-4 grid gap-3 sm:grid-cols-2">
+        <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-2">
           <div className="sm:col-span-2">
             <label className={labelCls}>직원</label>
             <select

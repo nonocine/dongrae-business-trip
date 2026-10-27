@@ -263,7 +263,7 @@ export default function ClubPlanEditor({
                   editId === s.id ? (
                     <tr key={s.id} className="border-b border-rule/70 last:border-0">
                       <td colSpan={5} className="py-2">
-                        <div className="grid gap-2 sm:grid-cols-2">
+                        <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
                           <input
                             type="date"
                             value={editDate}
@@ -375,7 +375,7 @@ export default function ClubPlanEditor({
           </div>
         )}
 
-        <div className="mt-3 grid gap-2 sm:grid-cols-2">
+        <div className="mt-3 grid grid-cols-1 gap-2 sm:grid-cols-2">
           <input
             type="date"
             value={newDate}

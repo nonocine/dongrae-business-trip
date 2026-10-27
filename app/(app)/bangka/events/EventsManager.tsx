@@ -181,7 +181,7 @@ function EventForm({
   return (
     <form onSubmit={submit} className={`${panelToneCls("yellow")} space-y-3`}>
       <h3 className="text-sm font-bold text-ink">{f.id ? "일정 수정" : "일정 추가"}</h3>
-      <div className="grid gap-3 sm:grid-cols-4">
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-4">
         <label className="sm:col-span-2">
           <span className={labelCls}>제목 *</span>
           <input value={f.title} onChange={set("title")} className={inputCls} required />

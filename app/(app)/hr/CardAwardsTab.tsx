@@ -253,7 +253,7 @@ function AwardEditor({
       {source === "internal" && !perms.canEditInternal && (
         <p className="text-xs text-warning">센터 포상은 등록 후 관장·부장이 관리합니다. 본인 화면에는 포상명·포상일만 남습니다.</p>
       )}
-      <div className="grid gap-3 sm:grid-cols-2">
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
         <div>
           <label className={labelCls}>{source === "internal" ? "포상일 *" : "수상일 *"}</label>
           <input type="date" name="awardedOn" className={inputCls} defaultValue={row?.awarded_on ?? ""} required />

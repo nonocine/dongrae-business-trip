@@ -1,0 +1,4895 @@
+{
+ "recruitment_interview_schedule": {
+  "id": {
+   "type": "uuid"
+  },
+  "application_id": {
+   "type": "uuid",
+   "fk": [
+    "recruitment_applications",
+    "id"
+   ]
+  },
+  "interview_at": {
+   "type": "timestamp with time zone"
+  },
+  "location": {
+   "type": "text"
+  },
+  "display_order": {
+   "type": "integer"
+  },
+  "notes": {
+   "type": "text"
+  },
+  "created_at": {
+   "type": "timestamp with time zone"
+  },
+  "updated_at": {
+   "type": "timestamp with time zone"
+  }
+ },
+ "business_result_details": {
+  "id": {
+   "type": "uuid"
+  },
+  "result_id": {
+   "type": "uuid",
+   "fk": [
+    "business_results",
+    "id"
+   ]
+  },
+  "entry_type": {
+   "type": "text"
+  },
+  "entry_date": {
+   "type": "date"
+  },
+  "session_no": {
+   "type": "integer"
+  },
+  "session_days": {
+   "type": "integer"
+  },
+  "content": {
+   "type": "text"
+  },
+  "participants_youth": {
+   "type": "integer"
+  },
+  "participants_other": {
+   "type": "integer"
+  },
+  "room_youth": {
+   "type": "integer"
+  },
+  "room_other": {
+   "type": "integer"
+  },
+  "sort_order": {
+   "type": "integer"
+  },
+  "created_at": {
+   "type": "timestamp with time zone"
+  }
+ },
+ "recruitment_postings": {
+  "id": {
+   "type": "uuid"
+  },
+  "slug": {
+   "type": "text"
+  },
+  "title": {
+   "type": "text"
+  },
+  "field": {
+   "type": "text"
+  },
+  "recruit_count": {
+   "type": "integer"
+  },
+  "application_start": {
+   "type": "timestamp with time zone"
+  },
+  "application_end": {
+   "type": "timestamp with time zone"
+  },
+  "qualifications": {
+   "type": "text"
+  },
+  "preferred": {
+   "type": "text"
+  },
+  "salary_info": {
+   "type": "text"
+  },
+  "process_info": {
+   "type": "text"
+  },
+  "notice": {
+   "type": "text"
+  },
+  "attachment_url": {
+   "type": "text"
+  },
+  "required_documents": {
+   "type": "jsonb"
+  },
+  "status": {
+   "type": "text"
+  },
+  "created_at": {
+   "type": "timestamp with time zone"
+  },
+  "updated_at": {
+   "type": "timestamp with time zone"
+  },
+  "created_by": {
+   "type": "text"
+  },
+  "require_certificate_copy": {
+   "type": "boolean"
+  },
+  "work_contract_period": {
+   "type": "text"
+  },
+  "work_location": {
+   "type": "text"
+  },
+  "work_hours": {
+   "type": "text"
+  },
+  "work_duties": {
+   "type": "text"
+  },
+  "screening_criteria": {
+   "type": "text"
+  },
+  "interview_criteria": {
+   "type": "text"
+  },
+  "interview_candidate_announce_date": {
+   "type": "text"
+  },
+  "interview_datetime": {
+   "type": "text"
+  },
+  "interview_location": {
+   "type": "text"
+  },
+  "final_result_announce_date": {
+   "type": "text"
+  },
+  "appointment_date": {
+   "type": "text"
+  },
+  "view_count": {
+   "type": "integer"
+  }
+ },
+ "file_backup_folders": {
+  "bucket": {
+   "type": "text"
+  },
+  "folder_path": {
+   "type": "text"
+  },
+  "drive_folder_id": {
+   "type": "text"
+  },
+  "created_at": {
+   "type": "timestamp with time zone"
+  }
+ },
+ "employee_roles": {
+  "id": {
+   "type": "uuid"
+  },
+  "driver_id": {
+   "type": "uuid",
+   "fk": [
+    "drivers",
+    "id"
+   ]
+  },
+  "role_key": {
+   "type": "text"
+  },
+  "created_at": {
+   "type": "timestamp with time zone"
+  }
+ },
+ "push_subscriptions": {
+  "id": {
+   "type": "uuid"
+  },
+  "participant_id": {
+   "type": "uuid"
+  },
+  "endpoint": {
+   "type": "text"
+  },
+  "p256dh": {
+   "type": "text"
+  },
+  "auth": {
+   "type": "text"
+  },
+  "created_at": {
+   "type": "timestamp with time zone"
+  }
+ },
+ "certificate_requests": {
+  "id": {
+   "type": "uuid"
+  },
+  "driver_id": {
+   "type": "text"
+  },
+  "employee_name": {
+   "type": "text"
+  },
+  "cert_type": {
+   "type": "text"
+  },
+  "purpose": {
+   "type": "text"
+  },
+  "duty": {
+   "type": "text"
+  },
+  "status": {
+   "type": "text"
+  },
+  "reject_reason": {
+   "type": "text"
+  },
+  "requested_at": {
+   "type": "timestamp with time zone"
+  },
+  "decided_at": {
+   "type": "timestamp with time zone"
+  },
+  "decided_by": {
+   "type": "text"
+  },
+  "issue_id": {
+   "type": "uuid",
+   "fk": [
+    "certificate_issues",
+    "id"
+   ]
+  },
+  "created_at": {
+   "type": "timestamp with time zone"
+  },
+  "submit_to": {
+   "type": "text"
+  }
+ },
+ "recruitment_scores": {
+  "id": {
+   "type": "uuid"
+  },
+  "application_id": {
+   "type": "uuid",
+   "fk": [
+    "recruitment_applications",
+    "id"
+   ]
+  },
+  "stage": {
+   "type": "text"
+  },
+  "reviewer_name": {
+   "type": "text"
+  },
+  "reviewer_id": {
+   "type": "text"
+  },
+  "scores": {
+   "type": "jsonb"
+  },
+  "total_score": {
+   "type": "numeric"
+  },
+  "max_score": {
+   "type": "numeric"
+  },
+  "is_absent": {
+   "type": "boolean"
+  },
+  "memo": {
+   "type": "text"
+  },
+  "submitted_at": {
+   "type": "timestamp with time zone"
+  },
+  "created_at": {
+   "type": "timestamp with time zone"
+  },
+  "updated_at": {
+   "type": "timestamp with time zone"
+  }
+ },
+ "mail_messages": {
+  "id": {
+   "type": "uuid"
+  },
+  "pop_uid": {
+   "type": "text"
+  },
+  "message_id": {
+   "type": "text"
+  },
+  "from_name": {
+   "type": "text"
+  },
+  "from_email": {
+   "type": "text"
+  },
+  "subject": {
+   "type": "text"
+  },
+  "body_text": {
+   "type": "text"
+  },
+  "body_html": {
+   "type": "text"
+  },
+  "received_at": {
+   "type": "timestamp with time zone"
+  },
+  "fetched_at": {
+   "type": "timestamp with time zone"
+  },
+  "has_attachments": {
+   "type": "boolean"
+  },
+  "attachments": {
+   "type": "jsonb"
+  },
+  "assignee_name": {
+   "type": "text"
+  },
+  "status": {
+   "type": "text"
+  },
+  "memo": {
+   "type": "text"
+  },
+  "gmail_copied_at": {
+   "type": "timestamp with time zone"
+  },
+  "naver_deleted_at": {
+   "type": "timestamp with time zone"
+  },
+  "ai_summary": {
+   "type": "text"
+  },
+  "ai_category": {
+   "type": "text"
+  },
+  "ai_suggested_assignee": {
+   "type": "text"
+  },
+  "ai_processed_at": {
+   "type": "timestamp with time zone"
+  },
+  "deleted_at": {
+   "type": "timestamp with time zone"
+  },
+  "opened_at": {
+   "type": "timestamp with time zone"
+  },
+  "category_source": {
+   "type": "text"
+  }
+ },
+ "bk_class_sessions": {
+  "session_id": {
+   "type": "uuid"
+  },
+  "session_date": {
+   "type": "date"
+  },
+  "program_id": {
+   "type": "uuid"
+  },
+  "subject": {
+   "type": "text"
+  },
+  "program_name": {
+   "type": "text"
+  },
+  "scope": {
+   "type": "text"
+  },
+  "target": {
+   "type": "text"
+  },
+  "time_start": {
+   "type": "time without time zone"
+  },
+  "time_end": {
+   "type": "time without time zone"
+  },
+  "room": {
+   "type": "text"
+  },
+  "instructor_name": {
+   "type": "text"
+  },
+  "log_content": {
+   "type": "text"
+  },
+  "staff_confirmed_at": {
+   "type": "timestamp with time zone"
+  }
+ },
+ "saem_lecture_certificates": {
+  "id": {
+   "type": "uuid"
+  },
+  "instructor_id": {
+   "type": "uuid",
+   "fk": [
+    "saem_instructors",
+    "id"
+   ]
+  },
+  "cert_year": {
+   "type": "integer"
+  },
+  "cert_no": {
+   "type": "integer"
+  },
+  "applicant_name": {
+   "type": "text"
+  },
+  "address": {
+   "type": "text"
+  },
+  "lecture_content": {
+   "type": "text"
+  },
+  "lecture_period": {
+   "type": "text"
+  },
+  "status": {
+   "type": "text"
+  },
+  "reject_reason": {
+   "type": "text"
+  },
+  "reviewed_by": {
+   "type": "text"
+  },
+  "reviewed_at": {
+   "type": "timestamp with time zone"
+  },
+  "printed_at": {
+   "type": "timestamp with time zone"
+  },
+  "created_at": {
+   "type": "timestamp with time zone"
+  }
+ },
+ "safety_check_results": {
+  "id": {
+   "type": "uuid"
+  },
+  "check_id": {
+   "type": "uuid",
+   "fk": [
+    "safety_checks",
+    "id"
+   ]
+  },
+  "item_id": {
+   "type": "uuid",
+   "fk": [
+    "safety_check_items",
+    "id"
+   ]
+  },
+  "result": {
+   "type": "text"
+  },
+  "note": {
+   "type": "text"
+  }
+ },
+ "saem_enrollments": {
+  "id": {
+   "type": "uuid"
+  },
+  "program_id": {
+   "type": "uuid",
+   "fk": [
+    "saem_programs",
+    "id"
+   ]
+  },
+  "seq_no": {
+   "type": "integer"
+  },
+  "student_name": {
+   "type": "text"
+  },
+  "school": {
+   "type": "text"
+  },
+  "grade": {
+   "type": "text"
+  },
+  "contact": {
+   "type": "text"
+  },
+  "emergency_contact": {
+   "type": "text"
+  },
+  "status": {
+   "type": "text"
+  },
+  "created_at": {
+   "type": "timestamp with time zone"
+  },
+  "erp_no": {
+   "type": "text"
+  },
+  "birth_date": {
+   "type": "date"
+  }
+ },
+ "saem_projects": {
+  "id": {
+   "type": "uuid"
+  },
+  "name": {
+   "type": "text"
+  },
+  "description": {
+   "type": "text"
+  },
+  "status": {
+   "type": "text"
+  },
+  "sort_order": {
+   "type": "integer"
+  },
+  "created_at": {
+   "type": "timestamp with time zone"
+  }
+ },
+ "press_releases": {
+  "id": {
+   "type": "uuid"
+  },
+  "title": {
+   "type": "text"
+  },
+  "subject": {
+   "type": "text"
+  },
+  "body_html": {
+   "type": "text"
+  },
+  "body_text": {
+   "type": "text"
+  },
+  "attachments": {
+   "type": "jsonb"
+  },
+  "erp_doc_no": {
+   "type": "text"
+  },
+  "event_group": {
+   "type": "text"
+  },
+  "status": {
+   "type": "text"
+  },
+  "created_by": {
+   "type": "text"
+  },
+  "sent_by": {
+   "type": "text"
+  },
+  "sent_at": {
+   "type": "timestamp with time zone"
+  },
+  "created_at": {
+   "type": "timestamp with time zone"
+  },
+  "updated_at": {
+   "type": "timestamp with time zone"
+  }
+ },
+ "bk_meal_weeks": {
+  "id": {
+   "type": "uuid"
+  },
+  "week_start": {
+   "type": "date"
+  },
+  "title": {
+   "type": "text"
+  },
+  "dietitian": {
+   "type": "text"
+  },
+  "vendor": {
+   "type": "text"
+  },
+  "nutrition_basis": {
+   "type": "text"
+  },
+  "allergen_legend": {
+   "type": "text"
+  },
+  "origin_text": {
+   "type": "text"
+  },
+  "source_file_path": {
+   "type": "text"
+  },
+  "uploaded_by": {
+   "type": "text"
+  },
+  "created_at": {
+   "type": "timestamp with time zone"
+  },
+  "updated_at": {
+   "type": "timestamp with time zone"
+  }
+ },
+ "recruitment_applications": {
+  "id": {
+   "type": "uuid"
+  },
+  "posting_id": {
+   "type": "uuid",
+   "fk": [
+    "recruitment_postings",
+    "id"
+   ]
+  },
+  "applicant_id": {
+   "type": "uuid",
+   "fk": [
+    "recruitment_applicants",
+    "id"
+   ]
+  },
+  "submitted_at": {
+   "type": "timestamp with time zone"
+  },
+  "status": {
+   "type": "text"
+  },
+  "screening_total": {
+   "type": "numeric"
+  },
+  "interview_total": {
+   "type": "numeric"
+  },
+  "hired_at": {
+   "type": "date"
+  },
+  "converted_to_employee_id": {
+   "type": "uuid",
+   "fk": [
+    "drivers",
+    "id"
+   ]
+  },
+  "created_at": {
+   "type": "timestamp with time zone"
+  },
+  "updated_at": {
+   "type": "timestamp with time zone"
+  },
+  "screening_reject_reason": {
+   "type": "text"
+  }
+ },
+ "saem_programs": {
+  "id": {
+   "type": "uuid"
+  },
+  "term_id": {
+   "type": "uuid",
+   "fk": [
+    "saem_terms",
+    "id"
+   ]
+  },
+  "name": {
+   "type": "text"
+  },
+  "instructor_id": {
+   "type": "uuid",
+   "fk": [
+    "saem_instructors",
+    "id"
+   ]
+  },
+  "period_no": {
+   "type": "integer"
+  },
+  "time_start": {
+   "type": "time without time zone"
+  },
+  "time_end": {
+   "type": "time without time zone"
+  },
+  "target": {
+   "type": "text"
+  },
+  "capacity": {
+   "type": "integer"
+  },
+  "tuition": {
+   "type": "integer"
+  },
+  "room": {
+   "type": "text"
+  },
+  "hourly_rate": {
+   "type": "integer"
+  },
+  "goal": {
+   "type": "text"
+  },
+  "plan_submitted_at": {
+   "type": "timestamp with time zone"
+  },
+  "status": {
+   "type": "text"
+  },
+  "sort_order": {
+   "type": "integer"
+  },
+  "created_at": {
+   "type": "timestamp with time zone"
+  },
+  "deduction_rate": {
+   "type": "numeric"
+  },
+  "session_weekday": {
+   "type": "integer"
+  },
+  "session_weeks": {
+   "type": "integer"
+  },
+  "session_holidays": {
+   "type": "date[]",
+   "items": "string"
+  },
+  "session_start": {
+   "type": "date"
+  },
+  "pay_type": {
+   "type": "text"
+  },
+  "share_rate": {
+   "type": "numeric"
+  },
+  "program_type": {
+   "type": "text"
+  },
+  "business_program_id": {
+   "type": "uuid",
+   "fk": [
+    "business_programs",
+    "id"
+   ]
+  },
+  "subject": {
+   "type": "text"
+  },
+  "session_weekdays": {
+   "type": "integer[]",
+   "items": "integer"
+  }
+ },
+ "org_awards": {
+  "id": {
+   "type": "uuid"
+  },
+  "award_name": {
+   "type": "text"
+  },
+  "recipient_name": {
+   "type": "text"
+  },
+  "recipient_type": {
+   "type": "text"
+  },
+  "recipient_driver_id": {
+   "type": "uuid",
+   "fk": [
+    "drivers",
+    "id"
+   ]
+  },
+  "awarded_by": {
+   "type": "text"
+  },
+  "awarded_on": {
+   "type": "date"
+  },
+  "related_program": {
+   "type": "text"
+  },
+  "file_path": {
+   "type": "text"
+  },
+  "memo": {
+   "type": "text"
+  },
+  "created_by": {
+   "type": "text"
+  },
+  "created_at": {
+   "type": "timestamp with time zone"
+  },
+  "updated_at": {
+   "type": "timestamp with time zone"
+  }
+ },
+ "rental_reservations": {
+  "reservation_no": {
+   "type": "bigint"
+  },
+  "reservation_type": {
+   "type": "text"
+  },
+  "reservation_date": {
+   "type": "date"
+  },
+  "start_time": {
+   "type": "text"
+  },
+  "end_time": {
+   "type": "text"
+  },
+  "space_name": {
+   "type": "text"
+  },
+  "room_name": {
+   "type": "text"
+  },
+  "purpose": {
+   "type": "text"
+  },
+  "program_name": {
+   "type": "text"
+  },
+  "applicant": {
+   "type": "text"
+  },
+  "team_name": {
+   "type": "text"
+  },
+  "person_total": {
+   "type": "integer"
+  },
+  "person_disabled": {
+   "type": "integer"
+  },
+  "status": {
+   "type": "text"
+  },
+  "status_name": {
+   "type": "text"
+  },
+  "reg_date": {
+   "type": "timestamp without time zone"
+  },
+  "synced_at": {
+   "type": "timestamp with time zone"
+  }
+ },
+ "driving_logs": {
+  "id": {
+   "type": "uuid"
+  },
+  "driven_at": {
+   "type": "date"
+  },
+  "driver": {
+   "type": "text"
+  },
+  "purpose": {
+   "type": "text"
+  },
+  "departure": {
+   "type": "text"
+  },
+  "waypoint": {
+   "type": "text"
+  },
+  "destination": {
+   "type": "text"
+  },
+  "distance": {
+   "type": "numeric"
+  },
+  "total_distance": {
+   "type": "numeric"
+  },
+  "confirmed_by": {
+   "type": "text"
+  },
+  "created_at": {
+   "type": "timestamp with time zone"
+  },
+  "start_date": {
+   "type": "date"
+  },
+  "end_date": {
+   "type": "date"
+  },
+  "is_multi_day": {
+   "type": "boolean"
+  },
+  "passenger_names": {
+   "type": "text[]",
+   "items": "string"
+  },
+  "passenger_others": {
+   "type": "text[]",
+   "items": "string"
+  }
+ },
+ "org_record_files": {
+  "id": {
+   "type": "uuid"
+  },
+  "agreement_id": {
+   "type": "uuid",
+   "fk": [
+    "org_agreements",
+    "id"
+   ]
+  },
+  "award_id": {
+   "type": "uuid",
+   "fk": [
+    "org_awards",
+    "id"
+   ]
+  },
+  "kind": {
+   "type": "text"
+  },
+  "file_path": {
+   "type": "text"
+  },
+  "file_name": {
+   "type": "text"
+  },
+  "mime_type": {
+   "type": "text"
+  },
+  "size_bytes": {
+   "type": "integer"
+  },
+  "sort_order": {
+   "type": "integer"
+  },
+  "uploaded_by": {
+   "type": "text"
+  },
+  "created_at": {
+   "type": "timestamp with time zone"
+  }
+ },
+ "training_completions": {
+  "id": {
+   "type": "uuid"
+  },
+  "training_id": {
+   "type": "uuid",
+   "fk": [
+    "mandatory_trainings",
+    "id"
+   ]
+  },
+  "driver_id": {
+   "type": "uuid",
+   "fk": [
+    "drivers",
+    "id"
+   ]
+  },
+  "certificate_path": {
+   "type": "text"
+  },
+  "completed_at": {
+   "type": "timestamp with time zone"
+  },
+  "uploaded_by": {
+   "type": "text"
+  }
+ },
+ "certificate_issues": {
+  "id": {
+   "type": "uuid"
+  },
+  "issue_year": {
+   "type": "integer"
+  },
+  "issue_seq": {
+   "type": "integer"
+  },
+  "cert_type": {
+   "type": "text"
+  },
+  "driver_id": {
+   "type": "text"
+  },
+  "employee_name": {
+   "type": "text"
+  },
+  "purpose": {
+   "type": "text"
+  },
+  "issued_on": {
+   "type": "date"
+  },
+  "issued_by": {
+   "type": "text"
+  },
+  "snapshot": {
+   "type": "jsonb"
+  },
+  "created_at": {
+   "type": "timestamp with time zone"
+  }
+ },
+ "business_partners": {
+  "id": {
+   "type": "uuid"
+  },
+  "name": {
+   "type": "text"
+  },
+  "category": {
+   "type": "text"
+  },
+  "phone": {
+   "type": "text"
+  },
+  "fax": {
+   "type": "text"
+  },
+  "address": {
+   "type": "text"
+  },
+  "website": {
+   "type": "text"
+  },
+  "memo": {
+   "type": "text"
+  },
+  "is_active": {
+   "type": "boolean"
+  },
+  "registered_by": {
+   "type": "text"
+  },
+  "created_at": {
+   "type": "timestamp with time zone"
+  },
+  "updated_at": {
+   "type": "timestamp with time zone"
+  },
+  "is_private": {
+   "type": "boolean"
+  }
+ },
+ "bk_guardians": {
+  "id": {
+   "type": "uuid"
+  },
+  "name": {
+   "type": "text"
+  },
+  "phone": {
+   "type": "text"
+  },
+  "relation": {
+   "type": "text"
+  },
+  "pin_hash": {
+   "type": "text"
+  },
+  "pin_set_at": {
+   "type": "timestamp with time zone"
+  },
+  "invite_token": {
+   "type": "text"
+  },
+  "invite_expires_at": {
+   "type": "timestamp with time zone"
+  },
+  "must_change_pin": {
+   "type": "boolean"
+  },
+  "status": {
+   "type": "text"
+  },
+  "failed_attempts": {
+   "type": "integer"
+  },
+  "locked_until": {
+   "type": "timestamp with time zone"
+  },
+  "last_login_at": {
+   "type": "timestamp with time zone"
+  },
+  "photo_consent_at": {
+   "type": "timestamp with time zone"
+  },
+  "memo": {
+   "type": "text"
+  },
+  "created_at": {
+   "type": "timestamp with time zone"
+  },
+  "updated_at": {
+   "type": "timestamp with time zone"
+  }
+ },
+ "hr_committees": {
+  "id": {
+   "type": "uuid"
+  },
+  "held_on": {
+   "type": "date"
+  },
+  "agenda_type": {
+   "type": "text"
+  },
+  "subject": {
+   "type": "text"
+  },
+  "members": {
+   "type": "jsonb"
+  },
+  "target_driver_id": {
+   "type": "uuid"
+  },
+  "resolution": {
+   "type": "text"
+  },
+  "note": {
+   "type": "text"
+  },
+  "attachment_path": {
+   "type": "text"
+  },
+  "created_by": {
+   "type": "text"
+  },
+  "created_at": {
+   "type": "timestamp with time zone"
+  }
+ },
+ "global_plans": {
+  "id": {
+   "type": "uuid"
+  },
+  "title": {
+   "type": "text"
+  },
+  "pdf_url": {
+   "type": "text"
+  },
+  "uploaded_by": {
+   "type": "text"
+  },
+  "created_at": {
+   "type": "timestamp with time zone"
+  }
+ },
+ "saem_club_monthly_reports": {
+  "id": {
+   "type": "uuid"
+  },
+  "program_id": {
+   "type": "uuid",
+   "fk": [
+    "saem_programs",
+    "id"
+   ]
+  },
+  "report_year": {
+   "type": "integer"
+  },
+  "report_month": {
+   "type": "integer"
+  },
+  "status": {
+   "type": "text"
+  },
+  "registered_count": {
+   "type": "integer"
+  },
+  "attendance_total": {
+   "type": "integer"
+  },
+  "expense_total": {
+   "type": "integer"
+  },
+  "submitted_at": {
+   "type": "timestamp with time zone"
+  },
+  "confirmed_at": {
+   "type": "timestamp with time zone"
+  },
+  "confirmed_by": {
+   "type": "text"
+  },
+  "created_at": {
+   "type": "timestamp with time zone"
+  },
+  "updated_at": {
+   "type": "timestamp with time zone"
+  }
+ },
+ "bk_events": {
+  "id": {
+   "type": "uuid"
+  },
+  "title": {
+   "type": "text"
+  },
+  "start_date": {
+   "type": "date"
+  },
+  "end_date": {
+   "type": "date"
+  },
+  "scope": {
+   "type": "text"
+  },
+  "memo": {
+   "type": "text"
+  },
+  "created_by": {
+   "type": "text"
+  },
+  "created_at": {
+   "type": "timestamp with time zone"
+  }
+ },
+ "contract_date_changes": {
+  "id": {
+   "type": "uuid"
+  },
+  "contract_kind": {
+   "type": "text"
+  },
+  "contract_id": {
+   "type": "uuid"
+  },
+  "old_date": {
+   "type": "date"
+  },
+  "new_date": {
+   "type": "date"
+  },
+  "reason": {
+   "type": "text"
+  },
+  "changed_by": {
+   "type": "text"
+  },
+  "changed_at": {
+   "type": "timestamp with time zone"
+  }
+ },
+ "saem_sessions": {
+  "id": {
+   "type": "uuid"
+  },
+  "program_id": {
+   "type": "uuid",
+   "fk": [
+    "saem_programs",
+    "id"
+   ]
+  },
+  "session_no": {
+   "type": "integer"
+  },
+  "session_date": {
+   "type": "date"
+  },
+  "plan_content": {
+   "type": "text"
+  },
+  "log_content": {
+   "type": "text"
+  },
+  "note": {
+   "type": "text"
+  },
+  "student_count": {
+   "type": "integer"
+  },
+  "work_hours": {
+   "type": "numeric"
+  },
+  "instructor_submitted_at": {
+   "type": "timestamp with time zone"
+  },
+  "staff_confirmed_at": {
+   "type": "timestamp with time zone"
+  },
+  "confirmed_by": {
+   "type": "text"
+  },
+  "settlement_id": {
+   "type": "uuid",
+   "fk": [
+    "saem_settlements",
+    "id"
+   ]
+  },
+  "instructor_signed_at": {
+   "type": "timestamp with time zone"
+  },
+  "activity_location": {
+   "type": "text"
+  },
+  "first_submitted_at": {
+   "type": "timestamp with time zone"
+  },
+  "log_updated_at": {
+   "type": "timestamp with time zone"
+  }
+ },
+ "yangjeong_drivers": {
+  "id": {
+   "type": "uuid"
+  },
+  "name": {
+   "type": "text"
+  },
+  "password": {
+   "type": "text"
+  },
+  "created_at": {
+   "type": "timestamp with time zone"
+  }
+ },
+ "saem_attendance": {
+  "id": {
+   "type": "uuid"
+  },
+  "session_id": {
+   "type": "uuid",
+   "fk": [
+    "saem_sessions",
+    "id"
+   ]
+  },
+  "enrollment_id": {
+   "type": "uuid",
+   "fk": [
+    "saem_enrollments",
+    "id"
+   ]
+  },
+  "status": {
+   "type": "text"
+  },
+  "checked_by": {
+   "type": "text"
+  },
+  "checked_at": {
+   "type": "timestamp with time zone"
+  }
+ },
+ "business_programs": {
+  "id": {
+   "type": "uuid"
+  },
+  "category_id": {
+   "type": "uuid",
+   "fk": [
+    "business_categories",
+    "id"
+   ]
+  },
+  "name": {
+   "type": "text"
+  },
+  "sort_order": {
+   "type": "integer"
+  },
+  "is_active": {
+   "type": "boolean"
+  },
+  "created_at": {
+   "type": "timestamp with time zone"
+  }
+ },
+ "profiles": {
+  "id": {
+   "type": "uuid"
+  },
+  "name": {
+   "type": "text"
+  },
+  "phone": {
+   "type": "text"
+  },
+  "birthdate": {
+   "type": "text"
+  },
+  "created_at": {
+   "type": "timestamp with time zone"
+  }
+ },
+ "organization_logos": {
+  "center_id": {
+   "type": "integer"
+  },
+  "logo_url": {
+   "type": "text"
+  }
+ },
+ "employment_contracts": {
+  "id": {
+   "type": "uuid"
+  },
+  "driver_id": {
+   "type": "uuid",
+   "fk": [
+    "drivers",
+    "id"
+   ]
+  },
+  "contract_start": {
+   "type": "date"
+  },
+  "contract_end": {
+   "type": "date"
+  },
+  "position": {
+   "type": "text"
+  },
+  "work_hours": {
+   "type": "text"
+  },
+  "work_days": {
+   "type": "text"
+  },
+  "weekly_hours": {
+   "type": "integer"
+  },
+  "workplace": {
+   "type": "text"
+  },
+  "break_time": {
+   "type": "text"
+  },
+  "payment_day": {
+   "type": "text"
+  },
+  "contract_pdf_url": {
+   "type": "text"
+  },
+  "signed_by_employee": {
+   "type": "text"
+  },
+  "signed_by_employer": {
+   "type": "text"
+  },
+  "signed_at": {
+   "type": "timestamp with time zone"
+  },
+  "created_at": {
+   "type": "timestamp with time zone"
+  },
+  "department": {
+   "type": "text"
+  },
+  "duty_content": {
+   "type": "text"
+  },
+  "probation_start": {
+   "type": "date"
+  },
+  "probation_end": {
+   "type": "date"
+  },
+  "contract_type": {
+   "type": "text"
+  },
+  "status": {
+   "type": "text"
+  },
+  "employee_signature": {
+   "type": "text"
+  },
+  "employee_signed_at": {
+   "type": "timestamp with time zone"
+  },
+  "employer_signed_at": {
+   "type": "timestamp with time zone"
+  },
+  "sent_at": {
+   "type": "timestamp with time zone"
+  },
+  "delivered_at": {
+   "type": "timestamp with time zone"
+  },
+  "created_by": {
+   "type": "text"
+  },
+  "signing_method": {
+   "type": "text"
+  },
+  "document_file_id": {
+   "type": "uuid",
+   "fk": [
+    "employee_document_files",
+    "id"
+   ]
+  },
+  "note": {
+   "type": "text"
+  },
+  "contract_date": {
+   "type": "date"
+  }
+ },
+ "recruitment_applicants": {
+  "id": {
+   "type": "uuid"
+  },
+  "applicant_number": {
+   "type": "text"
+  },
+  "name": {
+   "type": "text"
+  },
+  "name_hanja": {
+   "type": "text"
+  },
+  "birth_date": {
+   "type": "date"
+  },
+  "gender": {
+   "type": "text"
+  },
+  "address": {
+   "type": "text"
+  },
+  "email": {
+   "type": "text"
+  },
+  "phone": {
+   "type": "text"
+  },
+  "photo_url": {
+   "type": "text"
+  },
+  "education": {
+   "type": "jsonb"
+  },
+  "licenses": {
+   "type": "jsonb"
+  },
+  "career": {
+   "type": "jsonb"
+  },
+  "awards": {
+   "type": "jsonb"
+  },
+  "trainings": {
+   "type": "jsonb"
+  },
+  "motivation": {
+   "type": "text"
+  },
+  "self_development": {
+   "type": "text"
+  },
+  "career_summary": {
+   "type": "text"
+  },
+  "philosophy": {
+   "type": "text"
+  },
+  "documents": {
+   "type": "jsonb"
+  },
+  "agreed_privacy": {
+   "type": "boolean"
+  },
+  "agreed_criminal_check": {
+   "type": "boolean"
+  },
+  "agreed_truth": {
+   "type": "boolean"
+  },
+  "created_at": {
+   "type": "timestamp with time zone"
+  },
+  "updated_at": {
+   "type": "timestamp with time zone"
+  },
+  "kakao_id": {
+   "type": "text"
+  },
+  "agreed_unique_id": {
+   "type": "boolean"
+  },
+  "consent_signature": {
+   "type": "text"
+  },
+  "consent_signature_type": {
+   "type": "text"
+  },
+  "consent_snapshot": {
+   "type": "jsonb"
+  },
+  "consent_at": {
+   "type": "timestamp with time zone"
+  }
+ },
+ "press_reporters": {
+  "id": {
+   "type": "uuid"
+  },
+  "name": {
+   "type": "text"
+  },
+  "email": {
+   "type": "text"
+  },
+  "outlet": {
+   "type": "text"
+  },
+  "first_seen_at": {
+   "type": "date"
+  },
+  "last_article_at": {
+   "type": "date"
+  },
+  "last_article_title": {
+   "type": "text"
+  },
+  "last_article_url": {
+   "type": "text"
+  },
+  "article_count": {
+   "type": "integer"
+  },
+  "phone": {
+   "type": "text"
+  },
+  "beat": {
+   "type": "text"
+  },
+  "memo": {
+   "type": "text"
+  },
+  "receive_press_release": {
+   "type": "boolean"
+  },
+  "last_thanks_sent_at": {
+   "type": "date"
+  },
+  "source": {
+   "type": "text"
+  },
+  "created_at": {
+   "type": "timestamp with time zone"
+  },
+  "updated_at": {
+   "type": "timestamp with time zone"
+  },
+  "pending_email": {
+   "type": "text"
+  },
+  "pending_email_url": {
+   "type": "text"
+  },
+  "pending_email_at": {
+   "type": "timestamp with time zone"
+  }
+ },
+ "leave_plan_requests": {
+  "id": {
+   "type": "uuid"
+  },
+  "year": {
+   "type": "integer"
+  },
+  "employee_id": {
+   "type": "uuid"
+  },
+  "unused_days": {
+   "type": "numeric"
+  },
+  "period_start": {
+   "type": "date"
+  },
+  "period_end": {
+   "type": "date"
+  },
+  "plan": {
+   "type": "jsonb"
+  },
+  "total_days": {
+   "type": "numeric"
+  },
+  "submitted_at": {
+   "type": "timestamp with time zone"
+  },
+  "issued_by": {
+   "type": "text"
+  },
+  "created_at": {
+   "type": "timestamp with time zone"
+  }
+ },
+ "settings": {
+  "id": {
+   "type": "uuid"
+  },
+  "key": {
+   "type": "text"
+  },
+  "value": {
+   "type": "text"
+  }
+ },
+ "report_rooms": {
+  "id": {
+   "type": "uuid"
+  },
+  "floor": {
+   "type": "text"
+  },
+  "name": {
+   "type": "text"
+  },
+  "sort_order": {
+   "type": "integer"
+  },
+  "is_active": {
+   "type": "boolean"
+  }
+ },
+ "bk_guardian_students": {
+  "guardian_id": {
+   "type": "uuid",
+   "fk": [
+    "bk_guardians",
+    "id"
+   ]
+  },
+  "student_id": {
+   "type": "uuid",
+   "fk": [
+    "bk_students",
+    "id"
+   ]
+  },
+  "is_primary": {
+   "type": "boolean"
+  },
+  "created_at": {
+   "type": "timestamp with time zone"
+  }
+ },
+ "file_backup_runs": {
+  "id": {
+   "type": "uuid"
+  },
+  "started_at": {
+   "type": "timestamp with time zone"
+  },
+  "finished_at": {
+   "type": "timestamp with time zone"
+  },
+  "status": {
+   "type": "text"
+  },
+  "triggered_by": {
+   "type": "text"
+  },
+  "scanned": {
+   "type": "integer"
+  },
+  "uploaded": {
+   "type": "integer"
+  },
+  "updated": {
+   "type": "integer"
+  },
+  "bytes_uploaded": {
+   "type": "bigint"
+  },
+  "remaining": {
+   "type": "integer"
+  },
+  "error_message": {
+   "type": "text"
+  }
+ },
+ "facility_assets": {
+  "id": {
+   "type": "uuid"
+  },
+  "acquired_on": {
+   "type": "date"
+  },
+  "item_name": {
+   "type": "text"
+  },
+  "spec": {
+   "type": "text"
+  },
+  "location": {
+   "type": "text"
+  },
+  "unit": {
+   "type": "text"
+  },
+  "quantity": {
+   "type": "integer"
+  },
+  "unit_price": {
+   "type": "numeric"
+  },
+  "amount": {
+   "type": "numeric"
+  },
+  "useful_life_years": {
+   "type": "integer"
+  },
+  "disposal_scheduled_on": {
+   "type": "date"
+  },
+  "budget_source": {
+   "type": "text"
+  },
+  "is_registered": {
+   "type": "boolean"
+  },
+  "disposed_on": {
+   "type": "date"
+  },
+  "classification_no": {
+   "type": "text"
+  },
+  "note": {
+   "type": "text"
+  },
+  "created_by": {
+   "type": "text"
+  },
+  "created_at": {
+   "type": "timestamp with time zone"
+  },
+  "updated_at": {
+   "type": "timestamp with time zone"
+  },
+  "acquisition_type": {
+   "type": "text"
+  }
+ },
+ "reports": {
+  "id": {
+   "type": "uuid"
+  },
+  "scope": {
+   "type": "text"
+  },
+  "center_id": {
+   "type": "integer"
+  },
+  "title": {
+   "type": "text"
+  },
+  "content_md": {
+   "type": "text"
+  },
+  "created_by": {
+   "type": "text"
+  },
+  "created_at": {
+   "type": "timestamp with time zone"
+  }
+ },
+ "facility_locations": {
+  "id": {
+   "type": "uuid"
+  },
+  "name": {
+   "type": "text"
+  },
+  "sort_order": {
+   "type": "integer"
+  },
+  "is_active": {
+   "type": "boolean"
+  },
+  "created_at": {
+   "type": "timestamp with time zone"
+  }
+ },
+ "recruitment_interview_scores": {
+  "id": {
+   "type": "uuid"
+  },
+  "application_id": {
+   "type": "uuid",
+   "fk": [
+    "recruitment_applications",
+    "id"
+   ]
+  },
+  "judge_id": {
+   "type": "uuid",
+   "fk": [
+    "recruitment_judges",
+    "id"
+   ]
+  },
+  "score_understanding": {
+   "type": "integer"
+  },
+  "score_aptitude": {
+   "type": "integer"
+  },
+  "score_sincerity": {
+   "type": "integer"
+  },
+  "score_initiative": {
+   "type": "integer"
+  },
+  "total_score": {
+   "type": "integer"
+  },
+  "is_absent": {
+   "type": "boolean"
+  },
+  "memo": {
+   "type": "text"
+  },
+  "signed_at": {
+   "type": "timestamp with time zone"
+  },
+  "created_at": {
+   "type": "timestamp with time zone"
+  },
+  "updated_at": {
+   "type": "timestamp with time zone"
+  }
+ },
+ "hr_disciplines": {
+  "id": {
+   "type": "uuid"
+  },
+  "driver_id": {
+   "type": "uuid"
+  },
+  "kind": {
+   "type": "text"
+  },
+  "decided_on": {
+   "type": "date"
+  },
+  "effective_start": {
+   "type": "date"
+  },
+  "effective_end": {
+   "type": "date"
+  },
+  "reason": {
+   "type": "text"
+  },
+  "rule_basis": {
+   "type": "text"
+  },
+  "committee_id": {
+   "type": "uuid"
+  },
+  "notified_on": {
+   "type": "date"
+  },
+  "appeal_due_on": {
+   "type": "date"
+  },
+  "appeal_filed_on": {
+   "type": "date"
+  },
+  "appeal_result": {
+   "type": "text"
+  },
+  "promotion_block_until": {
+   "type": "date"
+  },
+  "attachment_path": {
+   "type": "text"
+  },
+  "created_by": {
+   "type": "text"
+  },
+  "created_at": {
+   "type": "timestamp with time zone"
+  },
+  "updated_at": {
+   "type": "timestamp with time zone"
+  }
+ },
+ "safety_checks": {
+  "id": {
+   "type": "uuid"
+  },
+  "check_year": {
+   "type": "integer"
+  },
+  "check_month": {
+   "type": "integer"
+  },
+  "checked_on": {
+   "type": "date"
+  },
+  "inspector": {
+   "type": "text"
+  },
+  "status": {
+   "type": "text"
+  },
+  "created_by": {
+   "type": "text"
+  },
+  "created_at": {
+   "type": "timestamp with time zone"
+  },
+  "updated_at": {
+   "type": "timestamp with time zone"
+  }
+ },
+ "mail_messages_backup_20260901": {
+  "id": {
+   "type": "uuid"
+  },
+  "pop_uid": {
+   "type": "text"
+  },
+  "message_id": {
+   "type": "text"
+  },
+  "from_name": {
+   "type": "text"
+  },
+  "from_email": {
+   "type": "text"
+  },
+  "subject": {
+   "type": "text"
+  },
+  "body_text": {
+   "type": "text"
+  },
+  "body_html": {
+   "type": "text"
+  },
+  "received_at": {
+   "type": "timestamp with time zone"
+  },
+  "fetched_at": {
+   "type": "timestamp with time zone"
+  },
+  "has_attachments": {
+   "type": "boolean"
+  },
+  "attachments": {
+   "type": "jsonb"
+  },
+  "assignee_name": {
+   "type": "text"
+  },
+  "status": {
+   "type": "text"
+  },
+  "memo": {
+   "type": "text"
+  },
+  "gmail_copied_at": {
+   "type": "timestamp with time zone"
+  },
+  "naver_deleted_at": {
+   "type": "timestamp with time zone"
+  },
+  "ai_summary": {
+   "type": "text"
+  },
+  "ai_category": {
+   "type": "text"
+  },
+  "ai_suggested_assignee": {
+   "type": "text"
+  },
+  "ai_processed_at": {
+   "type": "timestamp with time zone"
+  },
+  "deleted_at": {
+   "type": "timestamp with time zone"
+  },
+  "opened_at": {
+   "type": "timestamp with time zone"
+  }
+ },
+ "bk_absences": {
+  "id": {
+   "type": "uuid"
+  },
+  "student_id": {
+   "type": "uuid",
+   "fk": [
+    "bk_students",
+    "id"
+   ]
+  },
+  "start_date": {
+   "type": "date"
+  },
+  "end_date": {
+   "type": "date"
+  },
+  "reason_type": {
+   "type": "text"
+  },
+  "reason": {
+   "type": "text"
+  },
+  "confirmer_type": {
+   "type": "text"
+  },
+  "confirmer_other": {
+   "type": "text"
+  },
+  "confirmer_name": {
+   "type": "text"
+  },
+  "guardian_id": {
+   "type": "uuid",
+   "fk": [
+    "bk_guardians",
+    "id"
+   ]
+  },
+  "signature_path": {
+   "type": "text"
+  },
+  "channel": {
+   "type": "text"
+  },
+  "received_by": {
+   "type": "text"
+  },
+  "status": {
+   "type": "text"
+  },
+  "teacher_checked_by": {
+   "type": "text"
+  },
+  "teacher_checked_at": {
+   "type": "timestamp with time zone"
+  },
+  "approved_by": {
+   "type": "text"
+  },
+  "approved_at": {
+   "type": "timestamp with time zone"
+  },
+  "reject_reason": {
+   "type": "text"
+  },
+  "confirmed_on": {
+   "type": "date"
+  },
+  "created_at": {
+   "type": "timestamp with time zone"
+  },
+  "updated_at": {
+   "type": "timestamp with time zone"
+  }
+ },
+ "business_program_rental_links": {
+  "id": {
+   "type": "uuid"
+  },
+  "program_id": {
+   "type": "uuid",
+   "fk": [
+    "business_programs",
+    "id"
+   ]
+  },
+  "rental_program_name": {
+   "type": "text"
+  },
+  "rental_space_name": {
+   "type": "text"
+  },
+  "count_mode": {
+   "type": "text"
+  },
+  "default_audience": {
+   "type": "text"
+  },
+  "start_month": {
+   "type": "date"
+  },
+  "is_active": {
+   "type": "boolean"
+  },
+  "created_by": {
+   "type": "text"
+  },
+  "created_at": {
+   "type": "timestamp with time zone"
+  },
+  "updated_at": {
+   "type": "timestamp with time zone"
+  }
+ },
+ "bk_post_files": {
+  "id": {
+   "type": "uuid"
+  },
+  "post_id": {
+   "type": "uuid",
+   "fk": [
+    "bk_posts",
+    "id"
+   ]
+  },
+  "kind": {
+   "type": "text"
+  },
+  "path": {
+   "type": "text"
+  },
+  "name": {
+   "type": "text"
+  },
+  "mime": {
+   "type": "text"
+  },
+  "size": {
+   "type": "bigint"
+  },
+  "width": {
+   "type": "integer"
+  },
+  "height": {
+   "type": "integer"
+  },
+  "sort_order": {
+   "type": "integer"
+  },
+  "created_at": {
+   "type": "timestamp with time zone"
+  }
+ },
+ "certificates_issued": {
+  "id": {
+   "type": "uuid"
+  },
+  "driver_id": {
+   "type": "uuid",
+   "fk": [
+    "drivers",
+    "id"
+   ]
+  },
+  "certificate_type": {
+   "type": "text"
+  },
+  "issue_number": {
+   "type": "text"
+  },
+  "year": {
+   "type": "integer"
+  },
+  "year_seq": {
+   "type": "integer"
+  },
+  "issue_date": {
+   "type": "date"
+  },
+  "purpose": {
+   "type": "text"
+  },
+  "department": {
+   "type": "text"
+  },
+  "position_detail": {
+   "type": "text"
+  },
+  "period_from": {
+   "type": "date"
+  },
+  "period_to": {
+   "type": "date"
+  },
+  "duration": {
+   "type": "text"
+  },
+  "issued_by": {
+   "type": "text"
+  },
+  "pdf_url": {
+   "type": "text"
+  },
+  "created_at": {
+   "type": "timestamp with time zone"
+  }
+ },
+ "mutual_members": {
+  "id": {
+   "type": "uuid"
+  },
+  "employee_id": {
+   "type": "uuid"
+  },
+  "status": {
+   "type": "text"
+  },
+  "joined_on": {
+   "type": "date"
+  },
+  "left_on": {
+   "type": "date"
+  },
+  "memo": {
+   "type": "text"
+  },
+  "created_at": {
+   "type": "timestamp with time zone"
+  }
+ },
+ "staff_training_results": {
+  "id": {
+   "type": "uuid"
+  },
+  "report_year": {
+   "type": "integer"
+  },
+  "report_month": {
+   "type": "integer"
+  },
+  "training_date": {
+   "type": "date"
+  },
+  "staff_name": {
+   "type": "text"
+  },
+  "training_name": {
+   "type": "text"
+  },
+  "location": {
+   "type": "text"
+  },
+  "organizer": {
+   "type": "text"
+  },
+  "hours": {
+   "type": "text"
+  },
+  "source": {
+   "type": "text"
+  },
+  "source_completion_id": {
+   "type": "uuid"
+  },
+  "author_name": {
+   "type": "text"
+  },
+  "created_at": {
+   "type": "timestamp with time zone"
+  },
+  "updated_at": {
+   "type": "timestamp with time zone"
+  },
+  "updated_by": {
+   "type": "text"
+  },
+  "training_end_date": {
+   "type": "date"
+  }
+ },
+ "salary_contracts": {
+  "id": {
+   "type": "uuid"
+  },
+  "driver_id": {
+   "type": "uuid",
+   "fk": [
+    "drivers",
+    "id"
+   ]
+  },
+  "year": {
+   "type": "integer"
+  },
+  "period_start": {
+   "type": "date"
+  },
+  "period_end": {
+   "type": "date"
+  },
+  "base_salary": {
+   "type": "bigint"
+  },
+  "meal_allowance": {
+   "type": "bigint"
+  },
+  "qualification_allowance": {
+   "type": "bigint"
+  },
+  "family_allowance": {
+   "type": "bigint"
+  },
+  "management_allowance": {
+   "type": "bigint"
+  },
+  "holiday_bonus": {
+   "type": "bigint"
+  },
+  "transport_allowance": {
+   "type": "bigint"
+  },
+  "total_annual": {
+   "type": "bigint"
+  },
+  "contract_pdf_url": {
+   "type": "text"
+  },
+  "signed_at": {
+   "type": "timestamp with time zone"
+  },
+  "created_at": {
+   "type": "timestamp with time zone"
+  },
+  "segments": {
+   "type": "jsonb"
+  },
+  "amount_in_korean": {
+   "type": "text"
+  },
+  "issued_at": {
+   "type": "timestamp with time zone"
+  },
+  "issued_by": {
+   "type": "text"
+  },
+  "status": {
+   "type": "text"
+  },
+  "employee_signature": {
+   "type": "text"
+  },
+  "employee_signed_at": {
+   "type": "timestamp with time zone"
+  },
+  "employer_signed_at": {
+   "type": "timestamp with time zone"
+  },
+  "sent_at": {
+   "type": "timestamp with time zone"
+  },
+  "delivered_at": {
+   "type": "timestamp with time zone"
+  },
+  "created_by": {
+   "type": "text"
+  },
+  "signing_method": {
+   "type": "text"
+  },
+  "employer_title": {
+   "type": "text"
+  },
+  "note": {
+   "type": "text"
+  },
+  "contract_date": {
+   "type": "date"
+  }
+ },
+ "admins": {
+  "id": {
+   "type": "uuid"
+  },
+  "name": {
+   "type": "text"
+  },
+  "center_id": {
+   "type": "integer"
+  },
+  "center_name": {
+   "type": "text"
+  },
+  "phone": {
+   "type": "text"
+  },
+  "password": {
+   "type": "text"
+  },
+  "role": {
+   "type": "text"
+  },
+  "created_at": {
+   "type": "timestamp with time zone"
+  }
+ },
+ "bk_post_reads": {
+  "post_id": {
+   "type": "uuid",
+   "fk": [
+    "bk_posts",
+    "id"
+   ]
+  },
+  "guardian_id": {
+   "type": "uuid",
+   "fk": [
+    "bk_guardians",
+    "id"
+   ]
+  },
+  "read_at": {
+   "type": "timestamp with time zone"
+  }
+ },
+ "saem_instructors": {
+  "id": {
+   "type": "uuid"
+  },
+  "name": {
+   "type": "text"
+  },
+  "phone": {
+   "type": "text"
+  },
+  "email": {
+   "type": "text"
+  },
+  "bank_name": {
+   "type": "text"
+  },
+  "bank_account": {
+   "type": "text"
+  },
+  "account_holder": {
+   "type": "text"
+  },
+  "password_hash": {
+   "type": "text"
+  },
+  "password_set_at": {
+   "type": "timestamp with time zone"
+  },
+  "invite_token": {
+   "type": "text"
+  },
+  "invite_expires_at": {
+   "type": "timestamp with time zone"
+  },
+  "status": {
+   "type": "text"
+  },
+  "memo": {
+   "type": "text"
+  },
+  "created_at": {
+   "type": "timestamp with time zone"
+  },
+  "must_change_password": {
+   "type": "boolean"
+  },
+  "resume_data": {
+   "type": "jsonb"
+  },
+  "signature_data": {
+   "type": "text"
+  },
+  "account_type": {
+   "type": "text"
+  },
+  "rrn_enc": {
+   "type": "text"
+  },
+  "rrn_mask": {
+   "type": "text"
+  },
+  "rrn_updated_at": {
+   "type": "timestamp with time zone"
+  }
+ },
+ "drivers": {
+  "id": {
+   "type": "uuid"
+  },
+  "name": {
+   "type": "text"
+  },
+  "password": {
+   "type": "text"
+  },
+  "created_at": {
+   "type": "timestamp with time zone"
+  },
+  "rank": {
+   "type": "text"
+  },
+  "is_active": {
+   "type": "boolean"
+  },
+  "must_change_password": {
+   "type": "boolean"
+  },
+  "password_changed_at": {
+   "type": "timestamp with time zone"
+  },
+  "pin_hash": {
+   "type": "text"
+  },
+  "pin_failed_count": {
+   "type": "integer"
+  },
+  "pin_locked_until": {
+   "type": "timestamp with time zone"
+  },
+  "pin_set_at": {
+   "type": "timestamp with time zone"
+  }
+ },
+ "saem_club_budget_plans": {
+  "id": {
+   "type": "uuid"
+  },
+  "program_id": {
+   "type": "uuid",
+   "fk": [
+    "saem_programs",
+    "id"
+   ]
+  },
+  "plan_year": {
+   "type": "integer"
+  },
+  "budget_category": {
+   "type": "text"
+  },
+  "description": {
+   "type": "text"
+  },
+  "amount": {
+   "type": "integer"
+  },
+  "sort_order": {
+   "type": "integer"
+  },
+  "created_by": {
+   "type": "text"
+  },
+  "created_at": {
+   "type": "timestamp with time zone"
+  },
+  "updated_at": {
+   "type": "timestamp with time zone"
+  }
+ },
+ "org_agreements": {
+  "id": {
+   "type": "uuid"
+  },
+  "partner_name": {
+   "type": "text"
+  },
+  "business_partner_id": {
+   "type": "uuid",
+   "fk": [
+    "business_partners",
+    "id"
+   ]
+  },
+  "agreed_on": {
+   "type": "date"
+  },
+  "content": {
+   "type": "text"
+  },
+  "period_start": {
+   "type": "date"
+  },
+  "period_end": {
+   "type": "date"
+  },
+  "status": {
+   "type": "text"
+  },
+  "manager_driver_id": {
+   "type": "uuid",
+   "fk": [
+    "drivers",
+    "id"
+   ]
+  },
+  "file_path": {
+   "type": "text"
+  },
+  "memo": {
+   "type": "text"
+  },
+  "created_by": {
+   "type": "text"
+  },
+  "created_at": {
+   "type": "timestamp with time zone"
+  },
+  "updated_at": {
+   "type": "timestamp with time zone"
+  }
+ },
+ "business_result_rooms": {
+  "id": {
+   "type": "uuid"
+  },
+  "result_id": {
+   "type": "uuid",
+   "fk": [
+    "business_results",
+    "id"
+   ]
+  },
+  "room_id": {
+   "type": "uuid",
+   "fk": [
+    "report_rooms",
+    "id"
+   ]
+  },
+  "youth_count": {
+   "type": "integer"
+  },
+  "other_count": {
+   "type": "integer"
+  }
+ },
+ "saem_terms": {
+  "id": {
+   "type": "uuid"
+  },
+  "project_id": {
+   "type": "uuid",
+   "fk": [
+    "saem_projects",
+    "id"
+   ]
+  },
+  "name": {
+   "type": "text"
+  },
+  "start_date": {
+   "type": "date"
+  },
+  "end_date": {
+   "type": "date"
+  },
+  "status": {
+   "type": "text"
+  },
+  "created_at": {
+   "type": "timestamp with time zone"
+  },
+  "default_weekday": {
+   "type": "integer"
+  },
+  "default_weeks": {
+   "type": "integer"
+  },
+  "default_holidays": {
+   "type": "date[]",
+   "items": "string"
+  }
+ },
+ "yangjeong_settings": {
+  "id": {
+   "type": "uuid"
+  },
+  "key": {
+   "type": "text"
+  },
+  "value": {
+   "type": "text"
+  },
+  "updated_at": {
+   "type": "timestamp with time zone"
+  }
+ },
+ "saem_instructor_documents": {
+  "id": {
+   "type": "uuid"
+  },
+  "instructor_id": {
+   "type": "uuid",
+   "fk": [
+    "saem_instructors",
+    "id"
+   ]
+  },
+  "slot": {
+   "type": "text"
+  },
+  "file_path": {
+   "type": "text"
+  },
+  "original_name": {
+   "type": "text"
+  },
+  "uploaded_by": {
+   "type": "text"
+  },
+  "created_at": {
+   "type": "timestamp with time zone"
+  },
+  "issued_on": {
+   "type": "date"
+  }
+ },
+ "business_cards": {
+  "id": {
+   "type": "uuid"
+  },
+  "company": {
+   "type": "text"
+  },
+  "department": {
+   "type": "text"
+  },
+  "title": {
+   "type": "text"
+  },
+  "person_name": {
+   "type": "text"
+  },
+  "mobile": {
+   "type": "text"
+  },
+  "phone": {
+   "type": "text"
+  },
+  "fax": {
+   "type": "text"
+  },
+  "email": {
+   "type": "text"
+  },
+  "address": {
+   "type": "text"
+  },
+  "website": {
+   "type": "text"
+  },
+  "memo": {
+   "type": "text"
+  },
+  "image_path": {
+   "type": "text"
+  },
+  "ocr_raw": {
+   "type": "jsonb"
+  },
+  "registered_by": {
+   "type": "text"
+  },
+  "created_at": {
+   "type": "timestamp with time zone"
+  },
+  "updated_at": {
+   "type": "timestamp with time zone"
+  },
+  "partner_id": {
+   "type": "uuid",
+   "fk": [
+    "business_partners",
+    "id"
+   ]
+  },
+  "category": {
+   "type": "text"
+  },
+  "is_private": {
+   "type": "boolean"
+  }
+ },
+ "recruitment_document_scores": {
+  "id": {
+   "type": "uuid"
+  },
+  "application_id": {
+   "type": "uuid",
+   "fk": [
+    "recruitment_applications",
+    "id"
+   ]
+  },
+  "judge_id": {
+   "type": "uuid",
+   "fk": [
+    "recruitment_judges",
+    "id"
+   ]
+  },
+  "score_degree": {
+   "type": "integer"
+  },
+  "score_grade": {
+   "type": "integer"
+  },
+  "score_youth_license": {
+   "type": "integer"
+  },
+  "score_other_license": {
+   "type": "integer"
+  },
+  "score_self_intro": {
+   "type": "integer"
+  },
+  "score_qualitative": {
+   "type": "integer"
+  },
+  "total_score": {
+   "type": "integer"
+  },
+  "is_disqualified": {
+   "type": "boolean"
+  },
+  "disqualified_reason": {
+   "type": "text"
+  },
+  "memo": {
+   "type": "text"
+  },
+  "signed_at": {
+   "type": "timestamp with time zone"
+  },
+  "created_at": {
+   "type": "timestamp with time zone"
+  },
+  "updated_at": {
+   "type": "timestamp with time zone"
+  }
+ },
+ "credential_viewers": {
+  "id": {
+   "type": "uuid"
+  },
+  "credential_id": {
+   "type": "uuid",
+   "fk": [
+    "shared_credentials",
+    "id"
+   ]
+  },
+  "driver_id": {
+   "type": "uuid"
+  },
+  "created_at": {
+   "type": "timestamp with time zone"
+  }
+ },
+ "business_results": {
+  "id": {
+   "type": "uuid"
+  },
+  "report_year": {
+   "type": "integer"
+  },
+  "report_month": {
+   "type": "integer"
+  },
+  "category": {
+   "type": "text"
+  },
+  "program_name": {
+   "type": "text"
+  },
+  "sessions": {
+   "type": "integer"
+  },
+  "participants": {
+   "type": "integer"
+  },
+  "attendance": {
+   "type": "integer"
+  },
+  "youth_uses": {
+   "type": "integer"
+  },
+  "other_uses": {
+   "type": "integer"
+  },
+  "summary": {
+   "type": "text"
+  },
+  "evaluation": {
+   "type": "text"
+  },
+  "status": {
+   "type": "text"
+  },
+  "author_name": {
+   "type": "text"
+  },
+  "updated_by": {
+   "type": "text"
+  },
+  "created_at": {
+   "type": "timestamp with time zone"
+  },
+  "updated_at": {
+   "type": "timestamp with time zone"
+  },
+  "manager": {
+   "type": "text"
+  },
+  "detail_rows": {
+   "type": "jsonb"
+  },
+  "program_id": {
+   "type": "uuid",
+   "fk": [
+    "business_programs",
+    "id"
+   ]
+  },
+  "manager_name": {
+   "type": "text"
+  },
+  "operating_days": {
+   "type": "integer"
+  },
+  "participants_youth": {
+   "type": "integer"
+  },
+  "participants_other": {
+   "type": "integer"
+  },
+  "attendance_youth": {
+   "type": "integer"
+  },
+  "attendance_other": {
+   "type": "integer"
+  },
+  "source_type": {
+   "type": "text"
+  },
+  "source_key": {
+   "type": "text"
+  },
+  "manual_override": {
+   "type": "boolean"
+  },
+  "source_snapshot": {
+   "type": "jsonb"
+  },
+  "source_synced_at": {
+   "type": "timestamp with time zone"
+  }
+ },
+ "payroll_records": {
+  "id": {
+   "type": "uuid"
+  },
+  "driver_id": {
+   "type": "uuid",
+   "fk": [
+    "drivers",
+    "id"
+   ]
+  },
+  "year": {
+   "type": "integer"
+  },
+  "month": {
+   "type": "integer"
+  },
+  "pay_items": {
+   "type": "jsonb"
+  },
+  "deduct_items": {
+   "type": "jsonb"
+  },
+  "total_pay": {
+   "type": "integer"
+  },
+  "total_deduct": {
+   "type": "integer"
+  },
+  "net_pay": {
+   "type": "integer"
+  },
+  "confirmed_at": {
+   "type": "timestamp with time zone"
+  },
+  "confirmed_by": {
+   "type": "text"
+  },
+  "emailed_at": {
+   "type": "timestamp with time zone"
+  },
+  "created_at": {
+   "type": "timestamp with time zone"
+  }
+ },
+ "backup_logs": {
+  "id": {
+   "type": "uuid"
+  },
+  "started_at": {
+   "type": "timestamp with time zone"
+  },
+  "finished_at": {
+   "type": "timestamp with time zone"
+  },
+  "status": {
+   "type": "text"
+  },
+  "table_count": {
+   "type": "integer"
+  },
+  "total_rows": {
+   "type": "bigint"
+  },
+  "file_name": {
+   "type": "text"
+  },
+  "file_size_bytes": {
+   "type": "bigint"
+  },
+  "drive_file_id": {
+   "type": "text"
+  },
+  "error_message": {
+   "type": "text"
+  },
+  "triggered_by": {
+   "type": "text"
+  },
+  "notes": {
+   "type": "text"
+  }
+ },
+ "shared_credentials": {
+  "id": {
+   "type": "uuid"
+  },
+  "name": {
+   "type": "text"
+  },
+  "category": {
+   "type": "text"
+  },
+  "account": {
+   "type": "text"
+  },
+  "password_encrypted": {
+   "type": "text"
+  },
+  "url": {
+   "type": "text"
+  },
+  "memo": {
+   "type": "text"
+  },
+  "created_by": {
+   "type": "text"
+  },
+  "created_at": {
+   "type": "timestamp with time zone"
+  },
+  "updated_at": {
+   "type": "timestamp with time zone"
+  },
+  "created_by_driver_id": {
+   "type": "uuid",
+   "fk": [
+    "drivers",
+    "id"
+   ]
+  }
+ },
+ "announcements": {
+  "id": {
+   "type": "uuid"
+  },
+  "title": {
+   "type": "text"
+  },
+  "content": {
+   "type": "text"
+  },
+  "author_driver_id": {
+   "type": "uuid",
+   "fk": [
+    "drivers",
+    "id"
+   ]
+  },
+  "author_name": {
+   "type": "text"
+  },
+  "is_pinned": {
+   "type": "boolean"
+  },
+  "target_scope": {
+   "type": "text"
+  },
+  "attachments": {
+   "type": "jsonb"
+  },
+  "notified_slack": {
+   "type": "boolean"
+  },
+  "created_at": {
+   "type": "timestamp with time zone"
+  },
+  "updated_at": {
+   "type": "timestamp with time zone"
+  }
+ },
+ "recruitment_judges": {
+  "id": {
+   "type": "uuid"
+  },
+  "posting_id": {
+   "type": "uuid",
+   "fk": [
+    "recruitment_postings",
+    "id"
+   ]
+  },
+  "name": {
+   "type": "text"
+  },
+  "role": {
+   "type": "text"
+  },
+  "affiliation": {
+   "type": "text"
+  },
+  "judge_type": {
+   "type": "text"
+  },
+  "driver_id": {
+   "type": "uuid",
+   "fk": [
+    "drivers",
+    "id"
+   ]
+  },
+  "is_active": {
+   "type": "boolean"
+  },
+  "display_order": {
+   "type": "integer"
+  },
+  "created_at": {
+   "type": "timestamp with time zone"
+  },
+  "updated_at": {
+   "type": "timestamp with time zone"
+  },
+  "created_by": {
+   "type": "text"
+  },
+  "external_pool_id": {
+   "type": "uuid",
+   "fk": [
+    "external_judges_pool",
+    "id"
+   ]
+  }
+ },
+ "centers": {
+  "id": {
+   "type": "integer"
+  },
+  "name": {
+   "type": "text"
+  },
+  "program_url": {
+   "type": "text"
+  },
+  "updated_at": {
+   "type": "timestamp with time zone"
+  }
+ },
+ "mutual_ledger": {
+  "id": {
+   "type": "uuid"
+  },
+  "entry_date": {
+   "type": "date"
+  },
+  "kind": {
+   "type": "text"
+  },
+  "category": {
+   "type": "text"
+  },
+  "description": {
+   "type": "text"
+  },
+  "amount": {
+   "type": "integer"
+  },
+  "employee_id": {
+   "type": "uuid"
+  },
+  "created_by": {
+   "type": "text"
+  },
+  "created_at": {
+   "type": "timestamp with time zone"
+  }
+ },
+ "bk_meals": {
+  "id": {
+   "type": "uuid"
+  },
+  "meal_date": {
+   "type": "date"
+  },
+  "menu_text": {
+   "type": "text"
+  },
+  "allergy_note": {
+   "type": "text"
+  },
+  "photo_path": {
+   "type": "text"
+  },
+  "photo_by": {
+   "type": "text"
+  },
+  "photo_at": {
+   "type": "timestamp with time zone"
+  },
+  "created_at": {
+   "type": "timestamp with time zone"
+  },
+  "updated_at": {
+   "type": "timestamp with time zone"
+  },
+  "week_id": {
+   "type": "uuid",
+   "fk": [
+    "bk_meal_weeks",
+    "id"
+   ]
+  },
+  "menu_items": {
+   "type": "jsonb"
+  },
+  "kcal": {
+   "type": "integer"
+  },
+  "protein_pct": {
+   "type": "numeric"
+  },
+  "calcium_mg": {
+   "type": "numeric"
+  },
+  "iron_mg": {
+   "type": "numeric"
+  }
+ },
+ "bk_students": {
+  "id": {
+   "type": "uuid"
+  },
+  "name": {
+   "type": "text"
+  },
+  "school": {
+   "type": "text"
+  },
+  "grade": {
+   "type": "text"
+  },
+  "class_code": {
+   "type": "text"
+  },
+  "status": {
+   "type": "text"
+  },
+  "erp_no": {
+   "type": "text"
+  },
+  "birth_date": {
+   "type": "date"
+  },
+  "enrolled_on": {
+   "type": "date"
+  },
+  "left_on": {
+   "type": "date"
+  },
+  "memo": {
+   "type": "text"
+  },
+  "created_at": {
+   "type": "timestamp with time zone"
+  },
+  "updated_at": {
+   "type": "timestamp with time zone"
+  },
+  "school_class": {
+   "type": "text"
+  }
+ },
+ "external_judges_pool": {
+  "id": {
+   "type": "uuid"
+  },
+  "name": {
+   "type": "text"
+  },
+  "phone": {
+   "type": "text"
+  },
+  "affiliation": {
+   "type": "text"
+  },
+  "default_role": {
+   "type": "text"
+  },
+  "notes": {
+   "type": "text"
+  },
+  "privacy_agreed_at": {
+   "type": "timestamp with time zone"
+  },
+  "privacy_agreed_by": {
+   "type": "text"
+  },
+  "is_active": {
+   "type": "boolean"
+  },
+  "created_at": {
+   "type": "timestamp with time zone"
+  },
+  "updated_at": {
+   "type": "timestamp with time zone"
+  },
+  "created_by": {
+   "type": "text"
+  },
+  "stamp_path": {
+   "type": "text"
+  }
+ },
+ "stamp_records": {
+  "id": {
+   "type": "uuid"
+  },
+  "participant_id": {
+   "type": "uuid",
+   "fk": [
+    "profiles",
+    "id"
+   ]
+  },
+  "participant_name": {
+   "type": "text"
+  },
+  "participant_phone": {
+   "type": "text"
+  },
+  "center_id": {
+   "type": "integer"
+  },
+  "center_name": {
+   "type": "text"
+  },
+  "stamped_at": {
+   "type": "timestamp with time zone"
+  },
+  "approved_by": {
+   "type": "text"
+  },
+  "program_title": {
+   "type": "text"
+  },
+  "program_id": {
+   "type": "text"
+  }
+ },
+ "hr_incident_reports": {
+  "id": {
+   "type": "uuid"
+  },
+  "driver_id": {
+   "type": "uuid"
+  },
+  "occurred_on": {
+   "type": "date"
+  },
+  "submitted_at": {
+   "type": "timestamp with time zone"
+  },
+  "subject": {
+   "type": "text"
+  },
+  "content": {
+   "type": "text"
+  },
+  "attachment_path": {
+   "type": "text"
+  },
+  "requested_by": {
+   "type": "text"
+  },
+  "reviewed_at": {
+   "type": "timestamp with time zone"
+  },
+  "reviewed_by": {
+   "type": "text"
+  },
+  "review_note": {
+   "type": "text"
+  },
+  "discipline_id": {
+   "type": "uuid"
+  },
+  "created_at": {
+   "type": "timestamp with time zone"
+  }
+ },
+ "business_promotions": {
+  "id": {
+   "type": "uuid"
+  },
+  "report_year": {
+   "type": "integer"
+  },
+  "report_month": {
+   "type": "integer"
+  },
+  "activity_date": {
+   "type": "date"
+  },
+  "category": {
+   "type": "text"
+  },
+  "title": {
+   "type": "text"
+  },
+  "count": {
+   "type": "integer"
+  },
+  "url": {
+   "type": "text"
+  },
+  "description": {
+   "type": "text"
+  },
+  "author_name": {
+   "type": "text"
+  },
+  "created_at": {
+   "type": "timestamp with time zone"
+  },
+  "updated_at": {
+   "type": "timestamp with time zone"
+  },
+  "source": {
+   "type": "text"
+  },
+  "deliverable": {
+   "type": "text"
+  }
+ },
+ "yangjeong_driving_logs": {
+  "id": {
+   "type": "uuid"
+  },
+  "driven_at": {
+   "type": "date"
+  },
+  "driver": {
+   "type": "text"
+  },
+  "purpose": {
+   "type": "text"
+  },
+  "departure": {
+   "type": "text"
+  },
+  "waypoints": {
+   "type": "text[]",
+   "items": "string"
+  },
+  "destination": {
+   "type": "text"
+  },
+  "distance": {
+   "type": "numeric"
+  },
+  "total_distance": {
+   "type": "numeric"
+  },
+  "confirmed_by": {
+   "type": "text"
+  },
+  "created_at": {
+   "type": "timestamp with time zone"
+  }
+ },
+ "partner_contacts": {
+  "id": {
+   "type": "uuid"
+  },
+  "partner_id": {
+   "type": "uuid",
+   "fk": [
+    "business_partners",
+    "id"
+   ]
+  },
+  "person_name": {
+   "type": "text"
+  },
+  "title": {
+   "type": "text"
+  },
+  "department": {
+   "type": "text"
+  },
+  "mobile": {
+   "type": "text"
+  },
+  "phone": {
+   "type": "text"
+  },
+  "email": {
+   "type": "text"
+  },
+  "memo": {
+   "type": "text"
+  },
+  "card_id": {
+   "type": "uuid",
+   "fk": [
+    "business_cards",
+    "id"
+   ]
+  },
+  "is_primary": {
+   "type": "boolean"
+  },
+  "registered_by": {
+   "type": "text"
+  },
+  "created_at": {
+   "type": "timestamp with time zone"
+  },
+  "updated_at": {
+   "type": "timestamp with time zone"
+  }
+ },
+ "employee_salary_profiles": {
+  "id": {
+   "type": "uuid"
+  },
+  "driver_id": {
+   "type": "uuid",
+   "fk": [
+    "drivers",
+    "id"
+   ]
+  },
+  "year": {
+   "type": "integer"
+  },
+  "grade": {
+   "type": "text"
+  },
+  "step": {
+   "type": "integer"
+  },
+  "start_month": {
+   "type": "integer"
+  },
+  "end_month": {
+   "type": "integer"
+  },
+  "extra": {
+   "type": "jsonb"
+  },
+  "created_at": {
+   "type": "timestamp with time zone"
+  },
+  "updated_at": {
+   "type": "timestamp with time zone"
+  }
+ },
+ "press_articles": {
+  "id": {
+   "type": "uuid"
+  },
+  "published_at": {
+   "type": "date"
+  },
+  "outlet": {
+   "type": "text"
+  },
+  "title": {
+   "type": "text"
+  },
+  "url": {
+   "type": "text"
+  },
+  "event_group": {
+   "type": "text"
+  },
+  "is_roundup": {
+   "type": "boolean"
+  },
+  "reporter_id": {
+   "type": "uuid",
+   "fk": [
+    "press_reporters",
+    "id"
+   ]
+  },
+  "reporter_status": {
+   "type": "text"
+  },
+  "promotion_id": {
+   "type": "uuid",
+   "fk": [
+    "business_promotions",
+    "id"
+   ]
+  },
+  "source": {
+   "type": "text"
+  },
+  "created_at": {
+   "type": "timestamp with time zone"
+  },
+  "release_id": {
+   "type": "uuid",
+   "fk": [
+    "press_releases",
+    "id"
+   ]
+  }
+ },
+ "recruitment_scores_backup_v1": {
+  "id": {
+   "type": "uuid"
+  },
+  "application_id": {
+   "type": "uuid"
+  },
+  "stage": {
+   "type": "text"
+  },
+  "reviewer_name": {
+   "type": "text"
+  },
+  "reviewer_id": {
+   "type": "text"
+  },
+  "scores": {
+   "type": "jsonb"
+  },
+  "total_score": {
+   "type": "numeric"
+  },
+  "max_score": {
+   "type": "numeric"
+  },
+  "is_absent": {
+   "type": "boolean"
+  },
+  "memo": {
+   "type": "text"
+  },
+  "submitted_at": {
+   "type": "timestamp with time zone"
+  },
+  "created_at": {
+   "type": "timestamp with time zone"
+  },
+  "updated_at": {
+   "type": "timestamp with time zone"
+  }
+ },
+ "saem_settlements": {
+  "id": {
+   "type": "uuid"
+  },
+  "project_id": {
+   "type": "uuid",
+   "fk": [
+    "saem_projects",
+    "id"
+   ]
+  },
+  "title": {
+   "type": "text"
+  },
+  "period_start": {
+   "type": "date"
+  },
+  "period_end": {
+   "type": "date"
+  },
+  "status": {
+   "type": "text"
+  },
+  "confirmed_at": {
+   "type": "timestamp with time zone"
+  },
+  "confirmed_by": {
+   "type": "text"
+  },
+  "created_at": {
+   "type": "timestamp with time zone"
+  }
+ },
+ "mail_replies": {
+  "id": {
+   "type": "uuid"
+  },
+  "mail_id": {
+   "type": "uuid",
+   "fk": [
+    "mail_messages",
+    "id"
+   ]
+  },
+  "to_email": {
+   "type": "text"
+  },
+  "subject": {
+   "type": "text"
+  },
+  "body": {
+   "type": "text"
+  },
+  "sent_by": {
+   "type": "text"
+  },
+  "sent_at": {
+   "type": "timestamp with time zone"
+  },
+  "status": {
+   "type": "text"
+  },
+  "error_message": {
+   "type": "text"
+  },
+  "kind": {
+   "type": "text"
+  },
+  "cc_email": {
+   "type": "text"
+  },
+  "attachments": {
+   "type": "jsonb"
+  }
+ },
+ "business_categories": {
+  "id": {
+   "type": "uuid"
+  },
+  "name": {
+   "type": "text"
+  },
+  "sort_order": {
+   "type": "integer"
+  },
+  "is_active": {
+   "type": "boolean"
+  },
+  "created_at": {
+   "type": "timestamp with time zone"
+  }
+ },
+ "hr_awards": {
+  "id": {
+   "type": "uuid"
+  },
+  "driver_id": {
+   "type": "uuid"
+  },
+  "awarded_on": {
+   "type": "date"
+  },
+  "title": {
+   "type": "text"
+  },
+  "awarding_body": {
+   "type": "text"
+  },
+  "award_kind": {
+   "type": "text"
+  },
+  "merit_summary": {
+   "type": "text"
+  },
+  "attachment_path": {
+   "type": "text"
+  },
+  "created_by": {
+   "type": "text"
+  },
+  "created_at": {
+   "type": "timestamp with time zone"
+  },
+  "updated_at": {
+   "type": "timestamp with time zone"
+  },
+  "award_source": {
+   "type": "text"
+  }
+ },
+ "training_notification_log": {
+  "dedup_key": {
+   "type": "text"
+  },
+  "kind": {
+   "type": "text"
+  },
+  "driver_id": {
+   "type": "uuid",
+   "fk": [
+    "drivers",
+    "id"
+   ]
+  },
+  "training_id": {
+   "type": "uuid",
+   "fk": [
+    "mandatory_trainings",
+    "id"
+   ]
+  },
+  "payload": {
+   "type": "jsonb"
+  },
+  "sent_at": {
+   "type": "timestamp with time zone"
+  }
+ },
+ "file_backup_items": {
+  "bucket": {
+   "type": "text"
+  },
+  "object_path": {
+   "type": "text"
+  },
+  "size_bytes": {
+   "type": "bigint"
+  },
+  "etag": {
+   "type": "text"
+  },
+  "object_updated_at": {
+   "type": "timestamp with time zone"
+  },
+  "drive_file_id": {
+   "type": "text"
+  },
+  "backed_up_at": {
+   "type": "timestamp with time zone"
+  },
+  "revision_count": {
+   "type": "integer"
+  },
+  "source_missing_at": {
+   "type": "timestamp with time zone"
+  }
+ },
+ "saem_club_expenses": {
+  "id": {
+   "type": "uuid"
+  },
+  "program_id": {
+   "type": "uuid",
+   "fk": [
+    "saem_programs",
+    "id"
+   ]
+  },
+  "session_id": {
+   "type": "uuid",
+   "fk": [
+    "saem_sessions",
+    "id"
+   ]
+  },
+  "expense_date": {
+   "type": "date"
+  },
+  "funding_source": {
+   "type": "text"
+  },
+  "budget_category": {
+   "type": "text"
+  },
+  "description": {
+   "type": "text"
+  },
+  "amount": {
+   "type": "integer"
+  },
+  "created_by": {
+   "type": "text"
+  },
+  "created_at": {
+   "type": "timestamp with time zone"
+  },
+  "updated_at": {
+   "type": "timestamp with time zone"
+  }
+ },
+ "employee_document_files": {
+  "id": {
+   "type": "uuid"
+  },
+  "driver_id": {
+   "type": "uuid",
+   "fk": [
+    "drivers",
+    "id"
+   ]
+  },
+  "doc_key": {
+   "type": "text"
+  },
+  "file_path": {
+   "type": "text"
+  },
+  "file_name": {
+   "type": "text"
+  },
+  "sort_order": {
+   "type": "integer"
+  },
+  "mime_type": {
+   "type": "text"
+  },
+  "size_bytes": {
+   "type": "integer"
+  },
+  "uploaded_by": {
+   "type": "text"
+  },
+  "created_at": {
+   "type": "timestamp with time zone"
+  }
+ },
+ "bk_absence_files": {
+  "id": {
+   "type": "uuid"
+  },
+  "absence_id": {
+   "type": "uuid",
+   "fk": [
+    "bk_absences",
+    "id"
+   ]
+  },
+  "path": {
+   "type": "text"
+  },
+  "name": {
+   "type": "text"
+  },
+  "mime": {
+   "type": "text"
+  },
+  "size": {
+   "type": "integer"
+  },
+  "created_at": {
+   "type": "timestamp with time zone"
+  }
+ },
+ "saem_settlement_items": {
+  "id": {
+   "type": "uuid"
+  },
+  "settlement_id": {
+   "type": "uuid",
+   "fk": [
+    "saem_settlements",
+    "id"
+   ]
+  },
+  "instructor_id": {
+   "type": "uuid",
+   "fk": [
+    "saem_instructors",
+    "id"
+   ]
+  },
+  "detail": {
+   "type": "jsonb"
+  },
+  "gross_amount": {
+   "type": "integer"
+  },
+  "deduction_rate": {
+   "type": "numeric"
+  },
+  "deduction_amount": {
+   "type": "integer"
+  },
+  "net_amount": {
+   "type": "integer"
+  },
+  "adjusted": {
+   "type": "boolean"
+  }
+ },
+ "press_release_sends": {
+  "id": {
+   "type": "uuid"
+  },
+  "release_id": {
+   "type": "uuid",
+   "fk": [
+    "press_releases",
+    "id"
+   ]
+  },
+  "reporter_id": {
+   "type": "uuid",
+   "fk": [
+    "press_reporters",
+    "id"
+   ]
+  },
+  "to_email": {
+   "type": "text"
+  },
+  "to_name": {
+   "type": "text"
+  },
+  "outlet": {
+   "type": "text"
+  },
+  "is_test": {
+   "type": "boolean"
+  },
+  "status": {
+   "type": "text"
+  },
+  "gmail_message_id": {
+   "type": "text"
+  },
+  "error_message": {
+   "type": "text"
+  },
+  "sent_at": {
+   "type": "timestamp with time zone"
+  },
+  "created_at": {
+   "type": "timestamp with time zone"
+  }
+ },
+ "programs": {
+  "id": {
+   "type": "text"
+  },
+  "center_id": {
+   "type": "text"
+  },
+  "title": {
+   "type": "text"
+  },
+  "description": {
+   "type": "text"
+  },
+  "date": {
+   "type": "text"
+  },
+  "time": {
+   "type": "text"
+  },
+  "capacity": {
+   "type": "integer"
+  },
+  "target": {
+   "type": "text"
+  },
+  "image_url": {
+   "type": "text"
+  },
+  "created_at": {
+   "type": "timestamp with time zone"
+  },
+  "updated_at": {
+   "type": "timestamp with time zone"
+  },
+  "organization_id": {
+   "type": "integer"
+  },
+  "location": {
+   "type": "text"
+  },
+  "plan_pdf_url": {
+   "type": "text"
+  },
+  "application_url": {
+   "type": "text"
+  }
+ },
+ "mandatory_training_targets": {
+  "id": {
+   "type": "uuid"
+  },
+  "training_id": {
+   "type": "uuid",
+   "fk": [
+    "mandatory_trainings",
+    "id"
+   ]
+  },
+  "driver_id": {
+   "type": "uuid"
+  },
+  "assigned_at": {
+   "type": "timestamp with time zone"
+  },
+  "assigned_by": {
+   "type": "text"
+  }
+ },
+ "coin_pay_results": {
+  "id": {
+   "type": "uuid"
+  },
+  "report_year": {
+   "type": "integer"
+  },
+  "report_month": {
+   "type": "integer"
+  },
+  "entry_type": {
+   "type": "text"
+  },
+  "place": {
+   "type": "text"
+  },
+  "headcount": {
+   "type": "integer"
+  },
+  "amount": {
+   "type": "bigint"
+  },
+  "note": {
+   "type": "text"
+  },
+  "author_name": {
+   "type": "text"
+  },
+  "created_at": {
+   "type": "timestamp with time zone"
+  },
+  "updated_at": {
+   "type": "timestamp with time zone"
+  },
+  "updated_by": {
+   "type": "text"
+  }
+ },
+ "salary_config": {
+  "id": {
+   "type": "uuid"
+  },
+  "year": {
+   "type": "integer"
+  },
+  "config_key": {
+   "type": "text"
+  },
+  "config_value": {
+   "type": "numeric"
+  },
+  "label": {
+   "type": "text"
+  },
+  "created_at": {
+   "type": "timestamp with time zone"
+  },
+  "effective_month": {
+   "type": "integer"
+  }
+ },
+ "mandatory_trainings": {
+  "id": {
+   "type": "uuid"
+  },
+  "year": {
+   "type": "integer"
+  },
+  "name": {
+   "type": "text"
+  },
+  "due_date": {
+   "type": "date"
+  },
+  "site_url": {
+   "type": "text"
+  },
+  "note": {
+   "type": "text"
+  },
+  "is_active": {
+   "type": "boolean"
+  },
+  "display_order": {
+   "type": "integer"
+  },
+  "created_at": {
+   "type": "timestamp with time zone"
+  },
+  "location": {
+   "type": "text"
+  },
+  "organizer": {
+   "type": "text"
+  },
+  "hours": {
+   "type": "text"
+  },
+  "held_on": {
+   "type": "date"
+  },
+  "target_scope": {
+   "type": "text"
+  },
+  "new_hire_rule": {
+   "type": "text"
+  }
+ },
+ "hr_evaluations": {
+  "id": {
+   "type": "uuid"
+  },
+  "driver_id": {
+   "type": "uuid"
+  },
+  "period_year": {
+   "type": "integer"
+  },
+  "period_half": {
+   "type": "text"
+  },
+  "snapshot": {
+   "type": "jsonb"
+  },
+  "score_duty": {
+   "type": "numeric"
+  },
+  "score_training": {
+   "type": "numeric"
+  },
+  "score_career": {
+   "type": "numeric"
+  },
+  "bonus_award": {
+   "type": "numeric"
+  },
+  "penalty_discipline": {
+   "type": "numeric"
+  },
+  "total_score": {
+   "type": "numeric"
+  },
+  "grade": {
+   "type": "text"
+  },
+  "evaluator_note": {
+   "type": "text"
+  },
+  "evaluated_by": {
+   "type": "text"
+  },
+  "evaluated_at": {
+   "type": "timestamp with time zone"
+  },
+  "status": {
+   "type": "text"
+  },
+  "created_by": {
+   "type": "text"
+  },
+  "created_at": {
+   "type": "timestamp with time zone"
+  },
+  "updated_at": {
+   "type": "timestamp with time zone"
+  }
+ },
+ "safety_check_items": {
+  "id": {
+   "type": "uuid"
+  },
+  "section": {
+   "type": "text"
+  },
+  "category": {
+   "type": "text"
+  },
+  "item_no": {
+   "type": "integer"
+  },
+  "content": {
+   "type": "text"
+  },
+  "sort_order": {
+   "type": "integer"
+  },
+  "default_na": {
+   "type": "boolean"
+  },
+  "is_active": {
+   "type": "boolean"
+  }
+ },
+ "activities": {
+  "id": {
+   "type": "bigint"
+  },
+  "activity_type": {
+   "type": "text"
+  },
+  "author": {
+   "type": "text"
+  },
+  "start_date": {
+   "type": "date"
+  },
+  "end_date": {
+   "type": "date"
+  },
+  "location": {
+   "type": "text"
+  },
+  "companion": {
+   "type": "text"
+  },
+  "purpose": {
+   "type": "text"
+  },
+  "content": {
+   "type": "text"
+  },
+  "result": {
+   "type": "text"
+  },
+  "photos": {
+   "type": "text[]",
+   "items": "string"
+  },
+  "receipts": {
+   "type": "text[]",
+   "items": "string"
+  },
+  "transport_type": {
+   "type": "text"
+  },
+  "transport_cost": {
+   "type": "numeric"
+  },
+  "accommodation": {
+   "type": "boolean"
+  },
+  "accommodation_cost": {
+   "type": "numeric"
+  },
+  "organization": {
+   "type": "text"
+  },
+  "course_name": {
+   "type": "text"
+  },
+  "certificate": {
+   "type": "text"
+  },
+  "training_cost": {
+   "type": "numeric"
+  },
+  "country": {
+   "type": "text"
+  },
+  "city": {
+   "type": "text"
+  },
+  "visa_info": {
+   "type": "text"
+  },
+  "departure_date": {
+   "type": "date"
+  },
+  "return_date": {
+   "type": "date"
+  },
+  "education_type": {
+   "type": "text"
+  },
+  "instructor": {
+   "type": "text"
+  },
+  "education_hours": {
+   "type": "numeric"
+  },
+  "attendees_count": {
+   "type": "integer"
+  },
+  "created_at": {
+   "type": "timestamp with time zone"
+  },
+  "updated_at": {
+   "type": "timestamp with time zone"
+  },
+  "driving_log_id": {
+   "type": "uuid",
+   "fk": [
+    "driving_logs",
+    "id"
+   ]
+  }
+ },
+ "applications": {
+  "id": {
+   "type": "uuid"
+  },
+  "participant_id": {
+   "type": "uuid",
+   "fk": [
+    "profiles",
+    "id"
+   ]
+  },
+  "participant_name": {
+   "type": "text"
+  },
+  "participant_phone": {
+   "type": "text"
+  },
+  "center_id": {
+   "type": "integer"
+  },
+  "center_name": {
+   "type": "text"
+  },
+  "status": {
+   "type": "text"
+  },
+  "applied_at": {
+   "type": "timestamp with time zone"
+  },
+  "program_id": {
+   "type": "text"
+  },
+  "program_title": {
+   "type": "text"
+  }
+ },
+ "center_reports": {
+  "id": {
+   "type": "uuid"
+  },
+  "center_id": {
+   "type": "integer"
+  },
+  "opinion": {
+   "type": "text"
+  },
+  "photo_urls": {
+   "type": "text[]",
+   "items": "string"
+  },
+  "updated_at": {
+   "type": "timestamp with time zone"
+  }
+ },
+ "bk_posts": {
+  "id": {
+   "type": "uuid"
+  },
+  "post_type": {
+   "type": "text"
+  },
+  "scope": {
+   "type": "text"
+  },
+  "title": {
+   "type": "text"
+  },
+  "body": {
+   "type": "text"
+  },
+  "author_driver_id": {
+   "type": "uuid"
+  },
+  "author_name": {
+   "type": "text"
+  },
+  "is_pinned": {
+   "type": "boolean"
+  },
+  "published_at": {
+   "type": "timestamp with time zone"
+  },
+  "deleted_at": {
+   "type": "timestamp with time zone"
+  },
+  "created_at": {
+   "type": "timestamp with time zone"
+  },
+  "updated_at": {
+   "type": "timestamp with time zone"
+  }
+ },
+ "salary_grade_table": {
+  "id": {
+   "type": "uuid"
+  },
+  "year": {
+   "type": "integer"
+  },
+  "grade": {
+   "type": "text"
+  },
+  "step": {
+   "type": "integer"
+  },
+  "base_salary": {
+   "type": "integer"
+  },
+  "created_at": {
+   "type": "timestamp with time zone"
+  },
+  "effective_from": {
+   "type": "date"
+  }
+ },
+ "saem_member_roles": {
+  "id": {
+   "type": "uuid"
+  },
+  "instructor_id": {
+   "type": "uuid",
+   "fk": [
+    "saem_instructors",
+    "id"
+   ]
+  },
+  "role": {
+   "type": "text"
+  },
+  "granted_at": {
+   "type": "timestamp with time zone"
+  },
+  "granted_by": {
+   "type": "text"
+  },
+  "status": {
+   "type": "text"
+  },
+  "deactivated_at": {
+   "type": "timestamp with time zone"
+  },
+  "deactivated_by": {
+   "type": "text"
+  },
+  "deactivate_reason": {
+   "type": "text"
+  }
+ },
+ "employee_profiles": {
+  "id": {
+   "type": "uuid"
+  },
+  "driver_id": {
+   "type": "uuid",
+   "fk": [
+    "drivers",
+    "id"
+   ]
+  },
+  "name_chinese": {
+   "type": "text"
+  },
+  "resident_number": {
+   "type": "text"
+  },
+  "gender": {
+   "type": "text"
+  },
+  "birth_date": {
+   "type": "date"
+  },
+  "address": {
+   "type": "text"
+  },
+  "email": {
+   "type": "text"
+  },
+  "phone": {
+   "type": "text"
+  },
+  "photo_url": {
+   "type": "text"
+  },
+  "join_date": {
+   "type": "date"
+  },
+  "leave_date": {
+   "type": "date"
+  },
+  "education": {
+   "type": "jsonb"
+  },
+  "family": {
+   "type": "jsonb"
+  },
+  "licenses": {
+   "type": "jsonb"
+  },
+  "career": {
+   "type": "jsonb"
+  },
+  "awards": {
+   "type": "jsonb"
+  },
+  "trainings": {
+   "type": "jsonb"
+  },
+  "appointments": {
+   "type": "jsonb"
+  },
+  "military_service": {
+   "type": "text"
+  },
+  "created_at": {
+   "type": "timestamp with time zone"
+  },
+  "updated_at": {
+   "type": "timestamp with time zone"
+  },
+  "is_locked": {
+   "type": "boolean"
+  },
+  "locked_at": {
+   "type": "timestamp with time zone"
+  },
+  "locked_by": {
+   "type": "text"
+  },
+  "stamp_path": {
+   "type": "text"
+  },
+  "auth_level": {
+   "type": "text"
+  },
+  "documents": {
+   "type": "jsonb"
+  },
+  "employment_status": {
+   "type": "text"
+  },
+  "resignation_date": {
+   "type": "date"
+  },
+  "signature_data": {
+   "type": "text"
+  },
+  "signature_updated_at": {
+   "type": "timestamp with time zone"
+  }
+ },
+ "reviews": {
+  "id": {
+   "type": "uuid"
+  },
+  "participant_id": {
+   "type": "uuid",
+   "fk": [
+    "profiles",
+    "id"
+   ]
+  },
+  "participant_name": {
+   "type": "text"
+  },
+  "center_id": {
+   "type": "integer"
+  },
+  "center_name": {
+   "type": "text"
+  },
+  "rating": {
+   "type": "integer"
+  },
+  "comment": {
+   "type": "text"
+  },
+  "created_at": {
+   "type": "timestamp with time zone"
+  },
+  "updated_at": {
+   "type": "timestamp with time zone"
+  },
+  "program_rating": {
+   "type": "integer"
+  },
+  "leader_rating": {
+   "type": "integer"
+  },
+  "facility_rating": {
+   "type": "integer"
+  },
+  "wish_program": {
+   "type": "text"
+  }
+ },
+ "partner_transaction_logs": {
+  "id": {
+   "type": "uuid"
+  },
+  "partner_id": {
+   "type": "uuid",
+   "fk": [
+    "business_partners",
+    "id"
+   ]
+  },
+  "occurred_on": {
+   "type": "date"
+  },
+  "content": {
+   "type": "text"
+  },
+  "created_by": {
+   "type": "text"
+  },
+  "created_at": {
+   "type": "timestamp with time zone"
+  }
+ }
+}

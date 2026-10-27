@@ -288,7 +288,7 @@ function StudentForm({
   return (
     <form onSubmit={submit} className={`${panelToneCls("yellow")} space-y-3`}>
       <h3 className="text-sm font-bold text-ink">{f.id ? "학생 정보 수정" : "학생 추가"}</h3>
-      <div className="grid gap-3 sm:grid-cols-3">
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
         <label>
           <span className={labelCls}>이름 *</span>
           <input value={f.name} onChange={set("name")} className={inputCls} required />

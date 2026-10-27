@@ -850,10 +850,13 @@ export default function ActivityForm({
                 onClick={() =>
                   setKeptPhotos(keptPhotos.filter((u) => u !== src))
                 }
-                className="absolute right-1 top-1 rounded-full bg-black/60 px-1.5 text-xs font-bold text-white hover:bg-black/80"
+                className="group absolute right-0 top-0 flex h-10 w-10 items-center justify-center sm:right-1 sm:top-1 sm:h-auto sm:w-auto"
                 aria-label="기존 사진 삭제"
               >
-                ✕
+                {/* 휴대폰: 보이는 동그라미 32px · 누르는 영역 40px / PC: 기존 모습 */}
+                <span className="flex h-8 w-8 items-center justify-center rounded-full bg-black/60 text-xs font-bold text-white group-hover:bg-black/80 sm:h-auto sm:w-auto sm:px-1.5">
+                  ✕
+                </span>
               </button>
             </div>
           ))}
@@ -871,9 +874,12 @@ export default function ActivityForm({
               <button
                 type="button"
                 onClick={() => removePhoto(i)}
-                className="absolute right-1 top-1 rounded-full bg-black/60 px-1.5 text-xs font-bold text-white hover:bg-black/80"
+                className="group absolute right-0 top-0 flex h-10 w-10 items-center justify-center sm:right-1 sm:top-1 sm:h-auto sm:w-auto"
+                aria-label="사진 삭제"
               >
-                ✕
+                <span className="flex h-8 w-8 items-center justify-center rounded-full bg-black/60 text-xs font-bold text-white group-hover:bg-black/80 sm:h-auto sm:w-auto sm:px-1.5">
+                  ✕
+                </span>
               </button>
             </div>
           ))}

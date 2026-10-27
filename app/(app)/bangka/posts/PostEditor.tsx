@@ -162,7 +162,7 @@ export default function PostEditor({ post }: { post: BkPostDetail | null }) {
 
       <section className={`${panelToneCls("yellow")} space-y-3`}>
         <h3 className={sectionTitleCls("yellow")}>{post ? "글 수정" : "새 글"}</h3>
-        <div className="grid gap-3 sm:grid-cols-3">
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
           <label>
             <span className={labelCls}>종류</span>
             <select value={f.post_type} onChange={(e) => set("post_type", e.target.value as BkPostType)} className={inputCls}>
@@ -214,9 +214,9 @@ export default function PostEditor({ post }: { post: BkPostDetail | null }) {
           {!post && " 새 글은 [저장]을 누르면 이어서 올라갑니다."}
         </p>
         {post && post.files.length > 0 && (
-          <ul className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
+          <ul className="grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-3">
             {post.files.map((x) => (
-              <li key={x.id} className="flex items-center gap-2 rounded-lg border border-line bg-card p-2">
+              <li key={x.id} className="flex min-w-0 items-center gap-2 rounded-lg border border-line bg-card p-2">
                 {x.kind === "image" && x.url ? (
                   // eslint-disable-next-line @next/next/no-img-element -- 비공개 버킷 서명 URL(1시간) 미리보기
                   <img src={x.url} alt={x.name ?? ""} className="h-14 w-14 shrink-0 rounded object-cover" />

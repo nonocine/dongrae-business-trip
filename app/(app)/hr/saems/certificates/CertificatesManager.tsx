@@ -127,7 +127,7 @@ export default function CertificatesManager({
               key={f.key}
               type="button"
               onClick={() => setFilter(f.key)}
-              className={`rounded-lg border px-3 py-1.5 text-sm font-semibold transition ${
+              className={`min-h-10 rounded-lg border px-3 py-1.5 text-sm sm:min-h-0 font-semibold transition ${
                 filter === f.key
                   ? "border-navy bg-navy text-white"
                   : "border-line bg-card text-ink-body hover:bg-surface"

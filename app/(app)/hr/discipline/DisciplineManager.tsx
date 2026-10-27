@@ -436,7 +436,7 @@ function DisciplineForm({
           });
         }}
       >
-        <div className="grid gap-3 sm:grid-cols-2">
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
           <Field label="징계 종류 *">
             <select name="kind" className={inputCls} value={kind} onChange={(e) => setKind(e.target.value as DisciplineKind)} data-testid="discipline-kind">
               {DISCIPLINE_KINDS.map((k) => (
@@ -564,7 +564,7 @@ function AwardForm({
 
 export function AwardFields({ row }: { row?: AwardRow | null }) {
   return (
-    <div className="grid gap-3 sm:grid-cols-2">
+    <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
       <Field label="출처 *">
         <select name="awardSource" className={inputCls} defaultValue={row?.award_source ?? "external"}>
           <option value="external">외부 수상</option>
@@ -929,7 +929,7 @@ function CommitteeForm({
           });
         }}
       >
-        <div className="grid gap-3 sm:grid-cols-2">
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
           <Field label="개최일 *">
             <input type="date" name="heldOn" className={inputCls} defaultValue={row?.held_on ?? ""} />
           </Field>

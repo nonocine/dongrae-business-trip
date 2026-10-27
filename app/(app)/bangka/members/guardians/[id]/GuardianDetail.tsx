@@ -91,7 +91,7 @@ export default function GuardianDetail({
             {g.locked && <span className={badgeDanger}>잠김</span>}
           </div>
         </div>
-        <dl className="mt-3 grid gap-x-6 gap-y-1 text-sm sm:grid-cols-2">
+        <dl className="mt-3 grid grid-cols-1 gap-x-6 gap-y-1 text-sm sm:grid-cols-2">
           <Row label="마지막 로그인" value={g.last_login_at ? fmtKstDateTime(g.last_login_at) : "-"} />
           <Row label="PIN 설정" value={g.pin_set_at ? fmtKstDateTime(g.pin_set_at) : "아직 안 함"} />
           <Row

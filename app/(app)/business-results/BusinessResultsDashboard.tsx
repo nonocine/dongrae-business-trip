@@ -658,7 +658,7 @@ export default function BusinessResultsDashboard({
               </article>
             ))}
           </section>
-          <section className="grid gap-4 lg:grid-cols-[1.35fr_.65fr]">
+          <section className="grid grid-cols-1 gap-4 lg:grid-cols-[1.35fr_.65fr]">
             <article className={cardCls}>
               <div className="flex items-center justify-between gap-3">
                 <div>
@@ -866,7 +866,7 @@ export default function BusinessResultsDashboard({
               </div>
             )}
           </section>
-          <section className="grid gap-4 lg:grid-cols-2">
+          <section className="grid grid-cols-1 gap-4 lg:grid-cols-2">
             <article className={cardCls}>
               <div className="flex items-center justify-between">
                 <h3 className="font-bold text-ink">분야별 실적</h3>
@@ -1157,7 +1157,7 @@ export default function BusinessResultsDashboard({
 
           <form
             key={editingPromo?.id ?? "new"}
-            className="mt-4 grid gap-3 md:grid-cols-3"
+            className="mt-4 grid grid-cols-1 gap-3 md:grid-cols-3"
             onSubmit={(e) => {
               e.preventDefault();
               submitPromotion(e.currentTarget);
@@ -1225,7 +1225,7 @@ export default function BusinessResultsDashboard({
                 {/* 채널이 2개 이상일 때만 채널별 링크 칸을 엽니다 — 밴드 링크와
                     블로그 링크가 다른 경우용. 비우면 아래 공통 링크로 저장됩니다. */}
                 {promoChannels.length > 1 && (
-                  <div className="mt-2 grid gap-1.5 sm:grid-cols-2">
+                  <div className="mt-2 grid grid-cols-1 gap-1.5 sm:grid-cols-2">
                     {promoChannels.map((c) => (
                       <label key={c} className="flex items-center gap-2">
                         <span className="w-16 shrink-0 text-xs font-semibold text-ink-body">
@@ -1406,7 +1406,7 @@ export default function BusinessResultsDashboard({
         // 초록: 집계된 결과물
         <section className={panelToneCls("green")}>
           <h2 className={sectionTitleCls("green")}>{periodLabel} 종합보고서</h2>
-          <div className="mt-4 grid gap-2 text-sm sm:grid-cols-2">
+          <div className="mt-4 grid grid-cols-1 gap-2 text-sm sm:grid-cols-2">
             <p>
               사업 {aggregatedResults.length}개 / 운영 {totals.sessions}회
             </p>

@@ -776,7 +776,7 @@ export default function TrainingsManager({
                   <tr className="border-b border-line bg-navy-soft/30">
                     <td />
                     <td colSpan={8} className="px-2 pb-2">
-                      <div className="grid gap-2 sm:grid-cols-3">
+                      <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
                         {(
                           [
                             ["location", "장소", "예) 온라인"],
@@ -951,7 +951,7 @@ export default function TrainingsManager({
                 type="button"
                 onClick={runReminderNow}
                 disabled={reminding}
-                className={`${btnSecondary} h-[38px] px-4 text-sm`}
+                className={`${btnSecondary} h-10 px-4 text-sm sm:h-[38px]`}
                 title="오늘 Cron 이 돌면 누구에게 어떤 슬랙 알림이 갈지 미리 봅니다(발송하지 않음)"
               >
                 {reminding ? "계산 중…" : "알림 미리보기"}
@@ -1377,7 +1377,7 @@ function NewHireRulePicker({
   return (
     <div>
       <span className={lblCls}>신규 입사자 처리</span>
-      <div className="mt-1 grid gap-1 sm:grid-cols-2 lg:grid-cols-3">
+      <div className="mt-1 grid grid-cols-1 gap-1 sm:grid-cols-2 lg:grid-cols-3">
         {NEW_HIRE_RULES.map((r) => (
           <label
             key={r.value}

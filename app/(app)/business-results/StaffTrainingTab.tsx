@@ -308,7 +308,7 @@ export default function StaffTrainingTab({
         </p>
         <form
           key={editing?.id ?? "new"}
-          className="mt-4 grid gap-3 md:grid-cols-3"
+          className="mt-4 grid grid-cols-1 gap-3 md:grid-cols-3"
           onSubmit={submit}
           onChange={(e) => checkPeriod(e.currentTarget)}
         >

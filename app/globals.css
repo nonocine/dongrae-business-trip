@@ -210,10 +210,23 @@ button {
   }
 }
 
+/* 휴대폰(640px 이하) — 관장 원칙 "모든 화면은 PC·휴대폰 둘 다" (CLAUDE.md 화면 디자인).
+     · 입력칸 16px: 아이폰이 16px 미만 입력칸을 누르면 화면을 확대해 버립니다.
+     · 입력칸·선택칸 높이 40px 이상: 손가락으로 누르기 쉽게. 화면마다 따로 쓴
+       작은 입력칸(py-1.5 등)도 여기서 한꺼번에 맞춥니다. PC 는 그대로.
+     · select 최대 폭 100%: 선택지 글이 길면 select 가 그 폭만큼 커져 페이지 전체가
+       가로로 넘쳤습니다(강사 수강생·근무일지·프로그램 화면). */
 @media (max-width: 640px) {
   input,
   select,
   textarea {
     font-size: 16px;
+  }
+  input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="color"]):not([type="file"]):not([type="hidden"]),
+  select {
+    min-height: 40px;
+  }
+  select {
+    max-width: 100%;
   }
 }

@@ -240,7 +240,7 @@ function JudgeRow({
             type="button"
             onClick={onEdit}
             disabled={pending}
-            className="rounded-md border border-brand-blue bg-card px-2.5 py-1 text-xs font-semibold text-brand-blue hover:bg-brand-blue-soft disabled:opacity-60"
+            className="min-h-10 rounded-md border border-brand-blue bg-card px-2.5 py-1 text-xs font-semibold text-brand-blue hover:bg-brand-blue-soft disabled:opacity-60 sm:min-h-0"
           >
             수정
           </button>
@@ -272,7 +272,7 @@ function JudgeRow({
             type="button"
             onClick={handleDelete}
             disabled={pending}
-            className="rounded-md border border-stamp bg-card px-2.5 py-1 text-xs font-medium text-stamp hover:bg-stamp-soft disabled:opacity-60"
+            className="min-h-10 rounded-md border border-stamp bg-card px-2.5 py-1 text-xs font-medium text-stamp hover:bg-stamp-soft disabled:opacity-60 sm:min-h-0"
           >
             삭제
           </button>
@@ -287,7 +287,7 @@ function JudgeRow({
               type="button"
               onClick={handleToggle}
               disabled={pending}
-              className="rounded-md border border-brand-blue bg-card px-2.5 py-1 text-xs font-semibold text-brand-blue hover:bg-brand-blue-soft disabled:opacity-60"
+              className="min-h-10 rounded-md border border-brand-blue bg-card px-2.5 py-1 text-xs font-semibold text-brand-blue hover:bg-brand-blue-soft disabled:opacity-60 sm:min-h-0"
             >
               대신 비활성화하기
             </button>
@@ -395,7 +395,7 @@ function StampControls({ judge }: { judge: ExternalJudge }) {
             type="button"
             onClick={handleView}
             disabled={pending}
-            className="rounded-md border border-line bg-card px-2.5 py-1 text-xs font-medium text-ink-muted hover:bg-surface disabled:opacity-60"
+            className="min-h-10 rounded-md border border-line bg-card px-2.5 py-1 text-xs font-medium text-ink-muted hover:bg-surface disabled:opacity-60 sm:min-h-0"
           >
             보기
           </button>
@@ -403,7 +403,7 @@ function StampControls({ judge }: { judge: ExternalJudge }) {
             type="button"
             onClick={handleDelete}
             disabled={pending}
-            className="rounded-md border border-stamp bg-card px-2.5 py-1 text-xs font-medium text-stamp hover:bg-stamp-soft disabled:opacity-60"
+            className="min-h-10 rounded-md border border-stamp bg-card px-2.5 py-1 text-xs font-medium text-stamp hover:bg-stamp-soft disabled:opacity-60 sm:min-h-0"
           >
             삭제
           </button>

@@ -626,7 +626,9 @@ function ApplicantSummary({
       </SubSection>
 
       <SubSection title="학력">
-        {a.education.length === 0 ? (
+        {a.education_invalid ? (
+          <p className="text-xs font-semibold text-stamp">학력 정보 확인 필요</p>
+        ) : a.education.length === 0 ? (
           <Empty />
         ) : (
           <ul className="space-y-1.5 text-xs">
