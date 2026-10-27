@@ -40,6 +40,12 @@ import { buildAbsencePdf, buildMealPlanPdf, mealPlanWeeks, type MealPlanDay } fr
   console.log("10월 주:", mealPlanWeeks("2026-10"), "| 2026-08(6주):", mealPlanWeeks("2026-08"));
   writeFileSync(path.join(out, "meal-plan.pdf"), await buildMealPlanPdf({ ym: "2026-10", writtenOn: "2026-10-27", writer: "정다영", days }));
   writeFileSync(path.join(out, "meal-plan-6weeks.pdf"), await buildMealPlanPdf({ ym: "2026-08", writtenOn: "2026-10-27", writer: "정다영", days: [] }));
+  // 각주 넘침 확인용 — 11월 평일·토요일 전부 위 "아주 긴 하루" 메뉴 → 각주가 표 아래에 다 안 들어가 맨 뒤 장으로 이어짐.
+  const heavy = days.find((d) => d.date === "2026-10-05")!;
+  const novDays = Array.from({ length: 30 }, (_, i) => `2026-11-${String(i + 1).padStart(2, "0")}`)
+    .filter((d) => new Date(`${d}T00:00:00Z`).getUTCDay() !== 0)
+    .map((date) => ({ ...heavy, date }));
+  writeFileSync(path.join(out, "meal-plan-footnote-overflow.pdf"), await buildMealPlanPdf({ ym: "2026-11", writtenOn: "2026-10-27", writer: "정다영", days: novDays }));
 
   const sig = await sharp({ create: { width: 300, height: 120, channels: 4, background: { r: 0, g: 0, b: 0, alpha: 0 } } })
     .composite([{ input: Buffer.from(`<svg width="300" height="120"><path d="M20 80 C60 10, 90 110, 130 50 S200 20, 280 70" stroke="black" stroke-width="6" fill="none"/></svg>`) }])

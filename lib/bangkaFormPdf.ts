@@ -151,35 +151,42 @@ const allergenText = (m: MealPlanMenu) => [...m.allergens].sort((a, b) => a - b)
 // "불고기(5.6.10)" — 칸이 좁아 번호는 점으로 잇습니다.
 export const menuWithAllergens = (m: MealPlanMenu) => (m.allergens.length ? `${m.name}(${allergenText(m)})` : m.name);
 
-// 메뉴 이름만 말줄임(번호는 그대로). cap 글자 + "…" — 두 글자 이상 줄 때만("가자미조림" → "가자미조…" 는 이득 없음).
+// 각주로 빠진 날 칸에 넣는 줄인 이름. cap 글자 + "…" — 두 글자 이상 줄 때만("가자미조림" → "가자미조…" 는 이득 없음).
 const capName = (name: string, cap: number) => ([...name].length > cap + 1 ? `${[...name].slice(0, cap).join("")}…` : name);
 
 const MEAL_MAX_SIZE = 8;
 const MEAL_MIN_SIZE = 6; // 인쇄해서 읽을 수 있는 최소(2026-10 관장 지시)
-const NAME_MIN_CAP = 4; // 이름은 최소 4글자 + "…" 까지만 줄임
 
-// 급식 칸 배치 — ★ 알레르기 번호는 어떤 경우에도 "…" 로 자르지 않습니다(아이 안전 정보).
-//   칸이 부족하면 순서대로(2026-10 관장 지시):
-//     ① 메뉴 이름 쪽을 먼저 말줄임(긴 이름부터, 4글자까지)
-//     ② 글자 크기 축소(최소 6pt) — 크기마다 ① 을 다시 시도
-//     ③ 그래도 안 되면 null → 호출부가 그 날 번호를 표 아래 각주로 뺍니다.
-//   돌려준 줄은 칸 안에 전부 들어갑니다(잘린 줄 없음).
-export function planMealCell(
-  menus: MealPlanMenu[],
-  box: { x0: number; y0: number; x1: number; y1: number },
-  font: PDFFont,
-): { lines: string[]; size: number } | null {
-  const W = box.x1 - box.x0;
-  const Hh = box.y1 - box.y0;
-  const longest = Math.max(...menus.map((m) => [...m.name].length));
+type Box = { x0: number; y0: number; x1: number; y1: number };
+
+// 조각을 큰 글자부터 6pt 까지 줄여 보며 칸에 전부 들어가는 첫 배치(잘린 줄 없음). 안 되면 null.
+function fitWhole(tokens: string[], box: Box, font: PDFFont): { lines: string[]; size: number } | null {
+  const items = tokens.map((t) => safe(t)).filter(Boolean);
   for (let size = MEAL_MAX_SIZE; size >= MEAL_MIN_SIZE; size -= 0.25) {
-    for (let cap = longest; cap >= Math.min(NAME_MIN_CAP, longest); cap--) {
-      const tokens = menus.map((m) => safe(menuWithAllergens({ ...m, name: capName(m.name, cap) }))).filter(Boolean);
-      const lines = wrapTokens(tokens, W, size, font);
-      if (lines.length * lineH(size) <= Hh) return { lines, size };
-    }
+    const lines = wrapTokens(items, box.x1 - box.x0, size, font);
+    if (lines.length * lineH(size) <= box.y1 - box.y0) return { lines, size };
   }
   return null;
+}
+
+// 급식 칸 배치 — ★ 알레르기 번호는 어떤 경우에도 "…" 로 자르지 않습니다(아이 안전 정보).
+//   메뉴 이름만 잘라서 끝내는 경우도 없습니다. 칸이 부족하면 순서대로(2026-10 관장 지시):
+//     ① 글자 크기 축소(최소 6pt) — 이름·번호 모두 온전히
+//     ② 그래도 안 되면 그 날은 각주 방식: 칸에는 "※아래" + 줄인 이름, 표 아래 각주에 전체 이름과 번호
+export function planMealCell(menus: MealPlanMenu[], box: Box, font: PDFFont): { lines: string[]; size: number; footnote: boolean } {
+  const whole = fitWhole(menus.map(menuWithAllergens), box, font);
+  if (whole) return { ...whole, footnote: false };
+  // ② 칸에는 이름만 — 긴 이름부터 줄여(최소 2글자 + "…") 전부 들어가는 배치를 찾음
+  const longest = Math.max(...menus.map((m) => [...m.name].length));
+  for (let cap = longest; cap >= 2; cap--) {
+    const fit = fitWhole(["※아래", ...menus.map((m) => capName(m.name, cap))], box, font);
+    if (fit) return { ...fit, footnote: true };
+  }
+  // 메뉴가 아주 많아 이름 두 글자로도 안 들어가면 칸 안 이름 목록 끝만 "…"(전체 이름·번호는 각주에 있음)
+  const lines = wrapTokens(["※아래", ...menus.map((m) => capName(m.name, 2))].map((t) => safe(t)), box.x1 - box.x0, MEAL_MIN_SIZE, font);
+  const max = Math.max(1, Math.floor((box.y1 - box.y0) / lineH(MEAL_MIN_SIZE)));
+  if (lines.length > max) lines.splice(max - 1, lines.length, `${lines[max - 1]}…`);
+  return { lines, size: MEAL_MIN_SIZE, footnote: true };
 }
 
 // 칸 좌표(meal-plan.pdf 실측). 열 = 월~토, 행 = 1~5주.
@@ -230,6 +237,8 @@ export async function buildMealPlanPdf(input: {
   const byDate = new Map(input.days.map((d) => [d.date, d]));
   const weeks = mealPlanWeeks(input.ym);
   const { pdf, fonts, H } = await loadForm("meal-plan.pdf");
+  const moreFootnotes: string[] = [];
+  let moreSize = 7.5;
   for (let p = 0; p * 5 < weeks.length; p++) {
     if (p > 0) {
       // 둘째 장 — 빈 양식 한 장을 더 붙입니다(폰트는 한 번만 넣음).
@@ -268,33 +277,31 @@ export async function buildMealPlanPdf(input: {
         if (!meal || !meal.menus.length) continue; // 급식 없는 날은 날짜만
         const cell = { x0: x0 + 2.5, y0: top + MP.dateStrip + 1.8, x1: x1 - 2.5, y1: MP.kcalTop[wi] - 1.8 };
         const plan = planMealCell(meal.menus, cell, fonts.regular);
-        if (plan) {
-          drawLines(page, H, plan.lines, cell, fonts.regular, plan.size, "center");
-        } else {
-          // ③ 칸에는 표시 + 이름만(이름은 말줄임될 수 있음), 번호는 표 아래 각주에 빠짐없이.
-          //   표시는 맨 앞 — 끝에 두면 말줄임에 밀려 사라짐.
-          fitBox(page, H, ["※알레르기 아래", ...meal.menus.map((x) => x.name)], cell, fonts.regular, {
-            maxSize: MEAL_MAX_SIZE,
-            minSize: MEAL_MIN_SIZE,
-            align: "center",
-          });
-          const withNo = meal.menus.filter((x) => x.allergens.length);
-          if (withNo.length) footnotes.push(`※ ${d.getUTCDate()}일 알레르기: ${withNo.map((x) => `${x.name} ${allergenText(x)}`).join(" · ")}`);
+        drawLines(page, H, plan.lines, cell, fonts.regular, plan.size, "center");
+        if (plan.footnote) {
+          // 각주에는 그 날 메뉴 전체 이름 + 번호(번호 없는 메뉴는 이름만 — 칸에서 줄인 이름의 원래 이름 확인용).
+          footnotes.push(`※ ${d.getUTCDate()}일: ${meal.menus.map((x) => (x.allergens.length ? `${x.name} ${allergenText(x)}` : x.name)).join(" · ")}`);
         }
         if (meal.kcal != null) {
           text(page, H, String(meal.kcal), { x: x0 + 29.3, base: MP.kcalTop[wi] + 12.6, size: 10, font: fonts.regular, align: "center", maxW: 25 });
         }
       }
     });
-    if (footnotes.length) drawFootnotes(page, H, footnotes, fonts.regular);
+    if (footnotes.length) {
+      const rest = drawFootnotes(page, H, footnotes, fonts.regular);
+      moreFootnotes.push(...rest.lines);
+      moreSize = Math.min(moreSize, rest.size);
+    }
   }
+  if (moreFootnotes.length) drawFootnotePages(pdf, `${y}년 ${m}월 급식계획 — 알레르기 각주(이어서)`, moreFootnotes, moreSize, fonts.regular);
   pdf.setTitle(`${y}년 ${m}월 급식계획`);
   return pdf.save();
 }
 
 // ③ 각주 — 번호표 아래 여백. 글자를 6pt 까지 줄이고, 그래도 넘치면 용지 아래 여백까지 이어 찍습니다
 //   (번호를 버리지 않음).
-function drawFootnotes(page: PDFPage, H: number, notes: string[], font: PDFFont) {
+//   6pt 로도 자리가 모자라면 들어가는 만큼 찍고 "(다음 장에 이어짐)" — 남은 줄을 돌려주면 호출부가 맨 뒤 장에 이어 찍습니다.
+function drawFootnotes(page: PDFPage, H: number, notes: string[], font: PDFFont): { lines: string[]; size: number } {
   const f = MP.footnote;
   const W = f.x1 - f.x0;
   const wrapAll = (size: number) => notes.flatMap((n) => wrapTokens(safe(n).split(" · "), W, size, font, " · "));
@@ -304,10 +311,28 @@ function drawFootnotes(page: PDFPage, H: number, notes: string[], font: PDFFont)
     size -= 0.25;
     lines = wrapAll(size);
   }
+  const room = Math.floor((f.bottom - f.top) / lineH(size));
+  const here = lines.length > room ? [...lines.slice(0, room - 1), "(알레르기 각주가 마지막 장에 이어집니다)"] : lines;
   let base = f.top + size;
-  for (const ln of lines) {
-    page.drawText(ln, { x: f.x0, y: H - base, size, font, color: INK });
+  for (const ln of here) {
+    page.drawText(safe(ln), { x: f.x0, y: H - base, size, font, color: INK });
     base += lineH(size);
+  }
+  return { lines: lines.length > room ? lines.slice(room - 1) : [], size };
+}
+
+// 각주 이어 찍기 — 빈 A4 장(들)을 맨 뒤에 붙임. 번호는 하나도 버리지 않습니다.
+//   줄은 서식 아래에서 나눈 폭·크기 그대로 찍습니다(크게 찍으면 오른쪽 여백을 넘음).
+function drawFootnotePages(pdf: PDFDocument, title: string, lines: string[], size: number, font: PDFFont) {
+  const [PW, PH] = [595.28, 841.89];
+  const top = 60;
+  const perPage = Math.floor((PH - top - 50) / lineH(size));
+  for (let i = 0; i < lines.length; i += perPage) {
+    const pg = pdf.addPage([PW, PH]);
+    pg.drawText(safe(title), { x: MP.footnote.x0, y: PH - 40, size: 11, font, color: INK });
+    lines.slice(i, i + perPage).forEach((ln, k) => {
+      pg.drawText(safe(ln), { x: MP.footnote.x0, y: PH - top - size - k * lineH(size), size, font, color: INK });
+    });
   }
 }
 
