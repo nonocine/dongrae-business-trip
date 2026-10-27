@@ -4,12 +4,13 @@ import { resolveBangkaAccess } from "@/lib/bangkaAccess";
 import { bucket } from "@/lib/bangkaMedia";
 import { absenceReasonLabel, type AbsenceRow } from "@/lib/bangkaAbsence";
 import { buildAbsencePdf } from "@/lib/bangkaFormPdf";
+import { bkClassLabel } from "@/lib/bangka";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 // [필수 운영서식 15] 공결확인서 PDF — 원본 양식 + 확인자 서명, 뒤 장에 증빙자료(사진·PDF).
-//   학년/반 은 학생 정보의 학년(grade)·학교 반(school_class). 비어 있으면 그 칸은 빈칸(손으로 적음).
+//   학년/반 은 학생 정보의 학년(grade)·방과후 반(class_code → 이음반·지음반). 학년이 비어 있으면 빈칸(손으로 적음).
 export async function GET(_req: Request, ctx: { params: Promise<{ id: string }> }) {
   if (!(await resolveBangkaAccess())) return new Response("방과후아카데미 관리 권한이 없습니다.", { status: 403 });
   const { id } = await ctx.params;
@@ -17,13 +18,13 @@ export async function GET(_req: Request, ctx: { params: Promise<{ id: string }> 
 
   const { data, error } = await supabaseAdmin
     .from("bk_absences")
-    .select("*, bk_students(name, school, grade, school_class), bk_absence_files(name, mime, path, created_at)")
+    .select("*, bk_students(name, school, grade, class_code), bk_absence_files(name, mime, path, created_at)")
     .eq("id", id)
     .maybeSingle();
   if (error) return new Response(error.message, { status: 500 });
   if (!data) return new Response("공결 신청을 찾지 못했습니다.", { status: 404 });
   const a = data as AbsenceRow & {
-    bk_students: { name: string; school: string | null; grade: string | null; school_class: string | null } | null;
+    bk_students: { name: string; school: string | null; grade: string | null; class_code: string | null } | null;
     bk_absence_files: { name: string | null; mime: string | null; path: string; created_at: string }[];
   };
 
@@ -54,7 +55,7 @@ export async function GET(_req: Request, ctx: { params: Promise<{ id: string }> 
     name: a.bk_students?.name ?? "",
     school: a.bk_students?.school ?? null,
     grade: a.bk_students?.grade ?? null,
-    classNo: a.bk_students?.school_class ?? null,
+    afterClass: a.bk_students?.class_code ? bkClassLabel(a.bk_students.class_code) : null,
     startDate: a.start_date,
     endDate: a.end_date,
     confirmerType: a.confirmer_type,

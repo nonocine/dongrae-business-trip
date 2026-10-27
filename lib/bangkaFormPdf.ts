@@ -12,6 +12,7 @@ import path from "path";
 import fontkit from "@pdf-lib/fontkit";
 import { PDFDocument, rgb, type PDFFont, type PDFPage } from "pdf-lib";
 import { boldFont, fitToFont, fkFont, regularFont } from "@/lib/pdfFont";
+import { BK_ALLERGENS } from "@/lib/bangkaMenuParse";
 
 const FORM_DIR = path.join(process.cwd(), "lib", "forms", "bangka");
 const formBytes = (file: string) => readFileSync(path.join(FORM_DIR, file));
@@ -78,11 +79,19 @@ function fitBox(
       }
       if (cur) lines.push(cur);
       cur = "";
-      // 조각이 한 줄보다 길면 글자 단위로 자릅니다.
+      // 조각이 한 줄보다 길면 — "메뉴(5.6.13)" 은 괄호 앞에서 먼저 끊고, 그래도 길면 글자 단위로
+      //   자르되 알레르기 번호 중간("13" → "1"/"3")은 피해 점 뒤에서 끊습니다.
       let rest = piece;
+      const paren = rest.indexOf("(");
+      if (width(rest) > W && paren > 0 && width(rest.slice(0, paren)) <= W) {
+        lines.push(rest.slice(0, paren));
+        rest = rest.slice(paren);
+      }
       while (width(rest) > W) {
         let n = rest.length - 1;
         while (n > 1 && width(rest.slice(0, n)) > W) n--;
+        const dot = rest.slice(0, n).lastIndexOf(".");
+        if (rest.startsWith("(") && dot > 1) n = dot + 1;
         lines.push(rest.slice(0, n));
         rest = rest.slice(n);
       }
@@ -118,7 +127,14 @@ function fitBox(
 // [필수 운영서식 2] 급식계획
 // ---------------------------------------------------------------------
 
-export type MealPlanDay = { date: string; menus: string[]; kcal: number | null };
+// allergens = 메뉴마다 알레르기 번호(BK_ALLERGENS 1~19, 업체 식단표·앱 급식 화면과 같은 번호).
+//   손으로 넣은 날처럼 번호를 모르면 빈 배열 — 이름만 찍습니다.
+export type MealPlanMenu = { name: string; allergens: number[] };
+export type MealPlanDay = { date: string; menus: MealPlanMenu[]; kcal: number | null };
+
+// "불고기(5.6.10)" — 칸이 좁아 번호는 점으로 잇습니다.
+export const menuWithAllergens = (m: MealPlanMenu) =>
+  m.allergens.length ? `${m.name}(${[...m.allergens].sort((a, b) => a - b).join(".")})` : m.name;
 
 // 칸 좌표(meal-plan.pdf 실측). 열 = 월~토, 행 = 1~5주.
 const MP = {
@@ -127,7 +143,16 @@ const MP = {
   kcalTop: [335.4, 423.1, 507.9, 595.5, 677.5],
   weekBottom: [353.1, 440.8, 525.5, 610.3, 694.9],
   dateStrip: 17.6, // 주 칸 맨 위 하늘색 "일" 띠 높이
+  // 결재란 머리 칸(담임·팀장·빈칸) — 가운데 x, 글자 기준선. 원본 "담임" 글자 자리 실측.
+  signHead: { base: 153.1, size: 9.9, centers: [387.35, 441.6, 495.75] },
+  damimCover: { x: 375.6, top: 143.6, w: 23.5, h: 11.6 },
+  legendBase: 762.8, // 맨 아래 ※ 안내 3줄 다음 줄
 };
+
+// 알레르기 번호표 — 서식 맨 아래 안내 다음 줄(표 밖·용지 여백 안).
+const ALLERGEN_LEGEND = `알레르기: ${Object.entries(BK_ALLERGENS)
+  .map(([n, v]) => `${n}.${v.replace(/\(.*\)/, "")}`)
+  .join(" ")}`;
 
 const p2 = (n: number) => String(n).padStart(2, "0");
 const ymdUTC = (d: Date) => `${d.getUTCFullYear()}-${p2(d.getUTCMonth() + 1)}-${p2(d.getUTCDate())}`;
@@ -171,6 +196,13 @@ export async function buildMealPlanPdf(input: {
     const [wy, wm, wd] = input.writtenOn.split("-").map(Number);
     text(page, H, `${wy}. ${wm}. ${wd}.`, { x: 136, base: 220.4, size: 10, font: fonts.regular });
     text(page, H, input.writer, { x: 378, base: 220.4, size: 10, font: fonts.regular, maxW: 140 });
+    // 결재란: 원본 "담임·팀장·(빈칸)" → "담당·팀장·관장"(2026-10 조유경 팀장 요청). 담임 글자는 흰 칸으로 덮고 다시 씀.
+    const sh = MP.signHead;
+    const dc = MP.damimCover;
+    page.drawRectangle({ x: dc.x, y: H - dc.top - dc.h, width: dc.w, height: dc.h, color: rgb(1, 1, 1) });
+    text(page, H, "담당", { x: sh.centers[0], base: sh.base, size: sh.size, font: fonts.bold, bold: true, align: "center" });
+    text(page, H, "관장", { x: sh.centers[2], base: sh.base, size: sh.size, font: fonts.bold, bold: true, align: "center" });
+    text(page, H, ALLERGEN_LEGEND, { x: 70.9, base: MP.legendBase, size: 7.5, font: fonts.regular, maxW: 453 });
 
     weeks.slice(p * 5, p * 5 + 5).forEach((mon, wi) => {
       for (let di = 0; di < 6; di++) {
@@ -183,9 +215,9 @@ export async function buildMealPlanPdf(input: {
         text(page, H, String(d.getUTCDate()), { x: x0 + 48.3, base: top + 12.4, size: 10, font: fonts.bold, bold: true, align: "right" });
         const meal = byDate.get(ymdUTC(d));
         if (!meal || !meal.menus.length) continue; // 급식 없는 날은 날짜만
-        fitBox(page, H, meal.menus, { x0: x0 + 2.5, y0: top + MP.dateStrip + 1.8, x1: x1 - 2.5, y1: MP.kcalTop[wi] - 1.8 }, fonts.regular, {
-          maxSize: 8.5,
-          minSize: 4.5,
+        fitBox(page, H, meal.menus.map(menuWithAllergens), { x0: x0 + 2.5, y0: top + MP.dateStrip + 1.8, x1: x1 - 2.5, y1: MP.kcalTop[wi] - 1.8 }, fonts.regular, {
+          maxSize: 8,
+          minSize: 4,
           align: "center",
         });
         if (meal.kcal != null) {
@@ -206,7 +238,9 @@ export type AbsencePdfInput = {
   name: string;
   school: string | null;
   grade: string | null; // "4" · "초4" · "중1" 등 — 숫자만 찍음
-  classNo: string | null; // 학교 반(없으면 빈칸)
+  // "___반" 칸 = 방과후 반(이음반·지음반). 서식에 "반" 글자가 이미 있어 "이음"만 찍습니다.
+  //   학교 반(bk_students.school_class)은 이 칸에 쓰지 않습니다(데이터는 그대로 둠, 2026-10 조유경 팀장 요청).
+  afterClass: string | null;
   startDate: string;
   endDate: string;
   confirmerType: "guardian" | "teacher" | "other";
@@ -250,7 +284,7 @@ export async function buildAbsencePdf(a: AbsencePdfInput): Promise<Uint8Array> {
   text(page, H, a.name, { x: mid(AB.nameCell), base: AB.row1Base, size: 11, font: R, align: "center", maxW: 76 });
   text(page, H, a.school ?? "", { x: mid(AB.schoolCell), base: AB.row1Base, size: 10, font: R, align: "center", maxW: 76 });
   text(page, H, digits(a.grade), { x: AB.gradeCenter, base: AB.row1Base - 0.6, size: 10, font: R, align: "center", maxW: 16 });
-  text(page, H, digits(a.classNo), { x: AB.classCenter, base: AB.row1Base - 0.6, size: 10, font: R, align: "center", maxW: 16 });
+  text(page, H, (a.afterClass ?? "").replace(/반\s*$/, ""), { x: AB.classCenter, base: AB.row1Base - 0.6, size: 10, font: R, align: "center", maxW: 15 });
 
   const period = a.startDate === a.endDate ? [dotDate(a.startDate)] : [`${dotDate(a.startDate)} ~`, dotDate(a.endDate)];
   fitBox(page, H, period, AB.periodCell, R, { maxSize: 10, minSize: 6, sep: " ", align: "center" });

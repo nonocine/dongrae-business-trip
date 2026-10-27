@@ -14,15 +14,29 @@ import { buildAbsencePdf, buildMealPlanPdf, mealPlanWeeks, type MealPlanDay } fr
   const days: MealPlanDay[] = [];
   if (process.argv[3]) {
     const w = parseVendorWeek((await readXlsxGrid(readFileSync(process.argv[3]))).rows);
-    for (const d of w.days.filter((x) => x.hasMeal)) days.push({ date: d.date!, menus: menuItemsOf(d).map((i) => i.name), kcal: d.nutrition.kcal });
+    for (const d of w.days.filter((x) => x.hasMeal)) days.push({ date: d.date!, menus: menuItemsOf(d).map((i) => ({ name: i.name, allergens: i.allergens })), kcal: d.nutrition.kcal });
   }
   // 넘침 확인용 — 아주 긴 메뉴 하루.
   days.push({
     date: "2026-10-05",
-    menus: ["현미찹쌀흑미잡곡밥", "얼큰한소고기버섯육개장", "치즈돈까스와타르타르소스", "매콤달콤양념치킨강정", "청포묵김가루무침", "깍두기", "브로콜리초장무침", "요구르트", "과일샐러드와요거트드레싱", "수제초코머핀"],
+    // 알레르기 번호까지 붙은 가장 긴 날(번호가 많아도 칸 안에 들어가는지).
+    menus: (
+      [
+        ["현미찹쌀흑미잡곡밥", []],
+        ["얼큰한소고기버섯육개장", [5, 6, 13, 16]],
+        ["치즈돈까스와타르타르소스", [1, 2, 5, 6, 10, 12, 13]],
+        ["매콤달콤양념치킨강정", [5, 6, 12, 13, 15]],
+        ["청포묵김가루무침", [5, 6, 13]],
+        ["깍두기", [9, 13]],
+        ["브로콜리초장무침", [5, 6, 13]],
+        ["요구르트", [2]],
+        ["과일샐러드와요거트드레싱", [1, 2, 5, 11, 12]],
+        ["수제초코머핀", [1, 2, 4, 5, 6, 14]],
+      ] as [string, number[]][]
+    ).map(([name, allergens]) => ({ name, allergens })),
     kcal: 702,
   });
-  days.push({ date: "2026-10-01", menus: ["백미밥", "미역국", "불고기"], kcal: 640 });
+  days.push({ date: "2026-10-01", menus: [{ name: "백미밥", allergens: [] }, { name: "미역국", allergens: [5, 6, 16] }, { name: "불고기", allergens: [5, 6, 13, 16] }], kcal: 640 });
   console.log("10월 주:", mealPlanWeeks("2026-10"), "| 2026-08(6주):", mealPlanWeeks("2026-08"));
   writeFileSync(path.join(out, "meal-plan.pdf"), await buildMealPlanPdf({ ym: "2026-10", writtenOn: "2026-10-27", writer: "정다영", days }));
   writeFileSync(path.join(out, "meal-plan-6weeks.pdf"), await buildMealPlanPdf({ ym: "2026-08", writtenOn: "2026-10-27", writer: "정다영", days: [] }));
@@ -39,7 +53,7 @@ import { buildAbsencePdf, buildMealPlanPdf, mealPlanWeeks, type MealPlanDay } fr
     name: "김방카",
     school: "창신초등학교",
     grade: "초4",
-    classNo: "3",
+    afterClass: "이음반", // 방과후 반 — "반" 글자는 서식에 있어 "이음"만 찍힘
     confirmedOn: "2026-10-27",
     signature: { bytes: sig, mime: "image/png" },
     evidence: [{ name: "진료확인서.jpg", mime: "image/jpeg", bytes: photo }],
@@ -62,6 +76,7 @@ import { buildAbsencePdf, buildMealPlanPdf, mealPlanWeeks, type MealPlanDay } fr
     await buildAbsencePdf({
       ...base,
       signature: null,
+      afterClass: "지음반",
       evidence: [],
       startDate: "2026-11-02",
       endDate: "2026-11-02",
