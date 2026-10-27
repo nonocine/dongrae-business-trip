@@ -49,9 +49,67 @@ function text(
   page.drawText(t, { x, y: H - o.base, size, font: o.font, color: INK });
 }
 
-// 상자 안에 여러 줄 — 조각(tokens)을 쉼표로 이어 줄바꿈하고, 넘치면 글자를 줄입니다.
-//   조각 하나가 한 줄보다 길면 글자 단위로 끊습니다. 다 줄여도(minSize) 넘치면 남는 줄은 버리고
+// 조각(tokens)을 쉼표로 이어 폭 W 안에서 줄바꿈합니다(자르지 않음 — 줄 수만 늘어남).
+//   조각 하나가 한 줄보다 길면 — "메뉴(5.6.13)" 은 괄호 앞에서 먼저 끊고, 그래도 길면 글자 단위로
+//   자르되 알레르기 번호 중간("13" → "1"/"3")은 피해 점 뒤에서 끊습니다.
+function wrapTokens(items: string[], W: number, size: number, font: PDFFont, sep = ", "): string[] {
+  const lines: string[] = [];
+  let cur = "";
+  const width = (s: string) => font.widthOfTextAtSize(s, size);
+  items.forEach((it, i) => {
+    const piece = it + (i < items.length - 1 ? sep.trimEnd() : "");
+    const cand = cur ? `${cur} ${piece}` : piece;
+    if (width(cand) <= W) {
+      cur = cand;
+      return;
+    }
+    if (cur) lines.push(cur);
+    cur = "";
+    let rest = piece;
+    const paren = rest.indexOf("(");
+    if (width(rest) > W && paren > 0 && width(rest.slice(0, paren)) <= W) {
+      lines.push(rest.slice(0, paren));
+      rest = rest.slice(paren);
+    }
+    while (width(rest) > W) {
+      let n = rest.length - 1;
+      while (n > 1 && width(rest.slice(0, n)) > W) n--;
+      const dot = rest.slice(0, n).lastIndexOf(".");
+      if (rest.startsWith("(") && dot > 1) n = dot + 1;
+      lines.push(rest.slice(0, n));
+      rest = rest.slice(n);
+    }
+    cur = rest;
+  });
+  if (cur) lines.push(cur);
+  return lines;
+}
+
+const lineH = (size: number) => size * 1.18;
+
+// 줄들을 상자 세로 가운데에 찍습니다.
+function drawLines(
+  page: PDFPage,
+  H: number,
+  lines: string[],
+  box: { x0: number; y0: number; x1: number; y1: number },
+  font: PDFFont,
+  size: number,
+  align: "left" | "center" = "left",
+) {
+  const W = box.x1 - box.x0;
+  let base = box.y0 + (box.y1 - box.y0 - lines.length * lineH(size)) / 2 + size * 0.95;
+  for (const ln of lines) {
+    const w = font.widthOfTextAtSize(ln, size);
+    const x = align === "center" ? box.x0 + (W - w) / 2 : box.x0;
+    page.drawText(ln, { x, y: H - base, size, font, color: INK });
+    base += lineH(size);
+  }
+}
+
+// 상자 안에 여러 줄 — 넘치면 글자를 줄입니다. 다 줄여도(minSize) 넘치면 남는 줄은 버리고
 //   마지막 줄 끝을 "…" 로 표시합니다(칸 밖으로는 절대 나가지 않음).
+//   ★ 알레르기 번호처럼 잘리면 안 되는 글은 이 함수에 넣지 말 것 — planMealCell 참고.
 function fitBox(
   page: PDFPage,
   H: number,
@@ -64,63 +122,20 @@ function fitBox(
   if (!items.length) return;
   const W = box.x1 - box.x0;
   const Hh = box.y1 - box.y0;
-  const sep = o.sep ?? ", ";
-  const lh = (s: number) => s * 1.18;
-  const wrap = (size: number): string[] => {
-    const lines: string[] = [];
-    let cur = "";
-    const width = (s: string) => font.widthOfTextAtSize(s, size);
-    items.forEach((it, i) => {
-      const piece = it + (i < items.length - 1 ? sep.trimEnd() : "");
-      const cand = cur ? `${cur} ${piece}` : piece;
-      if (width(cand) <= W) {
-        cur = cand;
-        return;
-      }
-      if (cur) lines.push(cur);
-      cur = "";
-      // 조각이 한 줄보다 길면 — "메뉴(5.6.13)" 은 괄호 앞에서 먼저 끊고, 그래도 길면 글자 단위로
-      //   자르되 알레르기 번호 중간("13" → "1"/"3")은 피해 점 뒤에서 끊습니다.
-      let rest = piece;
-      const paren = rest.indexOf("(");
-      if (width(rest) > W && paren > 0 && width(rest.slice(0, paren)) <= W) {
-        lines.push(rest.slice(0, paren));
-        rest = rest.slice(paren);
-      }
-      while (width(rest) > W) {
-        let n = rest.length - 1;
-        while (n > 1 && width(rest.slice(0, n)) > W) n--;
-        const dot = rest.slice(0, n).lastIndexOf(".");
-        if (rest.startsWith("(") && dot > 1) n = dot + 1;
-        lines.push(rest.slice(0, n));
-        rest = rest.slice(n);
-      }
-      cur = rest;
-    });
-    if (cur) lines.push(cur);
-    return lines;
-  };
   let size = o.maxSize;
-  let lines = wrap(size);
-  while (size > o.minSize && lines.length * lh(size) > Hh) {
+  let lines = wrapTokens(items, W, size, font, o.sep);
+  while (size > o.minSize && lines.length * lineH(size) > Hh) {
     size = Math.max(o.minSize, size - 0.25);
-    lines = wrap(size);
+    lines = wrapTokens(items, W, size, font, o.sep);
   }
-  const maxLines = Math.max(1, Math.floor(Hh / lh(size)));
+  const maxLines = Math.max(1, Math.floor(Hh / lineH(size)));
   if (lines.length > maxLines) {
     lines = lines.slice(0, maxLines);
     let last = lines[maxLines - 1];
     while (last.length > 1 && font.widthOfTextAtSize(`${last}…`, size) > W) last = last.slice(0, -1);
     lines[maxLines - 1] = `${last}…`;
   }
-  const blockH = lines.length * lh(size);
-  let base = box.y0 + (Hh - blockH) / 2 + size * 0.95;
-  for (const ln of lines) {
-    const w = font.widthOfTextAtSize(ln, size);
-    const x = o.align === "center" ? box.x0 + (W - w) / 2 : box.x0;
-    page.drawText(ln, { x, y: H - base, size, font, color: INK });
-    base += lh(size);
-  }
+  drawLines(page, H, lines, box, font, size, o.align);
 }
 
 // ---------------------------------------------------------------------
@@ -132,9 +147,40 @@ function fitBox(
 export type MealPlanMenu = { name: string; allergens: number[] };
 export type MealPlanDay = { date: string; menus: MealPlanMenu[]; kcal: number | null };
 
+const allergenText = (m: MealPlanMenu) => [...m.allergens].sort((a, b) => a - b).join(".");
 // "불고기(5.6.10)" — 칸이 좁아 번호는 점으로 잇습니다.
-export const menuWithAllergens = (m: MealPlanMenu) =>
-  m.allergens.length ? `${m.name}(${[...m.allergens].sort((a, b) => a - b).join(".")})` : m.name;
+export const menuWithAllergens = (m: MealPlanMenu) => (m.allergens.length ? `${m.name}(${allergenText(m)})` : m.name);
+
+// 메뉴 이름만 말줄임(번호는 그대로). cap 글자 + "…" — 두 글자 이상 줄 때만("가자미조림" → "가자미조…" 는 이득 없음).
+const capName = (name: string, cap: number) => ([...name].length > cap + 1 ? `${[...name].slice(0, cap).join("")}…` : name);
+
+const MEAL_MAX_SIZE = 8;
+const MEAL_MIN_SIZE = 6; // 인쇄해서 읽을 수 있는 최소(2026-10 관장 지시)
+const NAME_MIN_CAP = 4; // 이름은 최소 4글자 + "…" 까지만 줄임
+
+// 급식 칸 배치 — ★ 알레르기 번호는 어떤 경우에도 "…" 로 자르지 않습니다(아이 안전 정보).
+//   칸이 부족하면 순서대로(2026-10 관장 지시):
+//     ① 메뉴 이름 쪽을 먼저 말줄임(긴 이름부터, 4글자까지)
+//     ② 글자 크기 축소(최소 6pt) — 크기마다 ① 을 다시 시도
+//     ③ 그래도 안 되면 null → 호출부가 그 날 번호를 표 아래 각주로 뺍니다.
+//   돌려준 줄은 칸 안에 전부 들어갑니다(잘린 줄 없음).
+export function planMealCell(
+  menus: MealPlanMenu[],
+  box: { x0: number; y0: number; x1: number; y1: number },
+  font: PDFFont,
+): { lines: string[]; size: number } | null {
+  const W = box.x1 - box.x0;
+  const Hh = box.y1 - box.y0;
+  const longest = Math.max(...menus.map((m) => [...m.name].length));
+  for (let size = MEAL_MAX_SIZE; size >= MEAL_MIN_SIZE; size -= 0.25) {
+    for (let cap = longest; cap >= Math.min(NAME_MIN_CAP, longest); cap--) {
+      const tokens = menus.map((m) => safe(menuWithAllergens({ ...m, name: capName(m.name, cap) }))).filter(Boolean);
+      const lines = wrapTokens(tokens, W, size, font);
+      if (lines.length * lineH(size) <= Hh) return { lines, size };
+    }
+  }
+  return null;
+}
 
 // 칸 좌표(meal-plan.pdf 실측). 열 = 월~토, 행 = 1~5주.
 const MP = {
@@ -147,12 +193,12 @@ const MP = {
   signHead: { base: 153.1, size: 9.9, centers: [387.35, 441.6, 495.75] },
   damimCover: { x: 375.6, top: 143.6, w: 23.5, h: 11.6 },
   legendBase: 762.8, // 맨 아래 ※ 안내 3줄 다음 줄
+  footnote: { x0: 70.9, x1: 524, top: 780, bottom: 834 }, // ③ 칸에 못 넣은 날의 번호 각주 자리(번호표 아래)
 };
 
-// 알레르기 번호표 — 서식 맨 아래 안내 다음 줄(표 밖·용지 여백 안).
-const ALLERGEN_LEGEND = `알레르기: ${Object.entries(BK_ALLERGENS)
-  .map(([n, v]) => `${n}.${v.replace(/\(.*\)/, "")}`)
-  .join(" ")}`;
+// 알레르기 번호표 — 서식 맨 아래 안내 다음 두 줄(표 밖·용지 여백 안). 한 줄이면 6pt 아래로 작아져 1~10 / 11~19 로 나눔.
+const LEGEND_ITEMS = Object.entries(BK_ALLERGENS).map(([n, v]) => `${n}.${v.replace(/\(.*\)/, "")}`);
+const ALLERGEN_LEGEND = [`알레르기: ${LEGEND_ITEMS.slice(0, 10).join(" ")}`, LEGEND_ITEMS.slice(10).join(" ")];
 
 const p2 = (n: number) => String(n).padStart(2, "0");
 const ymdUTC = (d: Date) => `${d.getUTCFullYear()}-${p2(d.getUTCMonth() + 1)}-${p2(d.getUTCDate())}`;
@@ -202,8 +248,13 @@ export async function buildMealPlanPdf(input: {
     page.drawRectangle({ x: dc.x, y: H - dc.top - dc.h, width: dc.w, height: dc.h, color: rgb(1, 1, 1) });
     text(page, H, "담당", { x: sh.centers[0], base: sh.base, size: sh.size, font: fonts.bold, bold: true, align: "center" });
     text(page, H, "관장", { x: sh.centers[2], base: sh.base, size: sh.size, font: fonts.bold, bold: true, align: "center" });
-    text(page, H, ALLERGEN_LEGEND, { x: 70.9, base: MP.legendBase, size: 7.5, font: fonts.regular, maxW: 453 });
+    ALLERGEN_LEGEND.forEach((ln, i) => {
+      // 둘째 줄은 "알레르기: " 폭만큼 들여 번호가 줄 맞춰 보이게.
+      const indent = i ? fonts.regular.widthOfTextAtSize("알레르기: ", 7.5) : 0;
+      text(page, H, ln, { x: 70.9 + indent, base: MP.legendBase + i * 9, size: 7.5, font: fonts.regular, maxW: 453 - indent });
+    });
 
+    const footnotes: string[] = [];
     weeks.slice(p * 5, p * 5 + 5).forEach((mon, wi) => {
       for (let di = 0; di < 6; di++) {
         const d = new Date(`${mon}T00:00:00Z`);
@@ -215,19 +266,49 @@ export async function buildMealPlanPdf(input: {
         text(page, H, String(d.getUTCDate()), { x: x0 + 48.3, base: top + 12.4, size: 10, font: fonts.bold, bold: true, align: "right" });
         const meal = byDate.get(ymdUTC(d));
         if (!meal || !meal.menus.length) continue; // 급식 없는 날은 날짜만
-        fitBox(page, H, meal.menus.map(menuWithAllergens), { x0: x0 + 2.5, y0: top + MP.dateStrip + 1.8, x1: x1 - 2.5, y1: MP.kcalTop[wi] - 1.8 }, fonts.regular, {
-          maxSize: 8,
-          minSize: 4,
-          align: "center",
-        });
+        const cell = { x0: x0 + 2.5, y0: top + MP.dateStrip + 1.8, x1: x1 - 2.5, y1: MP.kcalTop[wi] - 1.8 };
+        const plan = planMealCell(meal.menus, cell, fonts.regular);
+        if (plan) {
+          drawLines(page, H, plan.lines, cell, fonts.regular, plan.size, "center");
+        } else {
+          // ③ 칸에는 표시 + 이름만(이름은 말줄임될 수 있음), 번호는 표 아래 각주에 빠짐없이.
+          //   표시는 맨 앞 — 끝에 두면 말줄임에 밀려 사라짐.
+          fitBox(page, H, ["※알레르기 아래", ...meal.menus.map((x) => x.name)], cell, fonts.regular, {
+            maxSize: MEAL_MAX_SIZE,
+            minSize: MEAL_MIN_SIZE,
+            align: "center",
+          });
+          const withNo = meal.menus.filter((x) => x.allergens.length);
+          if (withNo.length) footnotes.push(`※ ${d.getUTCDate()}일 알레르기: ${withNo.map((x) => `${x.name} ${allergenText(x)}`).join(" · ")}`);
+        }
         if (meal.kcal != null) {
           text(page, H, String(meal.kcal), { x: x0 + 29.3, base: MP.kcalTop[wi] + 12.6, size: 10, font: fonts.regular, align: "center", maxW: 25 });
         }
       }
     });
+    if (footnotes.length) drawFootnotes(page, H, footnotes, fonts.regular);
   }
   pdf.setTitle(`${y}년 ${m}월 급식계획`);
   return pdf.save();
+}
+
+// ③ 각주 — 번호표 아래 여백. 글자를 6pt 까지 줄이고, 그래도 넘치면 용지 아래 여백까지 이어 찍습니다
+//   (번호를 버리지 않음).
+function drawFootnotes(page: PDFPage, H: number, notes: string[], font: PDFFont) {
+  const f = MP.footnote;
+  const W = f.x1 - f.x0;
+  const wrapAll = (size: number) => notes.flatMap((n) => wrapTokens(safe(n).split(" · "), W, size, font, " · "));
+  let size = 7.5;
+  let lines = wrapAll(size);
+  while (size > MEAL_MIN_SIZE && lines.length * lineH(size) > f.bottom - f.top) {
+    size -= 0.25;
+    lines = wrapAll(size);
+  }
+  let base = f.top + size;
+  for (const ln of lines) {
+    page.drawText(ln, { x: f.x0, y: H - base, size, font, color: INK });
+    base += lineH(size);
+  }
 }
 
 // ---------------------------------------------------------------------
