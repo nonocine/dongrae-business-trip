@@ -49,7 +49,7 @@ import {
 //     → 전화공결관리대장 탭에 모이고 엑셀로 내려받을 수 있습니다.
 // =====================================================================
 
-type Student = { id: string; name: string; school: string | null; grade: string | null; class_code: string };
+type Student = { id: string; name: string; school: string | null; grade: string | null; school_class: string | null; class_code: string };
 
 const STATUS_BADGE: Record<AbsenceStatus, string> = {
   submitted: badgeWarning,
@@ -209,7 +209,8 @@ function AbsenceDetail({ row: r, canApprove, onChanged }: { row: AbsenceView; ca
       <dl className="grid gap-x-4 gap-y-1 sm:grid-cols-[7rem_1fr]">
         <dt className="text-ink-muted">학생</dt>
         <dd>
-          {r.student?.name} · {[r.student?.school, r.student?.grade].filter(Boolean).join(" ")}
+          {r.student?.name} ·{" "}
+          {[r.student?.school, r.student?.grade, r.student?.school_class ? `${r.student.school_class}반` : null].filter(Boolean).join(" ")}
         </dd>
         <dt className="text-ink-muted">기간</dt>
         <dd>{absencePeriodLabel(r.start_date, r.end_date)}</dd>
@@ -324,7 +325,9 @@ function PhoneAbsenceForm({ students, todayYmd, onDone }: { students: Student[];
             {students.map((s) => (
               <option key={s.id} value={s.id}>
                 {s.name} ({BK_SCOPE_LABEL[s.class_code as BkScope] ?? s.class_code}
-                {s.school ? ` · ${s.school}` : ""})
+                {s.school ? ` · ${s.school}` : ""}
+                {s.grade ? ` ${s.grade}` : ""}
+                {s.school_class ? ` ${s.school_class}반` : ""})
               </option>
             ))}
           </select>

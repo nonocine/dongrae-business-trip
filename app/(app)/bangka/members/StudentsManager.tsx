@@ -39,6 +39,7 @@ const EMPTY: BkStudentInput = {
   name: "",
   school: "",
   grade: "",
+  school_class: "",
   class_code: "ieum",
   enrolled_on: "",
   memo: "",
@@ -158,6 +159,7 @@ export default function StudentsManager({
                       name: s.name,
                       school: s.school ?? "",
                       grade: s.grade ?? "",
+                      school_class: s.school_class ?? "",
                       class_code: s.class_code,
                       enrolled_on: s.enrolled_on ?? "",
                       memo: s.memo ?? "",
@@ -203,7 +205,10 @@ function StudentRow({
         {s.memo && <p className="text-[11px] font-normal text-ink-hint">{s.memo}</p>}
       </td>
       <td className="px-2 py-2 text-ink-body">{s.school ?? "-"}</td>
-      <td className="px-2 py-2 text-ink-body">{s.grade ?? "-"}</td>
+      <td className="px-2 py-2 text-ink-body">
+        {s.grade ?? "-"}
+        {s.school_class && <span className="ml-1 text-ink-muted">{s.school_class}반</span>}
+      </td>
       <td className="px-2 py-2">
         <span className={badgeNavy}>{bkClassLabel(s.class_code)}</span>
       </td>
@@ -295,6 +300,16 @@ function StudentForm({
         <label>
           <span className={labelCls}>학년</span>
           <input value={f.grade} onChange={set("grade")} placeholder="예: 중1" className={inputCls} />
+        </label>
+        <label>
+          <span className={labelCls}>학교 반</span>
+          <input
+            value={f.school_class}
+            onChange={set("school_class")}
+            inputMode="numeric"
+            placeholder="예: 3 (공결확인서 '반' 칸)"
+            className={inputCls}
+          />
         </label>
         <label>
           <span className={labelCls}>반 *</span>

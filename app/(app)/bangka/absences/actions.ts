@@ -38,7 +38,7 @@ export async function listAbsences(f: AbsenceFilter): Promise<AbsenceView[]> {
   await requireBangkaAccess();
   let q = supabaseAdmin
     .from("bk_absences")
-    .select(`${COLS}, bk_students(name, school, grade, class_code), bk_absence_files(id, name, mime, size, path)`)
+    .select(`${COLS}, bk_students(name, school, grade, school_class, class_code), bk_absence_files(id, name, mime, size, path)`)
     .order("start_date", { ascending: false })
     .order("created_at", { ascending: false })
     .limit(300);
@@ -68,15 +68,16 @@ export async function listAbsences(f: AbsenceFilter): Promise<AbsenceView[]> {
   }));
 }
 
-export async function listActiveStudents(): Promise<{ id: string; name: string; school: string | null; grade: string | null; class_code: string }[]> {
+type StudentPick = { id: string; name: string; school: string | null; grade: string | null; school_class: string | null; class_code: string };
+export async function listActiveStudents(): Promise<StudentPick[]> {
   await requireBangkaAccess();
   const { data, error } = await supabaseAdmin
     .from("bk_students")
-    .select("id, name, school, grade, class_code")
+    .select("id, name, school, grade, school_class, class_code")
     .eq("status", "active")
     .order("name");
   if (error) throw new Error(error.message);
-  return (data ?? []) as { id: string; name: string; school: string | null; grade: string | null; class_code: string }[];
+  return (data ?? []) as StudentPick[];
 }
 
 // 상태 바꾸기 — 현재 상태가 from 중 하나일 때만(동시 처리 방지).

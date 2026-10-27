@@ -153,6 +153,7 @@ export type BkStudentRow = {
   name: string;
   school: string | null;
   grade: string | null;
+  school_class: string | null; // 학교 반(공결확인서 "___반") — class_code(이음반/지음반)와 다름
   class_code: string;
   status: "active" | "left";
   enrolled_on: string | null;
@@ -166,6 +167,7 @@ export type BkStudentInput = {
   name: string;
   school: string;
   grade: string;
+  school_class: string;
   class_code: string;
   enrolled_on: string;
   memo: string;

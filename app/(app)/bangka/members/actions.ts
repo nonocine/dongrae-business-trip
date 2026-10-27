@@ -88,7 +88,7 @@ export async function listStudents(filters: {
   let q = supabaseAdmin
     .from(STUDENTS)
     .select(
-      "id, name, school, grade, class_code, status, enrolled_on, left_on, memo, bk_guardian_students(bk_guardians(id, name, status))"
+      "id, name, school, grade, school_class, class_code, status, enrolled_on, left_on, memo, bk_guardian_students(bk_guardians(id, name, status))"
     )
     .order("class_code", { ascending: true })
     .order("name", { ascending: true });
@@ -125,6 +125,8 @@ export async function saveStudent(input: BkStudentInput): Promise<Result<{ id: s
       name,
       school: cleanStr(input.school),
       grade: cleanStr(input.grade),
+      // 학교 반 — "3", "3반" 모두 받아 숫자만 저장(공결확인서 "___반" 칸).
+      school_class: cleanStr((input.school_class ?? "").replace(/반\s*$/, "")),
       class_code: input.class_code,
       enrolled_on: enrolled,
       memo: cleanStr(input.memo),

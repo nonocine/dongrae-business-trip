@@ -60,7 +60,7 @@ export type AbsenceRow = {
 };
 
 export type AbsenceView = AbsenceRow & {
-  student: { name: string; school: string | null; grade: string | null; class_code: string } | null;
+  student: { name: string; school: string | null; grade: string | null; school_class: string | null; class_code: string } | null;
   files: { id: string; name: string | null; mime: string | null; size: number | null; url: string | null }[];
   signatureUrl: string | null;
 };
