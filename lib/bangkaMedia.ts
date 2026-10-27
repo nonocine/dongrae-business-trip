@@ -4,13 +4,13 @@
 //     1) 서버가 서명 업로드 URL 발급(createSignedUploadUrl) — 사진은 tmp/, 그 밖은 최종 경로
 //     2) 브라우저가 Storage 로 직접 올림(uploadToSignedUrl)
 //     3) 서버가 마무리 — 사진은 tmp 원본을 받아 긴 변 1600px 로 줄여 최종 경로에 저장하고
-//        tmp 를 지움. 기록(bk_post_files·bk_meals)은 이 단계에서만 씁니다.
+//        tmp 를 지움. 목록용 축소본(가로 400px webp, thumbPathOf)도 함께 만듭니다. 기록(bk_post_files·bk_meals)은 이 단계에서만 씁니다.
 //   클라이언트가 보낸 경로는 서버가 발급한 형식인지 다시 확인합니다.
 // =====================================================================
 
 import sharp from "sharp";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
-import { BANGKA_MEDIA_BUCKET, BK_IMAGE_MAX_EDGE, extOf } from "@/lib/bangkaContent";
+import { BANGKA_MEDIA_BUCKET, BK_IMAGE_MAX_EDGE, BK_THUMB_WIDTH, extOf, thumbPathOf } from "@/lib/bangkaContent";
 
 const UUID = "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}";
 export const TMP_RE = new RegExp(`^tmp/${UUID}\\.[a-z0-9]{1,6}$`);
@@ -86,8 +86,27 @@ export async function finalizeImage(tmpPath: string, dir: string, mime: string):
   const path = `${dir}/${crypto.randomUUID()}.${resized.ext}`;
   const { error: upErr } = await bucket().upload(path, resized.bytes, { contentType: resized.mime, upsert: false });
   if (upErr) throw new Error(`사진 저장 실패: ${upErr.message}`);
+  await uploadThumb(path, resized.bytes);
   await bucket().remove([tmpPath]);
   return { ...resized, path };
+}
+
+// 축소본 — 실패해도 원본 저장은 그대로(보호자 앱은 축소본이 없으면 원본을 씁니다).
+export async function makeThumb(input: Buffer): Promise<Buffer> {
+  return sharp(input).rotate().resize({ width: BK_THUMB_WIDTH, withoutEnlargement: true }).webp({ quality: 72 }).toBuffer();
+}
+export async function uploadThumb(path: string, original: Buffer): Promise<boolean> {
+  try {
+    const { error } = await bucket().upload(thumbPathOf(path), await makeThumb(original), { contentType: "image/webp", upsert: true });
+    return !error;
+  } catch {
+    return false;
+  }
+}
+
+// 사진을 지울 때 축소본도 함께(없는 파일은 무시됩니다).
+export function removeWithThumbs(paths: string[]) {
+  return bucket().remove([...paths, ...paths.map(thumbPathOf)]);
 }
 
 // 직접 올린 파일(동영상·문서)의 크기·형식 — 실제로 올라갔는지 확인을 겸합니다.

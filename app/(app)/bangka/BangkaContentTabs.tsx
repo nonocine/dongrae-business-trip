@@ -8,6 +8,7 @@ const TABS = [
   { href: "/bangka/posts", label: "공지·알림장" },
   { href: "/bangka/meals", label: "급식" },
   { href: "/bangka/events", label: "연간일정" },
+  { href: "/bangka/absences", label: "공결" },
 ];
 
 export default function BangkaContentTabs() {

@@ -31,6 +31,13 @@ export const BK_FILE_KIND_LABEL: Record<BkFileKind, string> = { image: "사진",
 
 // 이미지는 서버에서 긴 변 1600px 로 줄입니다(원본은 보관하지 않음).
 export const BK_IMAGE_MAX_EDGE = 1600;
+
+// 목록·홈용 축소본 — 원본 옆에 "<원본에서 확장자 뺀 것>.thumb.webp"(가로 400px).
+//   보호자 앱(동래방카 lib/content.ts thumbPathOf)과 같은 규칙이어야 합니다.
+export const BK_THUMB_WIDTH = 400;
+export function thumbPathOf(path: string): string {
+  return path.replace(/\.[a-z0-9]{1,6}$/i, "") + ".thumb.webp";
+}
 // 올리기 전 원본 상한 — 버킷 한도(100MB) 안에서 종류별로.
 export const BK_MAX_BYTES: Record<BkFileKind, number> = {
   image: 30 * 1024 * 1024,

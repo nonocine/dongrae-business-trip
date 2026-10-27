@@ -17,6 +17,7 @@ export type BangkaAccess = {
   name: string;
   driverId: string | null;
   isM0: boolean;
+  rank: string | null; // 직급(관장·부장·팀장·팀원) — 공결 팀장 결재 판정용
 };
 
 // 접근 컨텍스트 — 권한 없으면 null. (페이지는 redirect, 액션은 throw)
@@ -51,7 +52,7 @@ export async function resolveBangkaAccess(): Promise<BangkaAccess | null> {
   const roles = driverId ? await listRolesForDriver(driverId) : [];
   const canAccess = isM0 || roles.includes("bangka");
   if (!canAccess) return null;
-  return { name: me.name.trim(), driverId, isM0 };
+  return { name: me.name.trim(), driverId, isM0, rank };
 }
 
 // 액션용 — 미통과면 throw.
@@ -63,4 +64,9 @@ export async function requireBangkaAccess(): Promise<BangkaAccess> {
     );
   }
   return ctx;
+}
+
+// 공결 팀장 결재 — 관장·부장(M0) 또는 직급 팀장.
+export function canApproveAbsence(ctx: BangkaAccess): boolean {
+  return ctx.isM0 || ctx.rank === "팀장";
 }

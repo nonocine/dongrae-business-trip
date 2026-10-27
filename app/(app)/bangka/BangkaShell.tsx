@@ -5,7 +5,7 @@ import { resolveBangkaAccess } from "@/lib/bangkaAccess";
 import BangkaContentTabs from "@/app/(app)/bangka/BangkaContentTabs";
 import { linkCls } from "@/lib/ui";
 
-// 방과후아카데미 콘텐츠(공지·알림장 / 급식 / 연간일정) 공통 틀 — 접근 가드 + 상단 탭.
+// 방과후아카데미 콘텐츠(공지·알림장 / 급식 / 연간일정 / 공결) 공통 틀 — 접근 가드 + 상단 탭.
 //   권한은 학생·보호자 관리와 같습니다(M0 또는 bangka 직무 — lib/bangkaAccess).
 export default async function BangkaShell({ children }: { children: React.ReactNode }) {
   await enforcePasswordChange();

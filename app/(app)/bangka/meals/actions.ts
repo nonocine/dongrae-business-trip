@@ -13,7 +13,7 @@ import {
   type BkMealLine,
   type BkMealRow,
 } from "@/lib/bangkaContent";
-import { bucket, finalizeImage, newObjectName, signedUrls, signUpload } from "@/lib/bangkaMedia";
+import { finalizeImage, newObjectName, removeWithThumbs, signedUrls, signUpload } from "@/lib/bangkaMedia";
 
 // =====================================================================
 // 급식(bk_meals — 하루 1행, 반 공통) 서버 액션 — /bangka/meals
@@ -150,10 +150,10 @@ export async function finalizeMealPhoto(input: { date: string; path: string; mim
       ? await supabaseAdmin.from(MEALS).update(photo).eq("meal_date", input.date)
       : await supabaseAdmin.from(MEALS).insert({ meal_date: input.date, menu_text: "", ...photo });
     if (error) {
-      await bucket().remove([img.path]);
+      await removeWithThumbs([img.path]);
       throw new Error(error.message);
     }
-    if (old && old !== img.path) await bucket().remove([old]);
+    if (old && old !== img.path) await removeWithThumbs([old]);
     revalidatePath(BASE);
     return { ok: true };
   } catch (e) {
@@ -168,7 +168,7 @@ export async function deleteMealPhoto(date: string): Promise<Result> {
     const { data: cur } = await supabaseAdmin.from(MEALS).select("photo_path, menu_text").eq("meal_date", date).maybeSingle();
     const c = cur as { photo_path: string | null; menu_text: string } | null;
     if (!c?.photo_path) return { ok: true };
-    const { error: rmErr } = await bucket().remove([c.photo_path]);
+    const { error: rmErr } = await removeWithThumbs([c.photo_path]);
     if (rmErr) return { ok: false, message: `사진 삭제 실패: ${rmErr.message}` };
     const { error } = c.menu_text
       ? await supabaseAdmin

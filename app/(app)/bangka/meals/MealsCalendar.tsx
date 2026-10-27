@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import {
@@ -65,13 +66,19 @@ export default function MealsCalendar({ ym, meals, todayYmd }: { ym: string; mea
           ▶
         </button>
         <span className="text-xs text-ink-muted">메뉴 {meals.filter((x) => x.menu_text).length}일 · 사진 {meals.filter((x) => x.photo_url).length}일</span>
+        <Link href="/bangka/meals/upload" className={`ml-auto ${btnPrimary}`}>
+          식단표 올리기(엑셀)
+        </Link>
+        <a href={`/bangka/meals/plan-pdf?ym=${ym}`} className={btnSecondary}>
+          {m}월 급식계획 PDF
+        </a>
         <button
           type="button"
           onClick={() => {
             setBulk((v) => !v);
             setSelected(null);
           }}
-          className={`ml-auto ${bulk ? btnSecondary : btnPrimary}`}
+          className={btnSecondary}
         >
           {bulk ? "일괄 입력 닫기" : "일괄 입력(붙여넣기)"}
         </button>

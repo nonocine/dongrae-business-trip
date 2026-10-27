@@ -16,7 +16,7 @@ import {
   type BkPostType,
   type BkScope,
 } from "@/lib/bangkaContent";
-import { bucket, finalizeImage, newObjectName, signedUrls, signUpload, statObject } from "@/lib/bangkaMedia";
+import { finalizeImage, newObjectName, removeWithThumbs, signedUrls, signUpload, statObject } from "@/lib/bangkaMedia";
 
 // =====================================================================
 // 공지·알림장(bk_posts) 서버 액션 — /bangka/posts
@@ -237,7 +237,7 @@ export async function finalizePostUpload(input: {
       .from(FILES)
       .insert({ post_id: input.postId, name: input.name.slice(0, 200), sort_order: sort_order + 1, ...row });
     if (error) {
-      await bucket().remove([row.path]);
+      await removeWithThumbs([row.path]);
       throw new Error(error.message);
     }
     revalidatePath(BASE);
@@ -257,7 +257,7 @@ export async function deletePostFile(input: { postId: string; fileId: string }):
       .eq("post_id", input.postId)
       .maybeSingle();
     if (!data) return { ok: true };
-    const { error: rmErr } = await bucket().remove([(data as { path: string }).path]);
+    const { error: rmErr } = await removeWithThumbs([(data as { path: string }).path]);
     if (rmErr) return { ok: false, message: `파일 삭제 실패: ${rmErr.message}` };
     const { error } = await supabaseAdmin.from(FILES).delete().eq("id", input.fileId);
     if (error) throw new Error(error.message);
