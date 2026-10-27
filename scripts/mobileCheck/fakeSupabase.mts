@@ -129,6 +129,17 @@ export function startFakeSupabase(port: number, schemaPath: string) {
     if ("must_change_password" in row) row.must_change_password = false;
     // 활동은 본인 작성분만 열립니다(getActivity) — 작성자를 가짜 관장으로, 종류는 실제 값 중 하나로.
     if (table === "activities") Object.assign(row, { author: BOSS_NAME, activity_type: "business_trip", driving_log_id: null });
+    // 동래샘들 계정 — 목록마다 버튼 조합이 달라지게 섞습니다(동아리샘 목록 넘침 2026-10).
+    //   0: 가입 완료 + 강사 겸직(saem_member_roles 가짜 행이 uuid(1)) → 비밀번호 재설정·중지·역할 해제·완전 삭제
+    //   1: 미가입·링크 만료 → [초대 링크 재발급]
+    //   2: 짧은 이름 + 하이픈 없는 전화번호(표시 형식 확인)
+    if (table === "saem_instructors") {
+      if (i === 1 && "password_set_at" in row) Object.assign(row, { password_set_at: null, invite_expires_at: "2026-01-01T00:00:00+00:00" });
+      if (i === 2) {
+        if ("name" in row) row.name = "김샘";
+        if ("phone" in row) row.phone = "01098765432";
+      }
+    }
     if ("deleted_at" in row) row.deleted_at = null;
     if ("left_on" in row) row.left_on = null;
     return row;

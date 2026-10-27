@@ -56,6 +56,7 @@ import {
   noticeWarning,
 } from "@/lib/ui";
 import Tabs from "@/app/components/Tabs";
+import { formatBkPhone, normalizeBkPhone } from "@/lib/bangka";
 
 const inputCls =
   "w-full rounded-md border border-rule bg-card px-3 py-2 text-sm text-ink-body shadow-sm focus:border-navy focus:outline-none focus:ring-1 focus:ring-navy";
@@ -389,6 +390,10 @@ function deactivationNote(teacher: ClubTeacherRow): string {
   return `중지: ${when} · ${who} · ${why}`;
 }
 
+// 목록 행 버튼 — 휴대폰 반반 칸에서 글이 길면(“동아리샘 역할 해제”) 버튼 안에서 줄바꿈되게 높이를 풀어 둔다.
+//   PC(sm 이상)는 공용 버튼 높이 그대로.
+const rowBtnFit = "min-w-0 px-2 !h-auto min-h-10 py-1.5 leading-snug sm:!h-[38px] sm:px-4 sm:py-0";
+
 // 등록된 동아리샘 목록.
 //   화면에 "활성"이 두 개 나오므로 라벨을 확실히 갈라 둔다.
 //     · 계정 배지("계정 활성/…")  = 동래샘들 로그인 상태. 여기서는 표시만 하고 바꾸지 않는다.
@@ -458,53 +463,70 @@ function TeacherList({
               <li
                 key={teacher.id}
                 title={roleActive ? undefined : deactivationNote(teacher)}
-                className={`flex flex-wrap items-center gap-x-2 gap-y-1 py-2 ${
+                className={`py-2 sm:flex sm:flex-wrap sm:items-center sm:gap-x-2 sm:gap-y-1 ${
                   roleActive ? "" : "bg-surface/60 opacity-60"
                 }`}
               >
-                <span
-                  className={`font-semibold ${
-                    roleActive ? "text-ink" : "text-ink-muted line-through"
-                  }`}
-                >
-                  {teacher.name}
-                </span>
-                {teacher.alsoInstructor && (
-                  <span className={badgeNavy}>강사 겸직</span>
+                {/* 휴대폰: 이름·배지 한 덩어리(배지가 많으면 줄바꿈) / PC: contents 로 한 줄에 흘림 */}
+                <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 sm:contents">
+                  <span
+                    className={`min-w-0 break-words font-semibold ${
+                      roleActive ? "text-ink" : "text-ink-muted line-through"
+                    }`}
+                  >
+                    {teacher.name}
+                  </span>
+                  {teacher.alsoInstructor && (
+                    <span className={badgeNavy}>강사 겸직</span>
+                  )}
+                  {/* 역할 상태 — 이 화면의 토글 대상 */}
+                  <span className={roleActive ? badgeSuccess : badgeWarning}>
+                    {roleActive ? "동아리샘 활성" : "동아리샘 중지"}
+                  </span>
+                  {/* 계정(로그인) 상태 — 정보 표시 전용 */}
+                  <span
+                    className={
+                      teacher.status === "active" ? badgeNeutral : badgeDanger
+                    }
+                  >
+                    계정 {teacher.status === "active" ? "활성" : teacher.status}
+                  </span>
+                  {/* 동래샘들 가입·초대 링크 상태 — 만료면 아래 [재발급] */}
+                  <InviteStatusBadge state={teacher.invite} />
+                </div>
+                {teacher.phone ? (
+                  <a
+                    href={`tel:${normalizeBkPhone(teacher.phone)}`}
+                    className="mt-1 inline-block text-xs text-ink-muted underline-offset-2 hover:underline sm:mt-0"
+                  >
+                    {formatBkPhone(teacher.phone)}
+                  </a>
+                ) : (
+                  <span className="mt-1 block text-xs text-ink-muted sm:mt-0 sm:inline">
+                    연락처 없음
+                  </span>
                 )}
-                {/* 역할 상태 — 이 화면의 토글 대상 */}
-                <span className={roleActive ? badgeSuccess : badgeWarning}>
-                  {roleActive ? "동아리샘 활성" : "동아리샘 중지"}
-                </span>
-                {/* 계정(로그인) 상태 — 정보 표시 전용 */}
-                <span
-                  className={
-                    teacher.status === "active" ? badgeNeutral : badgeDanger
-                  }
-                >
-                  계정 {teacher.status === "active" ? "활성" : teacher.status}
-                </span>
-                {/* 동래샘들 가입·초대 링크 상태 — 만료면 아래 [재발급] */}
-                <InviteStatusBadge state={teacher.invite} />
-                <span className="text-xs text-ink-muted">
-                  {teacher.phone ?? "연락처 없음"}
-                </span>
                 {!roleActive && (
-                  <span className="w-full text-xs text-ink-hint sm:w-auto">
+                  <span className="block w-full text-xs text-ink-hint sm:inline sm:w-auto">
                     {deactivationNote(teacher)}
                   </span>
                 )}
-                <div className="flex w-full flex-wrap gap-2 sm:ml-auto sm:w-auto sm:shrink-0">
+                {/* 휴대폰: 링크 버튼 한 줄 전체 + 중지·제거 반반(카드 안에서 줄바꿈) / PC: 오른쪽 한 줄 */}
+                <div className="mt-2 grid grid-cols-2 gap-2 sm:ml-auto sm:mt-0 sm:flex sm:w-auto sm:shrink-0 sm:flex-wrap">
                   <InviteReissueButton
                     instructorId={teacher.id}
                     name={teacher.name}
                     state={teacher.invite}
+                    className={`${
+                      teacher.invite.kind === "valid" ? btnSecondary : btnPrimary
+                    } col-span-2 ${rowBtnFit}`}
                   />
                   {/* 가입자 — 비밀번호를 잊었을 때(강사 상세와 같은 generateInvite) */}
                   <PasswordResetButton
                     instructorId={teacher.id}
                     name={teacher.name}
                     state={teacher.invite}
+                    className={`${btnSecondary} col-span-2 ${rowBtnFit}`}
                   />
                   {roleActive ? (
                     <button
@@ -518,7 +540,7 @@ function TeacherList({
                         if (reason === null) return; // 취소
                         onDeactivate(teacher, reason.trim());
                       }}
-                      className={btnSecondary}
+                      className={`${btnSecondary} ${rowBtnFit}`}
                     >
                       중지
                     </button>
@@ -527,7 +549,7 @@ function TeacherList({
                       type="button"
                       disabled={pending}
                       onClick={() => onReactivate(teacher)}
-                      className={btnSecondary}
+                      className={`${btnSecondary} ${rowBtnFit}`}
                     >
                       다시 활성
                     </button>
@@ -542,21 +564,38 @@ function TeacherList({
                       if (!window.confirm(ask)) return;
                       onRemove(teacher);
                     }}
-                    className={btnSecondary}
+                    className={`${btnSecondary} ${rowBtnFit}`}
                   >
                     {teacher.alsoInstructor ? "동아리샘 역할 해제" : "제거"}
                   </button>
+                  {/* PC: 기존처럼 줄 끝 빨간 버튼. 휴대폰은 아래 카드 맨 끝 글자 버튼으로 분리 */}
                   {canPurge && (
+                    <span className="hidden sm:contents">
+                      <button
+                        type="button"
+                        disabled={pending}
+                        onClick={() => setPurgeTarget(teacher)}
+                        className={btnDanger}
+                      >
+                        완전 삭제
+                      </button>
+                    </span>
+                  )}
+                </div>
+                {/* 휴대폰: 되돌릴 수 없는 동작은 자주 쓰는 버튼 줄과 떼어 카드 맨 아래 오른쪽에 작게.
+                    누르면 PurgeAccountDialog(제목에 이름 · "되돌릴 수 없습니다" · 이름 입력 확인) */}
+                {canPurge && (
+                  <div className="mt-1 flex justify-end sm:hidden">
                     <button
                       type="button"
                       disabled={pending}
                       onClick={() => setPurgeTarget(teacher)}
-                      className={btnDanger}
+                      className="min-h-10 px-1 text-xs font-semibold text-stamp underline-offset-2 hover:underline disabled:opacity-60"
                     >
                       완전 삭제
                     </button>
-                  )}
-                </div>
+                  </div>
+                )}
               </li>
             );
           })}

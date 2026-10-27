@@ -8,6 +8,7 @@
 //        로그인 후 들어갈 수 있는 화면 전부를 390·430·360·1280px 로 엽니다.
 //     3) 화면마다 잽니다.
 //        · 가로 넘침: document 너비 > 화면 너비. 넘치게 만든 요소(가로 스크롤 상자 밖)를 함께 적음
+//        · 카드 넘침: 버튼·글이 가장 가까운 테두리 상자(카드) 밖으로 나감(문서 폭은 그대로여도)
 //        · 작은 버튼: 휴대폰에서 높이 40px 미만인 버튼·링크 버튼·입력칸
 //          (제외: 탭 role=tab — 트랙 포함 40px / 표 안 / 배경·테두리 없는 글자형 버튼 / 스위치)
 //        · 입력칸 글자 16px 미만(아이폰이 확대해 버림)
@@ -18,10 +19,12 @@
 //     --port=3210             앱 포트(가짜 DB 는 +1)
 //     --json=<파일>           결과를 JSON 으로도 저장
 //     --widths=390,360        일부 폭만(기본 390·430·360·1280)
+//     --full=1                --shots 캡처를 화면 전체 길이로
+//     --font=1.3              휴대폰 '글꼴 크기 크게' 흉내(기본 글자 16px × 배율)
 //   ★ Windows Git Bash: `/mail` 처럼 / 로 시작하는 인자를 C:/Program Files/Git/mail 로 바꿔 버려
 //     --only 가 조용히 빠집니다. 앞에 MSYS_NO_PATHCONV=1 을 붙이세요(PowerShell·cmd 는 상관없음).
 //       MSYS_NO_PATHCONV=1 npm run test:mobile-overflow -- --only=/mail,/hr
-//   종료 코드: 휴대폰 폭 가로 넘침이 하나라도 있으면 1.
+//   종료 코드: 휴대폰 폭 가로 넘침·카드 넘침이 하나라도 있으면 1.
 import { spawn } from "node:child_process";
 import { mkdirSync, writeFileSync } from "node:fs";
 import path from "node:path";
@@ -33,6 +36,7 @@ const arg = (k: string) => process.argv.find((a) => a.startsWith(`--${k}=`))?.sp
 const PORT = Number(arg("port") ?? 3210);
 const DB_PORT = PORT + 1;
 const SHOTS = arg("shots");
+const FONT = Number(arg("font") ?? 1);
 const SECRET = "mobile-check-only-secret-not-production-0123456789";
 
 const ID = "00000000-0000-4000-8000-000000000001";
@@ -73,6 +77,7 @@ type Finding = {
   docWidth: number;
   viewWidth: number;
   culprits: string[];
+  cardEscapes: string[];
   smallTargets: string[];
   smallInputs: string[];
   clipped: string[];
@@ -123,6 +128,26 @@ async function measure(page: Page, mobile: boolean) {
           smallInputs.push(`${desc(el)} (${getComputedStyle(el).fontSize})`);
       }
     }
+    // 카드 밖으로 나간 요소: 화면 폭 안에 있어도 가장 가까운 테두리 상자(카드)의 오른쪽·왼쪽 선을 넘으면 넘침.
+    //   (2026-10 동아리샘 목록 — 버튼이 카드 테두리를 뚫었는데 문서 폭은 안 늘어 위 검사에 안 잡힘)
+    const cardEscapes: string[] = [];
+    if (mobile) {
+      const boxOf = (el: Element) => {
+        for (let p = el.parentElement; p && p !== document.body; p = p.parentElement) {
+          const s = getComputedStyle(p);
+          if (parseFloat(s.borderLeftWidth) > 0 && parseFloat(s.borderRightWidth) > 0 && parseFloat(s.borderTopLeftRadius) > 0) return p;
+        }
+        return null;
+      };
+      for (const el of document.querySelectorAll("button, a, span, input, select")) {
+        if (!visible(el) || clippedByAncestor(el) || el.closest("[role=dialog]")) continue;
+        const box = boxOf(el);
+        if (!box) continue;
+        const r = el.getBoundingClientRect();
+        const b = box.getBoundingClientRect();
+        if (r.right > b.right + 1 || r.left < b.left - 1) cardEscapes.push(`${desc(el)} → 카드 ${desc(box).slice(0, 40)}`);
+      }
+    }
     const clipped: string[] = [];
     for (const el of all) {
       const s = getComputedStyle(el);
@@ -134,6 +159,7 @@ async function measure(page: Page, mobile: boolean) {
       docWidth: document.documentElement.scrollWidth,
       viewWidth: vw,
       culprits,
+      cardEscapes: [...new Set(cardEscapes)].slice(0, 6),
       smallTargets: [...new Set(smallTargets)].slice(0, 8),
       smallInputs: [...new Set(smallInputs)].slice(0, 5),
       clipped: clipped.slice(0, 5),
@@ -206,6 +232,9 @@ try {
     ]);
     // tsx(esbuild)가 함수에 붙이는 __name 보조함수 — page.evaluate 안에서도 있게.
     await ctx.addInitScript("window.__name = (f) => f;");
+    // --font=1.3 : 휴대폰 '글꼴 크기 크게'처럼 기본 글자(rem)를 키워 엽니다.
+    if (FONT !== 1)
+      await ctx.addInitScript(`document.addEventListener("DOMContentLoaded", () => { document.documentElement.style.fontSize = "${16 * FONT}px"; });`);
     // 스플래시(세션당 1회) 건너뛰기
     await ctx.addInitScript(() => {
       try {
@@ -214,7 +243,7 @@ try {
     });
     const page = await ctx.newPage();
     for (const route of routes) {
-      const f: Finding = { route, width: w.name, finalUrl: "", docWidth: 0, viewWidth: w.width, culprits: [], smallTargets: [], smallInputs: [], clipped: [] };
+      const f: Finding = { route, width: w.name, finalUrl: "", docWidth: 0, viewWidth: w.width, culprits: [], cardEscapes: [], smallTargets: [], smallInputs: [], clipped: [] };
       try {
         await page.goto(base + route, { waitUntil: "networkidle", timeout: 240_000 });
         await page.waitForTimeout(600);
@@ -224,7 +253,7 @@ try {
         if (SHOTS) {
           mkdirSync(SHOTS, { recursive: true });
           const file = route.replace(/^\//, "").replace(/[/?=&]/g, "_") || "home";
-          await page.screenshot({ path: path.join(SHOTS, `${file}-${w.name}.png`) });
+          await page.screenshot({ path: path.join(SHOTS, `${file}-${w.name}.png`), fullPage: !!arg("full") });
         }
       } catch (e) {
         f.error = (e as Error).message.split("\n")[0];
@@ -232,7 +261,7 @@ try {
       findings.push(f);
       const over = f.docWidth > f.viewWidth;
       console.log(
-        `${w.name.padStart(4)} ${route.padEnd(42)} ${over ? `넘침 ${f.docWidth}px` : "ok"}${f.error ? ` [${f.error}]` : ""}${
+        `${w.name.padStart(4)} ${route.padEnd(42)} ${over ? `넘침 ${f.docWidth}px` : f.cardEscapes.length ? `카드 넘침 ${f.cardEscapes.length}` : "ok"}${f.error ? ` [${f.error}]` : ""}${
           f.finalUrl && f.finalUrl.split("?")[0] !== route.split("?")[0] ? ` → ${f.finalUrl}` : ""
         }`,
       );
@@ -246,9 +275,11 @@ try {
 }
 
 // ---- 보고 ----
-const mobileOver = findings.filter((f) => WIDTHS.find((w) => w.name === f.width)!.mobile && f.docWidth > f.viewWidth);
+const mobileOver = findings.filter((f) => WIDTHS.find((w) => w.name === f.width)!.mobile && (f.docWidth > f.viewWidth || f.cardEscapes.length > 0));
 console.log("\n## 가로 넘침");
 for (const f of findings.filter((f) => f.docWidth > f.viewWidth)) console.log(`- ${f.width}px ${f.route}: ${f.docWidth}px\n    ${f.culprits.join("\n    ")}`);
+console.log("\n## 카드 테두리 밖으로 나간 요소(휴대폰 폭)");
+for (const f of findings.filter((f) => f.cardEscapes.length)) console.log(`- ${f.width}px ${f.route}:\n    ${f.cardEscapes.join("\n    ")}`);
 console.log("\n## 휴대폰 작은 버튼·입력칸(40px 미만)");
 for (const f of findings.filter((f) => f.width === "390" && f.smallTargets.length)) console.log(`- ${f.route}: ${f.smallTargets.join(" | ")}`);
 console.log("\n## 입력칸 글자 16px 미만");
@@ -260,5 +291,5 @@ for (const f of findings.filter((f) => f.error)) console.log(`- ${f.width}px ${f
 console.log(`\n가짜 DB 쓰기 요청(운영 DB 아님, 기록만): ${fake.writes.length}건 ${[...new Set(fake.writes)].slice(0, 10).join(", ")}`);
 const json = arg("json");
 if (json) writeFileSync(json, JSON.stringify({ findings, writes: fake.writes }, null, 1));
-console.log(`\n휴대폰 폭 가로 넘침 ${mobileOver.length}건 / 점검 ${findings.length}건`);
+console.log(`\n휴대폰 폭 가로·카드 넘침 ${mobileOver.length}건 / 점검 ${findings.length}건`);
 process.exit(mobileOver.length ? 1 : 0);
