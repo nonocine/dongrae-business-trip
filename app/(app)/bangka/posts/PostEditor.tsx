@@ -235,7 +235,7 @@ export default function PostEditor({ post }: { post: BkPostDetail | null }) {
                       (x.name ?? "파일")
                     )}
                   </p>
-                  <p className="text-ink-muted">
+                  <p className="text-ink-muted [overflow-wrap:anywhere]">
                     {BK_FILE_KIND_LABEL[x.kind]} · {fmtBytes(x.size)}
                     {x.width && x.height ? ` · ${x.width}×${x.height}` : ""}
                   </p>

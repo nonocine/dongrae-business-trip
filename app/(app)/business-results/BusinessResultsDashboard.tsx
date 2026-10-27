@@ -890,7 +890,8 @@ export default function BusinessResultsDashboard({
                           }}
                         />
                       </div>
-                      <b className="w-16 text-right tabular-nums text-ink">
+                      {/* 고정 폭이면 큰 수가 칸을 넘음 — 최소 폭만 두고 늘어나게 */}
+                      <b className="min-w-16 whitespace-nowrap text-right tabular-nums text-ink">
                         {number.format(item.attendance)}
                       </b>
                     </div>

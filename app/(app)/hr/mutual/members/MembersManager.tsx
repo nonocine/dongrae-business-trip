@@ -378,12 +378,12 @@ function Stat({
 }) {
   return (
     <div
-      className={`rounded-lg border px-3 py-2 ${
+      className={`min-w-0 rounded-lg border px-2 py-2 sm:px-3 ${
         tone === "navy" ? "border-navy/30 bg-navy-soft/30" : "border-line bg-surface/60"
       }`}
     >
       <p className="text-[11px] text-ink-muted">{label}</p>
-      <p className="mt-0.5 font-mono text-base font-bold text-ink">{value}</p>
+      <p className="mt-0.5 font-mono text-sm font-bold text-ink [overflow-wrap:anywhere] sm:text-base">{value}</p>
     </div>
   );
 }

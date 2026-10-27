@@ -53,7 +53,8 @@ function fakeValue(table: string, col: string, c: Col | undefined, i: number): u
   if (/(url|link|href|homepage|website)/.test(n)) return "https://www.example.com/very/long/path/for/layout/check?query=1234567890abcdef";
   if (/(path|storage_key|object|file_key)$/.test(n)) return `test/${table}/${i}.pdf`;
   if (/(mime|content_type)/.test(n)) return "application/pdf";
-  if (/(slug)/.test(n)) return "2026-1";
+  // slug 는 운영 DB 에서 unique — 줄마다 다르게(같으면 목록 key 중복 경고가 거짓으로 뜸). 화면 경로의 eq 조건은 forced 로 덮임.
+  if (/(slug)/.test(n)) return `2026-${i + 1}`;
   if (/(status|state|type|kind|category|role|scope|channel|key|code|level|source|mode|gender|method|unit)$/.test(n))
     return "etc";
   if (/(memo|note|body|content|description|reason|comment|detail|summary|text|message|address|remarks)/.test(n))

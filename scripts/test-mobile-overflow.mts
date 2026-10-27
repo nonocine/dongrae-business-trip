@@ -80,6 +80,7 @@ type Finding = {
   cardEscapes: string[];
   smallTargets: string[];
   smallInputs: string[];
+  consoleErrors: string[];
   clipped: string[];
   error?: string;
 };
@@ -240,9 +241,6 @@ try {
     ]);
     // tsx(esbuild)가 함수에 붙이는 __name 보조함수 — page.evaluate 안에서도 있게.
     await ctx.addInitScript("window.__name = (f) => f;");
-    // --font=1.3 : 휴대폰 '글꼴 크기 크게'처럼 기본 글자(rem)를 키워 엽니다.
-    if (FONT !== 1)
-      await ctx.addInitScript(`document.addEventListener("DOMContentLoaded", () => { document.documentElement.style.fontSize = "${16 * FONT}px"; });`);
     // 스플래시(세션당 1회) 건너뛰기
     await ctx.addInitScript(() => {
       try {
@@ -250,10 +248,26 @@ try {
       } catch {}
     });
     const page = await ctx.newPage();
+    // 화면마다 브라우저 콘솔 오류(수화 불일치 등 — 개발 화면 "N Issue" 의 내용)를 모음.
+    let consoleErrors: string[] = [];
+    page.on("console", async (m) => {
+      if (m.type() !== "error") return;
+      // React 경고는 "%s" 자리에 값이 따로 와서 채워 적고, 불러오기 실패는 어느 주소인지 붙임.
+      const vals = await Promise.all(m.args().slice(1).map((a) => a.jsonValue().catch(() => "")));
+      let text = m.text().split("\n")[0];
+      for (const v of vals) text = text.replace("%s", String(v).split("\n")[0].slice(0, 60));
+      const at = /Failed to load resource/.test(text) ? ` ← ${m.location().url}` : "";
+      consoleErrors.push(`${text.slice(0, 160)}${at}`);
+    });
+    page.on("pageerror", (e) => consoleErrors.push(`pageerror: ${e.message.split("\n")[0].slice(0, 160)}`));
     for (const route of routes) {
-      const f: Finding = { route, width: w.name, finalUrl: "", docWidth: 0, viewWidth: w.width, culprits: [], cardEscapes: [], smallTargets: [], smallInputs: [], clipped: [] };
+      const f: Finding = { route, width: w.name, finalUrl: "", docWidth: 0, viewWidth: w.width, culprits: [], cardEscapes: [], smallTargets: [], smallInputs: [], clipped: [], consoleErrors: [] };
+      consoleErrors = [];
       try {
         await page.goto(base + route, { waitUntil: "networkidle", timeout: 240_000 });
+        // --font=1.3 : 휴대폰 '글꼴 크기 크게'처럼 기본 글자(rem)를 키움. 화면이 다 뜬 뒤 스타일 태그로 넣습니다
+        //   — <html style> 을 미리 바꾸면 서버 HTML 과 달라 개발 화면에 hydration "1 Issue" 가 뜸(앱 오류 아님).
+        if (FONT !== 1) await page.addStyleTag({ content: `html { font-size: ${16 * FONT}px !important; }` });
         await page.waitForTimeout(600);
         const m = await measure(page, w.mobile);
         Object.assign(f, m, { finalUrl: page.url().replace(base, "") });
@@ -266,6 +280,7 @@ try {
       } catch (e) {
         f.error = (e as Error).message.split("\n")[0];
       }
+      f.consoleErrors = [...new Set(consoleErrors)].slice(0, 3);
       findings.push(f);
       const over = f.docWidth > f.viewWidth;
       console.log(
@@ -294,6 +309,8 @@ console.log("\n## 입력칸 글자 16px 미만");
 for (const f of findings.filter((f) => f.width === "390" && f.smallInputs.length)) console.log(`- ${f.route}: ${f.smallInputs.join(" | ")}`);
 console.log("\n## 잘린 글자");
 for (const f of findings.filter((f) => f.width === "390" && f.clipped.length)) console.log(`- ${f.route}: ${f.clipped.join(" | ")}`);
+console.log("\n## 콘솔 오류(개발 화면 Issue)");
+for (const f of findings.filter((f) => f.consoleErrors.length)) console.log(`- ${f.width}px ${f.route}: ${f.consoleErrors.join(" | ")}`);
 console.log("\n## 열리지 않은 화면");
 for (const f of findings.filter((f) => f.error)) console.log(`- ${f.width}px ${f.route}: ${f.error}`);
 console.log(`\n가짜 DB 쓰기 요청(운영 DB 아님, 기록만): ${fake.writes.length}건 ${[...new Set(fake.writes)].slice(0, 10).join(", ")}`);
