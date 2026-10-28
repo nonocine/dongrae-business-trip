@@ -7,6 +7,7 @@ import { bkFileKind, extOf } from "@/lib/bangkaContent";
 import { finalizeImage, newObjectName, signedUrls, signUpload, statObject } from "@/lib/bangkaMedia";
 import {
   ABSENCE_FILE_MAX,
+  awaitingEvidence,
   isAbsenceReason,
   type AbsenceRow,
   type AbsenceStatus,
@@ -18,7 +19,9 @@ import { kstTodayYmd } from "@/lib/trainings";
 // 공결 처리(직원) — /bangka/absences
 //   · 담임 확인: 방과후아카데미 담당자 누구나(신청 → 담임 확인)
 //   · 팀장 결재 / 반려: 관장·부장·팀장만(canApproveAbsence). 결재는 앱 기록만(양식엔 결재란 없음).
-//   · 전화 공결: 받은 직원이 적음 — channel=phone, 확인자=선생님(받은 직원), 곧바로 담임 확인 상태.
+//   · 전화 공결: 받은 직원이 적음 — channel=phone, 확인자=선생님(받은 직원), 증빙 대기(evidence_pending)로 시작.
+//     보호자가 앱에서 증빙을 올리거나 직원이 [증빙 추가]로 대신 올리면 submitted("증빙 제출됨").
+//   · 증빙 0개면 담임 확인·결재 불가(여기서 먼저 막고, DB 트리거로도 막음 — docs/설계_전화공결증빙.md).
 //   bk_absences / bk_absence_files 는 service_role 전용 — 모든 액션이 진입 시 권한을 다시 봅니다.
 // =====================================================================
 
@@ -30,9 +33,13 @@ type Result<T = object> = ({ ok: true } & T) | { ok: false; message: string };
 const fail = (e: unknown, fb: string) => ({ ok: false as const, message: e instanceof Error ? e.message : fb });
 
 const COLS =
-  "id, student_id, start_date, end_date, reason_type, reason, confirmer_type, confirmer_other, confirmer_name, guardian_id, signature_path, channel, received_by, status, teacher_checked_by, teacher_checked_at, approved_by, approved_at, reject_reason, confirmed_on, created_at";
+  "id, student_id, start_date, end_date, reason_type, reason, confirmer_type, confirmer_other, confirmer_name, guardian_id, signature_path, channel, received_by, status, teacher_checked_by, teacher_checked_at, approved_by, approved_at, reject_reason, confirmed_on, evidence_requested_at, evidence_submitted_at, evidence_submitted_by, created_at";
 
-export type AbsenceFilter = { view: "pending" | "all" | "phone"; ym: string | null };
+// evidence = 증빙 대기(전화 공결 + 증빙 요청된 옛 결재 건 중 서류 없는 것). 월 구분 없이 전부.
+export type AbsenceFilter = { view: "pending" | "evidence" | "all" | "phone"; ym: string | null };
+
+// 증빙을 기다리는 건의 후보 — 증빙 대기 또는 증빙 요청된 결재 건(서류 유무는 받아서 거름).
+const EVIDENCE_OR = "status.eq.evidence_pending,and(status.eq.approved,evidence_requested_at.not.is.null)";
 
 export async function listAbsences(f: AbsenceFilter): Promise<AbsenceView[]> {
   await requireBangkaAccess();
@@ -43,6 +50,7 @@ export async function listAbsences(f: AbsenceFilter): Promise<AbsenceView[]> {
     .order("created_at", { ascending: false })
     .limit(300);
   if (f.view === "pending") q = q.in("status", ["submitted", "teacher_checked"]);
+  if (f.view === "evidence") q = q.or(EVIDENCE_OR);
   if (f.view === "phone") q = q.eq("channel", "phone");
   if (f.ym && /^\d{4}-\d{2}$/.test(f.ym)) {
     const [y, m] = f.ym.split("-").map(Number);
@@ -55,7 +63,8 @@ export async function listAbsences(f: AbsenceFilter): Promise<AbsenceView[]> {
     bk_students: AbsenceView["student"];
     bk_absence_files: { id: string; name: string | null; mime: string | null; size: number | null; path: string }[];
   };
-  const rows = (data ?? []) as unknown as Raw[];
+  let rows = (data ?? []) as unknown as Raw[];
+  if (f.view === "evidence") rows = rows.filter((r) => awaitingEvidence(r, r.bk_absence_files.length));
   const urls = await signedUrls([
     ...rows.flatMap((r) => r.bk_absence_files.map((x) => x.path)),
     ...rows.map((r) => r.signature_path).filter((p): p is string => !!p),
@@ -91,6 +100,25 @@ export async function listActiveStudents(): Promise<StudentPick[]> {
   return (data ?? []) as StudentPick[];
 }
 
+// 증빙을 기다리는 건 수 — '증빙 대기' 묶음 숫자. 보호자 응답을 기다리는 것이라 처리할 공결 배지와 따로.
+export async function countAwaitingEvidence(): Promise<number> {
+  await requireBangkaAccess();
+  const { data, error } = await supabaseAdmin
+    .from("bk_absences")
+    .select("status, evidence_requested_at, bk_absence_files(id)")
+    .or(EVIDENCE_OR);
+  if (error) return 0;
+  type Raw = { status: AbsenceStatus; evidence_requested_at: string | null; bk_absence_files: { id: string }[] };
+  return ((data ?? []) as unknown as Raw[]).filter((r) => awaitingEvidence(r, r.bk_absence_files.length)).length;
+}
+
+// 증빙이 하나라도 있는지 — 담임 확인·결재 전에 확인(DB 트리거와 같은 규칙, 문구를 친절하게).
+async function hasEvidence(id: string): Promise<boolean> {
+  const { count } = await supabaseAdmin.from("bk_absence_files").select("id", { count: "exact", head: true }).eq("absence_id", id);
+  return (count ?? 0) > 0;
+}
+const NO_EVIDENCE = "증빙 서류가 없어 처리할 수 없습니다. 보호자가 앱에서 올리거나 [증빙 추가]로 올려 주세요.";
+
 // 상태 바꾸기 — 현재 상태가 from 중 하나일 때만(동시 처리 방지).
 async function transition(id: string, from: AbsenceStatus[], patch: Record<string, unknown>): Promise<void> {
   if (!UUID.test(id)) throw new Error("잘못된 요청입니다.");
@@ -107,6 +135,7 @@ async function transition(id: string, from: AbsenceStatus[], patch: Record<strin
 export async function teacherCheckAbsence(id: string): Promise<Result> {
   try {
     const me = await requireBangkaAccess();
+    if (UUID.test(id) && !(await hasEvidence(id))) return { ok: false, message: NO_EVIDENCE };
     await transition(id, ["submitted"], { status: "teacher_checked", teacher_checked_by: me.name, teacher_checked_at: new Date().toISOString() });
     revalidatePath(BASE);
     return { ok: true };
@@ -119,6 +148,7 @@ export async function approveAbsence(id: string): Promise<Result> {
   try {
     const me = await requireBangkaAccess();
     if (!canApproveAbsence(me)) return { ok: false, message: "팀장 결재는 관장·부장 또는 방과후아카데미 팀장만 할 수 있습니다." };
+    if (UUID.test(id) && !(await hasEvidence(id))) return { ok: false, message: NO_EVIDENCE };
     await transition(id, ["teacher_checked"], { status: "approved", approved_by: me.name, approved_at: new Date().toISOString(), reject_reason: null });
     revalidatePath(BASE);
     return { ok: true };
@@ -127,13 +157,15 @@ export async function approveAbsence(id: string): Promise<Result> {
   }
 }
 
-// 반려 — 담임 확인 단계(신청)는 담당자 누구나, 담임 확인 뒤에는 결재권자만.
+// 반려 — 증빙 대기·신청 단계는 담당자 누구나, 담임 확인 뒤에는 결재권자만.
 export async function rejectAbsence(id: string, reason: string): Promise<Result> {
   try {
     const me = await requireBangkaAccess();
     const why = (reason ?? "").trim().slice(0, 500);
     if (!why) return { ok: false, message: "반려 사유를 적어 주세요." };
-    const from: AbsenceStatus[] = canApproveAbsence(me) ? ["submitted", "teacher_checked"] : ["submitted"];
+    const from: AbsenceStatus[] = canApproveAbsence(me)
+      ? ["evidence_pending", "submitted", "teacher_checked"]
+      : ["evidence_pending", "submitted"];
     await transition(id, from, { status: "rejected", reject_reason: why, approved_by: me.name, approved_at: new Date().toISOString() });
     revalidatePath(BASE);
     return { ok: true };
@@ -172,9 +204,9 @@ export async function createPhoneAbsence(input: {
         confirmer_name: me.name,
         channel: "phone",
         received_by: me.name,
-        status: "teacher_checked",
-        teacher_checked_by: me.name,
-        teacher_checked_at: now,
+        // 서류를 받아야 담임 확인 → 결재로 갈 수 있음(관장 결정 2026-10-28). 보호자 앱에 "증빙 서류를 올려 주세요".
+        status: "evidence_pending",
+        evidence_requested_at: now,
         confirmed_on: kstTodayYmd(),
       })
       .select("id")
@@ -210,7 +242,7 @@ export async function createAbsenceFileUpload(input: {
 
 export async function finalizeAbsenceFile(input: { absenceId: string; path: string; name: string; mime: string }): Promise<Result> {
   try {
-    await requireBangkaAccess();
+    const me = await requireBangkaAccess();
     if (!UUID.test(input.absenceId)) return { ok: false, message: "잘못된 요청입니다." };
     let row: { path: string; mime: string; size: number };
     if (input.path.startsWith("tmp/")) {
@@ -224,8 +256,14 @@ export async function finalizeAbsenceFile(input: { absenceId: string; path: stri
     }
     const { error } = await supabaseAdmin
       .from("bk_absence_files")
-      .insert({ absence_id: input.absenceId, name: input.name.slice(0, 200), ...row });
+      .insert({ absence_id: input.absenceId, name: input.name.slice(0, 200), uploaded_by: me.name, ...row });
     if (error) throw new Error(error.message);
+    // 직원이 종이 서류를 대신 올린 경우 — 증빙 대기였으면 다음 단계(증빙 제출됨)로. 다른 상태는 그대로.
+    await supabaseAdmin
+      .from("bk_absences")
+      .update({ status: "submitted", evidence_submitted_at: new Date().toISOString(), evidence_submitted_by: me.name, updated_at: new Date().toISOString() })
+      .eq("id", input.absenceId)
+      .eq("status", "evidence_pending");
     revalidatePath(BASE);
     return { ok: true };
   } catch (e) {

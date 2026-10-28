@@ -150,6 +150,12 @@ export function startFakeSupabase(port: number, schemaPath: string) {
       if ("edited_at" in row && i !== 1) row.edited_at = null;
     }
     if (table === "bk_talk_threads" && "last_guardian_at" in row) row.last_guardian_at = "2026-10-20T05:00:00+00:00";
+    // 공결 — 상태별 배지·버튼이 그려지게 섞음(증빙 대기 3일 넘은 것 / 증빙 제출됨 / 담임 확인 / 결재).
+    if (table === "bk_absences") {
+      const st = ["evidence_pending", "submitted", "teacher_checked", "approved"][i % 4];
+      Object.assign(row, { status: st, channel: i % 2 === 0 ? "phone" : "app", confirmer_type: "teacher" });
+      if ("evidence_requested_at" in row) row.evidence_requested_at = i === 0 ? "2026-10-20T01:00:00+00:00" : null;
+    }
     if ("deleted_at" in row) row.deleted_at = null;
     if ("left_on" in row) row.left_on = null;
     return row;

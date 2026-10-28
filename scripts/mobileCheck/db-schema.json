@@ -2211,6 +2211,15 @@
   },
   "updated_at": {
    "type": "timestamp with time zone"
+  },
+  "evidence_requested_at": {
+   "type": "timestamp with time zone"
+  },
+  "evidence_submitted_at": {
+   "type": "timestamp with time zone"
+  },
+  "evidence_submitted_by": {
+   "type": "text"
   }
  },
  "business_program_rental_links": {
@@ -4123,6 +4132,16 @@
   },
   "created_at": {
    "type": "timestamp with time zone"
+  },
+  "uploaded_by": {
+   "type": "text"
+  },
+  "uploaded_by_guardian_id": {
+   "type": "uuid",
+   "fk": [
+    "bk_guardians",
+    "id"
+   ]
   }
  },
  "saem_settlement_items": {
