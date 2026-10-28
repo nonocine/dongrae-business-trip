@@ -21,6 +21,7 @@
 //     --widths=390,360        일부 폭만(기본 390·430·360·1280)
 //     --full=1                --shots 캡처를 화면 전체 길이로
 //     --font=1.3              휴대폰 '글꼴 크기 크게' 흉내(기본 글자 16px × 배율)
+//     --min=44                작은 버튼 기준 높이(기본 40px — 보호자·현장용 화면은 44 로 봄)
 //   ★ Windows Git Bash: `/mail` 처럼 / 로 시작하는 인자를 C:/Program Files/Git/mail 로 바꿔 버려
 //     --only 가 조용히 빠집니다. 앞에 MSYS_NO_PATHCONV=1 을 붙이세요(PowerShell·cmd 는 상관없음).
 //       MSYS_NO_PATHCONV=1 npm run test:mobile-overflow -- --only=/mail,/hr
@@ -37,6 +38,7 @@ const PORT = Number(arg("port") ?? 3210);
 const DB_PORT = PORT + 1;
 const SHOTS = arg("shots");
 const FONT = Number(arg("font") ?? 1);
+const MIN_TARGET = Number(arg("min") ?? 40);
 const SECRET = "mobile-check-only-secret-not-production-0123456789";
 
 const ID = "00000000-0000-4000-8000-000000000001";
@@ -48,6 +50,7 @@ const ROUTES = [
   "/bangka/absences", "/bangka/absences?view=all", "/bangka/absences?view=phone", "/bangka/events", "/bangka/meals",
   "/bangka/meals/upload", "/bangka/members", "/bangka/members/bulk", "/bangka/members/guardians",
   `/bangka/members/guardians/${ID}`, "/bangka/posts", `/bangka/posts/${ID}`, "/bangka/posts/new",
+  "/bangka/talk", "/bangka/talk?view=all", `/bangka/talk/${ID}`, "/bangka/talk/settings",
   "/business-results", "/hr", "/hr/backup", "/hr/cards", "/hr/certificates", "/hr/clubs", "/hr/contracts",
   "/hr/credentials", "/hr/discipline", "/hr/evaluations", "/hr/external-judges", "/hr/facility/assets",
   "/hr/facility/driving", "/hr/facility/locations", "/hr/facility/rentals", "/hr/facility/safety",
@@ -86,7 +89,7 @@ type Finding = {
 };
 
 async function measure(page: Page, mobile: boolean) {
-  return page.evaluate((mobile) => {
+  return page.evaluate(({ mobile, minTarget }) => {
     const vw = document.documentElement.clientWidth;
     const desc = (el: Element) => {
       const cls = (el.getAttribute("class") ?? "").split(/\s+/).slice(0, 4).join(".");
@@ -124,7 +127,7 @@ async function measure(page: Page, mobile: boolean) {
         const plain = cs.backgroundColor === "rgba(0, 0, 0, 0)" && parseFloat(cs.borderTopWidth) === 0 && el.tagName === "BUTTON";
         if (plain || el.getAttribute("role") === "switch" || el.querySelector(":scope > svg:only-child, :scope > span.sr-only")) continue;
         const r = el.getBoundingClientRect();
-        if (r.height < 40 && el.tagName !== "TEXTAREA") smallTargets.push(`${desc(el)} (${Math.round(r.height)}px)`);
+        if (r.height < minTarget && el.tagName !== "TEXTAREA") smallTargets.push(`${desc(el)} (${Math.round(r.height)}px)`);
         if (/INPUT|SELECT|TEXTAREA/.test(el.tagName) && parseFloat(getComputedStyle(el).fontSize) < 16)
           smallInputs.push(`${desc(el)} (${getComputedStyle(el).fontSize})`);
       }
@@ -174,7 +177,7 @@ async function measure(page: Page, mobile: boolean) {
       clipped: clipped.slice(0, 5),
       errorPage: /This page couldn.t load|Application error|Unhandled Runtime Error/.test(document.body.innerText),
     };
-  }, mobile);
+  }, { mobile, minTarget: MIN_TARGET });
 }
 
 async function waitFor(url: string, ms: number) {
@@ -303,7 +306,7 @@ console.log("\n## 가로 넘침");
 for (const f of findings.filter((f) => f.docWidth > f.viewWidth)) console.log(`- ${f.width}px ${f.route}: ${f.docWidth}px\n    ${f.culprits.join("\n    ")}`);
 console.log("\n## 카드 테두리 밖으로 나간 요소(휴대폰 폭)");
 for (const f of findings.filter((f) => f.cardEscapes.length)) console.log(`- ${f.width}px ${f.route}:\n    ${f.cardEscapes.join("\n    ")}`);
-console.log("\n## 휴대폰 작은 버튼·입력칸(40px 미만)");
+console.log(`\n## 휴대폰 작은 버튼·입력칸(${MIN_TARGET}px 미만)`);
 for (const f of findings.filter((f) => f.width === "390" && f.smallTargets.length)) console.log(`- ${f.route}: ${f.smallTargets.join(" | ")}`);
 console.log("\n## 입력칸 글자 16px 미만");
 for (const f of findings.filter((f) => f.width === "390" && f.smallInputs.length)) console.log(`- ${f.route}: ${f.smallInputs.join(" | ")}`);

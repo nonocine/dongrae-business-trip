@@ -4891,5 +4891,197 @@
   "created_at": {
    "type": "timestamp with time zone"
   }
+ },
+ "bk_talk_threads": {
+  "id": {
+   "type": "uuid"
+  },
+  "guardian_id": {
+   "type": "uuid",
+   "fk": [
+    "bk_guardians",
+    "id"
+   ]
+  },
+  "student_id": {
+   "type": "uuid",
+   "fk": [
+    "bk_students",
+    "id"
+   ]
+  },
+  "topic_type": {
+   "type": "text",
+   "enum": [
+    "post",
+    "general",
+    "session"
+   ]
+  },
+  "post_id": {
+   "type": "uuid",
+   "fk": [
+    "bk_posts",
+    "id"
+   ]
+  },
+  "session_id": {
+   "type": "uuid"
+  },
+  "topic_title": {
+   "type": "text"
+  },
+  "status": {
+   "type": "text",
+   "enum": [
+    "open",
+    "answered",
+    "closed"
+   ]
+  },
+  "last_message_at": {
+   "type": "timestamp with time zone"
+  },
+  "last_guardian_at": {
+   "type": "timestamp with time zone"
+  },
+  "last_staff_at": {
+   "type": "timestamp with time zone"
+  },
+  "guardian_read_at": {
+   "type": "timestamp with time zone"
+  },
+  "closed_at": {
+   "type": "timestamp with time zone"
+  },
+  "closed_by": {
+   "type": "text"
+  },
+  "deleted_at": {
+   "type": "timestamp with time zone"
+  },
+  "created_at": {
+   "type": "timestamp with time zone"
+  },
+  "updated_at": {
+   "type": "timestamp with time zone"
+  }
+ },
+ "bk_talk_messages": {
+  "id": {
+   "type": "uuid"
+  },
+  "thread_id": {
+   "type": "uuid",
+   "fk": [
+    "bk_talk_threads",
+    "id"
+   ]
+  },
+  "author_type": {
+   "type": "text",
+   "enum": [
+    "guardian",
+    "staff"
+   ]
+  },
+  "guardian_id": {
+   "type": "uuid",
+   "fk": [
+    "bk_guardians",
+    "id"
+   ]
+  },
+  "staff_driver_id": {
+   "type": "uuid"
+  },
+  "staff_name": {
+   "type": "text"
+  },
+  "body": {
+   "type": "text"
+  },
+  "edited_at": {
+   "type": "timestamp with time zone"
+  },
+  "deleted_at": {
+   "type": "timestamp with time zone"
+  },
+  "hidden_at": {
+   "type": "timestamp with time zone"
+  },
+  "hidden_by": {
+   "type": "text"
+  },
+  "hidden_reason": {
+   "type": "text"
+  },
+  "created_at": {
+   "type": "timestamp with time zone"
+  }
+ },
+ "bk_talk_files": {
+  "id": {
+   "type": "uuid"
+  },
+  "message_id": {
+   "type": "uuid",
+   "fk": [
+    "bk_talk_messages",
+    "id"
+   ]
+  },
+  "path": {
+   "type": "text"
+  },
+  "name": {
+   "type": "text"
+  },
+  "mime": {
+   "type": "text"
+  },
+  "size": {
+   "type": "integer"
+  },
+  "width": {
+   "type": "integer"
+  },
+  "height": {
+   "type": "integer"
+  },
+  "created_at": {
+   "type": "timestamp with time zone"
+  }
+ },
+ "bk_talk_settings": {
+  "id": {
+   "type": "smallint"
+  },
+  "weekdays": {
+   "type": "smallint[]",
+   "items": "integer"
+  },
+  "open_time": {
+   "type": "time without time zone"
+  },
+  "close_time": {
+   "type": "time without time zone"
+  },
+  "block_holidays": {
+   "type": "boolean"
+  },
+  "extra_closed_dates": {
+   "type": "date[]",
+   "items": "string"
+  },
+  "closed_notice": {
+   "type": "text"
+  },
+  "updated_at": {
+   "type": "timestamp with time zone"
+  },
+  "updated_by": {
+   "type": "text"
+  }
  }
 }

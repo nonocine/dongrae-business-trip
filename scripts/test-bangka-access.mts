@@ -74,6 +74,7 @@ const mod = {
   upload: await import(url("app/(app)/bangka/meals/upload/actions.ts")),
   events: await import(url("app/(app)/bangka/events/actions.ts")),
   absences: await import(url("app/(app)/bangka/absences/actions.ts")),
+  talk: await import(url("app/(app)/bangka/talk/actions.ts")),
 };
 const routes = {
   "공결확인서 PDF (GET /bangka/absences/[id]/pdf)": async () =>
@@ -132,9 +133,21 @@ const ACTIONS: [string, string, () => Promise<unknown>][] = [
   ["공결", "createPhoneAbsence (전화 공결)", () => mod.absences.createPhoneAbsence({ studentId: ID, startDate: "2026-10-27", endDate: "2026-10-27", reasonType: "etc", reason: "x", confirmerType: "teacher" })],
   ["공결", "createAbsenceFileUpload", () => mod.absences.createAbsenceFileUpload({ absenceId: ID, name: "a.pdf", mime: "application/pdf", size: 1 })],
   ["공결", "finalizeAbsenceFile", () => mod.absences.finalizeAbsenceFile({ absenceId: ID, path: "p", name: "a", mime: "application/pdf" })],
+  ["방카톡", "listTalkThreads", () => mod.talk.listTalkThreads("open", "all")],
+  ["방카톡", "countOpenTalks (탭·메뉴 배지)", () => mod.talk.countOpenTalks()],
+  ["방카톡", "getTalkThread", () => mod.talk.getTalkThread(ID)],
+  ["방카톡", "getTalkHours", () => mod.talk.getTalkHours()],
+  ["방카톡", "replyTalk (답글)", () => mod.talk.replyTalk(ID, "답글")],
+  ["방카톡", "editMyReply", () => mod.talk.editMyReply(ID, ID, "고침")],
+  ["방카톡", "deleteMyReply", () => mod.talk.deleteMyReply(ID, ID)],
+  ["방카톡", "hideTalkMessage (가리기)", () => mod.talk.hideTalkMessage(ID, ID, "개인정보")],
+  ["방카톡", "unhideTalkMessage", () => mod.talk.unhideTalkMessage(ID, ID)],
+  ["방카톡", "setTalkClosed (닫기)", () => mod.talk.setTalkClosed(ID, true)],
+  ["방카톡", "saveTalkSettings (운영시간 저장)", () =>
+    mod.talk.saveTalkSettings({ weekdays: [1, 2, 3, 4, 5], openTime: "13:00", closeTime: "20:00", blockHolidays: true, extraClosedDates: [], closedNotice: "안내" })],
 ];
 
-const DENY = /권한이 없습니다|팀장 결재는/;
+const DENY = /권한이 없습니다|팀장 결재는|팀장만 바꿀 수 있습니다/;
 async function verdict(fn: () => Promise<unknown>): Promise<"허용" | "거부"> {
   try {
     const r = (await fn()) as { ok?: boolean; message?: string } | null;
@@ -162,7 +175,7 @@ for (const p of P) {
   // 메뉴(사이드바·메인 카드)
   const bangkaMenus = (MENU_ITEMS as { group: string; key: string }[]).filter((m) => m.group === "bangka");
   const seen = bangkaMenus.filter((m) => canSeeMenuItem(m as never, { isM0: isM0(p), roles: p.roles }));
-  put("메뉴 '방과후아카데미' 4개 보임", p.label, seen.length === bangkaMenus.length ? "보임" : seen.length === 0 ? "숨김" : `${seen.length}개`);
+  put(`메뉴 '방과후아카데미' ${bangkaMenus.length}개 보임`, p.label, seen.length === bangkaMenus.length ? "보임" : seen.length === 0 ? "숨김" : `${seen.length}개`);
   check(seen.length === (canAccess(p) ? bangkaMenus.length : 0), `${p.label} 메뉴`);
 
   // 화면 진입(레이아웃 가드 = resolveBangkaAccess)
@@ -175,7 +188,7 @@ for (const p of P) {
   for (const [screen, name, fn] of ACTIONS) {
     const v = await verdict(fn);
     put(`${screen} · ${name}`, p.label, v);
-    const expected = name.startsWith("approveAbsence") ? canApprove(p) : canAccess(p);
+    const expected = name.startsWith("approveAbsence") || name.startsWith("saveTalkSettings") ? canApprove(p) : canAccess(p);
     check((v === "허용") === expected, `${p.label} ${name} → ${v}`);
   }
   for (const [name, fn] of Object.entries(routes)) {
@@ -198,6 +211,25 @@ for (const p of P.filter(canAccess)) {
   put("공결 · 담임 확인 뒤 반려", p.label, access.canApproveAbsence(ctx) ? "허용" : "거부(신청 단계만)");
 }
 for (const p of P.filter((x) => !canAccess(x))) put("공결 · 담임 확인 뒤 반려", p.label, "거부");
+
+// 방카톡 — 다른 직원 답글은 못 고치고 못 지움(결정 4). 박병현형 답글을 조유경형이 고치기·지우기 시도.
+{
+  const T = "00000000-0000-4000-8000-000000000071";
+  const M = "00000000-0000-4000-8000-000000000072";
+  db.bk_talk_messages = [
+    { id: M, thread_id: T, author_type: "staff", staff_driver_id: "d-park", staff_name: "박병현형", body: "답", edited_at: null, deleted_at: null, hidden_at: null, hidden_by: null, hidden_reason: null, created_at: "2026-10-28T05:00:00Z" },
+  ];
+  const OTHER = /내가 쓴 답글만/;
+  for (const [who, expectMine] of [["d-cho", false], ["d-park", true]] as const) {
+    session = P.find((p) => p.id === who)!;
+    const e = (await mod.talk.editMyReply(T, M, "고침")) as { ok: boolean; message?: string };
+    const d = (await mod.talk.deleteMyReply(T, M)) as { ok: boolean; message?: string };
+    const blocked = !e.ok && OTHER.test(e.message ?? "") && !d.ok && OTHER.test(d.message ?? "");
+    put("방카톡 · 박병현형 답글 고치기·지우기", session.label, blocked ? "거부(남의 답글)" : e.ok && d.ok ? "허용(내 답글)" : `${e.message}/${d.message}`);
+    check(expectMine ? e.ok && d.ok : blocked, `${session.label} 남의 답글 고치기`);
+  }
+  delete db.bk_talk_messages;
+}
 
 // 표 출력(마크다운)
 const who = P.map((p) => p.label);

@@ -141,6 +141,15 @@ export function startFakeSupabase(port: number, schemaPath: string) {
         if ("phone" in row) row.phone = "01098765432";
       }
     }
+    // 방카톡 — 운영시간은 실제 기본값, 말은 보호자·직원(가짜 관장 = 내 답글)·가린 글을 섞습니다.
+    if (table === "bk_talk_settings")
+      Object.assign(row, { weekdays: [1, 2, 3, 4, 5], open_time: "13:00:00", close_time: "20:00:00", block_holidays: true, extra_closed_dates: ["2026-12-31"] });
+    if (table === "bk_talk_messages") {
+      if (i % 2 === 1 && "author_type" in row) Object.assign(row, { author_type: "staff", staff_driver_id: BOSS_ID, staff_name: BOSS_NAME });
+      if ("hidden_at" in row) Object.assign(row, i === 2 ? { hidden_at: "2026-10-27T06:00:00+00:00", hidden_by: BOSS_NAME, hidden_reason: "개인정보 포함" } : { hidden_at: null });
+      if ("edited_at" in row && i !== 1) row.edited_at = null;
+    }
+    if (table === "bk_talk_threads" && "last_guardian_at" in row) row.last_guardian_at = "2026-10-20T05:00:00+00:00";
     if ("deleted_at" in row) row.deleted_at = null;
     if ("left_on" in row) row.left_on = null;
     return row;

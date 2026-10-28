@@ -498,6 +498,17 @@ export const MENU_ITEMS: MenuItem[] = [
     desc: "방과후아카데미 연간 일정",
     show: { kind: "m0OrRole", role: "bangka" },
   },
+  {
+    // 보호자 문의(동래방카 요청 2·4·10번). 배지 = 미답변 수(shellData).
+    key: "bangka-talk",
+    group: "bangka",
+    label: "방카톡",
+    href: "/bangka/talk",
+    icon: "💬",
+    desc: "보호자 문의·글 아래 질문에 답글, 운영시간 설정",
+    show: { kind: "m0OrRole", role: "bangka" },
+    badgeDesc: (n) => (n && n > 0 ? `미답변 ${n}건 — 보호자 문의에 답글` : "보호자 문의·글 아래 질문에 답글, 운영시간 설정"),
+  },
 
   // ---------- 관리자 영역 — M0 ----------
   {

@@ -24,6 +24,7 @@ import {
 import { getUnreadMailCount } from "@/app/(app)/mail/actions";
 import { getTrainingsAdminSummary } from "@/app/(app)/hr/trainings/actions";
 import { getPendingCertRequestCount } from "@/app/(app)/hr/certificates/actions";
+import { countOpenTalks } from "@/app/(app)/bangka/talk/actions";
 import { isM0Grant } from "@/lib/authLevels";
 import { hasPersonnelAccess } from "@/lib/personnelAccess";
 import type { MenuContext } from "@/lib/menu";
@@ -59,11 +60,14 @@ export const getShellData = cache(async (): Promise<ShellData> => {
   const isM0 = isM0Grant({ rank, email: g?.email, authLevel });
 
   // 증명서 승인 대기는 M0 배지라 M0 일 때만 셉니다(기존 대시보드와 동일).
-  const [unreadMailCount, trainingAdminSummary, pendingCertCount] =
+  //   방카톡 미답변은 방카 메뉴가 보이는 사람(M0 또는 bangka 직무)만 — 못 세면 undefined.
+  const canBangka = isM0 || [...roles].includes("bangka");
+  const [unreadMailCount, trainingAdminSummary, pendingCertCount, openTalkCount] =
     await Promise.all([
       getUnreadMailCount(),
       getTrainingsAdminSummary(),
       isM0 ? getPendingCertRequestCount() : Promise.resolve(0),
+      canBangka ? countOpenTalks().catch(() => undefined) : Promise.resolve(undefined),
     ]);
 
   return {
@@ -79,6 +83,7 @@ export const getShellData = cache(async (): Promise<ShellData> => {
       "/mail": unreadMailCount,
       "/hr/trainings": trainingAdminSummary?.totalNotMet,
       "/hr/certificates": pendingCertCount,
+      "/bangka/talk": openTalkCount,
     },
     rank,
     authLevel,
