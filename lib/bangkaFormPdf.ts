@@ -2,7 +2,7 @@
 // 동래방카 필수 운영서식 출력 — 원본 PDF(lib/forms/bangka/*.pdf)를 그대로 배경으로 쓰고
 //   그 위에 글자만 찍습니다. 양식을 새로 그리지 않습니다.
 //   좌표는 원본 PDF 의 표 선·글자 위치를 재서 옮긴 값입니다(pt, 왼쪽 위 기준 → 찍을 때 뒤집음).
-//     · [필수 운영서식 2]  급식계획      meal-plan.pdf
+//     · [필수 운영서식 2]  급식계획      meal-plan.pdf (+ 뒤에 "급식 사진" 장 — 서식 밖, 사진 있는 날만)
 //     · [필수 운영서식 15] 공결확인서    absence.pdf (+ 증빙자료를 뒤 장으로)
 //   글자가 칸보다 길면 글자 크기를 줄여 칸 안에 넣습니다(칸 밖으로 넘치지 않음).
 // =====================================================================
@@ -10,6 +10,7 @@
 import { readFileSync } from "fs";
 import path from "path";
 import fontkit from "@pdf-lib/fontkit";
+import sharp from "sharp";
 import { PDFDocument, rgb, type PDFFont, type PDFPage } from "pdf-lib";
 import { boldFont, fitToFont, fkFont, regularFont } from "@/lib/pdfFont";
 import { BK_ALLERGENS } from "@/lib/bangkaMenuParse";
@@ -232,6 +233,7 @@ export async function buildMealPlanPdf(input: {
   writtenOn: string; // YYYY-MM-DD
   writer: string;
   days: MealPlanDay[];
+  photos?: MealPhoto[]; // 사진 있는 날만(날짜순으로 정렬해 찍음). 없거나 0장이면 사진 장 없음
 }): Promise<Uint8Array> {
   const [y, m] = input.ym.split("-").map(Number);
   const byDate = new Map(input.days.map((d) => [d.date, d]));
@@ -294,6 +296,7 @@ export async function buildMealPlanPdf(input: {
     }
   }
   if (moreFootnotes.length) drawFootnotePages(pdf, `${y}년 ${m}월 급식계획 — 알레르기 각주(이어서)`, moreFootnotes, moreSize, fonts.regular);
+  if (input.photos?.length) await drawMealPhotoPages(pdf, `${y}년 ${m}월 급식 사진`, input.photos, fonts);
   pdf.setTitle(`${y}년 ${m}월 급식계획`);
   return pdf.save();
 }
@@ -333,6 +336,71 @@ function drawFootnotePages(pdf: PDFDocument, title: string, lines: string[], siz
     lines.slice(i, i + perPage).forEach((ln, k) => {
       pg.drawText(safe(ln), { x: MP.footnote.x0, y: PH - top - size - k * lineH(size), size, font, color: INK });
     });
+  }
+}
+
+// ---------------------------------------------------------------------
+// 급식 사진 장 — 급식계획 표 뒤에 붙이는 서식 밖 A4(2026-10 조유경 팀장 요청 7번).
+//   한 장에 6장(2열×3행), 사진 아래 "10월 26일(월)" + 그날 메뉴 1~2개. 사진 있는 날만 날짜순.
+// ---------------------------------------------------------------------
+
+export type MealPhoto = { date: string; jpeg: Uint8Array; menus: string[] };
+
+// 원본(bangka-media, 긴 변 1600px) → 긴 변 1200px JPEG. 한 달 25장 기준 PDF 10MB 이하가 목표.
+export async function mealPhotoJpeg(input: Uint8Array): Promise<Uint8Array> {
+  const out = await sharp(input)
+    .rotate()
+    .resize({ width: 1200, height: 1200, fit: "inside", withoutEnlargement: true })
+    .flatten({ background: "#ffffff" })
+    .jpeg({ quality: 72, mozjpeg: true })
+    .toBuffer();
+  return new Uint8Array(out);
+}
+
+// 사진 아래 메뉴 1~2개 — 밥·김치처럼 매일 나오는 것은 건너뛰고 앞에서부터(다 빠지면 앞 2개).
+export function photoCaptionMenus(menus: string[]): string[] {
+  const names = menus.map((s) => s.trim()).filter(Boolean);
+  const main = names.filter((n) => !/밥$/.test(n) && !/김치|깍두기/.test(n));
+  return (main.length ? main : names).slice(0, 2);
+}
+
+const DOW = ["일", "월", "화", "수", "목", "금", "토"];
+
+async function drawMealPhotoPages(pdf: PDFDocument, title: string, photos: MealPhoto[], fonts: Fonts) {
+  const [PW, PH] = [595.28, 841.89];
+  const margin = 40;
+  const gap = 14;
+  const top = margin + 30; // 제목 줄 아래
+  const cellW = (PW - margin * 2 - gap) / 2;
+  const cellH = (PH - top - margin - gap * 2) / 3;
+  const captionH = 30;
+  const sorted = [...photos].sort((a, b) => a.date.localeCompare(b.date));
+  const pages = Math.ceil(sorted.length / 6);
+  for (let p = 0; p < pages; p++) {
+    const page = pdf.addPage([PW, PH]);
+    text(page, PH, title, { x: margin, base: margin + 12, size: 13, font: fonts.bold, bold: true });
+    if (pages > 1) text(page, PH, `${p + 1} / ${pages}`, { x: PW - margin, base: margin + 12, size: 9, font: fonts.regular, align: "right" });
+    for (const [i, ph] of sorted.slice(p * 6, p * 6 + 6).entries()) {
+      const x0 = margin + (i % 2) * (cellW + gap);
+      const y0 = top + Math.floor(i / 2) * (cellH + gap);
+      const boxH = cellH - captionH;
+      // 사진 칸 — 연한 테두리 안에 비율 그대로 가운데.
+      page.drawRectangle({ x: x0, y: PH - y0 - boxH, width: cellW, height: boxH, borderColor: rgb(0.8, 0.8, 0.8), borderWidth: 0.5 });
+      try {
+        const img = await pdf.embedJpg(ph.jpeg);
+        const s = Math.min((cellW - 4) / img.width, (boxH - 4) / img.height);
+        const w = img.width * s;
+        const h = img.height * s;
+        page.drawImage(img, { x: x0 + (cellW - w) / 2, y: PH - y0 - boxH + (boxH - h) / 2, width: w, height: h });
+      } catch {
+        text(page, PH, "사진을 넣지 못했습니다", { x: x0 + cellW / 2, base: y0 + boxH / 2, size: 9, font: fonts.regular, align: "center" });
+      }
+      const [, mm, dd] = ph.date.split("-").map(Number);
+      const dow = DOW[new Date(`${ph.date}T00:00:00Z`).getUTCDay()];
+      text(page, PH, `${mm}월 ${dd}일(${dow})`, { x: x0 + cellW / 2, base: y0 + boxH + 12, size: 10, font: fonts.bold, bold: true, align: "center" });
+      const cap = photoCaptionMenus(ph.menus).join(" · ");
+      if (cap) text(page, PH, cap, { x: x0 + cellW / 2, base: y0 + boxH + 25, size: 9, font: fonts.regular, align: "center", maxW: cellW });
+    }
   }
 }
 

@@ -6,7 +6,7 @@ import path from "path";
 import sharp from "sharp";
 import { readXlsxGrid } from "../lib/bangkaMenuXlsx";
 import { menuItemsOf, parseVendorWeek } from "../lib/bangkaMenuParse";
-import { buildAbsencePdf, buildMealPlanPdf, mealPlanWeeks, type MealPlanDay } from "../lib/bangkaFormPdf";
+import { buildAbsencePdf, buildMealPlanPdf, mealPhotoJpeg, mealPlanWeeks, type MealPhoto, type MealPlanDay } from "../lib/bangkaFormPdf";
 
 (async () => {
   const out = process.argv[2] ?? ".";
@@ -46,6 +46,22 @@ import { buildAbsencePdf, buildMealPlanPdf, mealPlanWeeks, type MealPlanDay } fr
     .filter((d) => new Date(`${d}T00:00:00Z`).getUTCDay() !== 0)
     .map((date) => ({ ...heavy, date }));
   writeFileSync(path.join(out, "meal-plan-footnote-overflow.pdf"), await buildMealPlanPdf({ ym: "2026-11", writtenOn: "2026-10-27", writer: "정다영", days: novDays }));
+
+  // 급식 사진 장 — 11월 25일 전부 사진(원본처럼 긴 변 1600px, 압축이 잘 안 되는 무늬 = 용량 보수적으로).
+  //   세로 사진 몇 장 섞음. 목표: PDF 10MB 이하.
+  const novPhotos: MealPhoto[] = [];
+  for (const [i, d] of novDays.entries()) {
+    const [w, h] = i % 5 === 4 ? [1200, 1600] : [1600, 1200];
+    const raw = await sharp({ create: { width: w, height: h, channels: 3, background: { r: 128, g: 128, b: 128 }, noise: { type: "gaussian", mean: 128, sigma: 40 } } })
+      .blur(1.2)
+      .composite([{ input: Buffer.from(`<svg width="${w}" height="${h}"><circle cx="${w / 2}" cy="${h / 2}" r="${Math.min(w, h) / 3}" fill="rgb(${(i * 37) % 255},140,90)" fill-opacity="0.6"/><text x="60" y="160" font-size="120" fill="white">${d.date}</text></svg>`) }])
+      .jpeg({ quality: 90 })
+      .toBuffer();
+    novPhotos.push({ date: d.date, jpeg: await mealPhotoJpeg(raw), menus: d.menus.map((x) => x.name) });
+  }
+  const withPhotos = await buildMealPlanPdf({ ym: "2026-11", writtenOn: "2026-10-27", writer: "정다영", days: novDays, photos: novPhotos });
+  writeFileSync(path.join(out, "meal-plan-photos-25.pdf"), withPhotos);
+  console.log(`사진 25장 PDF: ${(withPhotos.length / 1024 / 1024).toFixed(2)}MB (목표 10MB 이하)`);
 
   const sig = await sharp({ create: { width: 300, height: 120, channels: 4, background: { r: 0, g: 0, b: 0, alpha: 0 } } })
     .composite([{ input: Buffer.from(`<svg width="300" height="120"><path d="M20 80 C60 10, 90 110, 130 50 S200 20, 280 70" stroke="black" stroke-width="6" fill="none"/></svg>`) }])

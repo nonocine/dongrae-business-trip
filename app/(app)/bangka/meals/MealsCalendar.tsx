@@ -43,6 +43,8 @@ export default function MealsCalendar({ ym, meals, todayYmd }: { ym: string; mea
   const byDate = new Map(meals.map((m) => [m.meal_date, m]));
   const [selected, setSelected] = useState<string | null>(null);
   const [bulk, setBulk] = useState(false);
+  // 급식계획 PDF 뒤에 "급식 사진" 장(사진 있는 날만). 끄면 표만.
+  const [pdfPhotos, setPdfPhotos] = useState(true);
   const editorRef = useRef<HTMLDivElement>(null);
   const [y, m] = ym.split("-").map(Number);
 
@@ -69,9 +71,13 @@ export default function MealsCalendar({ ym, meals, todayYmd }: { ym: string; mea
         <Link href="/bangka/meals/upload" className={`ml-auto ${btnPrimary}`}>
           식단표 올리기(엑셀)
         </Link>
-        <a href={`/bangka/meals/plan-pdf?ym=${ym}`} className={btnSecondary}>
+        <a href={`/bangka/meals/plan-pdf?ym=${ym}${pdfPhotos ? "" : "&photos=0"}`} className={btnSecondary}>
           {m}월 급식계획 PDF
         </a>
+        <label className="flex min-h-10 items-center gap-1.5 text-sm text-ink-body">
+          <input type="checkbox" checked={pdfPhotos} onChange={(e) => setPdfPhotos(e.target.checked)} className="h-4 w-4" />
+          사진 포함
+        </label>
         <button
           type="button"
           onClick={() => {
