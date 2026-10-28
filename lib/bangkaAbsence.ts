@@ -3,7 +3,11 @@
 //   보호자 앱(동래방카 lib/absence.ts)과 코드값이 같아야 합니다(bk_absences 를 함께 씀).
 //   흐름: 보호자 앱 신청(submitted) → 담임 확인(teacher_checked) → 팀장 결재(approved)
 //         또는 반려(rejected, 사유). 보호자가 신청 단계에서 취소하면 cancelled.
-//   전화 공결: 직원이 받아 적음(channel=phone, 확인자=선생님) → 받은 직원이 곧 담임 확인 → 팀장 결재.
+//   전화 공결(요청 5번, 2026-10): 직원이 받아 적음(channel=phone, 확인자=선생님) → 증빙 대기(evidence_pending)
+//         → 보호자가 앱에서 증빙 업로드(또는 직원이 종이 서류를 대신 올림) → submitted("증빙 제출됨")
+//         → 담임 확인 → 팀장 결재. 증빙 없으면 담임 확인·결재 불가(DB 트리거로도 막음).
+//   이미 결재된 옛 전화 공결 중 증빙 없는 건은 evidence_requested_at 만 찍혀 있고(A안), 증빙이 붙어도 상태는 그대로.
+//   설계: docs/설계_전화공결증빙.md
 // =====================================================================
 
 export const ABSENCE_REASONS = [
@@ -19,14 +23,28 @@ export type AbsenceReasonKey = (typeof ABSENCE_REASONS)[number]["key"];
 export const isAbsenceReason = (v: unknown): v is AbsenceReasonKey => ABSENCE_REASONS.some((r) => r.key === v);
 export const absenceReasonLabel = (k: string | null | undefined) => ABSENCE_REASONS.find((r) => r.key === k)?.label ?? "기타";
 
-export type AbsenceStatus = "submitted" | "teacher_checked" | "approved" | "rejected" | "cancelled";
+export type AbsenceStatus = "evidence_pending" | "submitted" | "teacher_checked" | "approved" | "rejected" | "cancelled";
 export const ABSENCE_STATUS_LABEL: Record<AbsenceStatus, string> = {
+  evidence_pending: "증빙 대기",
   submitted: "신청",
   teacher_checked: "담임 확인",
   approved: "결재 완료",
   rejected: "반려",
   cancelled: "취소",
 };
+
+// 화면 이름표 — 전화 공결이 증빙을 받아 넘어온 submitted 는 "증빙 제출됨".
+export function absenceStatusLabel(r: { status: AbsenceStatus; channel: "app" | "phone" }): string {
+  return r.status === "submitted" && r.channel === "phone" ? "증빙 제출됨" : ABSENCE_STATUS_LABEL[r.status];
+}
+
+// 증빙을 기다리는 건 — 증빙 대기, 또는 증빙 요청된(A안) 옛 결재 건 중 아직 서류가 없는 것.
+export function awaitingEvidence(r: { status: AbsenceStatus; evidence_requested_at: string | null }, fileCount: number): boolean {
+  return r.status === "evidence_pending" || (r.status === "approved" && !!r.evidence_requested_at && fileCount === 0);
+}
+
+// 증빙 대기가 이 날수를 넘으면 직원 목록에서 강조(관장 결정 2026-10-28).
+export const EVIDENCE_STALE_DAYS = 3;
 
 export type AbsenceConfirmer = "guardian" | "teacher" | "other";
 export const ABSENCE_CONFIRMER_LABEL: Record<AbsenceConfirmer, string> = { guardian: "보호자", teacher: "선생님", other: "기타" };
@@ -56,6 +74,9 @@ export type AbsenceRow = {
   approved_at: string | null;
   reject_reason: string | null;
   confirmed_on: string | null;
+  evidence_requested_at: string | null;
+  evidence_submitted_at: string | null;
+  evidence_submitted_by: string | null;
   created_at: string;
 };
 

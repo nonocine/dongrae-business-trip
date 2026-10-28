@@ -15,9 +15,11 @@ import { uploadToSlot } from "@/app/(app)/bangka/uploadClient";
 import {
   ABSENCE_CONFIRMER_LABEL,
   ABSENCE_REASONS,
-  ABSENCE_STATUS_LABEL,
+  EVIDENCE_STALE_DAYS,
   absencePeriodLabel,
   absenceReasonLabel,
+  absenceStatusLabel,
+  awaitingEvidence,
   type AbsenceStatus,
   type AbsenceView,
 } from "@/lib/bangkaAbsence";
@@ -47,17 +49,31 @@ import Tabs from "@/app/components/Tabs";
 //   · [공결확인서 PDF]: 원본 양식에 찍고 증빙자료를 뒤 장으로 붙인 한 파일.
 //   · [전화 공결 입력]: 보호자 전화를 받은 직원이 적습니다(확인자=선생님, 받은 직원 기록)
 //     → 전화공결관리대장 탭에 모이고 엑셀로 내려받을 수 있습니다.
+//   · 전화 공결은 '증빙 대기'로 시작 — 보호자가 앱에서 올리거나 직원이 [증빙 추가]로 대신 올리면
+//     '증빙 제출됨'(담임 확인 단계). 증빙 0개면 담임 확인·결재 버튼을 막습니다.
+//     증빙 대기가 EVIDENCE_STALE_DAYS(3일) 이상이면 목록에서 빨갛게 강조.
 // =====================================================================
 
 type Student = { id: string; name: string; school: string | null; grade: string | null; school_class: string | null; class_code: string };
 
 const STATUS_BADGE: Record<AbsenceStatus, string> = {
+  evidence_pending: badgeWarning,
   submitted: badgeWarning,
   teacher_checked: badgeNavy,
   approved: badgeSuccess,
   rejected: badgeDanger,
   cancelled: badgeNeutral,
 };
+
+// 상태 배지 — 증빙 받아 넘어온 전화 공결(증빙 제출됨)은 파랑.
+const statusBadge = (r: AbsenceView) => (r.status === "submitted" && r.channel === "phone" ? badgeNavy : STATUS_BADGE[r.status]);
+
+// 증빙 요청 뒤 지난 날수(KST 날짜 기준). 요청 시각이 없으면 접수 시각.
+function evidenceWaitDays(r: AbsenceView, todayYmd: string): number {
+  const at = r.evidence_requested_at ?? r.created_at;
+  const kst = new Date(Date.parse(at) + 9 * 3600_000).toISOString().slice(0, 10);
+  return Math.max(0, Math.round((Date.parse(todayYmd) - Date.parse(kst)) / 86_400_000));
+}
 
 export default function AbsencesManager({
   view,
@@ -66,13 +82,15 @@ export default function AbsencesManager({
   students,
   canApprove,
   todayYmd,
+  evidenceCount,
 }: {
-  view: "pending" | "all" | "phone";
+  view: "pending" | "evidence" | "all" | "phone";
   ym: string | null;
   rows: AbsenceView[];
   students: Student[];
   canApprove: boolean;
   todayYmd: string;
+  evidenceCount: number;
 }) {
   const router = useRouter();
   const [openId, setOpenId] = useState<string | null>(null);
@@ -91,6 +109,7 @@ export default function AbsencesManager({
             value={view}
             items={[
               { key: "pending", href: href("pending", null), label: "처리할 공결" },
+              { key: "evidence", href: href("evidence", null), label: `증빙 대기${evidenceCount ? ` (${evidenceCount})` : ""}` },
               { key: "all", href: href("all", monthNav), label: "전체(월별)" },
               { key: "phone", href: href("phone", monthNav), label: "전화공결관리대장" },
             ]}
@@ -99,7 +118,7 @@ export default function AbsencesManager({
             {phoneOpen ? "닫기" : "전화 공결 입력"}
           </button>
         </div>
-        {view !== "pending" && (
+        {(view === "all" || view === "phone") && (
           <div className="flex flex-wrap items-center gap-2">
             <Link href={href(view, shiftYm(monthNav, -1))} className={btnSecondary}>
               ◀
@@ -130,7 +149,7 @@ export default function AbsencesManager({
           onDone={(id) => {
             setPhoneOpen(false);
             setOpenId(id);
-            router.push(href("phone", todayYmd.slice(0, 7)));
+            router.push(href("evidence", null));
             router.refresh();
           }}
         />
@@ -138,20 +157,35 @@ export default function AbsencesManager({
 
       <div className={panelToneCls("green")}>
         <h3 className={sectionTitleCls("green")}>
-          {view === "pending" ? "처리할 공결" : view === "phone" ? "전화공결관리대장" : "공결 신청"} ({rows.length})
+          {view === "pending" ? "처리할 공결" : view === "evidence" ? "증빙 대기" : view === "phone" ? "전화공결관리대장" : "공결 신청"} ({rows.length})
         </h3>
+        {view === "evidence" && (
+          <p className="mt-1 text-xs text-ink-muted">
+            보호자 앱에 &lsquo;증빙 서류를 올려 주세요&rsquo;가 떠 있는 건입니다. {EVIDENCE_STALE_DAYS}일 이상 지난 건은 빨갛게 표시합니다.
+            종이 서류를 받았으면 [증빙 추가]로 올리면 담임 확인 단계로 넘어갑니다.
+          </p>
+        )}
         {rows.length === 0 ? (
-          <p className="mt-3 text-sm text-ink-muted">{view === "pending" ? "처리할 공결 신청이 없습니다." : "이 달 공결이 없습니다."}</p>
+          <p className="mt-3 text-sm text-ink-muted">
+            {view === "pending" ? "처리할 공결 신청이 없습니다." : view === "evidence" ? "증빙을 기다리는 공결이 없습니다." : "이 달 공결이 없습니다."}
+          </p>
         ) : (
           <ul className="mt-3 divide-y divide-rule">
-            {rows.map((r) => (
-              <li key={r.id}>
+            {rows.map((r) => {
+              const waiting = awaitingEvidence(r, r.files.length);
+              const waitDays = waiting ? evidenceWaitDays(r, todayYmd) : 0;
+              const stale = waiting && waitDays >= EVIDENCE_STALE_DAYS;
+              return (
+              <li key={r.id} className={stale ? "-mx-2 rounded-md bg-stamp-soft/60 px-2" : undefined}>
                 <button
                   type="button"
                   onClick={() => setOpenId(openId === r.id ? null : r.id)}
                   className="flex w-full flex-wrap items-center gap-x-3 gap-y-1 py-2.5 text-left text-sm"
                 >
-                  <span className={STATUS_BADGE[r.status]}>{ABSENCE_STATUS_LABEL[r.status]}</span>
+                  <span className={statusBadge(r)}>{absenceStatusLabel(r)}</span>
+                  {r.status === "approved" && waiting && <span className={badgeWarning}>증빙 요청</span>}
+                  {r.files.length === 0 && r.status !== "cancelled" && r.status !== "rejected" && <span className={badgeDanger}>증빙 없음</span>}
+                  {waiting && <span className={`text-xs font-semibold ${stale ? "text-stamp" : "text-ink-muted"}`}>{waitDays}일째 대기</span>}
                   <b className="text-ink">{r.student?.name ?? "(학생 없음)"}</b>
                   <span className="text-ink-muted">{r.student ? BK_SCOPE_LABEL[r.student.class_code as BkScope] ?? r.student.class_code : ""}</span>
                   <span className="text-ink">{absencePeriodLabel(r.start_date, r.end_date)}</span>
@@ -161,7 +195,8 @@ export default function AbsencesManager({
                 </button>
                 {openId === r.id && <AbsenceDetail row={r} canApprove={canApprove} onChanged={() => router.refresh()} />}
               </li>
-            ))}
+              );
+            })}
           </ul>
         )}
       </div>
@@ -205,7 +240,9 @@ function AbsenceDetail({ row: r, canApprove, onChanged }: { row: AbsenceView; ca
     });
   }
 
-  const canReject = r.status === "submitted" || (r.status === "teacher_checked" && canApprove);
+  const canReject = r.status === "evidence_pending" || r.status === "submitted" || (r.status === "teacher_checked" && canApprove);
+  // 증빙 없으면 담임 확인·결재 불가(서버·DB 에서도 막음) — 버튼은 보이되 눌리지 않게 + 이유.
+  const noEvidence = r.files.length === 0;
   return (
     <div className="mb-3 space-y-3 rounded-lg border border-rule bg-card p-3 text-sm">
       <dl className="grid grid-cols-1 gap-x-4 gap-y-1 sm:grid-cols-[7rem_1fr]">
@@ -227,6 +264,8 @@ function AbsenceDetail({ row: r, canApprove, onChanged }: { row: AbsenceView; ca
         </dd>
         <dt className="text-ink-muted">처리</dt>
         <dd>
+          {r.status === "evidence_pending" && "증빙 대기(보호자 앱에 요청됨) · "}
+          {r.evidence_submitted_by && `증빙 제출 ${r.evidence_submitted_by} (${fmtKstShort(r.evidence_submitted_at ?? "")}) · `}
           {r.teacher_checked_by ? `담임 확인 ${r.teacher_checked_by} (${fmtKstShort(r.teacher_checked_at ?? "")})` : "담임 확인 전"}
           {r.status === "approved" && ` · 결재 ${r.approved_by} (${fmtKstShort(r.approved_at ?? "")})`}
           {r.status === "rejected" && ` · 반려 ${r.approved_by}: ${r.reject_reason}`}
@@ -254,13 +293,25 @@ function AbsenceDetail({ row: r, canApprove, onChanged }: { row: AbsenceView; ca
       {msg && <p className={msg.ok ? noticeSuccess : noticeError}>{msg.text}</p>}
 
       <div className="flex flex-wrap items-center gap-2">
-        {r.status === "submitted" && (
-          <button type="button" disabled={pending} onClick={() => run(() => teacherCheckAbsence(r.id), "담임 확인했습니다.")} className={btnPrimary}>
+        {(r.status === "submitted" || r.status === "evidence_pending") && (
+          <button
+            type="button"
+            disabled={pending || noEvidence}
+            title={noEvidence ? "증빙 서류가 올라와야 처리할 수 있습니다" : undefined}
+            onClick={() => run(() => teacherCheckAbsence(r.id), "담임 확인했습니다.")}
+            className={btnPrimary}
+          >
             담임 확인
           </button>
         )}
         {r.status === "teacher_checked" && canApprove && (
-          <button type="button" disabled={pending} onClick={() => run(() => approveAbsence(r.id), "결재했습니다.")} className={btnPrimary}>
+          <button
+            type="button"
+            disabled={pending || noEvidence}
+            title={noEvidence ? "증빙 서류가 올라와야 처리할 수 있습니다" : undefined}
+            onClick={() => run(() => approveAbsence(r.id), "결재했습니다.")}
+            className={btnPrimary}
+          >
             팀장 결재
           </button>
         )}
@@ -279,6 +330,9 @@ function AbsenceDetail({ row: r, canApprove, onChanged }: { row: AbsenceView; ca
           </label>
         )}
       </div>
+      {noEvidence && (r.status === "evidence_pending" || r.status === "submitted" || r.status === "teacher_checked") && (
+        <p className="text-xs text-stamp">증빙 서류가 올라와야 담임 확인·결재할 수 있습니다. 종이 서류를 받았으면 [증빙 추가]로 올려 주세요.</p>
+      )}
       {rejecting && (
         <div className="flex flex-wrap items-end gap-2">
           <label className="min-w-[16rem] flex-1">
@@ -318,7 +372,10 @@ function PhoneAbsenceForm({ students, todayYmd, onDone }: { students: Student[];
       }}
     >
       <h3 className={sectionTitleCls("yellow")}>전화 공결 입력</h3>
-      <p className="text-xs text-ink-muted">확인자는 &lsquo;선생님(받은 직원)&rsquo; 으로 기록되고 곧바로 담임 확인 상태가 됩니다. 증빙자료는 저장 후 목록에서 [증빙 추가] 로 붙이세요.</p>
+      <p className="text-xs text-ink-muted">
+        확인자는 &lsquo;선생님(받은 직원)&rsquo; 으로 기록되고 &lsquo;증빙 대기&rsquo; 상태가 됩니다. 보호자 앱에 &lsquo;증빙 서류를 올려 주세요&rsquo;가 뜨고,
+        보호자가 올리거나 종이 서류를 받아 [증빙 추가]로 올리면 담임 확인 단계로 넘어갑니다.
+      </p>
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-4">
         <label className="sm:col-span-2">
           <span className={labelCls}>학생</span>

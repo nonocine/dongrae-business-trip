@@ -45,7 +45,7 @@ const ACT_ID = "1";
 // 로그인 후 화면 전체(app 아래 page.tsx). 동적 경로는 가짜 id 로 채웁니다.
 const ROUTES = [
   "/", "/activities", `/activities/${ACT_ID}`, `/activities/${ACT_ID}/edit`, "/admin", "/announcements",
-  "/bangka/absences", "/bangka/absences?view=all", "/bangka/absences?view=phone", "/bangka/events", "/bangka/meals",
+  "/bangka/absences", "/bangka/absences?view=evidence", "/bangka/absences?view=all", "/bangka/absences?view=phone", "/bangka/events", "/bangka/meals",
   "/bangka/meals/upload", "/bangka/members", "/bangka/members/bulk", "/bangka/members/guardians",
   `/bangka/members/guardians/${ID}`, "/bangka/posts", `/bangka/posts/${ID}`, "/bangka/posts/new",
   "/business-results", "/hr", "/hr/backup", "/hr/cards", "/hr/certificates", "/hr/clubs", "/hr/contracts",
