@@ -4891,5 +4891,237 @@
   "created_at": {
    "type": "timestamp with time zone"
   }
+ },
+ "approvals": {
+  "id": {
+   "type": "uuid"
+  },
+  "doc_kind": {
+   "type": "text"
+  },
+  "target_id": {
+   "type": "uuid"
+  },
+  "round": {
+   "type": "integer"
+  },
+  "requester_driver_id": {
+   "type": "uuid",
+   "fk": [
+    "drivers",
+    "id"
+   ]
+  },
+  "requester_name": {
+   "type": "text"
+  },
+  "status": {
+   "type": "text"
+  },
+  "approver_driver_id": {
+   "type": "uuid",
+   "fk": [
+    "drivers",
+    "id"
+   ]
+  },
+  "approver_name": {
+   "type": "text"
+  },
+  "approver_rank": {
+   "type": "text"
+  },
+  "requested_at": {
+   "type": "timestamp with time zone"
+  },
+  "decided_at": {
+   "type": "timestamp with time zone"
+  },
+  "reject_reason": {
+   "type": "text"
+  },
+  "erp_system": {
+   "type": "text"
+  },
+  "erp_doc_no": {
+   "type": "text"
+  },
+  "erp_status": {
+   "type": "text"
+  },
+  "erp_synced_at": {
+   "type": "timestamp with time zone"
+  },
+  "created_at": {
+   "type": "timestamp with time zone"
+  },
+  "updated_at": {
+   "type": "timestamp with time zone"
+  }
+ },
+ "seal_requests": {
+  "id": {
+   "type": "uuid"
+  },
+  "requester_driver_id": {
+   "type": "uuid",
+   "fk": [
+    "drivers",
+    "id"
+   ]
+  },
+  "requester_name": {
+   "type": "text"
+  },
+  "doc_type": {
+   "type": "text"
+  },
+  "title": {
+   "type": "text"
+  },
+  "cert_date": {
+   "type": "date"
+  },
+  "purpose": {
+   "type": "text"
+  },
+  "item_template": {
+   "type": "jsonb"
+  },
+  "body_template": {
+   "type": "text"
+  },
+  "status": {
+   "type": "text"
+  },
+  "current_approval_id": {
+   "type": "uuid",
+   "fk": [
+    "approvals",
+    "id"
+   ]
+  },
+  "issue_year": {
+   "type": "integer"
+  },
+  "issued_at": {
+   "type": "timestamp with time zone"
+  },
+  "created_at": {
+   "type": "timestamp with time zone"
+  },
+  "updated_at": {
+   "type": "timestamp with time zone"
+  }
+ },
+ "seal_recipients": {
+  "id": {
+   "type": "uuid"
+  },
+  "request_id": {
+   "type": "uuid",
+   "fk": [
+    "seal_requests",
+    "id"
+   ]
+  },
+  "line_no": {
+   "type": "integer"
+  },
+  "recipient_name": {
+   "type": "text"
+  },
+  "items": {
+   "type": "jsonb"
+  },
+  "body": {
+   "type": "text"
+  },
+  "issue_year": {
+   "type": "integer"
+  },
+  "issue_seq": {
+   "type": "integer"
+  },
+  "issued_at": {
+   "type": "timestamp with time zone"
+  },
+  "snapshot": {
+   "type": "jsonb"
+  },
+  "canceled_at": {
+   "type": "timestamp with time zone"
+  },
+  "canceled_by_driver_id": {
+   "type": "uuid",
+   "fk": [
+    "drivers",
+    "id"
+   ]
+  },
+  "canceled_by_name": {
+   "type": "text"
+  },
+  "cancel_reason": {
+   "type": "text"
+  },
+  "created_at": {
+   "type": "timestamp with time zone"
+  },
+  "updated_at": {
+   "type": "timestamp with time zone"
+  }
+ },
+ "seal_number_counters": {
+  "year": {
+   "type": "integer"
+  },
+  "next_seq": {
+   "type": "integer"
+  },
+  "start_seq": {
+   "type": "integer"
+  },
+  "start_set_by": {
+   "type": "text"
+  },
+  "start_set_at": {
+   "type": "timestamp with time zone"
+  },
+  "updated_at": {
+   "type": "timestamp with time zone"
+  }
+ },
+ "seal_print_logs": {
+  "id": {
+   "type": "uuid"
+  },
+  "request_id": {
+   "type": "uuid",
+   "fk": [
+    "seal_requests",
+    "id"
+   ]
+  },
+  "recipient_ids": {
+   "type": "array",
+   "items": "string"
+  },
+  "is_reprint": {
+   "type": "boolean"
+  },
+  "printed_by_driver_id": {
+   "type": "uuid",
+   "fk": [
+    "drivers",
+    "id"
+   ]
+  },
+  "printed_by_name": {
+   "type": "text"
+  },
+  "printed_at": {
+   "type": "timestamp with time zone"
+  }
  }
 }

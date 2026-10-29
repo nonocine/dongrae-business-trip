@@ -25,6 +25,11 @@ import { getUnreadMailCount } from "@/app/(app)/mail/actions";
 import { getTrainingsAdminSummary } from "@/app/(app)/hr/trainings/actions";
 import { getPendingCertRequestCount } from "@/app/(app)/hr/certificates/actions";
 import { isM0Grant } from "@/lib/authLevels";
+import {
+  SEAL_APPROVER_RANKS,
+  countPendingSealRequests,
+  resolveSealRegisterAccess,
+} from "@/lib/sealRegisterServer";
 import { hasPersonnelAccess } from "@/lib/personnelAccess";
 import type { MenuContext } from "@/lib/menu";
 
@@ -59,11 +64,16 @@ export const getShellData = cache(async (): Promise<ShellData> => {
   const isM0 = isM0Grant({ rank, email: g?.email, authLevel });
 
   // 증명서 승인 대기는 M0 배지라 M0 일 때만 셉니다(기존 대시보드와 동일).
-  const [unreadMailCount, trainingAdminSummary, pendingCertCount] =
+  //   직인사용대장 결재 대기는 직급(관장·부장)으로만 — 화면 권한과 같은 판정.
+  const isSealApprover = !!rank && (SEAL_APPROVER_RANKS as readonly string[]).includes(rank);
+  const [unreadMailCount, trainingAdminSummary, pendingCertCount, pendingSealCount] =
     await Promise.all([
       getUnreadMailCount(),
       getTrainingsAdminSummary(),
       isM0 ? getPendingCertRequestCount() : Promise.resolve(0),
+      isSealApprover
+        ? resolveSealRegisterAccess().then(countPendingSealRequests).catch(() => undefined)
+        : Promise.resolve(0),
     ]);
 
   return {
@@ -79,6 +89,7 @@ export const getShellData = cache(async (): Promise<ShellData> => {
       "/mail": unreadMailCount,
       "/hr/trainings": trainingAdminSummary?.totalNotMet,
       "/hr/certificates": pendingCertCount,
+      "/seal-register": pendingSealCount,
     },
     rank,
     authLevel,
