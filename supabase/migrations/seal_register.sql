@@ -396,7 +396,31 @@ begin
 end;
 $$;
 
+-- 13-1) 결재자 확인 — drivers.rank 가 관장·부장일 때만 그 직급을 돌려줌 ------------
+--    반려·승인 함수가 맨 앞에서 부름. 결재 기록(approver_rank·snapshot.approvedRank)에는
+--    앱이 넘긴 p_approver_rank 대신 이 값(DB 직급)을 씀.
+create or replace function public.seal_check_approver(p_approver_driver_id uuid)
+returns text
+language plpgsql
+stable
+set search_path = public
+as $$
+declare
+  v_rank text;
+begin
+  if p_approver_driver_id is null then
+    raise exception '결재자 정보가 없습니다.' using errcode = 'check_violation';
+  end if;
+  select d.rank into v_rank from public.drivers d where d.id = p_approver_driver_id;
+  if v_rank is null or v_rank not in ('관장', '부장') then
+    raise exception '직인 사용 결재는 관장·부장만 할 수 있습니다.' using errcode = 'check_violation';
+  end if;
+  return v_rank;
+end;
+$$;
+
 -- 14) 반려(사유 필수) --------------------------------------------------
+--    p_approver_rank 는 호환용으로 남겨 둔 매개변수(쓰지 않음) — 직급은 seal_check_approver 값.
 create or replace function public.seal_reject_request(
   p_request_id uuid,
   p_approver_driver_id uuid,
@@ -410,7 +434,9 @@ set search_path = public
 as $$
 declare
   r public.seal_requests%rowtype;
+  v_rank text;
 begin
+  v_rank := public.seal_check_approver(p_approver_driver_id);
   if char_length(btrim(coalesce(p_reason, ''))) = 0 then
     raise exception '반려 사유를 적어 주세요.' using errcode = 'check_violation';
   end if;
@@ -423,7 +449,7 @@ begin
   end if;
   update public.approvals
      set status = 'rejected', approver_driver_id = p_approver_driver_id, approver_name = p_approver_name,
-         approver_rank = p_approver_rank, decided_at = now(), reject_reason = btrim(p_reason)
+         approver_rank = v_rank, decided_at = now(), reject_reason = btrim(p_reason)
    where id = r.current_approval_id and status = 'pending';
   update public.seal_requests set status = 'rejected' where id = r.id;
 end;
@@ -433,6 +459,7 @@ $$;
 --    · 신청 줄을 잠가 같은 신청 두 번 승인 막음(부장·관장이 동시에 눌러도 한 명만 성공)
 --    · 그해 번호 줄을 잠가 다른 신청 승인과 차례로 처리 → 중복·건너뜀 없음
 --    · 연도는 승인 순간 한국 시각 기준. 대상자 줄 순서(line_no)대로 번호.
+--    · p_approver_rank 는 호환용으로 남겨 둔 매개변수(쓰지 않음) — 직급은 seal_check_approver 값.
 create or replace function public.seal_approve_request(
   p_request_id uuid,
   p_approver_driver_id uuid,
@@ -450,7 +477,9 @@ declare
   n integer;
   lbl text;
   ts timestamptz := now();
+  v_rank text;
 begin
+  v_rank := public.seal_check_approver(p_approver_driver_id);
   if char_length(btrim(coalesce(p_approver_name, ''))) = 0 then
     raise exception '결재자 이름이 없습니다.' using errcode = 'check_violation';
   end if;
@@ -484,7 +513,7 @@ begin
              'certDate', r.cert_date,
              'certifier', '동래구청소년센터장',
              'approvedBy', p_approver_name,
-             'approvedRank', p_approver_rank,
+             'approvedRank', v_rank,
              'issuedAt', ts
            )
      where s.id = x.id;
@@ -500,7 +529,7 @@ begin
   update public.seal_number_counters set next_seq = n, updated_at = ts where year = y;
   update public.approvals
      set status = 'approved', approver_driver_id = p_approver_driver_id, approver_name = p_approver_name,
-         approver_rank = p_approver_rank, decided_at = ts
+         approver_rank = v_rank, decided_at = ts
    where id = r.current_approval_id and status = 'pending';
   update public.seal_requests set status = 'issued', issue_year = y, issued_at = ts where id = r.id;
 end;
@@ -554,12 +583,14 @@ end;
 $$;
 
 -- 18) 함수는 서버(service_role)만 부름 ------------------------------------
+revoke all on function public.seal_check_approver(uuid) from public, anon, authenticated;
 revoke all on function public.seal_submit_request(uuid) from public, anon, authenticated;
 revoke all on function public.seal_withdraw_request(uuid) from public, anon, authenticated;
 revoke all on function public.seal_reject_request(uuid, uuid, text, text, text) from public, anon, authenticated;
 revoke all on function public.seal_approve_request(uuid, uuid, text, text) from public, anon, authenticated;
 revoke all on function public.seal_cancel_recipient(uuid, uuid, text, text) from public, anon, authenticated;
 revoke all on function public.seal_set_start_no(integer, integer, text) from public, anon, authenticated;
+grant execute on function public.seal_check_approver(uuid) to service_role;
 grant execute on function public.seal_submit_request(uuid) to service_role;
 grant execute on function public.seal_withdraw_request(uuid) to service_role;
 grant execute on function public.seal_reject_request(uuid, uuid, text, text, text) to service_role;
