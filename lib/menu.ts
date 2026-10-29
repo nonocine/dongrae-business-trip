@@ -255,6 +255,19 @@ export const MENU_ITEMS: MenuItem[] = [
     desc: "재직증명서 즉시 발급 · 발급 이력",
     show: { kind: "everyone" },
   },
+  // 직인사용대장 — 노미현 부장 요청(2026-10-27). 신청은 전 직원, 결재·전체 대장은 관장·부장(화면이 drivers.rank 로 판정).
+  //   배지는 관장·부장에게만 들어옵니다(결재 대기, 본인 신청 제외).
+  {
+    key: "common-seal-register",
+    group: "common",
+    label: "직인사용대장",
+    href: "/seal-register",
+    icon: "🔖",
+    desc: "직인 증서(수상확인증·수료증·표창장·상장·위촉장) 신청·결재·발급",
+    show: { kind: "everyone" },
+    badgeDesc: (n) =>
+      n && n > 0 ? `결재 대기 ${n}건 — 직인 증서 신청·결재·발급` : "직인 증서(수상확인증·수료증·표창장·상장·위촉장) 신청·결재·발급",
+  },
   {
     key: "common-my-contracts",
     group: "common",

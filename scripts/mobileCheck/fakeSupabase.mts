@@ -141,6 +141,38 @@ export function startFakeSupabase(port: number, schemaPath: string) {
         if ("phone" in row) row.phone = "01098765432";
       }
     }
+    // 직인사용대장 — 상세 화면을 상태별로 열 수 있게 id 로 상태를 정합니다.
+    //   uuid(1) 결재 대기(남의 신청 → 승인·반려 버튼) / uuid(2) 발급(내 신청, 2번 줄 취소) / uuid(3) 반려(내 신청 → 고치기)
+    if (table === "seal_requests") {
+      const st: Record<string, string> = { [uuid(1)]: "pending", [uuid(2)]: "issued", [uuid(3)]: "rejected", [uuid(4)]: "draft" };
+      const status = st[String(row.id)] ?? ["pending", "issued", "rejected", "draft"][i % 4];
+      Object.assign(row, { status, doc_type: "award_confirm", cert_date: "2026-10-17" });
+      if ("requester_driver_id" in row && row.requester_driver_id !== BOSS_ID) row.requester_driver_id = status === "pending" ? uuid(9) : BOSS_ID;
+      if ("item_template" in row)
+        row.item_template = [
+          { label: "행 사 명", scope: "common", value: LONG },
+          { label: "참가팀/명", scope: "person", isName: true },
+          { label: "참가일시", scope: "common", date: true, value: "2026-10-17" },
+          { label: "수상부문", scope: "person" },
+        ];
+      if ("body_template" in row) row.body_template = `${SENTENCE} {수상부문}`;
+      if (status !== "issued") Object.assign(row, { issue_year: null, issued_at: null });
+    }
+    if (table === "seal_recipients") {
+      // 발급 신청(uuid(2))의 줄, 또는 전체 대장 조회(신청을 함께 읽음 — seal_requests 칸이 붙음)
+      const issued = row.request_id === uuid(2) || "seal_requests" in row;
+      if ("items" in row) row.items = [{ label: "행 사 명", value: LONG }, { label: "참가팀/명", value: `${LONG} 팀` }, { label: "참가일시", value: "2026. 10. 17. (토)" }, { label: "수상부문", value: "대상" }];
+      if ("body" in row) row.body = SENTENCE;
+      if (issued) {
+        Object.assign(row, { issue_year: 2026, issue_seq: 15 + i, issued_at: "2026-10-27T05:00:00+00:00" });
+        if ("snapshot" in row) row.snapshot = { issueLabel: `제2026-${15 + i}호`, title: "수상확인증", certDate: "2026-10-17", approvedBy: BOSS_NAME };
+        if ("canceled_at" in row) row.canceled_at = i === 1 ? "2026-10-28T05:00:00+00:00" : null;
+      } else Object.assign(row, { issue_year: null, issue_seq: null, issued_at: null, snapshot: null, canceled_at: null });
+    }
+    if (table === "approvals" && "status" in row) {
+      row.status = ["rejected", "approved", "withdrawn", "pending"][i % 4];
+      if (row.status === "rejected") row.reject_reason = SENTENCE;
+    }
     if ("deleted_at" in row) row.deleted_at = null;
     if ("left_on" in row) row.left_on = null;
     return row;
