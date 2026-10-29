@@ -19,6 +19,8 @@ const nextConfig: NextConfig = {
     "/hr/salary/**": ["./lib/fonts/*.ttf"],
     // 기관 대장 PDF 출력(나눔고딕).
     "/hr/org-records/**": ["./lib/fonts/*.ttf"],
+    // 강사 근무일지·출석부 PDF + 일괄 출력용 폰트 라우트(pdf-font).
+    "/hr/saems/programs/**": ["./lib/fonts/*.ttf"],
     // 동래방카 필수 운영서식(급식계획·공결확인서) — 원본 양식 PDF 위에 나눔고딕으로 찍습니다.
     "/bangka/**": ["./lib/fonts/*.ttf", "./lib/forms/bangka/*.pdf"],
   },
