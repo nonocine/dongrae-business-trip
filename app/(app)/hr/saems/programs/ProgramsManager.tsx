@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState, useTransition } from "react";
 import { createPortal } from "react-dom";
+import type { BulkDoc } from "@/lib/bulkProgramPdf";
 import { useRouter } from "next/navigation";
 import {
   listTerms,
@@ -344,10 +345,205 @@ function OutputMenu({ programId }: { programId: string }) {
   );
 }
 
+// =====================================================================
+// 선택 출력 — 체크한 프로그램을 PDF 한 파일로(표 순서, 프로그램마다 새 쪽).
+//   문서 종류는 개별 "출력 ▼" 메뉴와 같은 3종. 개별 출력에 기간·회차 선택이 없으므로
+//   여기도 없다(프로그램의 회차 전부). 만드는 건 브라우저 — lib/bulkProgramPdf 주석 참고.
+//   만든 결과는 문서 종류별로 기억해 두고, 미리보기 ↔ 저장을 오가도 다시 만들지 않는다.
+// =====================================================================
+// 타입만 가져온다 — pdf-lib 는 버튼을 누를 때 동적 import(첫 화면 번들에 안 싣는다).
+type BulkDocKey = BulkDoc;
+const BULK_DOCS: { key: BulkDocKey; label: string; sub: string }[] = [
+  { key: "worklog", label: "강사 근무일지", sub: "강사 서명 자동 · 프로그램당 A4 1장" },
+  { key: "attendance", label: "출석부 · 출결 포함", sub: "체크된 출결이 채워진 출석부" },
+  { key: "attendance-blank", label: "출석부 · 빈 양식", sub: "출결 칸이 빈 — 손으로 체크" },
+];
+
+function BulkPrintModal({
+  items,
+  termName,
+  projectName,
+  onClose,
+}: {
+  items: { id: string; name: string }[];
+  termName: string;
+  projectName: string;
+  onClose: () => void;
+}) {
+  const [doc, setDoc] = useState<BulkDocKey>("worklog");
+  const [busy, setBusy] = useState(false);
+  const [progress, setProgress] = useState<{ done: number; total: number } | null>(null);
+  const [err, setErr] = useState<string | null>(null);
+  const [blockedUrl, setBlockedUrl] = useState<string | null>(null);
+  const [made, setMade] = useState<
+    Partial<
+      Record<
+        BulkDocKey,
+        { url: string; filename: string; ok: number; failed: { name: string; reason: string }[] }
+      >
+    >
+  >({});
+  const cur = made[doc];
+
+  async function ensure() {
+    if (made[doc]) return made[doc]!;
+    const lib = await import("@/lib/bulkProgramPdf");
+    const r = await lib.buildBulkProgramPdf(items, doc, (done, total) =>
+      setProgress({ done, total })
+    );
+    if (!r.bytes) {
+      throw new Error(
+        `만들 수 있는 문서가 없었습니다. 실패: ${r.failed
+          .map((f) => `${f.name}(${f.reason})`)
+          .join(", ")}`
+      );
+    }
+    const url = URL.createObjectURL(
+      new Blob([r.bytes as BlobPart], { type: "application/pdf" })
+    );
+    const out = {
+      url,
+      filename: lib.bulkPdfFilename(doc, termName, projectName, r.ok),
+      ok: r.ok,
+      failed: r.failed,
+    };
+    setMade((m) => ({ ...m, [doc]: out }));
+    return out;
+  }
+
+  async function run(action: "preview" | "save") {
+    setErr(null);
+    setBlockedUrl(null);
+    // 미리보기 창은 클릭 순간에 열어 둬야 팝업 차단에 안 걸린다 — 만든 뒤 주소만 바꾼다.
+    let win: Window | null = null;
+    if (action === "preview" && !made[doc]) {
+      win = window.open("", "_blank");
+      win?.document.write(
+        '<p style="font-family:sans-serif;padding:16px">PDF를 만드는 중입니다…</p>'
+      );
+    }
+    setBusy(true);
+    try {
+      const r = await ensure();
+      if (action === "preview") {
+        if (win) win.location.href = r.url;
+        else if (!window.open(r.url, "_blank")) setBlockedUrl(r.url);
+      } else {
+        const a = document.createElement("a");
+        a.href = r.url;
+        a.download = r.filename;
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+      }
+    } catch (e) {
+      win?.close();
+      setErr(e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusy(false);
+      setProgress(null);
+    }
+  }
+
+  const choice =
+    "flex min-h-[44px] cursor-pointer items-start gap-2 rounded-md border px-3 py-2";
+
+  return (
+    <ModalShell title={`선택 출력 — ${items.length}건`} onClose={busy ? () => {} : onClose}>
+      <div className="space-y-3" data-testid="bulk-print-modal">
+        <fieldset disabled={busy} className="space-y-1.5">
+          <legend className="mb-1 text-[11px] font-semibold text-navy">문서 종류</legend>
+          {BULK_DOCS.map((d) => (
+            <label
+              key={d.key}
+              className={`${choice} ${doc === d.key ? "border-navy bg-surface" : "border-line"}`}
+            >
+              <input
+                type="radio"
+                name="bulk-doc"
+                className="mt-0.5 h-5 w-5 shrink-0 accent-navy"
+                checked={doc === d.key}
+                onChange={() => setDoc(d.key)}
+              />
+              <span className="text-sm text-ink-body">
+                {d.label}
+                <span className="block text-[11px] text-ink-hint">{d.sub}</span>
+              </span>
+            </label>
+          ))}
+        </fieldset>
+        <p className="text-[11px] text-ink-hint">
+          표 순서대로 한 파일에 묶고, 프로그램마다 새 쪽에서 시작합니다. 각 문서는 개별
+          출력과 같은 양식이며 회차 전부가 들어갑니다.
+        </p>
+
+        {busy && progress && (
+          <div aria-live="polite">
+            <p className="text-sm text-ink-body">
+              {progress.total}건 중 {Math.min(progress.done + 1, progress.total)}건 만드는 중…
+            </p>
+            <div className="mt-1 h-2 overflow-hidden rounded bg-surface">
+              <div
+                className="h-full bg-navy transition-all"
+                style={{ width: `${(progress.done / Math.max(1, progress.total)) * 100}%` }}
+              />
+            </div>
+          </div>
+        )}
+        {busy && !progress && <p className="text-sm text-ink-body">준비 중…</p>}
+
+        {cur && !busy && (
+          <p className={cur.failed.length ? noticeWarning : noticeSuccess} data-testid="bulk-result">
+            {cur.ok}건을 한 파일로 만들었습니다.
+            {cur.failed.length > 0 && (
+              <>
+                {" "}
+                실패 {cur.failed.length}건 — 빠진 프로그램:{" "}
+                {cur.failed.map((f) => `${f.name}(${f.reason})`).join(", ")}
+              </>
+            )}
+          </p>
+        )}
+        {blockedUrl && (
+          <p className={noticeWarning}>
+            팝업이 막혔습니다.{" "}
+            <a href={blockedUrl} target="_blank" rel="noreferrer" className="underline">
+              여기를 눌러 미리보기
+            </a>
+          </p>
+        )}
+        {err && <p className={noticeError}>{err}</p>}
+
+        <div className="grid grid-cols-2 gap-2 pt-1">
+          <button
+            type="button"
+            onClick={() => run("preview")}
+            disabled={busy}
+            className={`${btnSecondary} min-h-[44px] sm:min-h-[44px]`}
+            data-testid="bulk-preview"
+          >
+            미리보기(새 창)
+          </button>
+          <button
+            type="button"
+            onClick={() => run("save")}
+            disabled={busy}
+            className={`${btnPrimary} min-h-[44px] sm:min-h-[44px]`}
+            data-testid="bulk-save"
+          >
+            PDF 저장
+          </button>
+        </div>
+      </div>
+    </ModalShell>
+  );
+}
+
 export default function ProgramsManager({
   projects,
   instructors,
   canManage,
+  canBulkPrint,
 }: {
   projects: SaemProject[];
   instructors: InstructorOption[];
@@ -355,6 +551,8 @@ export default function ProgramsManager({
   //   수강료·정산 방식 열도 뺀다 — 강사 보수에 해당하는 값이라 서버에서
   //   이미 비워져 온다(listPrograms 주석 참고).
   canManage: boolean;
+  // 선택 출력 시험 개방 — lib/bulkPrintAccess(관장 + BULK_PRINT_EMAILS). false 면 체크 칸·버튼을 안 그린다.
+  canBulkPrint: boolean;
 }) {
   const router = useRouter();
   const [projectId, setProjectId] = useState(projects[0]?.id ?? "");
@@ -364,8 +562,34 @@ export default function ProgramsManager({
   const [modal, setModal] = useState<Modal>(null);
   const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
   const [, start] = useTransition();
+  // 선택 출력 — 체크한 프로그램 id. 차시를 바꾸면 비운다(차시 select onChange).
+  const [picked, setPicked] = useState<Set<string>>(new Set());
+  const [bulkOpen, setBulkOpen] = useState(false);
+  const selectAllRef = useRef<HTMLInputElement>(null);
 
   const term = terms.find((t) => t.id === termId) ?? null;
+  // 회차 0건은 개별 출력도 막혀 있다 — 같은 기준으로 체크를 막는다.
+  const printable = programs.filter((p) => p.sessionCount > 0);
+  // 표에서 사라진(삭제·회차 0 이 된) 프로그램은 선택에서 빠지게, 표 순서대로 센다.
+  const pickedRows = printable.filter((p) => picked.has(p.id));
+  const allPicked = printable.length > 0 && pickedRows.length === printable.length;
+
+  useEffect(() => {
+    if (selectAllRef.current)
+      selectAllRef.current.indeterminate = pickedRows.length > 0 && !allPicked;
+  }, [pickedRows.length, allPicked]);
+
+  function togglePick(id: string) {
+    setPicked((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }
+  function togglePickAll() {
+    setPicked(allPicked ? new Set() : new Set(printable.map((p) => p.id)));
+  }
 
   // 프로젝트 변경 → 차시 로드.
   useEffect(() => {
@@ -447,7 +671,10 @@ export default function ProgramsManager({
           </select>
           <select
             value={termId}
-            onChange={(e) => setTermId(e.target.value)}
+            onChange={(e) => {
+              setTermId(e.target.value);
+              setPicked(new Set()); // 다른 차시의 선택이 남지 않게
+            }}
             className={selCls}
             aria-label="차시"
           >
@@ -520,19 +747,33 @@ export default function ProgramsManager({
 
       {/* 프로그램 목록 */}
       <section className={cardCls}>
-        <div className="mb-3 flex items-center justify-between">
+        <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
           <h3 className="text-sm font-bold text-ink">
             프로그램 {termId ? `(${programs.length})` : ""}
           </h3>
           {canManage && (
-            <button
-              type="button"
-              onClick={() => setModal({ kind: "program", program: null })}
-              className={btnPrimary}
-              disabled={!termId}
-            >
-              + 프로그램 추가
-            </button>
+            <div className="flex flex-wrap gap-2">
+              {canBulkPrint && (
+              <button
+                type="button"
+                onClick={() => setBulkOpen(true)}
+                className={`${btnSecondary} min-h-[44px] sm:min-h-[44px]`}
+                disabled={pickedRows.length === 0}
+                title="체크한 프로그램의 근무일지·출석부를 PDF 한 파일로"
+                data-testid="bulk-print-open"
+              >
+                선택 출력 ({pickedRows.length}건)
+              </button>
+              )}
+              <button
+                type="button"
+                onClick={() => setModal({ kind: "program", program: null })}
+                className={`${btnPrimary} min-h-[44px] sm:min-h-[44px]`}
+                disabled={!termId}
+              >
+                + 프로그램 추가
+              </button>
+            </div>
           )}
         </div>
 
@@ -547,6 +788,27 @@ export default function ProgramsManager({
             <table className="w-full min-w-[880px] border-collapse">
               <thead>
                 <tr className="border-b border-line">
+                  {canBulkPrint && (
+                    <th className="w-11 p-0">
+                      <label
+                        className={`flex h-11 w-11 items-center justify-center ${
+                          printable.length ? "cursor-pointer" : "cursor-not-allowed opacity-40"
+                        }`}
+                        title="출력할 수 있는 프로그램 전체 선택"
+                      >
+                        <input
+                          ref={selectAllRef}
+                          type="checkbox"
+                          className="h-5 w-5 accent-navy"
+                          checked={allPicked}
+                          disabled={printable.length === 0}
+                          onChange={togglePickAll}
+                          aria-label="전체 선택"
+                          data-testid="bulk-pick-all"
+                        />
+                      </label>
+                    </th>
+                  )}
                   <th className={thCls}>프로그램</th>
                   <th className={thCls}>강사</th>
                   <th className={thCls}>교시</th>
@@ -566,6 +828,27 @@ export default function ProgramsManager({
               <tbody>
                 {programs.map((p) => (
                   <tr key={p.id} className="border-b border-line/60">
+                    {canBulkPrint && (
+                      <td className="w-11 p-0">
+                        <label
+                          className={`flex h-11 w-11 items-center justify-center ${
+                            p.sessionCount > 0 ? "cursor-pointer" : "cursor-not-allowed opacity-40"
+                          }`}
+                          title={p.sessionCount > 0 ? undefined : "회차가 없어 출력할 내용이 없습니다"}
+                        >
+                          <input
+                            type="checkbox"
+                            className="h-5 w-5 accent-navy"
+                            checked={p.sessionCount > 0 && picked.has(p.id)}
+                            disabled={p.sessionCount === 0}
+                            onChange={() => togglePick(p.id)}
+                            aria-label={`${p.name} 선택`}
+                            data-testid="bulk-pick"
+                            data-program-id={p.id}
+                          />
+                        </label>
+                      </td>
+                    )}
                     <td className={`${tdCls} font-medium text-ink`}>{p.name}</td>
                     <td className={tdCls}>{p.instructorName ?? "-"}</td>
                     <td className={tdCls}>{p.period_no ?? "-"}</td>
@@ -660,6 +943,14 @@ export default function ProgramsManager({
         )}
       </section>
 
+      {canBulkPrint && bulkOpen && (
+        <BulkPrintModal
+          items={pickedRows.map((p) => ({ id: p.id, name: p.name }))}
+          termName={term?.name ?? ""}
+          projectName={projects.find((p) => p.id === projectId)?.name ?? ""}
+          onClose={() => setBulkOpen(false)}
+        />
+      )}
       {modal?.kind === "project" && (
         <ProjectModal
           onClose={() => setModal(null)}
