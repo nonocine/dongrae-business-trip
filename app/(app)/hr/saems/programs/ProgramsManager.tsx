@@ -3,6 +3,12 @@
 import { useEffect, useRef, useState, useTransition } from "react";
 import { createPortal } from "react-dom";
 import type { BulkDoc } from "@/lib/bulkProgramPdf";
+import {
+  isYmd,
+  kstMonthPeriod,
+  periodQuery,
+  type WorkLogPeriod,
+} from "@/lib/workLogPeriod";
 import { useRouter } from "next/navigation";
 import {
   listTerms,
@@ -287,6 +293,7 @@ function OutputMenu({ programId }: { programId: string }) {
     "block w-full px-3 py-1.5 text-left text-xs text-ink-body hover:bg-surface";
   const sub = "mt-0.5 block text-[10px] text-ink-hint";
   const sheet = `/hr/saems/programs/${programId}/attendance-sheet`;
+  const [periodOpen, setPeriodOpen] = useState(false);
 
   return (
     <>
@@ -314,15 +321,19 @@ function OutputMenu({ programId }: { programId: string }) {
               style={{ top: pos.top, left: pos.left, width: MENU_W }}
               onClick={(e) => e.stopPropagation()}
             >
-              <a
-                href={`/hr/saems/programs/${programId}/worklog`}
+              <button
+                type="button"
                 role="menuitem"
                 className={item}
-                onClick={() => setOpen(false)}
+                onClick={() => {
+                  setOpen(false);
+                  setPeriodOpen(true);
+                }}
+                data-testid="worklog-open"
               >
                 강사 근무일지
-                <span className={sub}>강사 서명 자동 · A4 1장</span>
-              </a>
+                <span className={sub}>강사 서명 자동 · 기간 선택</span>
+              </button>
               <div className="my-1 border-t border-line/70" />
               <a href={sheet} role="menuitem" className={item} onClick={() => setOpen(false)}>
                 출석부 · 출결 포함
@@ -341,15 +352,164 @@ function OutputMenu({ programId }: { programId: string }) {
           </div>,
           document.body
         )}
+      {periodOpen &&
+        createPortal(
+          <WorkLogPeriodModal programId={programId} onClose={() => setPeriodOpen(false)} />,
+          document.body
+        )}
     </>
   );
 }
 
 // =====================================================================
+// 근무일지 기간 선택 — 시작일~종료일(양 끝 포함) + [이번 달][지난달][전체].
+//   빈칸 둘 = 전체(지금과 같은 결과). 출석부에는 쓰지 않는다. 규칙은 lib/workLogPeriod.
+// =====================================================================
+type PeriodInput = { from: string; to: string };
+const PERIOD_ALL: PeriodInput = { from: "", to: "" };
+
+function checkPeriod(v: PeriodInput): { period: WorkLogPeriod; error: string | null } {
+  if (!v.from && !v.to) return { period: null, error: null };
+  if (!v.from || !v.to) return { period: null, error: "시작일과 종료일을 모두 고르세요." };
+  if (!isYmd(v.from) || !isYmd(v.to)) return { period: null, error: "날짜 형식이 올바르지 않습니다." };
+  if (v.from > v.to) return { period: null, error: "시작일이 종료일보다 늦습니다." };
+  return { period: { from: v.from, to: v.to }, error: null };
+}
+
+function PeriodPicker({
+  value,
+  onChange,
+  disabled,
+}: {
+  value: PeriodInput;
+  onChange: (v: PeriodInput) => void;
+  disabled?: boolean;
+}) {
+  const quick: { key: string; label: string; v: PeriodInput }[] = [
+    { key: "this", label: "이번 달", v: kstMonthPeriod(0) },
+    { key: "last", label: "지난달", v: kstMonthPeriod(-1) },
+    { key: "all", label: "전체", v: PERIOD_ALL },
+  ];
+  const { error } = checkPeriod(value);
+  const qBtn = "min-h-[44px] rounded-md border px-2 text-sm";
+  // 폰 폭에서는 globals.css 가 입력칸 min-height 를 40px 로 덮으므로 44px 는 style 로 준다.
+  const dateCls = `${inCls} min-w-0`;
+  const dateStyle = { minHeight: 44 };
+  return (
+    <fieldset disabled={disabled} className="space-y-1.5" data-testid="period-picker">
+      <legend className="mb-1 text-[11px] font-semibold text-navy">근무일지 기간</legend>
+      <div className="grid grid-cols-3 gap-2">
+        {quick.map((q) => {
+          const on = q.v.from === value.from && q.v.to === value.to;
+          return (
+            <button
+              key={q.key}
+              type="button"
+              onClick={() => onChange(q.v)}
+              className={`${qBtn} ${on ? "border-navy bg-surface font-semibold text-navy" : "border-line text-ink-body"}`}
+              aria-pressed={on}
+              data-testid={`period-${q.key}`}
+            >
+              {q.label}
+            </button>
+          );
+        })}
+      </div>
+      <div className="grid grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] items-center gap-1.5">
+        <input
+          type="date"
+          value={value.from}
+          onChange={(e) => onChange({ ...value, from: e.target.value })}
+          className={dateCls}
+          style={dateStyle}
+          aria-label="시작일"
+          data-testid="period-from"
+        />
+        <span className="text-sm text-ink-hint">~</span>
+        <input
+          type="date"
+          value={value.to}
+          onChange={(e) => onChange({ ...value, to: e.target.value })}
+          className={dateCls}
+          style={dateStyle}
+          aria-label="종료일"
+          data-testid="period-to"
+        />
+      </div>
+      {error ? (
+        <p className="text-[11px] text-stamp" role="alert" data-testid="period-error">
+          {error}
+        </p>
+      ) : (
+        <p className="text-[11px] text-ink-hint">
+          {value.from
+            ? "회차 날짜가 이 기간(양 끝 포함)에 든 회차만 넣습니다. 회차 번호는 그대로입니다."
+            : "전체 — 회차 전부가 들어갑니다."}
+        </p>
+      )}
+    </fieldset>
+  );
+}
+
+// 개별 "출력 ▼ → 강사 근무일지" — 기간을 고르는 작은 창. 기본이 [전체]라 바로 누르면 예전과 같다.
+function WorkLogPeriodModal({ programId, onClose }: { programId: string; onClose: () => void }) {
+  const [value, setValue] = useState<PeriodInput>(PERIOD_ALL);
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+  const { period, error } = checkPeriod(value);
+
+  async function download() {
+    setErr(null);
+    setBusy(true);
+    try {
+      const q = periodQuery(period);
+      const r = await fetch(`/hr/saems/programs/${programId}/worklog${q ? `?${q}` : ""}`, {
+        cache: "no-store",
+      });
+      if (!r.ok) throw new Error((await r.text().catch(() => "")).slice(0, 120) || `서버 오류 ${r.status}`);
+      const cd = r.headers.get("Content-Disposition") ?? "";
+      const m = cd.match(/filename\*=UTF-8''([^;]+)/);
+      const filename = m ? decodeURIComponent(m[1]) : "강사근무일지.pdf";
+      const url = URL.createObjectURL(await r.blob());
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 60_000);
+      onClose();
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <ModalShell title="강사 근무일지 출력" onClose={busy ? () => {} : onClose}>
+      <div className="space-y-3" data-testid="worklog-period-modal">
+        <PeriodPicker value={value} onChange={setValue} disabled={busy} />
+        {err && <p className={noticeError}>{err}</p>}
+        <button
+          type="button"
+          onClick={download}
+          disabled={busy || !!error}
+          className={`${btnPrimary} min-h-[44px] w-full sm:min-h-[44px]`}
+          data-testid="worklog-download"
+        >
+          {busy ? "만드는 중…" : period ? "기간 근무일지 PDF 저장" : "전체 근무일지 PDF 저장"}
+        </button>
+      </div>
+    </ModalShell>
+  );
+}
+
+// =====================================================================
 // 선택 출력 — 체크한 프로그램을 PDF 한 파일로(표 순서, 프로그램마다 새 쪽).
-//   문서 종류는 개별 "출력 ▼" 메뉴와 같은 3종. 개별 출력에 기간·회차 선택이 없으므로
-//   여기도 없다(프로그램의 회차 전부). 만드는 건 브라우저 — lib/bulkProgramPdf 주석 참고.
-//   만든 결과는 문서 종류별로 기억해 두고, 미리보기 ↔ 저장을 오가도 다시 만들지 않는다.
+//   문서 종류는 개별 "출력 ▼" 메뉴와 같은 3종. 근무일지만 기간을 고를 수 있다(기본 전체).
+//   기간 안 회차가 0 인 프로그램은 건너뛴다. 만드는 건 브라우저 — lib/bulkProgramPdf 주석 참고.
+//   만든 결과는 문서 종류·기간별로 기억해 두고, 미리보기 ↔ 저장을 오가도 다시 만들지 않는다.
 // =====================================================================
 // 타입만 가져온다 — pdf-lib 는 버튼을 누를 때 동적 import(첫 화면 번들에 안 싣는다).
 type BulkDocKey = BulkDoc;
@@ -371,31 +531,48 @@ function BulkPrintModal({
   onClose: () => void;
 }) {
   const [doc, setDoc] = useState<BulkDocKey>("worklog");
+  const [periodIn, setPeriodIn] = useState<PeriodInput>(PERIOD_ALL);
   const [busy, setBusy] = useState(false);
   const [progress, setProgress] = useState<{ done: number; total: number } | null>(null);
   const [err, setErr] = useState<string | null>(null);
   const [blockedUrl, setBlockedUrl] = useState<string | null>(null);
   const [made, setMade] = useState<
-    Partial<
-      Record<
-        BulkDocKey,
-        { url: string; filename: string; ok: number; failed: { name: string; reason: string }[] }
-      >
+    Record<
+      string,
+      {
+        url: string;
+        filename: string;
+        ok: number;
+        failed: { name: string; reason: string }[];
+        skipped: string[];
+      }
     >
   >({});
-  const cur = made[doc];
+  // 기간은 근무일지에만 — 출석부는 늘 전체.
+  const { period: pickedPeriod, error: periodError } =
+    doc === "worklog" ? checkPeriod(periodIn) : { period: null, error: null };
+  const madeKey = `${doc}|${periodQuery(pickedPeriod)}`;
+  const cur = made[madeKey];
 
   async function ensure() {
-    if (made[doc]) return made[doc]!;
+    if (made[madeKey]) return made[madeKey];
     const lib = await import("@/lib/bulkProgramPdf");
-    const r = await lib.buildBulkProgramPdf(items, doc, (done, total) =>
-      setProgress({ done, total })
+    const r = await lib.buildBulkProgramPdf(
+      items,
+      doc,
+      (done, total) => setProgress({ done, total }),
+      pickedPeriod
     );
     if (!r.bytes) {
+      const parts: string[] = [];
+      if (r.failed.length)
+        parts.push(`실패: ${r.failed.map((f) => `${f.name}(${f.reason})`).join(", ")}`);
+      if (r.skipped.length)
+        parts.push(`기간 안에 회차가 없어 건너뜀: ${r.skipped.join(", ")}`);
       throw new Error(
-        `만들 수 있는 문서가 없었습니다. 실패: ${r.failed
-          .map((f) => `${f.name}(${f.reason})`)
-          .join(", ")}`
+        r.failed.length
+          ? `만들 수 있는 문서가 없었습니다. ${parts.join(" / ")}`
+          : `선택한 기간에 회차가 있는 프로그램이 없어 PDF를 만들지 않았습니다. ${parts.join(" / ")}`
       );
     }
     const url = URL.createObjectURL(
@@ -403,11 +580,12 @@ function BulkPrintModal({
     );
     const out = {
       url,
-      filename: lib.bulkPdfFilename(doc, termName, projectName, r.ok),
+      filename: lib.bulkPdfFilename(doc, termName, projectName, r.ok, pickedPeriod),
       ok: r.ok,
       failed: r.failed,
+      skipped: r.skipped,
     };
-    setMade((m) => ({ ...m, [doc]: out }));
+    setMade((m) => ({ ...m, [madeKey]: out }));
     return out;
   }
 
@@ -416,7 +594,7 @@ function BulkPrintModal({
     setBlockedUrl(null);
     // 미리보기 창은 클릭 순간에 열어 둬야 팝업 차단에 안 걸린다 — 만든 뒤 주소만 바꾼다.
     let win: Window | null = null;
-    if (action === "preview" && !made[doc]) {
+    if (action === "preview" && !made[madeKey]) {
       win = window.open("", "_blank");
       win?.document.write(
         '<p style="font-family:sans-serif;padding:16px">PDF를 만드는 중입니다…</p>'
@@ -472,9 +650,12 @@ function BulkPrintModal({
             </label>
           ))}
         </fieldset>
+        {doc === "worklog" && (
+          <PeriodPicker value={periodIn} onChange={setPeriodIn} disabled={busy} />
+        )}
         <p className="text-[11px] text-ink-hint">
           표 순서대로 한 파일에 묶고, 프로그램마다 새 쪽에서 시작합니다. 각 문서는 개별
-          출력과 같은 양식이며 회차 전부가 들어갑니다.
+          출력과 같은 양식입니다.
         </p>
 
         {busy && progress && (
@@ -493,7 +674,10 @@ function BulkPrintModal({
         {busy && !progress && <p className="text-sm text-ink-body">준비 중…</p>}
 
         {cur && !busy && (
-          <p className={cur.failed.length ? noticeWarning : noticeSuccess} data-testid="bulk-result">
+          <p
+            className={cur.failed.length || cur.skipped.length ? noticeWarning : noticeSuccess}
+            data-testid="bulk-result"
+          >
             {cur.ok}건을 한 파일로 만들었습니다.
             {cur.failed.length > 0 && (
               <>
@@ -501,6 +685,11 @@ function BulkPrintModal({
                 실패 {cur.failed.length}건 — 빠진 프로그램:{" "}
                 {cur.failed.map((f) => `${f.name}(${f.reason})`).join(", ")}
               </>
+            )}
+            {cur.skipped.length > 0 && (
+              <span className="mt-1 block" data-testid="bulk-skipped">
+                기간 안에 회차가 없어 건너뜀 {cur.skipped.length}건: {cur.skipped.join(", ")}
+              </span>
             )}
           </p>
         )}
@@ -518,7 +707,7 @@ function BulkPrintModal({
           <button
             type="button"
             onClick={() => run("preview")}
-            disabled={busy}
+            disabled={busy || !!periodError}
             className={`${btnSecondary} min-h-[44px] sm:min-h-[44px]`}
             data-testid="bulk-preview"
           >
@@ -527,7 +716,7 @@ function BulkPrintModal({
           <button
             type="button"
             onClick={() => run("save")}
-            disabled={busy}
+            disabled={busy || !!periodError}
             className={`${btnPrimary} min-h-[44px] sm:min-h-[44px]`}
             data-testid="bulk-save"
           >

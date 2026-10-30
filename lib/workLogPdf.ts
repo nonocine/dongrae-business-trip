@@ -20,6 +20,7 @@ import { supabaseAdmin } from "@/lib/supabaseAdmin";
 import { formatPhone } from "@/lib/saemEnrollment";
 import { embedServerFonts } from "@/lib/pdfFont";
 import { drawWorkLog, type WorkLogData } from "@/lib/workLogPdfDraw";
+import { filterSessionsByPeriod, type WorkLogPeriod } from "@/lib/workLogPeriod";
 
 // 그리기·양식은 lib/workLogPdfDraw(일괄 출력이 브라우저에서도 쓴다).
 export {
@@ -31,8 +32,10 @@ export {
 
 // 프로그램 단위 근무일지 조회 — 근무일지 화면은 "날짜(회차)" 기준이라 프로그램 단위가 없었다.
 //   출력물은 프로그램 1개가 종이 1장이므로 program_id 로 묶어 session_no 순으로 읽는다.
+//   period 를 주면 그 기간(양 끝 포함) 회차만 남긴다 — lib/workLogPeriod 참고.
 export async function loadProgramWorkLog(
-  programId: string
+  programId: string,
+  period: WorkLogPeriod = null
 ): Promise<WorkLogData | null> {
   if (!programId) return null;
   const { data: prog } = await supabaseAdmin
@@ -101,7 +104,7 @@ export async function loadProgramWorkLog(
     instructorName: String(ins?.name ?? ""),
     instructorPhone: formatPhone(ins?.phone) ?? "",
     instructorSignature: sig,
-    sessions: (sess ?? []).map((r) => {
+    sessions: filterSessionsByPeriod((sess ?? []).map((r) => {
       const s = r as Record<string, unknown>;
       return {
         session_no: Number(s.session_no ?? 0),
@@ -113,7 +116,7 @@ export async function loadProgramWorkLog(
         instructor_signed_at:
           (s.instructor_signed_at as string | null) ?? null,
       };
-    }),
+    }), period),
   };
 }
 
