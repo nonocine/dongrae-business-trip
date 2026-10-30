@@ -2,6 +2,7 @@ import { requireSaemAccess } from "@/lib/saemAccess";
 import { canBulkPrint } from "@/lib/bulkPrintAccess";
 import { loadProgramWorkLog } from "@/lib/workLogPdf";
 import { loadAttendanceSheet } from "@/lib/attendancePdf";
+import { parsePeriodParams } from "@/lib/workLogPeriod";
 
 // 일괄 출력(프로그램 관리 "선택 출력")용 — PDF 대신 양식에 들어갈 데이터를 JSON 으로 준다.
 //   브라우저가 여러 프로그램을 받아 lib/*PdfDraw 로 한 문서에 그린다(폰트는 한 번만 임베드).
@@ -23,7 +24,11 @@ export async function GET(
   if (!(await canBulkPrint()))
     return new Response("권한이 없습니다.", { status: 403 });
   const { id } = await params;
-  const doc = new URL(req.url).searchParams.get("doc");
+  const sp = new URL(req.url).searchParams;
+  const doc = sp.get("doc");
+  // 근무일지 기간(from·to) — 형식이 틀리면 400. 출석부에는 쓰지 않는다.
+  const parsed = parsePeriodParams(sp);
+  if (!parsed.ok) return new Response(parsed.error, { status: 400 });
 
   const headers = {
     "Content-Type": "application/json; charset=utf-8",
@@ -32,7 +37,8 @@ export async function GET(
   };
 
   if (doc === "worklog") {
-    const data = await loadProgramWorkLog(id);
+    // 기간 안 회차가 0 이어도 200(빈 sessions) — 선택 출력이 "건너뜀"으로 센다.
+    const data = await loadProgramWorkLog(id, parsed.period);
     if (!data) return new Response("프로그램을 찾을 수 없습니다.", { status: 404 });
     return new Response(JSON.stringify(data), { headers });
   }

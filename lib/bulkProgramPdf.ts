@@ -22,6 +22,7 @@ import {
   drawAttendance,
   type AttendanceSheetData,
 } from "@/lib/attendancePdfDraw";
+import { periodLabel, periodQuery, type WorkLogPeriod } from "@/lib/workLogPeriod";
 
 export type BulkDoc = "worklog" | "attendance" | "attendance-blank";
 
@@ -36,6 +37,8 @@ export type BulkResult = {
   bytes: Uint8Array | null; // 전부 실패하면 null
   ok: number;
   failed: { name: string; reason: string }[];
+  // 근무일지 기간 안에 회차가 0 인 프로그램 — 실패가 아니라 건너뜀(쪽을 만들지 않는다).
+  skipped: string[];
 };
 
 // 폰트는 탭이 살아 있는 동안 한 번만 받는다(라우트도 브라우저 캐시를 허용한다).
@@ -68,10 +71,15 @@ type Loaded =
   | { kind: "worklog"; data: WorkLogData }
   | { kind: "attendance"; data: AttendanceSheetData };
 
-async function fetchData(id: string, doc: BulkDoc): Promise<Loaded> {
+async function fetchData(
+  id: string,
+  doc: BulkDoc,
+  period: WorkLogPeriod
+): Promise<Loaded> {
   const kind = doc === "worklog" ? "worklog" : "attendance";
+  const q = kind === "worklog" && period ? `&${periodQuery(period)}` : "";
   const r = await fetch(
-    `/hr/saems/programs/${encodeURIComponent(id)}/print-data?doc=${kind}`,
+    `/hr/saems/programs/${encodeURIComponent(id)}/print-data?doc=${kind}${q}`,
     { cache: "no-store" }
   );
   if (!r.ok) {
@@ -95,8 +103,10 @@ const PREFETCH = 4;
 export async function buildBulkProgramPdf(
   items: BulkItem[],
   doc: BulkDoc,
-  onProgress: (done: number, total: number) => void
+  onProgress: (done: number, total: number) => void,
+  period: WorkLogPeriod = null // 근무일지 전용. 출석부는 무시한다.
 ): Promise<BulkResult> {
+  if (doc !== "worklog") period = null;
   const total = items.length;
   onProgress(0, total);
   const fonts = await loadFonts();
@@ -106,7 +116,7 @@ export async function buildBulkProgramPdf(
   const pending: Promise<Loaded>[] = [];
   const kick = (i: number) => {
     if (i < total && !pending[i]) {
-      pending[i] = fetchData(items[i].id, doc);
+      pending[i] = fetchData(items[i].id, doc, period);
       pending[i].catch(() => {}); // 처리되지 않은 거부 경고 방지 — 아래에서 await 한다
     }
   };
@@ -114,17 +124,22 @@ export async function buildBulkProgramPdf(
 
   let ok = 0;
   const failed: BulkResult["failed"] = [];
+  const skipped: string[] = [];
   for (let i = 0; i < total; i++) {
     kick(i + PREFETCH);
     const before = pdf.getPageCount();
     try {
       const got = await pending[i];
-      if (got.kind === "worklog") await drawWorkLog(pdf, embedded, got.data);
-      else
-        await drawAttendance(pdf, embedded, got.data, {
-          blank: doc === "attendance-blank",
-        });
-      ok++;
+      if (got.kind === "worklog" && period && got.data.sessions.length === 0) {
+        skipped.push(items[i].name);
+      } else {
+        if (got.kind === "worklog") await drawWorkLog(pdf, embedded, got.data);
+        else
+          await drawAttendance(pdf, embedded, got.data, {
+            blank: doc === "attendance-blank",
+          });
+        ok++;
+      }
     } catch (e) {
       // 그리다 실패했으면 그 건이 만든 쪽을 걷어 낸다(반쯤 그린 쪽이 남지 않게).
       while (pdf.getPageCount() > before) pdf.removePage(pdf.getPageCount() - 1);
@@ -136,19 +151,25 @@ export async function buildBulkProgramPdf(
     onProgress(i + 1, total);
   }
 
-  return { bytes: ok > 0 ? await pdf.save() : null, ok, failed };
+  return { bytes: ok > 0 ? await pdf.save() : null, ok, failed, skipped };
 }
 
-// 파일명 — 문서_차시_프로젝트_N건.pdf. 윈도에서 못 쓰는 글자는 밑줄로.
+// 파일명 — 문서_차시_프로젝트_N건.pdf(근무일지 기간 지정 시 문서_기간_차시_프로젝트_N건.pdf).
+//   N 은 실제로 들어간 건수. 윈도에서 못 쓰는 글자는 밑줄로.
 //   다운로드는 a[download] 로 브라우저가 이름을 정하므로 한글이 그대로 남는다.
 export function bulkPdfFilename(
   doc: BulkDoc,
   termName: string,
   projectName: string,
-  count: number
+  count: number,
+  period: WorkLogPeriod = null
 ): string {
-  const parts = [BULK_DOC_LABEL[doc], termName.trim(), projectName.trim(), `${count}건`].filter(
-    Boolean
-  );
+  const parts = [
+    BULK_DOC_LABEL[doc],
+    doc === "worklog" && period ? periodLabel(period) : "",
+    termName.trim(),
+    projectName.trim(),
+    `${count}건`,
+  ].filter(Boolean);
   return `${parts.join("_")}.pdf`.replace(/[\\/:*?"<>|]/g, "_");
 }

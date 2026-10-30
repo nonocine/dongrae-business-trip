@@ -6,6 +6,7 @@
 import { rgb, type PDFDocument, type PDFFont, type PDFImage } from "pdf-lib";
 import { decodeDataUrl } from "@/lib/dataUrl";
 import { fitToFont, spaced, type PdfFonts } from "@/lib/pdfFontText";
+import { periodLabel, type WorkLogPeriod } from "@/lib/workLogPeriod";
 
 const NAVY = rgb(0.122, 0.227, 0.373);
 const INK = rgb(0.13, 0.15, 0.18);
@@ -59,8 +60,14 @@ export function workLogTitle(d: WorkLogData): string {
   return term ? `${term} 강사 근무일지` : "강사 근무일지";
 }
 
-export function workLogPdfFilename(d: WorkLogData): string {
-  const parts = [d.termName, d.programName, "강사근무일지"].filter(Boolean);
+// 기간을 지정하면 선택 출력과 같은 규칙: 강사근무일지_기간_차시_프로그램_1건.pdf.
+//   전체(null)면 예전 이름 그대로.
+export function workLogPdfFilename(d: WorkLogData, period: WorkLogPeriod = null): string {
+  const parts = period
+    ? ["강사근무일지", periodLabel(period), d.termName, d.programName, "1건"]
+        .map((s) => s.trim())
+        .filter(Boolean)
+    : [d.termName, d.programName, "강사근무일지"].filter(Boolean);
   // 파일명에 못 쓰는 문자(윈도 기준)는 밑줄로.
   return `${parts.join("_")}.pdf`.replace(/[\\/:*?"<>|]/g, "_");
 }
