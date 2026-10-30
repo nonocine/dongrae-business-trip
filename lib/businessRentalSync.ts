@@ -6,9 +6,17 @@
 //   (business_program_rental_links) 에 따라 월 1행으로 집계해
 //   business_results 에 채웁니다. 담당자가 고친 값은 덮지 않습니다.
 //
-//   ★ 행 처리 규칙 (가장 중요)
-//     a. 자동 행 없음 + 같은 사업·연·월에 수기 행(source_type 없음) 있음
-//        → 만들지 않음(skippedExistingManual). 7~9월 수기 실적과 중복 방지.
+//   ★ 행 처리 규칙 (가장 중요) — 어떤 경우에도 같은 사업·연·월에 행을 2개 만들지 않는다.
+//     a. 자동 행 없음 + 같은 사업·연·월에 수기 행(source_type 없음) 1개
+//        → 새로 만들지 않고 그 행을 자동 행으로 채택(adopted) — 관장 결정 2026-10
+//          (9월부터 적용). source_type·source_key 를 달고 대관 값으로 숫자·세부행을
+//          갱신한다. status 는 그대로(submitted 면 submitted). author_name·
+//          manager_name 도 그대로.
+//          · 수기 행이 manual_override 면 숫자·세부행은 덮지 않고 연결만(adoptedSnapshotOnly).
+//          · 그 달 예약이 0건이면 채택하지 않음(skippedExistingManual) — 수기 값을 0 으로
+//            지우지 않는다.
+//        a'. 수기 행이 2개 이상 → 어느 것도 고르지 않고 건너뜀(skippedMultipleManual).
+//        채택 뒤에는 자동 행이므로 이후 동기화는 d·e·f 를 따른다(제출된 행은 숫자 고정).
 //     b. 자동 행 없음 + 그 달 예약 0건 → 만들지 않음(skippedEmpty).
 //     c. 자동 행 없음 → 새로 생성(status='draft').
 //     d. 자동 행 + 제출(submitted) → 숫자 그대로, snapshot 만 갱신.
@@ -60,7 +68,10 @@ export type RentalSyncAction =
   | "updated"
   | "snapshotOnly"
   | "deleted"
+  | "adopted"
+  | "adoptedSnapshotOnly"
   | "skippedExistingManual"
+  | "skippedMultipleManual"
   | "skippedEmpty"
   | "skippedBeforeStart"
   | "error";
@@ -70,6 +81,8 @@ export type RentalSyncItem = {
   programName: string;
   month: string; // "YYYY-MM"
   action: RentalSyncAction;
+  // 손댄(또는 손댈 — dryRun) business_results 행 id. 새로 만드는 경우 dryRun 이면 없음.
+  resultId?: string;
   reason?: string;
   sessions: number;
   operating_days: number;
@@ -89,11 +102,37 @@ export type RentalResultSyncSummary = {
   updated: number;
   snapshotOnly: number;
   deleted: number;
+  adopted: number;
+  adoptedSnapshotOnly: number;
   skippedExistingManual: number;
+  skippedMultipleManual: number;
   skippedEmpty: number;
   errors: string[];
   items: RentalSyncItem[];
 };
+
+export function emptyRentalSyncSummary(
+  year: number,
+  month: number,
+  dryRun: boolean,
+): RentalResultSyncSummary {
+  return {
+    year,
+    month,
+    dryRun,
+    created: 0,
+    updated: 0,
+    snapshotOnly: 0,
+    deleted: 0,
+    adopted: 0,
+    adoptedSnapshotOnly: 0,
+    skippedExistingManual: 0,
+    skippedMultipleManual: 0,
+    skippedEmpty: 0,
+    errors: [],
+    items: [],
+  };
+}
 
 const p2 = (n: number) => String(n).padStart(2, "0");
 
@@ -265,19 +304,7 @@ export async function syncRentalToBusinessResults(opts: {
   const { year, month } = opts;
   const dryRun = Boolean(opts.dryRun);
   const ym = `${year}-${p2(month)}`;
-  const summary: RentalResultSyncSummary = {
-    year,
-    month,
-    dryRun,
-    created: 0,
-    updated: 0,
-    snapshotOnly: 0,
-    deleted: 0,
-    skippedExistingManual: 0,
-    skippedEmpty: 0,
-    errors: [],
-    items: [],
-  };
+  const summary = emptyRentalSyncSummary(year, month, dryRun);
 
   let linkQuery = supabaseAdmin
     .from(RENTAL_LINK_TABLE)
@@ -382,21 +409,60 @@ export async function syncRentalToBusinessResults(opts: {
         .maybeSingle();
       if (autoError) throw new Error(autoError.message);
       const existing = autoData as ExistingRow | null;
+      if (existing) item.resultId = existing.id;
 
       if (!existing) {
-        // 규칙 a — 같은 사업·연·월의 수기 행이 있으면 만들지 않습니다.
-        const { data: manual, error: manualError } = await supabaseAdmin
+        // 규칙 a — 같은 사업·연·월의 수기 행이 있으면 새로 만들지 않고 그 행을 채택합니다.
+        const { data: manualData, error: manualError } = await supabaseAdmin
           .from("business_results")
-          .select("id")
+          .select("id,status,manual_override")
           .eq("program_id", link.program_id)
           .eq("report_year", year)
           .eq("report_month", month)
           .is("source_type", null)
-          .limit(1);
+          .limit(2);
         if (manualError) throw new Error(manualError.message);
-        if ((manual ?? []).length > 0) {
-          item.action = "skippedExistingManual";
-          summary.skippedExistingManual += 1;
+        const manual = (manualData ?? []) as ExistingRow[];
+        if (manual.length > 1) {
+          // 규칙 a' — 어느 행을 채택할지 정할 수 없습니다(중복 의심). 사람이 정리해야 합니다.
+          item.action = "skippedMultipleManual";
+          item.reason = "같은 사업·연·월에 수기 행이 2개 이상입니다.";
+          summary.skippedMultipleManual += 1;
+          continue;
+        }
+        if (manual.length === 1) {
+          const m = manual[0];
+          item.resultId = m.id;
+          if (agg.dates.length === 0) {
+            item.action = "skippedExistingManual";
+            summary.skippedExistingManual += 1;
+            continue;
+          }
+          const link_ = {
+            source_type: RENTAL_SOURCE_TYPE,
+            source_key: sourceKey,
+            source_snapshot: snapshot,
+            source_synced_at: now,
+          };
+          if (m.manual_override) {
+            item.action = "adoptedSnapshotOnly";
+            summary.adoptedSnapshotOnly += 1;
+            if (dryRun) continue;
+            await writeBusinessResultRow(m.id, link_);
+            continue;
+          }
+          item.action = "adopted";
+          summary.adopted += 1;
+          if (dryRun) continue;
+          // status·author_name·manager_name 은 보내지 않습니다(그대로 둠).
+          await writeBusinessResultRow(m.id, {
+            ...numberFields(link, agg),
+            ...link_,
+            updated_by: RENTAL_AUTHOR_NAME,
+            updated_at: now,
+          });
+          if (!(await replaceResultDetailRows(m.id, agg.details)))
+            throw new Error("세부입력 테이블이 아직 적용되지 않았습니다.");
           continue;
         }
         // 규칙 b — 빈 행 금지.
@@ -486,7 +552,8 @@ export function formatRentalSyncSummary(s: RentalResultSyncSummary): string {
   return (
     `${s.year}-${p2(s.month)}${s.dryRun ? "(dryRun)" : ""} · ` +
     `생성 ${s.created} · 갱신 ${s.updated} · 값보존 ${s.snapshotOnly} · ` +
-    `삭제 ${s.deleted} · 수기있음 ${s.skippedExistingManual} · ` +
+    `삭제 ${s.deleted} · 수기채택 ${s.adopted} · 수기채택(값보존) ${s.adoptedSnapshotOnly} · ` +
+    `수기있음 ${s.skippedExistingManual} · 수기중복 ${s.skippedMultipleManual} · ` +
     `예약없음 ${s.skippedEmpty}` +
     (s.errors.length > 0 ? ` · 오류 ${s.errors.join(" / ")}` : "")
   );

@@ -2,6 +2,7 @@ import { runRentalSync } from "@/lib/rentalSync";
 import {
   formatRentalSyncSummary,
   kstCurrentAndPreviousMonth,
+  emptyRentalSyncSummary,
   syncRentalToBusinessResults,
   type RentalResultSyncSummary,
 } from "@/lib/businessRentalSync";
@@ -64,19 +65,8 @@ export async function GET(request: Request) {
     try {
       result = await syncRentalToBusinessResults({ year, month });
     } catch (e) {
-      result = {
-        year,
-        month,
-        dryRun: false,
-        created: 0,
-        updated: 0,
-        snapshotOnly: 0,
-        deleted: 0,
-        skippedExistingManual: 0,
-        skippedEmpty: 0,
-        errors: [e instanceof Error ? e.message : String(e)],
-        items: [],
-      };
+      result = emptyRentalSyncSummary(year, month, false);
+      result.errors.push(e instanceof Error ? e.message : String(e));
     }
     businessResults.push(result);
     const resultLine = `[rental-sync → 사업실적] ${formatRentalSyncSummary(result)}`;
