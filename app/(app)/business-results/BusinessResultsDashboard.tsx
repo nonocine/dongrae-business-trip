@@ -364,9 +364,14 @@ export default function BusinessResultsDashboard({
         s.created && `새로 ${s.created}건`,
         s.updated && `갱신 ${s.updated}건`,
         s.deleted && `삭제 ${s.deleted}건(예약 전부 취소)`,
+        s.adopted && `수기 실적 ${s.adopted}건을 자동으로 전환해 갱신`,
+        s.adoptedSnapshotOnly &&
+          `수기 수정 실적 ${s.adoptedSnapshotOnly}건은 자동으로 전환만(값 유지)`,
         s.snapshotOnly && `수기·제출 행 ${s.snapshotOnly}건은 값 유지`,
         s.skippedExistingManual &&
-          `이미 수기 실적이 있는 ${s.skippedExistingManual}건 건너뜀`,
+          `예약이 없어 수기 실적 ${s.skippedExistingManual}건 그대로`,
+        s.skippedMultipleManual &&
+          `수기 실적이 2개 이상인 ${s.skippedMultipleManual}건 건너뜀(정리 필요)`,
       ].filter(Boolean);
       setNotice({
         ok: s.errors.length === 0,

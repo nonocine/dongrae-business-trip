@@ -4,8 +4,9 @@
 //   ① dryRun + ignoreStartMonth 로 2026년 7·8·9월 "동래점빵 다있소" 계산값이
 //      기존 수기 실적(김혜지 입력)과 같은지 — 7월 4일·400명 / 8월 4일·403명 /
 //      9월 3일·324명.
-//   ② 같은 dryRun 에서 7~9월이 규칙 a(skippedExistingManual)로 판정되는지
-//      — 실제 실행 때 수기 실적과 중복 생성되지 않아야 합니다.
+//      (9월은 홈페이지 대관 데이터가 바뀌어 지금은 3일·323명 — 수기는 324명.)
+//   ② 같은 dryRun 에서 7~9월 다있소가 규칙 a(adopted — 수기 행 채택)로 판정되는지
+//      — 새 행을 만들지 않아야 합니다. 알바냥 8월(수기 2행)은 a'(skippedMultipleManual).
 //   ③ --apply-month 를 주면 그 달을 실제로 1회 실행해 요약을 출력합니다.
 //
 //   ⚠️ ①② 는 아무것도 쓰지 않습니다(dryRun).
@@ -32,7 +33,7 @@ async function main() {
   const expected: Record<number, { days: number; persons: number }> = {
     7: { days: 4, persons: 400 },
     8: { days: 4, persons: 403 },
-    9: { days: 3, persons: 324 },
+    9: { days: 3, persons: 323 },
   };
   for (const month of [7, 8, 9]) {
     const s = await syncRentalToBusinessResults({
@@ -60,11 +61,19 @@ async function main() {
       `youth_uses ${item?.youth_uses} · room_youth 합계 ${item?.room_youth} · other_uses ${item?.other_uses} · room_other ${item?.room_other}`,
     );
     chk(
-      `2026-${month} 규칙 a(skippedExistingManual)`,
-      item?.action === "skippedExistingManual",
+      `2026-${month} 규칙 a(adopted — 새 행 없음)`,
+      item?.action === "adopted" && s.created === 0,
       `판정 ${item?.action}`,
     );
     chk(`2026-${month} 오류 없음`, s.errors.length === 0, s.errors.join(" / "));
+    if (month === 8) {
+      const alba = s.items.find((i) => i.programName.includes("알바냥"));
+      chk(
+        "2026-8 알바냥 수기 2행 → 규칙 a'(skippedMultipleManual)",
+        alba?.action === "skippedMultipleManual",
+        `판정 ${alba?.action}`,
+      );
+    }
   }
 
   const apply = process.argv
