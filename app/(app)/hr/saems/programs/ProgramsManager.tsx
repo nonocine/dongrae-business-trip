@@ -543,6 +543,7 @@ export default function ProgramsManager({
   projects,
   instructors,
   canManage,
+  canBulkPrint,
 }: {
   projects: SaemProject[];
   instructors: InstructorOption[];
@@ -550,6 +551,8 @@ export default function ProgramsManager({
   //   수강료·정산 방식 열도 뺀다 — 강사 보수에 해당하는 값이라 서버에서
   //   이미 비워져 온다(listPrograms 주석 참고).
   canManage: boolean;
+  // 선택 출력 시험 개방 — lib/bulkPrintAccess(관장 + BULK_PRINT_EMAILS). false 면 체크 칸·버튼을 안 그린다.
+  canBulkPrint: boolean;
 }) {
   const router = useRouter();
   const [projectId, setProjectId] = useState(projects[0]?.id ?? "");
@@ -750,6 +753,7 @@ export default function ProgramsManager({
           </h3>
           {canManage && (
             <div className="flex flex-wrap gap-2">
+              {canBulkPrint && (
               <button
                 type="button"
                 onClick={() => setBulkOpen(true)}
@@ -760,6 +764,7 @@ export default function ProgramsManager({
               >
                 선택 출력 ({pickedRows.length}건)
               </button>
+              )}
               <button
                 type="button"
                 onClick={() => setModal({ kind: "program", program: null })}
@@ -783,7 +788,7 @@ export default function ProgramsManager({
             <table className="w-full min-w-[880px] border-collapse">
               <thead>
                 <tr className="border-b border-line">
-                  {canManage && (
+                  {canBulkPrint && (
                     <th className="w-11 p-0">
                       <label
                         className={`flex h-11 w-11 items-center justify-center ${
@@ -823,7 +828,7 @@ export default function ProgramsManager({
               <tbody>
                 {programs.map((p) => (
                   <tr key={p.id} className="border-b border-line/60">
-                    {canManage && (
+                    {canBulkPrint && (
                       <td className="w-11 p-0">
                         <label
                           className={`flex h-11 w-11 items-center justify-center ${
@@ -938,7 +943,7 @@ export default function ProgramsManager({
         )}
       </section>
 
-      {bulkOpen && (
+      {canBulkPrint && bulkOpen && (
         <BulkPrintModal
           items={pickedRows.map((p) => ({ id: p.id, name: p.name }))}
           termName={term?.name ?? ""}

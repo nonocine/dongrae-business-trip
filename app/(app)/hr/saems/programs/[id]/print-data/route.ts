@@ -1,4 +1,5 @@
 import { requireSaemAccess } from "@/lib/saemAccess";
+import { canBulkPrint } from "@/lib/bulkPrintAccess";
 import { loadProgramWorkLog } from "@/lib/workLogPdf";
 import { loadAttendanceSheet } from "@/lib/attendancePdf";
 
@@ -18,6 +19,9 @@ export async function GET(
   } catch {
     return new Response("권한이 없습니다.", { status: 403 });
   }
+  // 선택 출력 시험 개방 — 관장 + BULK_PRINT_EMAILS 만(lib/bulkPrintAccess).
+  if (!(await canBulkPrint()))
+    return new Response("권한이 없습니다.", { status: 403 });
   const { id } = await params;
   const doc = new URL(req.url).searchParams.get("doc");
 
