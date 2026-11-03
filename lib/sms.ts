@@ -132,7 +132,12 @@ export async function getSmsSenders(): Promise<
 
 // 건별 결과 → 성공·실패·대기 수. 번호 등 건별 내용은 밖으로 내보내지 않습니다.
 //   중계 서버가 합계(sent/failed)를 주면 그대로, 목록을 주면 상태 문구로 셉니다.
-export function summarizeRelayResult(data: Record<string, unknown>): Omit<SmsResultSummary, "ok"> {
+export function summarizeRelayResult(top: Record<string, unknown>): Omit<SmsResultSummary, "ok"> {
+  // 합계가 최상위 또는 result/data 객체 아래에 올 수 있습니다(youthforten 과 같은 수용).
+  const nested = [top.result, top.data].find(
+    (v) => v && typeof v === "object" && !Array.isArray(v),
+  ) as Record<string, unknown> | undefined;
+  const data = nested ?? top;
   const list = [data.list, data.results, data.items, data.data, data.result].find(
     Array.isArray,
   ) as Record<string, unknown>[] | undefined;

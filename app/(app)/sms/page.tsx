@@ -6,11 +6,12 @@ import SmsSender from "@/app/(app)/sms/SmsSender";
 
 export const dynamic = "force-dynamic";
 
-// 문자 발송 — 공통 메뉴. 팀장 이상 + SMS_SEND_EMAILS(lib/smsAccess). 메뉴 조건도 같습니다.
+// 문자 발송 — 전 직원 공통 메뉴. 로그인 직원 + SMS_SEND_EMAILS(lib/smsAccess). 메뉴 조건도 같습니다.
 //   발송은 문자 중계 서버(sms-relay) 경유 — 화면은 /api/sms/* 만 부릅니다.
 export default async function SmsPage() {
   await enforcePasswordChange();
-  if (!(await resolveSmsAccess())) redirect("/");
+  const access = await resolveSmsAccess();
+  if (!access) redirect("/");
 
   let loadError: string | null = null;
   const [students, logs] = await Promise.all([
@@ -18,7 +19,7 @@ export default async function SmsPage() {
       loadError = e instanceof Error ? e.message : String(e);
       return [];
     }),
-    listSmsLogs(50).catch((e) => {
+    listSmsLogs(access, 50).catch((e) => {
       loadError = e instanceof Error ? e.message : String(e);
       return [];
     }),
