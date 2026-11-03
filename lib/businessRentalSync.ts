@@ -24,6 +24,16 @@
 //     f. 자동 행 + 둘 다 아님 → 숫자·세부행 전체 갱신. 예약이 0건이 됐으면
 //        (전부 취소) 행 삭제.
 //
+//   ★ 연결 방식 (2026-11)
+//     · exact(기본) — program_name 이 rental_program_name 과 정확히 같은 예약.
+//     · contains — program_name 에 rental_program_name 이 들어 있는 예약 모두
+//       (예: '밥 해달레' → "10월 청소년 쿠킹 클래스 '밥 해달레' - …").
+//     · 공간 기준 — rental_program_name 이 '*' 또는 빈 값이고 rental_space_name 이
+//       있으면, 프로그램명이 비어 있는 청소년 공간 예약(reservation_type='room') 을
+//       공간명으로 매칭. rental_space_name 은 쉼표로 여러 공간을 적을 수 있다.
+//     · 한 예약이 여러 연결에 걸리면 먼저 만든 연결(created_at, 같으면 id 순) 하나에만
+//       반영하고 경고를 남긴다(중복 집계 방지).
+//
 //   * 쓰기는 lib/businessResultsWrite 를 씁니다(화면 저장과 같은 경로).
 //   * 실패는 throw 하지 않고 errors[] 에 사유를 담아 돌려줍니다.
 //   * "use server" 아님 — Cron 라우트/서버 액션이 각자 인증 후 호출.
@@ -48,11 +58,14 @@ export type RentalLink = {
   program_id: string;
   rental_program_name: string;
   rental_space_name: string | null;
+  // 'exact'(기본) | 'contains'. 컬럼이 아직 없거나 비어 있으면 exact.
+  match_mode?: "exact" | "contains" | null;
   count_mode: "date" | "session";
   default_audience: "youth" | "other";
   start_month: string; // "YYYY-MM-01"
   is_active: boolean;
   created_by: string | null;
+  created_at?: string | null;
 };
 
 export type RentalSnapshot = {
@@ -108,6 +121,8 @@ export type RentalResultSyncSummary = {
   skippedMultipleManual: number;
   skippedEmpty: number;
   errors: string[];
+  // 한 예약이 두 연결에 걸린 경우 등 — 실패는 아니지만 확인이 필요한 것.
+  warnings: string[];
   items: RentalSyncItem[];
 };
 
@@ -130,6 +145,7 @@ export function emptyRentalSyncSummary(
     skippedMultipleManual: 0,
     skippedEmpty: 0,
     errors: [],
+    warnings: [],
     items: [],
   };
 }
@@ -166,6 +182,8 @@ export function parseRentalSourceKey(
 }
 
 type Reservation = {
+  reservation_no: number;
+  reservation_type: string | null;
   reservation_date: string;
   space_name: string | null;
   program_name: string | null;
@@ -177,29 +195,135 @@ function likeEscape(s: string) {
   return s.replace(/[\\%_]/g, (c) => `\\${c}`);
 }
 
-async function loadReservations(
+export type RentalMatchKind = "exact" | "contains" | "space";
+
+type LinkMatchFields = Pick<
+  RentalLink,
+  "rental_program_name" | "rental_space_name" | "match_mode"
+>;
+
+// 공간명 목록 — 쉼표로 여러 공간. 비어 있으면 [].
+export function rentalSpaceList(link: Pick<RentalLink, "rental_space_name">) {
+  return (link.rental_space_name ?? "")
+    .split(",")
+    .map((s) => s.trim())
+    .filter(Boolean);
+}
+
+// 연결 방식 판정. 공간 기준('*'·빈 값)인데 공간명이 없으면 null(잘못된 연결).
+export function rentalMatchKind(link: LinkMatchFields): RentalMatchKind | null {
+  const name = (link.rental_program_name ?? "").trim();
+  if (name === "" || name === "*") {
+    return rentalSpaceList(link).length > 0 ? "space" : null;
+  }
+  return link.match_mode === "contains" ? "contains" : "exact";
+}
+
+// 이 예약이 연결에 해당하는지 — 최종 판정(DB 조건은 후보만 좁힘).
+export function reservationMatchesLink(
+  link: LinkMatchFields,
+  r: Pick<Reservation, "reservation_type" | "space_name" | "program_name">,
+): boolean {
+  const kind = rentalMatchKind(link);
+  if (!kind) return false;
+  const spaces = rentalSpaceList(link);
+  const spaceOk =
+    spaces.length === 0 || spaces.includes((r.space_name ?? "").trim());
+  const program = (r.program_name ?? "").trim();
+  if (kind === "space") {
+    return r.reservation_type === "room" && program === "" && spaceOk;
+  }
+  const name = link.rental_program_name.trim();
+  const nameOk = kind === "exact" ? program === name : program.includes(name);
+  return nameOk && spaceOk;
+}
+
+const PAGE = 1000;
+
+export async function loadReservations(
   link: RentalLink,
   year: number,
   month: number,
 ): Promise<Reservation[]> {
-  const name = link.rental_program_name.trim();
-  const space = (link.rental_space_name ?? "").trim();
+  const kind = rentalMatchKind(link);
+  if (!kind)
+    throw new Error(
+      "대관 프로그램명이 '*'(공간 기준)인데 공간명이 비어 있습니다.",
+    );
   const { start, end } = monthRange(year, month);
-  const { data, error } = await supabaseAdmin
-    .from(RENTAL_TABLE)
-    .select("reservation_date,space_name,program_name,person_total")
-    .eq("status", "Y")
-    .gte("reservation_date", start)
-    .lt("reservation_date", end)
-    .ilike("program_name", `%${likeEscape(name)}%`)
-    .order("reservation_date")
-    .limit(5000);
-  if (error) throw new Error(`대관 예약 조회 실패: ${error.message}`);
-  return ((data ?? []) as Reservation[]).filter(
-    (r) =>
-      (r.program_name ?? "").trim() === name &&
-      (!space || (r.space_name ?? "").trim() === space),
-  );
+  const rows: Reservation[] = [];
+  // 공간 예약은 한 달 1,000건을 넘을 수 있어 나눠 읽습니다.
+  for (let from = 0; ; from += PAGE) {
+    let q = supabaseAdmin
+      .from(RENTAL_TABLE)
+      .select(
+        "reservation_no,reservation_type,reservation_date,space_name,program_name,person_total",
+      )
+      .eq("status", "Y")
+      .gte("reservation_date", start)
+      .lt("reservation_date", end);
+    q =
+      kind === "space"
+        ? q.eq("reservation_type", "room").in("space_name", rentalSpaceList(link))
+        : q.ilike(
+            "program_name",
+            `%${likeEscape(link.rental_program_name.trim())}%`,
+          );
+    const { data, error } = await q
+      .order("reservation_date")
+      .order("reservation_no")
+      .range(from, from + PAGE - 1);
+    if (error) throw new Error(`대관 예약 조회 실패: ${error.message}`);
+    const page = (data ?? []) as Reservation[];
+    rows.push(...page);
+    if (page.length < PAGE) break;
+  }
+  return rows.filter((r) => reservationMatchesLink(link, r));
+}
+
+// 먼저 만든 연결이 앞 — created_at, 같으면 id.
+function linkOrder(a: RentalLink, b: RentalLink) {
+  const ca = a.created_at ?? "";
+  const cb = b.created_at ?? "";
+  if (ca !== cb) return ca < cb ? -1 : 1;
+  return a.id < b.id ? -1 : a.id > b.id ? 1 : 0;
+}
+
+// 한 예약은 한 연결에만 — 여러 연결에 걸리면 먼저 만든 연결이 가져가고 경고를 냅니다.
+//   loaded 순서와 관계없이 linkOrder 로 정합니다.
+export function assignReservations<
+  R extends Pick<
+    Reservation,
+    "reservation_no" | "reservation_date" | "program_name" | "space_name"
+  >,
+>(
+  loaded: { link: RentalLink; rows: R[] }[],
+  ym: string,
+): { rowsByLink: Map<string, R[]>; warnings: string[] } {
+  const ordered = [...loaded].sort((a, b) => linkOrder(a.link, b.link));
+  const owner = new Map<number, RentalLink>();
+  const rowsByLink = new Map<string, R[]>();
+  const warnings: string[] = [];
+  for (const { link, rows } of ordered) {
+    const mine: R[] = [];
+    for (const r of rows) {
+      const first = owner.get(r.reservation_no);
+      if (!first) {
+        owner.set(r.reservation_no, link);
+        mine.push(r);
+        continue;
+      }
+      if (first.id === link.id) continue;
+      const label = (r.program_name ?? "").trim() || (r.space_name ?? "");
+      warnings.push(
+        `[${ym}] 예약 ${r.reservation_no}(${r.reservation_date} ${label})이 ` +
+          `연결 "${first.rental_program_name}"·"${link.rental_program_name}"에 모두 걸려 ` +
+          `먼저 만든 "${first.rental_program_name}"에만 반영합니다.`,
+      );
+    }
+    rowsByLink.set(link.id, mine);
+  }
+  return { rowsByLink, warnings };
 }
 
 type Aggregate = {
@@ -215,7 +339,11 @@ function aggregate(link: RentalLink, rows: Reservation[]): Aggregate {
     a.reservation_date.localeCompare(b.reservation_date),
   );
   const youth = link.default_audience !== "other";
-  const label = [link.rental_program_name.trim(), link.rental_space_name?.trim()]
+  // 공간 기준('*') 연결은 프로그램명 대신 공간명만 적습니다.
+  const label = [
+    rentalMatchKind(link) === "space" ? "" : link.rental_program_name.trim(),
+    link.rental_space_name?.trim(),
+  ]
     .filter(Boolean)
     .join(" · ");
   // 실별인원도 참가인원과 같은 값 — 김혜지 수기 실적과 같은 방식이고, 비워 두면
@@ -306,17 +434,20 @@ export async function syncRentalToBusinessResults(opts: {
   const ym = `${year}-${p2(month)}`;
   const summary = emptyRentalSyncSummary(year, month, dryRun);
 
-  let linkQuery = supabaseAdmin
+  // 한 연결만 돌릴 때도 활성 연결 전체를 읽습니다 — 겹치는 예약을 어느 연결이
+  //   가져갈지 정하려면 다른 연결도 봐야 합니다.
+  const { data: linkData, error: linkError } = await supabaseAdmin
     .from(RENTAL_LINK_TABLE)
     .select("*")
     .eq("is_active", true);
-  if (opts.linkId) linkQuery = linkQuery.eq("id", opts.linkId);
-  const { data: linkData, error: linkError } = await linkQuery;
   if (linkError) {
     summary.errors.push(`대관 연결 조회 실패: ${linkError.message}`);
     return summary;
   }
-  const links = (linkData ?? []) as RentalLink[];
+  const allLinks = ((linkData ?? []) as RentalLink[]).sort(linkOrder);
+  const links = opts.linkId
+    ? allLinks.filter((l) => l.id === opts.linkId)
+    : allLinks;
   if (links.length === 0) return summary;
 
   // 사업 등록 정보(사업명·분야) — 새 행의 program_name·category 원본.
@@ -348,6 +479,27 @@ export async function syncRentalToBusinessResults(opts: {
     ]),
   );
   const programById = new Map(programs.map((p) => [p.id, p]));
+
+  // 예약 → 가져갈 연결(먼저 만든 연결). 이 달에 시작 월이 지난 연결만 후보입니다.
+  const loaded: { link: RentalLink; rows: Reservation[] }[] = [];
+  const loadErrors = new Map<string, string>();
+  for (const link of allLinks) {
+    if (!opts.ignoreStartMonth && `${ym}-01` < link.start_month.slice(0, 10))
+      continue;
+    try {
+      loaded.push({ link, rows: await loadReservations(link, year, month) });
+    } catch (e) {
+      loadErrors.set(link.id, e instanceof Error ? e.message : String(e));
+    }
+  }
+  const { rowsByLink: reservationsByLink, warnings } = assignReservations(
+    loaded,
+    ym,
+  );
+  for (const w of warnings) {
+    summary.warnings.push(w);
+    console.warn(`[대관→사업실적] ${w}`);
+  }
 
   for (const link of links) {
     const program = programById.get(link.program_id);
@@ -381,7 +533,9 @@ export async function syncRentalToBusinessResults(opts: {
         continue;
       }
 
-      const agg = aggregate(link, await loadReservations(link, year, month));
+      const loadError = loadErrors.get(link.id);
+      if (loadError) throw new Error(loadError);
+      const agg = aggregate(link, reservationsByLink.get(link.id) ?? []);
       item.sessions = agg.sessions;
       item.operating_days = agg.operating_days;
       item.participants = agg.participants;
@@ -555,6 +709,7 @@ export function formatRentalSyncSummary(s: RentalResultSyncSummary): string {
     `삭제 ${s.deleted} · 수기채택 ${s.adopted} · 수기채택(값보존) ${s.adoptedSnapshotOnly} · ` +
     `수기있음 ${s.skippedExistingManual} · 수기중복 ${s.skippedMultipleManual} · ` +
     `예약없음 ${s.skippedEmpty}` +
+    (s.warnings.length > 0 ? ` · 경고 ${s.warnings.length}건` : "") +
     (s.errors.length > 0 ? ` · 오류 ${s.errors.join(" / ")}` : "")
   );
 }
