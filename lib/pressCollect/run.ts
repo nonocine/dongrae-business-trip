@@ -113,6 +113,9 @@ export async function runPressCollectAndRecord(
   const runId = (runRow as { id: string }).id;
 
   try {
+    // 네이버 키가 없으면(예: Production 환경변수 등록 전) 구글만으로 저장하지 않고 바로 실패로 기록합니다.
+    //   슬랙은 보내지 않고, 텔레그램은 키가 있을 때만 갑니다(없으면 조용히 skip).
+    if (!naverConfigured()) throw new Error("네이버 키 없음(NAVER_API_HUB_ID/KEY 미설정) — 수집하지 않음");
     const report = await runPressCollect({ ...opts, dryRun: false });
     report.runId = runId;
     const s = report.saved!;
