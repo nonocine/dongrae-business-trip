@@ -31,7 +31,7 @@ import {
   resolveSealRegisterAccess,
 } from "@/lib/sealRegisterServer";
 import { hasPersonnelAccess } from "@/lib/personnelAccess";
-import { smsSendAllowed } from "@/lib/smsAccess";
+import { smsSendAllowed } from "@/lib/sms/access";
 import type { MenuContext } from "@/lib/menu";
 
 export type ShellData = {

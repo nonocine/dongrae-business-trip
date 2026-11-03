@@ -5,7 +5,12 @@
 //   ⚠️ 전화번호를 로그·콘솔·DB 어디에도 남기지 않습니다 — 여기서도 출력하지 않습니다.
 // =====================================================================
 
-import type { SmsResultSummary, SmsSendersInfo } from "@/lib/smsText";
+import {
+  SMS_CHUNK_SIZE,
+  SMS_SPLIT_THRESHOLD,
+  type SmsResultSummary,
+  type SmsSendersInfo,
+} from "@/lib/sms/text";
 
 const APP = "dongupssi";
 const TIMEOUT_MS = 15_000;
@@ -169,4 +174,89 @@ export async function getSmsResult(msgId: string): Promise<SmsResultSummary & { 
   if (!r.ok)
     return { ok: false, status: r.status, sent: 0, failed: 0, pending: 0, error: r.error };
   return { ok: true, status: 200, ...summarizeRelayResult(r.data) };
+}
+
+// 큰 발송 — SMS_SPLIT_THRESHOLD(1,000명)를 넘으면 SMS_CHUNK_SIZE(500명)씩 차례로 보내 합산합니다.
+//   일부 묶음만 실패하면 ok:true 에 partial(실패 사유)을 담습니다. 전부 실패하면 ok:false.
+//   여러 번 보냈으면 provider_msg_id 는 쉼표로 이어 붙입니다(결과 조회가 나눠 합산).
+export async function sendSmsBatch(
+  input: SendSmsInput,
+): Promise<
+  | {
+      ok: true;
+      sent: number;
+      failed: number;
+      msg_type: string | null;
+      provider_msg_id: string | null;
+      sender: string | null;
+      partial?: string;
+    }
+  | RelayFailure
+> {
+  const chunks: string[][] = [];
+  if (input.to.length > SMS_SPLIT_THRESHOLD) {
+    for (let i = 0; i < input.to.length; i += SMS_CHUNK_SIZE)
+      chunks.push(input.to.slice(i, i + SMS_CHUNK_SIZE));
+  } else {
+    chunks.push(input.to);
+  }
+  let sent = 0;
+  let failed = 0;
+  const ids: string[] = [];
+  const errors: string[] = [];
+  let msgType: string | null = null;
+  let sender: string | null = null;
+  let lastFailure: RelayFailure | null = null;
+  for (const [i, to] of chunks.entries()) {
+    const r = await sendSms({ ...input, to });
+    if (!r.ok) {
+      failed += to.length;
+      errors.push(`${i + 1}번째 묶음(${to.length}명): ${r.error}`);
+      lastFailure = r;
+      // 권한·설정 문제(400·403·503)와 하루 한도(429)는 다음 묶음도 똑같이 실패하므로 멈춥니다.
+      if ([400, 401, 403, 429, 503].includes(r.status)) {
+        const rest = chunks.slice(i + 1).reduce((a, c) => a + c.length, 0);
+        failed += rest;
+        if (rest > 0) errors.push(`남은 ${rest}명은 보내지 않았습니다.`);
+        break;
+      }
+      continue;
+    }
+    sent += r.sent;
+    failed += r.failed;
+    if (r.provider_msg_id) ids.push(r.provider_msg_id);
+    msgType = msgType ?? r.msg_type;
+    sender = sender ?? r.sender;
+  }
+  if (ids.length === 0 && lastFailure)
+    return chunks.length === 1
+      ? lastFailure
+      : { ...lastFailure, error: errors.join(" / ") };
+  return {
+    ok: true,
+    sent,
+    failed,
+    msg_type: msgType,
+    provider_msg_id: ids.length > 0 ? ids.join(",") : null,
+    sender,
+    ...(errors.length > 0 ? { partial: errors.join(" / ") } : {}),
+  };
+}
+
+// 쉼표로 이어진 여러 msg_id 의 결과를 합산합니다.
+export async function getSmsResultMulti(
+  msgIds: string,
+): Promise<SmsResultSummary & { status: number }> {
+  const ids = msgIds.split(",").map((s) => s.trim()).filter(Boolean);
+  const total = { ok: true, status: 200, sent: 0, failed: 0, pending: 0 } as SmsResultSummary & {
+    status: number;
+  };
+  for (const id of ids) {
+    const r = await getSmsResult(id);
+    if (!r.ok) return r;
+    total.sent += r.sent;
+    total.failed += r.failed;
+    total.pending += r.pending;
+  }
+  return total;
 }
