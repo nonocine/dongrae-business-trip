@@ -64,6 +64,7 @@
 **정리 규칙**
 - 같은 내용 기사는 한 묶음, 그 아래 **언론사 링크 전부** 나열 ("언론사 N곳")
 - 묶음기사(브리핑 모음, 주요일정 등)는 "📌 지역 소식 묶음 기사"로 따로 표시
+- 묶음기사도 홍보 실적(언론보도)에 넣고, 홍보내용 앞에 "[묶음기사]"로 구분 (2026-11-03 관장 결정)
 - 본문 복사 금지, 링크·요약만
 - 이미 올린 기사는 `press_shared.json`에 기록 → 중복 게시 방지
 
@@ -383,7 +384,7 @@ ONNA_NEWS_API_KEY        # 운영(live)
 | `article.title` | ✓ | 500자 이하 |
 | `article.url` | ✓ | http(s), 2000자 이하. **중복 판정 기준** |
 | `article.event_group` | | 같은 내용 묶음 키, 200자 이하 |
-| `article.is_roundup` | | true/false (기본 false). true 면 실적에 넣지 않음 |
+| `article.is_roundup` | | true/false (기본 false). true 면 실적에 "[묶음기사] 제목"으로 넣고 기자는 연결하지 않음 (2026-11-03 변경) |
 | `reporter` | | 못 찾았으면 `null` (또는 이름·이메일 빈 값) |
 | `reporter.name` | | 50자 이하. 없으면 기자를 만들지 않고 기사만 저장 |
 | `reporter.email` | | 이메일 형식. **추측해서 채우지 말 것** |
@@ -393,7 +394,7 @@ ONNA_NEWS_API_KEY        # 운영(live)
 1. 토큰 불일치·미설정 → 401 (본문을 읽지 않음, DB 변화 없음)
 2. 검증 실패 → 400 (단건) / 그 건만 `ok:false, status:400` (여러 건)
 3. 같은 `url` 기사가 이미 있으면 `article:"exists"` — 기자·실적 모두 건너뜀(기사 수 안 늘어남)
-4. 새 기사이고 묶음기사가 아니면 사업실적 홍보(`business_promotions`)에 `언론보도` 1줄(source `auto`, 작성자 `헤르메스 자동`). 같은 url 의 언론보도 행이 이미 있으면(수기 포함) 새로 만들지 않고 연결
+4. 새 기사면 사업실적 홍보(`business_promotions`)에 `언론보도` 1줄(source `auto`, 작성자 `헤르메스 자동` / 자동 수집은 `동업자씨 자동 수집`). 묶음기사는 홍보내용 앞에 `[묶음기사] `. 같은 url 의 언론보도 행이 이미 있으면(수기 포함) 새로 만들지 않고 연결
 5. 기자: 이메일(대소문자 무시) → 없으면 이름+언론사로 찾음
    - 찾으면 자동 칸만 갱신(기사 수 +1, 최근 기사, 처음 본 날). 수동 칸(메모·전화·담당 분야·보도자료 받기·감사 메일)은 절대 안 씀. 관장이 직접 넣은 기자도 동일
    - 이름·언론사가 같은데 이메일이 다르면 이메일은 그대로 두고 `pending_email` 로 보류 → 화면에 "이메일 변경 확인" 배지
@@ -406,7 +407,7 @@ ONNA_NEWS_API_KEY        # 운영(live)
 ```
 - `article`: `created` | `exists`
 - `reporter`: `created` | `updated` | `skipped`
-- `promotion`: `created` | `linked` | `skipped` (묶음기사·이미 있던 기사)
+- `promotion`: `created` | `linked` | `skipped` (이미 있던 기사·확인 필요 기사)
 - `pending_email: true` — 이메일 변경 확인으로 보류됨 (텔레그램 관장 보고에 한 줄 넣을 것)
 - 여러 건: `{ "results": [ { "ok": true, ... } | { "ok": false, "status": 400|500, "error": "..." } ] }`
 - 500 이면 그 건은 되돌려져 있으니 다음 실행에서 다시 보내면 됩니다.

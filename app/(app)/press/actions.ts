@@ -235,7 +235,7 @@ async function articleUrlOutlet(id: string): Promise<{ url: string; outlet: stri
   return data as { url: string; outlet: string; url_status: string };
 }
 
-// 확인 필요 → 승인: 그때 홍보 실적·기자 연결(묶음기사는 실적·기자 없음).
+// 확인 필요 → 승인: 그때 홍보 실적·기자 연결(묶음기사는 실적에 "[묶음기사]"로, 기자 없음).
 export async function approveArticle(id: string): Promise<PressActionResult> {
   await requirePressAdmin();
   try {

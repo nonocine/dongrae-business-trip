@@ -208,7 +208,7 @@ function ReviewQueue({ articles }: { articles: PressArticle[] }) {
         확인할 기사 <span className={`ml-1 ${badgeWarning}`}>{list.length}</span>
       </h3>
       <p className="mt-1 text-xs text-ink-muted">
-        자동 수집이 판단하지 못한 기사입니다. <b>승인</b>하면 홍보 실적·기자에 반영되고(묶음기사는 실적 제외),{" "}
+        자동 수집이 판단하지 못한 기사입니다. <b>승인</b>하면 홍보 실적·기자에 반영되고(묶음기사는 실적에 ‘[묶음기사]’로 표시, 기자 없음),{" "}
         <b>제외</b>하면 목록에서 숨깁니다(다시 수집되지 않음). 확인 필요 기사는 슬랙에 공유되지 않습니다.
       </p>
       <div className="mt-2">
@@ -269,7 +269,7 @@ function ReviewRow({ article: a, setNotice }: { article: PressArticle; setNotice
             onClick={() =>
               run(
                 () => approveArticle(a.id),
-                a.is_roundup ? "승인했습니다(묶음기사 — 실적 제외)." : "승인했습니다. 홍보 실적·기자에 반영했습니다.",
+                a.is_roundup ? "승인했습니다. 홍보 실적에 묶음기사로 반영했습니다." : "승인했습니다. 홍보 실적·기자에 반영했습니다.",
               )
             }
           >
@@ -782,8 +782,6 @@ function ArticlesTab({
                     <span className={badgeSuccess}>연결됨</span>
                   ) : a.review_status === "needs_review" || a.review_status === "rejected" ? (
                     <span className="text-ink-hint">보류</span>
-                  ) : a.is_roundup ? (
-                    <span className={badgeNeutral}>제외</span>
                   ) : (
                     <span className="text-ink-hint">—</span>
                   )}
@@ -819,7 +817,7 @@ function ArticlesTab({
         )}
       </div>
       <p className="mt-3 text-xs text-ink-muted">
-        {inRange.length}건 · 홍보 실적(언론보도) 연결 {linkedCount}건. 묶음기사와 확인 필요 기사는 실적에 넣지 않습니다.
+        {inRange.length}건 · 홍보 실적(언론보도) 연결 {linkedCount}건. 묶음기사도 실적에 넣고 ‘[묶음기사]’로 구분합니다. 확인 필요 기사는 승인 전까지 넣지 않습니다.
       </p>
       {notice && (
         <div className="mt-2">

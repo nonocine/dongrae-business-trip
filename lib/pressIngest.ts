@@ -17,7 +17,8 @@ import {
 //   순서
 //     1) 기사 insert — url unique 가 중복 판정입니다. 이미 있으면 "exists" 로
 //        끝내고 기자·실적은 건드리지 않습니다(기사 수가 늘지 않음).
-//     2) 홍보 실적 — 묶음기사가 아니면 business_promotions(언론보도) 1줄.
+//     2) 홍보 실적 — business_promotions(언론보도) 1줄. 묶음기사도 넣습니다(관장 결정
+//        2026-11-03). 묶음기사는 홍보내용(title) 앞에 "[묶음기사] " 를 붙여 구분합니다.
 //        같은 url 의 언론보도 행이 이미 있으면(수기 포함) 새로 만들지 않고 연결.
 //     3) 기자 — 자동 칸만 갱신/생성. 수동 칸은 어떤 경우에도 쓰지 않습니다.
 //     4) 기사에 reporter_id · promotion_id 연결.
@@ -194,8 +195,6 @@ async function linkPromotion(
   a: PressIngestItem["article"],
   author: string,
 ): Promise<{ id: string | null; action: PressIngestResult["promotion"] }> {
-  if (a.is_roundup) return { id: null, action: "skipped" };
-
   const { data: found, error: findErr } = await supabaseAdmin
     .from("business_promotions")
     .select("id")
@@ -216,7 +215,7 @@ async function linkPromotion(
       report_month: Number(m),
       activity_date: a.published_at,
       category: PRESS_PROMOTION_CATEGORY,
-      title: a.title,
+      title: promotionTitle(a),
       count: 1,
       url: a.url,
       description: a.outlet,
@@ -227,6 +226,42 @@ async function linkPromotion(
     .single();
   if (error) fail("실적 추가", error.message);
   return { id: (data as { id: string }).id, action: "created" };
+}
+
+// 홍보 실적 홍보내용 — 묶음기사는 앞에 표시(실적 화면에 비고 칸이 없어 제목으로 구분).
+export const ROUNDUP_PROMOTION_PREFIX = "[묶음기사] ";
+function promotionTitle(a: PressIngestItem["article"]): string {
+  return a.is_roundup ? `${ROUNDUP_PROMOTION_PREFIX}${a.title}` : a.title;
+}
+
+// 이미 저장된 확정 기사(auto·approved)에 실적만 연결 — 묶음기사 실적 백필용.
+//   이미 연결돼 있으면 건드리지 않습니다. 실패하면 이번에 만든 실적 행을 지웁니다.
+export async function linkPromotionForArticle(articleId: string): Promise<PressIngestResult["promotion"]> {
+  const { data, error } = await supabaseAdmin
+    .from("press_articles")
+    .select("published_at,outlet,title,url,event_group,is_roundup,source,review_status,promotion_id")
+    .eq("id", articleId)
+    .maybeSingle();
+  if (error) fail("기사 조회", error.message);
+  if (!data) fail("기사 조회", "기사를 찾을 수 없습니다.");
+  const row = data as PressIngestItem["article"] & {
+    source: PressArticleSource;
+    review_status: string;
+    promotion_id: string | null;
+  };
+  if (row.promotion_id) return "skipped";
+  if (row.review_status !== "auto" && row.review_status !== "approved") return "skipped";
+  const p = await linkPromotion(row, promotionAuthorOf(row.source));
+  const { error: upErr } = await supabaseAdmin
+    .from("press_articles")
+    .update({ promotion_id: p.id })
+    .eq("id", articleId)
+    .is("promotion_id", null);
+  if (upErr) {
+    if (p.action === "created") await supabaseAdmin.from("business_promotions").delete().eq("id", p.id);
+    fail("기사 연결", upErr.message);
+  }
+  return p.action;
 }
 
 // --- 진입점 ----------------------------------------------------------
