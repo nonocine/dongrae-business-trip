@@ -2,8 +2,9 @@
 //   공유 그룹은 모든 직원의 이 카드 안에 보입니다 → 직원이 코드 수정 없이 새 출처를 만드는 셈.
 //   그룹 안 사람: DB 출처는 {source, ref_id} 로 저장돼 있어, 보낼 때 그 출처의
 //   resolveRefs 로 최신 이름·번호를 가져옵니다. 직접 입력(manual)은 저장된 번호.
-//   ⚠️ 공유 그룹에 든 사람은 그 출처의 canUse 가 없는 직원도 보낼 수 있습니다
-//     (만든 사람이 공유를 고른 것). 번호는 여전히 화면에 나가지 않습니다.
+//   ⚠️ 권한 우회 차단(관장 결정 2026-11): 보내는 사람이 canUse 권한이 없는 출처의 구성원은
+//     서버에서 빼고 수만 알려 줍니다("권한 밖 N명 제외"). 직접 입력(manual) 구성원은
+//     그룹을 쓸 수 있으면 포함. 출처가 없어진(등록표에서 빠진) 구성원도 권한 밖으로 셉니다.
 
 import { listGroups, loadGroupMembers } from "@/lib/sms/groups";
 import { SMS_TABLE_MISSING } from "@/lib/sms/text";
@@ -61,7 +62,10 @@ export const groupsSource: SmsSource = {
   },
 
   async resolvePhones(u, sel) {
-    const { groups, members } = await loadGroupMembers(u, idsOf(sel));
+    const { groups, members: all } = await loadGroupMembers(u, idsOf(sel));
+    const allowed = (source: string) => source === "manual" || !!findSmsSource(source)?.canUse(u);
+    const members = all.filter((m) => allowed(m.source));
+    const restricted = all.length - members.length;
     // 출처별로 모아 한 번에 최신 정보를 가져옵니다.
     const bySource = new Map<string, string[]>();
     for (const m of members) {
@@ -94,6 +98,6 @@ export const groupsSource: SmsSource = {
     });
     const label =
       groups.length === 1 ? `주소록 ${groups[0].name}` : `주소록 ${groups.length}개`;
-    return { label, short: label, people };
+    return { label, short: label, people, restricted };
   },
 };

@@ -37,6 +37,8 @@ export type ResolvedBundle = {
   // 이력 요약에 쓰는 짧은 이름 — 없으면 label.
   short?: string;
   people: ResolvedPerson[];
+  // 보내는 사람이 그 출처를 쓸 권한이 없어 뺀 사람 수(주소록 묶음에서) — "권한 밖 N명 제외".
+  restricted?: number;
 };
 
 export type SmsSource = {

@@ -296,6 +296,11 @@ export default function SmsSender({
               {preview && (
                 <p className="pb-1 text-xs text-ink-muted">
                   중복 {won.format(preview.duplicates)}건 자동 제외 · 번호 없음 {won.format(preview.noPhone)}건 제외
+                  {preview.restricted > 0 && (
+                    <span title="주소록에 든 사람 중 내가 쓸 권한이 없는 명단(예: 방과후 보호자)의 사람은 빠집니다.">
+                      {" "}· 권한 밖 {won.format(preview.restricted)}명 제외
+                    </span>
+                  )}
                   {previewing && " · 다시 세는 중…"}
                 </p>
               )}

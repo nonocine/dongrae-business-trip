@@ -81,11 +81,11 @@ async function main() {
 
   // ④
   const can = (k: string, u: typeof admin) => findSmsSource(k)!.canUse(u);
-  chk("일반 직원: 방과후·동래미래·강사·기자 못 씀", !can("bk-guardians", staff) && !can("saem-academy", staff) && !can("instructors", staff) && !can("reporters", staff));
-  chk("일반 직원: 직원·거래처·주소록·직접 입력 씀", can("employees", staff) && can("partners", staff) && can("groups", staff) && can("manual", staff));
+  chk("일반 직원: 방과후·동래미래·기자 못 씀", !can("bk-guardians", staff) && !can("saem-academy", staff) && !can("reporters", staff));
+  chk("일반 직원: 강사·직원·거래처·주소록·직접 입력 씀", can("instructors", staff) && can("employees", staff) && can("partners", staff) && can("groups", staff) && can("manual", staff));
   let denied = false;
   try {
-    await computeRecipients(staff, [{ uid: "x", source: "instructors", selection: { ids: instIds }, excluded: [] }]);
+    await computeRecipients(staff, [{ uid: "x", source: "saem-academy", selection: { ids: ["x"] }, excluded: [] }]);
   } catch {
     denied = true;
   }

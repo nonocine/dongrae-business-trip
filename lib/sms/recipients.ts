@@ -57,12 +57,14 @@ export async function computeRecipients(
   const summaryParts: string[] = [];
   let duplicates = 0;
   let noPhone = 0;
+  let restricted = 0;
 
   for (const b of bundles) {
     const src = findSmsSource(b.source);
     if (!src) throw new Error(`알 수 없는 출처입니다: ${b.source}`);
     if (!src.canUse(user)) throw new Error(`"${src.label}" 출처를 쓸 권한이 없습니다.`);
     const r = await src.resolvePhones(user, b.selection);
+    restricted += r.restricted ?? 0;
     const excluded = new Set(b.excluded);
     let count = 0;
     for (const p of r.people) {
@@ -101,6 +103,7 @@ export async function computeRecipients(
       total: phones.length,
       duplicates,
       noPhone,
+      restricted,
       bundles: chips,
       people,
       summary: summaryParts.join(" + "),

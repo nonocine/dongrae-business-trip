@@ -1,6 +1,6 @@
 // 출처 ③ 강사 — [활동 중 강사 전체] 또는 [동래미래 차시 → 그 차시 담당 강사만].
 //   번호: saem_instructors.phone. 상태 'active' 만.
-//   사용: M0 또는 saem 직무(강사 휴대전화 열람 기준과 같음, lib/saemAccess).
+//   사용: 문자 발송 권한이 있는 전 직원(관장 결정 2026-11). 번호는 화면에 나가지 않습니다.
 
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
 import { isValidSmsPhone, normalizeSmsPhone } from "@/lib/sms/text";
@@ -26,7 +26,7 @@ export const instructorsSource: SmsSource = {
   description: "활동 중 강사 · 차시 담당 강사",
   pickerType: "list",
   color: "amber",
-  canUse: (u) => u.isM0 || u.roles.includes("saem"),
+  canUse: () => true,
 
   async loadOptions(_u, { filter }) {
     const terms = await loadAcademyTerms();

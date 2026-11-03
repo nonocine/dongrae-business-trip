@@ -201,6 +201,7 @@ export type SmsPreviewResult = {
   total: number; // 실제로 보낼 인원(중복·번호없음 제외)
   duplicates: number;
   noPhone: number;
+  restricted: number; // 주소록 안 권한 밖 출처 구성원(서버에서 제외)
   bundles: { uid: string; label: string; count: number; color: SmsChipColor }[];
   people: SmsPreviewPerson[];
   summary: string; // "동래미래 4차시 158 + 강사 5"

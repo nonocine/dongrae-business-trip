@@ -1,5 +1,7 @@
 // 출처 ① 방과후아카데미 보호자 — 재원생(bk_students.status='active') 기준으로 고르고,
-//   연결된 정상 보호자(bk_guardians.status='active')에게 보냅니다. 대표 보호자만 / 모든 보호자.
+//   연결된 보호자에게 보냅니다. 대표 보호자만 / 모든 보호자.
+//   보호자 상태(bk_guardians.status: invited·active·suspended) — 초대만 받고 가입 전(invited)도
+//   번호가 있으면 포함, 사용중지(suspended)만 제외(관장 결정 2026-11). 탈퇴 상태 값은 없습니다.
 //   사용: M0 또는 bangka 직무(학생·보호자 관리 화면과 같은 기준, lib/bangkaAccess).
 
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
@@ -36,14 +38,15 @@ async function loadAll() {
   return { students, links, guardians };
 }
 
-// 정상(active) 보호자만 — id → 이름·번호.
+// 보낼 수 있는 보호자(사용중지 제외) — id → 이름·번호.
+const EXCLUDED_GUARDIAN_STATUSES = ["suspended"];
 async function loadGuardians(ids: string[]) {
   const rows = await inChunks(ids, async (chunk) => {
     const { data, error } = await supabaseAdmin
       .from("bk_guardians")
       .select("id, name, phone")
       .in("id", chunk)
-      .eq("status", "active");
+      .not("status", "in", `(${EXCLUDED_GUARDIAN_STATUSES.join(",")})`);
     if (error) throw new Error(`보호자 조회 실패: ${error.message}`);
     return (data ?? []) as Guardian[];
   });
@@ -119,7 +122,7 @@ export const bkGuardiansSource: SmsSource = {
             hasPhone: n > 0,
           };
         }),
-      note: "같은 보호자는 한 번만 보냅니다. 사용중이 아닌 보호자는 빠집니다.",
+      note: "같은 보호자는 한 번만 보냅니다. 초대만 받은 보호자도 번호가 있으면 받고, 사용중지 보호자는 빠집니다.",
     };
   },
 

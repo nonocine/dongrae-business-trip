@@ -1,7 +1,7 @@
 // 출처 ② 동래미래아카데미 수강생 — 차시 고르기(진행 중 차시 기본) → 프로그램 체크.
 //   번호: saem_enrollments.contact. 상태 'active' 만(cancelled 등은 제외).
-//   사업 찾기: saem_projects.name 에 '동래미래'가 들어간 사업. 차시 이름에 '테스트'가
-//   들어가면 목록에서 뺍니다.
+//   사업 찾기: 고정 id(ACADEMY_PROJECT_ID). 그 행이 없으면 이름 검색('동래미래')으로 대신하고
+//   서버 로그에 경고합니다. 차시 이름에 '테스트'가 들어가면 목록에서 뺍니다.
 //   사용: M0 또는 saem 직무(수강생 연락처 열람 기준과 같음, lib/saemAccess).
 
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
@@ -10,7 +10,28 @@ import { normalizeWeekdays, weekdaysLabel } from "@/lib/saemSchedule";
 import { isValidSmsPhone, normalizeSmsPhone } from "@/lib/sms/text";
 import { idsOf, inChunks, str, type ResolvedPerson, type SmsSource } from "./types";
 
+// saem_projects — "동래미래 아카데미"(2026-11-03 확인).
+export const ACADEMY_PROJECT_ID = "7be2afdc-6f0a-4f38-bf8a-3425217a7f4c";
 export const ACADEMY_PROJECT_KEYWORD = "동래미래";
+
+async function academyProjectIds(): Promise<string[]> {
+  const { data: fixed, error: fe } = await supabaseAdmin
+    .from("saem_projects")
+    .select("id")
+    .eq("id", ACADEMY_PROJECT_ID)
+    .maybeSingle();
+  if (fe) throw new Error(`사업 조회 실패: ${fe.message}`);
+  if (fixed) return [ACADEMY_PROJECT_ID];
+  console.warn(
+    `[sms] 동래미래 사업 고정 id(${ACADEMY_PROJECT_ID})를 찾지 못해 이름 검색('${ACADEMY_PROJECT_KEYWORD}')으로 대신합니다. lib/sms/sources/saem-academy.ts 를 확인하세요.`,
+  );
+  const { data, error } = await supabaseAdmin
+    .from("saem_projects")
+    .select("id")
+    .ilike("name", `%${ACADEMY_PROJECT_KEYWORD}%`);
+  if (error) throw new Error(`사업 조회 실패: ${error.message}`);
+  return ((data ?? []) as { id: string }[]).map((p) => p.id);
+}
 
 export type AcademyTerm = {
   id: string;
@@ -21,12 +42,7 @@ export type AcademyTerm = {
 };
 
 export async function loadAcademyTerms(): Promise<AcademyTerm[]> {
-  const { data: projects, error: pe } = await supabaseAdmin
-    .from("saem_projects")
-    .select("id, name")
-    .ilike("name", `%${ACADEMY_PROJECT_KEYWORD}%`);
-  if (pe) throw new Error(`사업 조회 실패: ${pe.message}`);
-  const ids = ((projects ?? []) as { id: string }[]).map((p) => p.id);
+  const ids = await academyProjectIds();
   if (ids.length === 0) return [];
   const { data, error } = await supabaseAdmin
     .from("saem_terms")
