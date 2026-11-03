@@ -10,9 +10,10 @@
 //     a. 자동 행 없음 + 같은 사업·연·월에 수기 행(source_type 없음) 1개
 //        → 새로 만들지 않고 그 행을 자동 행으로 채택(adopted) — 관장 결정 2026-10
 //          (9월부터 적용). source_type·source_key 를 달고 대관 값으로 숫자·세부행을
-//          갱신한다. status 는 그대로(submitted 면 submitted). author_name·
-//          manager_name 도 그대로.
-//          · 수기 행이 manual_override 면 숫자·세부행은 덮지 않고 연결만(adoptedSnapshotOnly).
+//          갱신한다. status·author_name·manager_name 은 그대로.
+//          · 수기 행이 manual_override 이거나 이미 제출(submitted)됐으면 숫자·세부행은
+//            덮지 않고 연결·snapshot 만(adoptedSnapshotOnly) — 제출 숫자 보호(2026-11).
+//            화면은 snapshot 과 다르면 "대관 기준 N명(제출된 숫자 유지)" 을 보여 준다.
 //          · 그 달 예약이 0건이면 채택하지 않음(skippedExistingManual) — 수기 값을 0 으로
 //            지우지 않는다.
 //        a'. 수기 행이 2개 이상 → 어느 것도 고르지 않고 건너뜀(skippedMultipleManual).
@@ -598,8 +599,13 @@ export async function syncRentalToBusinessResults(opts: {
             source_snapshot: snapshot,
             source_synced_at: now,
           };
-          if (m.manual_override) {
+          // 수기 수정했거나 이미 제출(submitted)된 수기 행은 숫자를 덮지 않습니다
+          //   (안전장치 2026-11). 차이는 화면에서 snapshot 으로 보여 줍니다.
+          if (m.manual_override || m.status === "submitted") {
             item.action = "adoptedSnapshotOnly";
+            item.reason = m.manual_override
+              ? "수기 수정 행 — 숫자 유지"
+              : "제출된 행 — 숫자 유지";
             summary.adoptedSnapshotOnly += 1;
             if (dryRun) continue;
             await writeBusinessResultRow(m.id, link_);

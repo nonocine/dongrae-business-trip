@@ -5,8 +5,9 @@
 //      기존 수기 실적(김혜지 입력)과 같은지 — 7월 4일·400명 / 8월 4일·403명 /
 //      9월 3일·324명.
 //      (9월은 홈페이지 대관 데이터가 바뀌어 지금은 3일·323명 — 수기는 324명.)
-//   ② 같은 dryRun 에서 7~9월 다있소가 규칙 a(adopted — 수기 행 채택)로 판정되는지
-//      — 새 행을 만들지 않아야 합니다. 알바냥 8월(수기 2행)은 a'(skippedMultipleManual).
+//   ② 같은 dryRun 에서 7·8월 다있소가 규칙 a 채택이되 제출된 수기 행이라 숫자 유지
+//      (adoptedSnapshotOnly), 9월은 이미 채택된 자동 행이라 규칙 d(snapshotOnly)로
+//      판정되는지 — 새 행을 만들지 않아야 합니다. 알바냥 8월(수기 2행)은 a'(skippedMultipleManual).
 //   ③ --apply-month 를 주면 그 달을 실제로 1회 실행해 요약을 출력합니다.
 //
 //   ⚠️ ①② 는 아무것도 쓰지 않습니다(dryRun).
@@ -60,9 +61,13 @@ async function main() {
         item?.room_other === 0,
       `youth_uses ${item?.youth_uses} · room_youth 합계 ${item?.room_youth} · other_uses ${item?.other_uses} · room_other ${item?.room_other}`,
     );
+    // 7·8월 다있소 수기 행은 제출(submitted)됨 → 안전장치로 숫자 유지(adoptedSnapshotOnly).
+    // 9월 다있소는 이미 채택된 자동 행 → 규칙 d(snapshotOnly). (2026-11 확인)
+    //   ※ 다른 연결(예: 동아리연합회 9월)은 수기 행이 없어 created 일 수 있어 다있소만 봅니다.
+    const want = month === 9 ? "snapshotOnly" : "adoptedSnapshotOnly";
     chk(
-      `2026-${month} 규칙 a(adopted — 새 행 없음)`,
-      item?.action === "adopted" && s.created === 0,
+      `2026-${month} 다있소 ${want} — 새 행 없음·제출 숫자 유지`,
+      item?.action === want,
       `판정 ${item?.action}`,
     );
     chk(`2026-${month} 오류 없음`, s.errors.length === 0, s.errors.join(" / "));

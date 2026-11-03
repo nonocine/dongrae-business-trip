@@ -82,16 +82,21 @@ const badgeAuto =
 const badgeManual =
   "rounded-full bg-warning-soft px-2 py-0.5 text-[11px] font-bold text-warning";
 
-// 수기로 고친 자동 행 — 홈페이지 값과 지금 값이 다를 때만 비교 문구를 냅니다.
+// 숫자를 보존하는 자동 행(수기로 고쳤거나 제출된 행) — 홈페이지 값과 지금 값이
+//   다를 때만 비교 문구를 냅니다.
 function rentalSnapshotNote(row: BusinessResult): string | null {
   const snap = row.source_snapshot;
-  if (!row.manual_override || !snap) return null;
+  if (!snap || row.source_type !== RENTAL_SOURCE) return null;
+  if (!row.manual_override && row.status !== "submitted") return null;
   const same =
     snap.operating_days === row.operating_days &&
     snap.sessions === row.sessions &&
     snap.participants === row.participants &&
     snap.participants === row.attendance;
   if (same) return null;
+  // 제출된 행은 제출 숫자를 그대로 둡니다(lib/businessRentalSync 규칙 a·d).
+  if (!row.manual_override)
+    return `대관 기준 ${number.format(snap.operating_days)}일 · ${number.format(snap.participants)}명 (제출된 숫자 유지)`;
   // "MM.DD HH:mm" → "MM/DD HH:mm"
   const at = fmtKstDateTime(snap.synced_at ?? row.source_synced_at, {
     year: false,
