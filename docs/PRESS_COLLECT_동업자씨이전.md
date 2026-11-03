@@ -241,6 +241,7 @@ revoke all on press_collect_runs from anon, authenticated;
 **판정 정책 (Haiku 프롬프트 `lib/pressCollect/filter.ts`에 반영)**
 - 센터가 **장소로만** 언급된 기사(예: 순회상영 장소 목록 중 하나) → `ours=true, venue_only=true` → `needs_review`(저장하되 실적·슬랙 제외, 사람이 판단)
 - **묶음기사**는 여러 기관·여러 소식을 모은 것만("부산 브리핑 모음", "동래구 소식", "[부산은 오늘]")
+- 묶음기사도 홍보 실적에 넣음(홍보내용 앞 "[묶음기사]"), 기자는 연결 안 함, 슬랙은 "📌 지역 소식 묶음 기사" 칸 — 같은 날 추가 결정
 - 축제 예고처럼 **한 행사 기사 안에 우리 프로그램이 소개**된 것은 일반 기사(실적 반영)
 
 **구글 주소 찾기 순서** — ① 네이버 제목 검색 → ② 리다이렉트 → ③ batchexecute 변환(`decodeGoogleNewsLink`, 비공식) → 실패하면 구글 주소 + `needs_check`
@@ -255,3 +256,6 @@ revoke all on press_collect_runs from anon, authenticated;
 - 실행 잠금: 10분 안에 시작해 안 끝난 실행이 있으면 거절(크론·[지금 수집] 겹침 방지)
 - 텔레그램: 실패·확인 필요·주소 확인·저장 실패가 있을 때만 한 줄
 - 홈페이지 게시(`createHomepageDraft`)는 `auto`/`approved` 기사만
+
+**묶음기사 실적 백필 (2026-11-03)** — 실적 없던 확정 묶음기사 6건(9월 4, 10월 2, 헤르메스 1건 포함)을 `scripts/press-roundup-promotions.mts` 로 연결.
+**금련산축제(그랜드모먼트 유스호스텔) 기사 3건** — 관장 확인: 우리 센터 관련, 그대로 둠.
