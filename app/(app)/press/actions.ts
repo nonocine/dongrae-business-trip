@@ -5,12 +5,18 @@ import { isManagerAdmin } from "@/app/actions";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
 import {
   cleanText,
+  isHttpUrl,
   isValidEmail,
   isYmd,
   PRESS_LIMITS,
   type PressArticle,
+  type PressIngestReporter,
   type PressReporter,
 } from "@/lib/press";
+import { approvePressArticle, fixPressArticleUrl } from "@/lib/pressIngest";
+import { readArticlePage } from "@/lib/pressCollect/article";
+import { runPressCollectAndRecord } from "@/lib/pressCollect/run";
+import { PRESS_COLLECT_DAYS } from "@/lib/pressCollect/config";
 
 // =====================================================================
 // "보도자료 기자" 화면 서버 액션 — 관장 전용.
@@ -177,4 +183,139 @@ export async function dismissPendingEmail(id: string): Promise<PressActionResult
   if (error) return { ok: false, error: error.message };
   revalidatePath("/press");
   return { ok: true };
+}
+
+// =====================================================================
+// 자동 수집(docs/PRESS_COLLECT_동업자씨이전.md) — 확인 필요·주소 확인·지금 수집
+// =====================================================================
+
+export type PressCollectRun = {
+  id: string;
+  trigger: "cron" | "manual";
+  started_at: string;
+  finished_at: string | null;
+  found: number;
+  new_saved: number;
+  needs_review: number;
+  url_needs_check: number;
+  status: "ok" | "partial" | "failed" | null;
+};
+
+export async function loadLastCollectRun(): Promise<PressCollectRun | null> {
+  await requirePressAdmin();
+  const { data, error } = await supabaseAdmin
+    .from("press_collect_runs")
+    .select("id,trigger,started_at,finished_at,found,new_saved,needs_review,url_needs_check,status")
+    .order("started_at", { ascending: false })
+    .limit(1);
+  if (error) throw new Error(error.message);
+  return ((data ?? [])[0] as PressCollectRun | undefined) ?? null;
+}
+
+// 원문에서 기자 다시 읽기 — 못 읽으면 null(기자 없이 진행).
+async function reporterFromPage(url: string, outlet: string): Promise<PressIngestReporter> {
+  try {
+    const page = await readArticlePage(url);
+    const email = page.reporterEmail && isValidEmail(page.reporterEmail) ? page.reporterEmail.toLowerCase() : null;
+    const name = page.reporterName?.slice(0, PRESS_LIMITS.name) ?? null;
+    return name || email ? { name, email, outlet } : null;
+  } catch {
+    return null;
+  }
+}
+
+async function articleUrlOutlet(id: string): Promise<{ url: string; outlet: string; url_status: string }> {
+  const { data, error } = await supabaseAdmin
+    .from("press_articles")
+    .select("url,outlet,url_status")
+    .eq("id", id)
+    .maybeSingle();
+  if (error) throw new Error(error.message);
+  if (!data) throw new Error("기사를 찾을 수 없습니다.");
+  return data as { url: string; outlet: string; url_status: string };
+}
+
+// 확인 필요 → 승인: 그때 홍보 실적·기자 연결(묶음기사는 실적·기자 없음).
+export async function approveArticle(id: string): Promise<PressActionResult> {
+  await requirePressAdmin();
+  try {
+    const a = await articleUrlOutlet(id);
+    const reporter = a.url_status === "ok" ? await reporterFromPage(a.url, a.outlet) : null;
+    await approvePressArticle(id, reporter);
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : "승인하지 못했습니다." };
+  }
+  revalidatePath("/press");
+  return { ok: true };
+}
+
+// 확인 필요 → 제외: 지우지 않고 숨깁니다(다음 수집 때 같은 기사가 다시 들어오지 않게).
+export async function rejectArticle(id: string): Promise<PressActionResult> {
+  await requirePressAdmin();
+  const { data, error } = await supabaseAdmin
+    .from("press_articles")
+    .update({ review_status: "rejected" })
+    .eq("id", id)
+    .eq("review_status", "needs_review")
+    .select("id");
+  if (error) return { ok: false, error: error.message };
+  if (!data || data.length === 0) return { ok: false, error: "확인 필요 상태의 기사만 제외할 수 있습니다." };
+  revalidatePath("/press");
+  return { ok: true };
+}
+
+// 제외를 되돌리기 → 다시 확인 필요로.
+export async function restoreRejectedArticle(id: string): Promise<PressActionResult> {
+  await requirePressAdmin();
+  const { data, error } = await supabaseAdmin
+    .from("press_articles")
+    .update({ review_status: "needs_review" })
+    .eq("id", id)
+    .eq("review_status", "rejected")
+    .select("id");
+  if (error) return { ok: false, error: error.message };
+  if (!data || data.length === 0) return { ok: false, error: "제외된 기사만 되돌릴 수 있습니다." };
+  revalidatePath("/press");
+  return { ok: true };
+}
+
+// "주소 확인 필요" → 실제 언론사 주소로 고치기.
+export async function fixArticleUrl(id: string, rawUrl: string): Promise<PressActionResult> {
+  await requirePressAdmin();
+  const url = cleanText(rawUrl);
+  if (!url || !isHttpUrl(url)) return { ok: false, error: "http(s) 로 시작하는 기사 주소를 넣어 주세요." };
+  if (/(^|\.)google\.com$/i.test(new URL(url).hostname)) {
+    return { ok: false, error: "구글 주소가 아니라 언론사 기사 주소를 넣어 주세요." };
+  }
+  try {
+    const a = await articleUrlOutlet(id);
+    await fixPressArticleUrl(id, url, await reporterFromPage(url, a.outlet));
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : "주소를 고치지 못했습니다." };
+  }
+  revalidatePath("/press");
+  return { ok: true };
+}
+
+// [지금 수집] — 크론과 같은 함수(최근 7일, 슬랙·텔레그램 정상 동작). 겹치면 거절.
+export async function collectPressNow(): Promise<PressActionResult & { summary?: string }> {
+  await requirePressAdmin();
+  try {
+    const r = await runPressCollectAndRecord({
+      trigger: "manual",
+      since: new Date(Date.now() - PRESS_COLLECT_DAYS * 86_400_000),
+    });
+    const s = r.saved!;
+    revalidatePath("/press");
+    return {
+      ok: true,
+      summary:
+        `수집 완료 — 후보 ${r.candidates.length}건 · 새 기사 ${s.created}건 · 확인 필요 ${s.needsReview}건` +
+        (s.urlNeedsCheck ? ` · 주소 확인 필요 ${s.urlNeedsCheck}건` : "") +
+        (r.status === "partial" ? ` · 일부 오류 ${r.errors.length}건(관장 텔레그램 참고)` : "") +
+        (r.slackSent ? " · 슬랙 공유함" : ""),
+    };
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : "수집하지 못했습니다." };
+  }
 }

@@ -46,14 +46,29 @@ export type PressArticle = {
   reporter_status: PressReporterStatus;
   promotion_id: string | null;
   release_id: string | null;
-  source: "hermes" | "manual";
+  source: PressArticleSource;
+  // 자동 수집(docs/PRESS_COLLECT_동업자씨이전.md) — 헤르메스·수기 기사는 ok / auto.
+  url_status: "ok" | "needs_check";
+  review_status: PressReviewStatus;
+  review_reason: string | null;
   created_at: string;
 };
+
+export type PressArticleSource = "hermes" | "manual" | "collector:naver" | "collector:google";
+
+// auto·approved 만 "우리 기사"로 셉니다(슬랙·홍보 실적·홈페이지 게시).
+//   needs_review — 사람이 판단할 때까지 보류, rejected — 숨김(지우지 않음: 다시 수집되지 않게).
+export type PressReviewStatus = "auto" | "needs_review" | "approved" | "rejected";
+
+export function isConfirmedArticle(a: Pick<PressArticle, "review_status">): boolean {
+  return a.review_status === "auto" || a.review_status === "approved";
+}
 
 // 홍보 실적(business_promotions) 연결 — 구분값은 BusinessResultsDashboard 의
 //   promotionCategories 안의 값을 그대로 씁니다(새 구분을 만들지 않습니다).
 export const PRESS_PROMOTION_CATEGORY = "언론보도";
 export const PRESS_PROMOTION_AUTHOR = "헤르메스 자동";
+export const PRESS_COLLECTOR_PROMOTION_AUTHOR = "동업자씨 자동 수집";
 
 // 입력 길이 상한 — 입구·관장 입력 공통.
 export const PRESS_LIMITS = {

@@ -23,6 +23,10 @@
     {
       "path": "/api/cron/file-backup",
       "schedule": "0 19 * * *"
+    },
+    {
+      "path": "/api/cron/press-collect",
+      "schedule": "0 23 * * 0-4"
     }
   ]
 }
