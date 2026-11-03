@@ -514,7 +514,9 @@ export default function SmsSender({
       <section className={panelToneCls("navy")}>
         <h3 className="mb-1 text-sm font-bold text-ink">발송 이력 (최근 50건)</h3>
         <p className="mb-3 text-xs text-ink-muted">
-          [결과 조회]는 그 시점의 성공·실패 수입니다. 최종 확정은 발송 24시간 뒤입니다.
+          전 직원이 같은 이력을 봅니다. 본문 전체는 보낸 사람·관장·부장만, 다른 직원에게는
+          앞 20자만 보입니다. [결과 조회]는 그 시점의 성공·실패 수이고, 최종 확정은 발송
+          24시간 뒤입니다.
         </p>
         <div className="overflow-x-auto">
           <table className="w-full text-sm">
@@ -523,6 +525,7 @@ export default function SmsSender({
                 <th className="px-2 py-2 text-left">일시</th>
                 <th className="px-2 py-2 text-left">보낸 사람</th>
                 <th className="px-2 py-2 text-left">대상</th>
+                <th className="px-2 py-2 text-left">본문</th>
                 <th className="px-2 py-2 text-right">인원</th>
                 <th className="px-2 py-2 text-left">유형</th>
                 <th className="px-2 py-2 text-left">결과</th>
@@ -532,7 +535,7 @@ export default function SmsSender({
             <tbody>
               {logs.length === 0 && (
                 <tr>
-                  <td colSpan={7} className="px-2 py-4 text-center text-ink-muted">
+                  <td colSpan={8} className="px-2 py-4 text-center text-ink-muted">
                     아직 보낸 문자가 없습니다.
                   </td>
                 </tr>
@@ -547,6 +550,18 @@ export default function SmsSender({
                     </td>
                     <td className="px-2 py-1.5">{row.sender_name ?? "-"}</td>
                     <td className="px-2 py-1.5">{row.audience_desc ?? "-"}</td>
+                    <td className="max-w-[20rem] px-2 py-1.5">
+                      <span
+                        className="whitespace-pre-wrap break-words text-xs text-ink-body"
+                        title={
+                          row.text_truncated
+                            ? "본문 전체는 보낸 사람·관장·부장만 볼 수 있습니다."
+                            : undefined
+                        }
+                      >
+                        {row.text_body || "-"}
+                      </span>
+                    </td>
                     <td className="px-2 py-1.5 text-right">{row.recipient_count}</td>
                     <td className="whitespace-nowrap px-2 py-1.5">
                       {row.msg_type ?? "-"}{" "}

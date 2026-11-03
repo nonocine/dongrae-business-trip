@@ -86,7 +86,7 @@ export const getShellData = cache(async (): Promise<ShellData> => {
       // 대시보드가 예전에 쓰던 조건 그대로 — 올해 교육이 1건 이상.
       hasMyTrainings: (myTrainingSummary?.total ?? 0) > 0,
       // 문자 발송 — /sms 가드(resolveSmsAccess)와 같은 판정.
-      canSendSms: smsSendAllowed({ rank, email: g?.email, authLevel }),
+      canSendSms: smsSendAllowed({ email: g?.email }),
     },
     badges: {
       "/mail": unreadMailCount,

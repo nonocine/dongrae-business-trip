@@ -120,6 +120,9 @@ export type SmsLogRow = {
   failed_count: number | null;
   provider_msg_id: string | null;
   error: string | null;
+  // 본문 — 보낸 본인·관장·부장은 전체, 다른 직원은 앞 20자(서버가 잘라서 줌).
+  text_body: string;
+  text_truncated: boolean;
 };
 
 export type SmsSendRequest = {

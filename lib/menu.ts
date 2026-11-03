@@ -96,7 +96,7 @@ export const MENU_GROUP_LABEL: Record<MenuGroup, string> = {
 //       auth_level='M0' 면 참이지만, isManagerAdmin 은 '구글 세션' 이면서
 //       master 이거나 rank='관장' 일 때만 참입니다. 부장(M0)도, 비번 로그인도
 //       /admin 에서는 튕깁니다. m0 로 걸면 눌렀다 튕기는 메뉴가 됩니다.
-//   smsSender: 문자 발송 — 팀장 이상 + SMS_SEND_EMAILS(lib/smsAccess, 가드와 같은 판정).
+//   smsSender: 문자 발송 — 로그인 직원 + SMS_SEND_EMAILS(lib/smsAccess, 가드와 같은 판정).
 export type MenuVisibility =
   | { kind: "everyone" }
   | { kind: "m0" }
@@ -193,16 +193,6 @@ export const MENU_ITEMS: MenuItem[] = [
     show: { kind: "everyone" },
   },
   {
-    // 팀장 이상 + SMS_SEND_EMAILS 만 보입니다 — 가드(lib/smsAccess)와 같은 판정.
-    key: "common-sms",
-    group: "common",
-    label: "문자 발송",
-    href: "/sms",
-    icon: "✉️",
-    desc: "방과후 보호자·직접 입력 번호로 문자 보내기 · 발송 이력",
-    show: { kind: "smsSender" },
-  },
-  {
     key: "common-profile",
     group: "common",
     label: "내 인사기록카드",
@@ -279,6 +269,16 @@ export const MENU_ITEMS: MenuItem[] = [
     show: { kind: "everyone" },
     badgeDesc: (n) =>
       n && n > 0 ? `결재 대기 ${n}건 — 직인 증서 신청·결재·발급` : "직인 증서(수상확인증·수료증·표창장·상장·위촉장) 신청·결재·발급",
+  },
+  {
+    // 전 직원 공통 — SMS_SEND_EMAILS 에 있는 사람("*" 면 전원)만 보입니다 — 가드(lib/smsAccess)와 같은 판정.
+    key: "common-sms",
+    group: "common",
+    label: "문자 발송",
+    href: "/sms",
+    icon: "✉️",
+    desc: "방과후 보호자·직접 입력 번호로 문자 보내기 · 발송 이력",
+    show: { kind: "smsSender" },
   },
   {
     key: "common-my-contracts",

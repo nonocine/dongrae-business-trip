@@ -5,6 +5,7 @@
 // =====================================================================
 
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
+import { canSeeFullBody, previewBody, type SmsAccess } from "@/lib/smsAccess";
 import {
   isValidSmsPhone,
   normalizeSmsPhone,
@@ -102,16 +103,24 @@ export async function resolveBkRecipients(
   return { phones, studentCount: picked.length };
 }
 
-export async function listSmsLogs(limit = 50): Promise<SmsLogRow[]> {
+// 전 직원이 같은 목록을 봅니다. 본문 전체는 보낸 본인·관장·부장만 — 나머지는 앞 20자를
+//   서버에서 잘라 보냅니다(화면에서 가리는 게 아니라 아예 내려보내지 않음).
+export async function listSmsLogs(
+  viewer: Pick<SmsAccess, "driverId" | "isM0">,
+  limit = 50,
+): Promise<SmsLogRow[]> {
   const { data, error } = await supabaseAdmin
     .from(SMS_LOG_TABLE)
     .select(
-      "id, created_at, sent_by, program, audience_desc, recipient_count, msg_type, sender, is_test, ok, sent_count, failed_count, provider_msg_id, error",
+      "id, created_at, sent_by, program, audience_desc, recipient_count, text_body, msg_type, sender, is_test, ok, sent_count, failed_count, provider_msg_id, error",
     )
     .order("created_at", { ascending: false })
     .limit(limit);
   if (error) throw new Error(`발송 이력 조회 실패: ${error.message}`);
-  const rows = (data ?? []) as (Omit<SmsLogRow, "sender_name"> & {
+  const rows = (data ?? []) as (Omit<
+    SmsLogRow,
+    "sender_name" | "text_truncated"
+  > & {
     sent_by: string | null;
   })[];
   const ids = [...new Set(rows.map((r) => r.sent_by).filter(Boolean))] as string[];
@@ -124,8 +133,15 @@ export async function listSmsLogs(limit = 50): Promise<SmsLogRow[]> {
     for (const d of (drv ?? []) as { id: string; name: string }[])
       names.set(d.id, d.name);
   }
-  return rows.map(({ sent_by, ...r }) => ({
-    ...r,
-    sender_name: sent_by ? names.get(sent_by) ?? null : null,
-  }));
+  return rows.map(({ sent_by, text_body, ...r }) => {
+    const full = canSeeFullBody(viewer, sent_by);
+    const body = text_body ?? "";
+    const shown = full ? body : previewBody(body);
+    return {
+      ...r,
+      sender_name: sent_by ? names.get(sent_by) ?? null : null,
+      text_body: shown,
+      text_truncated: shown !== body,
+    };
+  });
 }
