@@ -28,12 +28,18 @@ import {
 } from "@/lib/press";
 import {
   applyPendingEmail,
+  approveArticle,
+  collectPressNow,
   createManualReporter,
   deleteReporter,
   dismissPendingEmail,
+  fixArticleUrl,
+  rejectArticle,
+  restoreRejectedArticle,
   updateReporterManual,
   type ManualFieldsInput,
   type PressActionResult,
+  type PressCollectRun,
 } from "./actions";
 import Tabs from "@/app/components/Tabs";
 
@@ -81,14 +87,17 @@ function SourceBadge({ source }: { source: PressReporter["source"] }) {
 export default function PressManager({
   reporters,
   articles,
+  lastRun,
   today,
   initialTab,
 }: {
   reporters: PressReporter[];
   articles: PressArticle[];
+  lastRun: PressCollectRun | null;
   today: string;
   initialTab: Tab;
 }) {
+  const visibleCount = articles.filter((a) => a.review_status !== "rejected").length;
   const [tab, setTab] = useState<Tab>(initialTab);
   const switchTab = (t: Tab) => {
     setTab(t);
@@ -97,13 +106,15 @@ export default function PressManager({
 
   return (
     <div className="space-y-4">
+      <CollectBar lastRun={lastRun} />
+      <ReviewQueue articles={articles} />
       <Tabs
         ariaLabel="보도자료"
         value={tab}
         onChange={switchTab}
         items={[
           { key: "reporters", label: "기자", icon: "contact", count: reporters.length },
-          { key: "articles", label: "기사", icon: "newspaper", count: articles.length },
+          { key: "articles", label: "기사", icon: "newspaper", count: visibleCount },
         ]}
       />
       {tab === "reporters" ? (
@@ -112,6 +123,169 @@ export default function PressManager({
         <ArticlesTab reporters={reporters} articles={articles} today={today} />
       )}
     </div>
+  );
+}
+
+// ---------------------------------------------------------------------
+// 자동 수집 — 마지막 수집 한 줄 + [지금 수집]
+// ---------------------------------------------------------------------
+
+function kstDateTime(iso: string): string {
+  return new Intl.DateTimeFormat("ko-KR", {
+    timeZone: "Asia/Seoul",
+    month: "numeric",
+    day: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+  }).format(new Date(iso));
+}
+
+function CollectBar({ lastRun }: { lastRun: PressCollectRun | null }) {
+  const router = useRouter();
+  const [pending, start] = useTransition();
+  const [notice, setNotice] = useState<Notice>(null);
+
+  const collect = () =>
+    start(async () => {
+      setNotice(null);
+      try {
+        const r = await collectPressNow();
+        if (r.ok) {
+          setNotice({ kind: "ok", text: r.summary ?? "수집했습니다." });
+          router.refresh();
+        } else setNotice({ kind: "error", text: r.error });
+      } catch (e) {
+        setNotice({ kind: "error", text: e instanceof Error ? e.message : "수집하지 못했습니다." });
+      }
+    });
+
+  let line = "아직 자동 수집 기록이 없습니다.";
+  let failed = false;
+  if (lastRun) {
+    const when = `${kstDateTime(lastRun.started_at)}${lastRun.trigger === "manual" ? " (수동)" : ""}`;
+    if (!lastRun.finished_at) line = `수집 중… (${when} 시작)`;
+    else if (lastRun.status === "failed") {
+      failed = true;
+      line = `마지막 수집: ${when} · 실패 — 관장 텔레그램 알림 확인`;
+    } else {
+      line =
+        `마지막 수집: ${when} · 새 기사 ${lastRun.new_saved}건 · 확인 필요 ${lastRun.needs_review}건` +
+        (lastRun.url_needs_check ? ` · 주소 확인 ${lastRun.url_needs_check}건` : "") +
+        (lastRun.status === "partial" ? " · 일부 오류" : "");
+    }
+  }
+
+  return (
+    <section className={`${cardCls} flex flex-wrap items-center justify-between gap-2 py-3`}>
+      <div className="min-w-0">
+        <p className={`text-sm ${failed ? "font-semibold text-stamp" : "text-ink-body"}`}>📰 {line}</p>
+        <p className="mt-0.5 text-xs text-ink-hint">평일 아침 8시 자동 수집(네이버·구글 뉴스, 최근 7일). 새 기사만 슬랙 #14_보도자료관련에 공유합니다.</p>
+        {notice && (
+          <div className="mt-2">
+            <NoticeLine notice={notice} />
+          </div>
+        )}
+      </div>
+      <button type="button" className={btnSecondary} onClick={collect} disabled={pending}>
+        {pending ? "수집 중… (1분 정도)" : "지금 수집"}
+      </button>
+    </section>
+  );
+}
+
+// ---------------------------------------------------------------------
+// 확인할 기사 — 확인 필요(승인/제외) · 주소 확인 필요(주소 고치기)
+// ---------------------------------------------------------------------
+
+function ReviewQueue({ articles }: { articles: PressArticle[] }) {
+  const list = articles.filter((a) => a.review_status === "needs_review" || a.url_status === "needs_check");
+  const [notice, setNotice] = useState<Notice>(null);
+  if (list.length === 0) return null;
+  return (
+    <section className={`${cardCls} border-warning`}>
+      <h3 className="text-sm font-semibold text-ink">
+        확인할 기사 <span className={`ml-1 ${badgeWarning}`}>{list.length}</span>
+      </h3>
+      <p className="mt-1 text-xs text-ink-muted">
+        자동 수집이 판단하지 못한 기사입니다. <b>승인</b>하면 홍보 실적·기자에 반영되고(묶음기사는 실적 제외),{" "}
+        <b>제외</b>하면 목록에서 숨깁니다(다시 수집되지 않음). 확인 필요 기사는 슬랙에 공유되지 않습니다.
+      </p>
+      <div className="mt-2">
+        <NoticeLine notice={notice} />
+      </div>
+      <ul className="mt-2 divide-y divide-line">
+        {list.map((a) => (
+          <ReviewRow key={a.id} article={a} setNotice={setNotice} />
+        ))}
+      </ul>
+    </section>
+  );
+}
+
+function ReviewRow({ article: a, setNotice }: { article: PressArticle; setNotice: (n: Notice) => void }) {
+  const { pending, run } = useAction(setNotice);
+  const [url, setUrl] = useState("");
+  return (
+    <li className="py-3 text-sm">
+      <div className="flex flex-wrap items-baseline gap-x-2 gap-y-1">
+        <span className="text-ink-muted">{a.published_at}</span>
+        <span className="text-ink-body">{a.outlet}</span>
+        <a href={a.url} target="_blank" rel="noreferrer" className={linkCls}>
+          {a.title}
+        </a>
+        {a.is_roundup && <span className={badgeWarning}>묶음기사</span>}
+        {a.review_status === "needs_review" && <span className={badgeWarning}>확인 필요</span>}
+        {a.url_status === "needs_check" && <span className={badgeWarning}>주소 확인 필요</span>}
+      </div>
+      {a.review_reason && <p className="mt-1 text-xs text-ink-muted">판정 사유: {a.review_reason}</p>}
+
+      {a.url_status === "needs_check" && (
+        <div className="mt-2 flex flex-wrap items-center gap-2">
+          <input
+            type="url"
+            className={`${inputCls} min-w-0 flex-1`}
+            placeholder="언론사 기사 주소(https://…) — 위 링크를 열어 주소창의 주소를 붙여 넣으세요"
+            value={url}
+            onChange={(e) => setUrl(e.target.value)}
+          />
+          <button
+            type="button"
+            className={btnSecondary}
+            disabled={pending || !url.trim()}
+            onClick={() => run(() => fixArticleUrl(a.id, url), "주소를 고쳤습니다.", () => setUrl(""))}
+          >
+            주소 고치기
+          </button>
+        </div>
+      )}
+
+      {a.review_status === "needs_review" && (
+        <div className="mt-2 flex gap-2">
+          <button
+            type="button"
+            className={btnPrimary}
+            disabled={pending}
+            onClick={() =>
+              run(
+                () => approveArticle(a.id),
+                a.is_roundup ? "승인했습니다(묶음기사 — 실적 제외)." : "승인했습니다. 홍보 실적·기자에 반영했습니다.",
+              )
+            }
+          >
+            {pending ? "처리 중…" : "승인"}
+          </button>
+          <button
+            type="button"
+            className={btnSecondary}
+            disabled={pending}
+            onClick={() => run(() => rejectArticle(a.id), "제외했습니다.")}
+          >
+            제외
+          </button>
+        </div>
+      )}
+    </li>
   );
 }
 
@@ -529,14 +703,21 @@ function ArticlesTab({
   const [from, setFrom] = useState(`${today.slice(0, 4)}-01-01`);
   const [to, setTo] = useState(today);
   const [grouped, setGrouped] = useState(false);
+  const [showRejected, setShowRejected] = useState(false);
+  const [notice, setNotice] = useState<Notice>(null);
+  const { pending, run } = useAction(setNotice);
   const names = useMemo(() => new Map(reporters.map((r) => [r.id, r.name])), [reporters]);
+  const rejectedCount = articles.filter((a) => a.review_status === "rejected").length;
 
   const inRange = useMemo(
     () =>
       articles.filter(
-        (a) => (!from || a.published_at >= from) && (!to || a.published_at <= to),
+        (a) =>
+          (showRejected || a.review_status !== "rejected") &&
+          (!from || a.published_at >= from) &&
+          (!to || a.published_at <= to),
       ),
-    [articles, from, to],
+    [articles, from, to, showRejected],
   );
 
   // event_group 별 묶음 — 키 없는 기사는 맨 뒤 한 묶음.
@@ -577,6 +758,21 @@ function ArticlesTab({
                     {a.title}
                   </a>
                   {a.is_roundup && <span className={`ml-1 ${badgeWarning}`}>묶음기사</span>}
+                  {a.review_status === "needs_review" && <span className={`ml-1 ${badgeWarning}`}>확인 필요</span>}
+                  {a.url_status === "needs_check" && <span className={`ml-1 ${badgeWarning}`}>주소 확인 필요</span>}
+                  {a.review_status === "rejected" && (
+                    <>
+                      <span className={`ml-1 ${badgeNeutral}`}>제외함</span>{" "}
+                      <button
+                        type="button"
+                        className="text-xs text-ink-muted underline"
+                        disabled={pending}
+                        onClick={() => run(() => restoreRejectedArticle(a.id), "확인 필요로 되돌렸습니다.")}
+                      >
+                        되돌리기
+                      </button>
+                    </>
+                  )}
                 </td>
                 <td className="py-2 pr-2 text-ink-body">
                   {name ?? <span className="text-ink-hint">{STATUS_LABEL[a.reporter_status] || "삭제됨"}</span>}
@@ -584,6 +780,8 @@ function ArticlesTab({
                 <td className="py-2">
                   {a.promotion_id ? (
                     <span className={badgeSuccess}>연결됨</span>
+                  ) : a.review_status === "needs_review" || a.review_status === "rejected" ? (
+                    <span className="text-ink-hint">보류</span>
                   ) : a.is_roundup ? (
                     <span className={badgeNeutral}>제외</span>
                   ) : (
@@ -613,10 +811,21 @@ function ArticlesTab({
           <input type="checkbox" checked={grouped} onChange={(e) => setGrouped(e.target.checked)} className="h-4 w-4 rounded border-line" />
           <span className="text-ink-body">같은 내용끼리 묶어 보기</span>
         </label>
+        {rejectedCount > 0 && (
+          <label className="inline-flex h-[38px] cursor-pointer items-center gap-2 rounded-lg border border-line bg-surface px-3 text-sm">
+            <input type="checkbox" checked={showRejected} onChange={(e) => setShowRejected(e.target.checked)} className="h-4 w-4 rounded border-line" />
+            <span className="text-ink-body">제외한 기사도 보기 ({rejectedCount})</span>
+          </label>
+        )}
       </div>
       <p className="mt-3 text-xs text-ink-muted">
-        {inRange.length}건 · 홍보 실적(언론보도) 연결 {linkedCount}건. 묶음기사는 실적에 넣지 않습니다.
+        {inRange.length}건 · 홍보 실적(언론보도) 연결 {linkedCount}건. 묶음기사와 확인 필요 기사는 실적에 넣지 않습니다.
       </p>
+      {notice && (
+        <div className="mt-2">
+          <NoticeLine notice={notice} />
+        </div>
+      )}
 
       <div className="mt-3">
         {inRange.length === 0 ? (

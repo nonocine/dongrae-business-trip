@@ -1,9 +1,12 @@
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
 import {
+  PRESS_COLLECTOR_PROMOTION_AUTHOR,
   PRESS_PROMOTION_AUTHOR,
   PRESS_PROMOTION_CATEGORY,
   reporterStatusOf,
+  type PressArticleSource,
   type PressIngestItem,
+  type PressIngestReporter,
   type PressReporterStatus,
 } from "@/lib/press";
 
@@ -189,6 +192,7 @@ async function upsertReporter(
 
 async function linkPromotion(
   a: PressIngestItem["article"],
+  author: string,
 ): Promise<{ id: string | null; action: PressIngestResult["promotion"] }> {
   if (a.is_roundup) return { id: null, action: "skipped" };
 
@@ -216,7 +220,7 @@ async function linkPromotion(
       count: 1,
       url: a.url,
       description: a.outlet,
-      author_name: PRESS_PROMOTION_AUTHOR,
+      author_name: author,
       source: "auto",
     })
     .select("id")
@@ -227,11 +231,57 @@ async function linkPromotion(
 
 // --- 진입점 ----------------------------------------------------------
 
+// 자동 수집기(lib/pressCollect)용 선택 사항. 아무것도 안 주면 헤르메스 입구와 똑같이 동작합니다.
+export type PressIngestOptions = {
+  source?: PressArticleSource; // 기본 'hermes'
+  // 'needs_review' — 기사 행만 저장하고 홍보 실적·기자는 건드리지 않습니다.
+  //   사람이 승인하면(approvePressArticle) 그때 연결합니다.
+  reviewStatus?: "auto" | "needs_review";
+  reviewReason?: string | null;
+  urlStatus?: "ok" | "needs_check"; // needs_check — 구글 경유 주소. 화면에서 직원이 고칩니다.
+};
+
+function promotionAuthorOf(source: PressArticleSource): string {
+  return source === "hermes" || source === "manual" ? PRESS_PROMOTION_AUTHOR : PRESS_COLLECTOR_PROMOTION_AUTHOR;
+}
+
+// 기사 행이 이미 있을 때 2)~4) — 홍보 실적·기자·연결. 실패하면 이번에 만든 실적 행만 되돌리고 throw.
+async function linkArticle(
+  articleId: string,
+  item: PressIngestItem,
+  source: PressArticleSource,
+): Promise<{ reporter: ReporterOutcome; promotion: { id: string | null; action: PressIngestResult["promotion"] } }> {
+  let createdPromotionId: string | null = null;
+  try {
+    const promotion = await linkPromotion(item.article, promotionAuthorOf(source));
+    if (promotion.action === "created") createdPromotionId = promotion.id;
+    const reporter = await upsertReporter(item);
+    const { error: linkErr } = await supabaseAdmin
+      .from("press_articles")
+      .update({
+        reporter_id: reporter.id,
+        promotion_id: promotion.id,
+        reporter_status: reporterStatusOf(item.reporter),
+      })
+      .eq("id", articleId);
+    if (linkErr) fail("기사 연결", linkErr.message);
+    return { reporter, promotion };
+  } catch (e) {
+    if (createdPromotionId) {
+      await supabaseAdmin.from("business_promotions").delete().eq("id", createdPromotionId);
+    }
+    throw e;
+  }
+}
+
 export async function ingestPressItem(
   item: PressIngestItem,
+  opts: PressIngestOptions = {},
 ): Promise<PressIngestResult> {
   const a = item.article;
   const reporterStatus = reporterStatusOf(item.reporter);
+  const source = opts.source ?? "hermes";
+  const reviewStatus = opts.reviewStatus ?? "auto";
 
   const { data: inserted, error: insErr } = await supabaseAdmin
     .from("press_articles")
@@ -243,7 +293,10 @@ export async function ingestPressItem(
       event_group: a.event_group,
       is_roundup: a.is_roundup,
       reporter_status: reporterStatus,
-      source: "hermes",
+      source,
+      review_status: reviewStatus,
+      review_reason: opts.reviewReason ?? null,
+      url_status: opts.urlStatus ?? "ok",
     })
     .select("id")
     .single();
@@ -261,18 +314,13 @@ export async function ingestPressItem(
   }
   const articleId = (inserted as { id: string }).id;
 
-  let createdPromotionId: string | null = null;
+  // 확인 필요 — 실적·기자는 승인 때.
+  if (reviewStatus === "needs_review") {
+    return { url: a.url, article: "created", reporter: "skipped", reporter_status: reporterStatus, promotion: "skipped" };
+  }
+
   try {
-    const promotion = await linkPromotion(a);
-    if (promotion.action === "created") createdPromotionId = promotion.id;
-    const reporter = await upsertReporter(item);
-
-    const { error: linkErr } = await supabaseAdmin
-      .from("press_articles")
-      .update({ reporter_id: reporter.id, promotion_id: promotion.id })
-      .eq("id", articleId);
-    if (linkErr) fail("기사 연결", linkErr.message);
-
+    const { reporter, promotion } = await linkArticle(articleId, item, source);
     return {
       url: a.url,
       article: "created",
@@ -282,14 +330,112 @@ export async function ingestPressItem(
       ...(reporter.pendingEmail ? { pending_email: true as const } : {}),
     };
   } catch (e) {
-    // 되돌리기 — 기사부터(실적을 참조할 수 있으므로) 지우고 실적을 지웁니다.
+    // 되돌리기 — 실적은 linkArticle 이 지웠고, 기사도 지워 다음에 처음부터 처리되게 합니다.
     await supabaseAdmin.from("press_articles").delete().eq("id", articleId);
-    if (createdPromotionId) {
-      await supabaseAdmin
-        .from("business_promotions")
-        .delete()
-        .eq("id", createdPromotionId);
-    }
     throw e;
+  }
+}
+
+// --- 확인 필요 기사 승인 ------------------------------------------------
+//   needs_review 로 저장된 기사를 사람이 승인 — 그때 홍보 실적·기자를 연결합니다.
+//   reporter 는 부르는 쪽이 원문을 다시 읽어 넘깁니다(못 읽으면 null → 기자 없이).
+//   실패하면 상태를 needs_review 로 되돌립니다.
+export async function approvePressArticle(
+  articleId: string,
+  reporter: PressIngestReporter,
+): Promise<PressIngestResult> {
+  const { data, error } = await supabaseAdmin
+    .from("press_articles")
+    .select("published_at,outlet,title,url,event_group,is_roundup,source,review_status")
+    .eq("id", articleId)
+    .maybeSingle();
+  if (error) fail("기사 조회", error.message);
+  if (!data) fail("기사 조회", "기사를 찾을 수 없습니다.");
+  const row = data as PressIngestItem["article"] & { source: PressArticleSource; review_status: string };
+  if (row.review_status !== "needs_review") fail("승인", "확인 필요 상태의 기사만 승인할 수 있습니다.");
+
+  // 먼저 상태를 바꿔 두 번 눌러도 두 번 연결되지 않게 합니다(조건부 갱신).
+  const { data: claimed, error: claimErr } = await supabaseAdmin
+    .from("press_articles")
+    .update({ review_status: "approved" })
+    .eq("id", articleId)
+    .eq("review_status", "needs_review")
+    .select("id");
+  if (claimErr) fail("승인", claimErr.message);
+  if (!claimed || claimed.length === 0) fail("승인", "이미 처리된 기사입니다.");
+
+  const item: PressIngestItem = {
+    article: {
+      published_at: row.published_at,
+      outlet: row.outlet,
+      title: row.title,
+      url: row.url,
+      event_group: row.event_group,
+      is_roundup: row.is_roundup,
+    },
+    reporter: row.is_roundup ? null : reporter,
+  };
+  try {
+    const { reporter: r, promotion } = await linkArticle(articleId, item, row.source);
+    return {
+      url: row.url,
+      article: "exists",
+      reporter: r.action,
+      reporter_status: reporterStatusOf(item.reporter),
+      promotion: promotion.action,
+      ...(r.pendingEmail ? { pending_email: true as const } : {}),
+    };
+  } catch (e) {
+    await supabaseAdmin.from("press_articles").update({ review_status: "needs_review" }).eq("id", articleId);
+    throw e;
+  }
+}
+
+// --- 주소 고치기 (url_status = needs_check) --------------------------------
+//   구글 경유 주소로 저장된 기사를 직원이 실제 언론사 주소로 고칩니다.
+//   * 연결된 홍보 실적 행의 url 도 같이 고칩니다.
+//   * 확정 기사(auto·approved)이고 기자가 비어 있으면, 부르는 쪽이 새 주소에서 읽은 기자를 붙입니다.
+export async function fixPressArticleUrl(
+  articleId: string,
+  url: string,
+  reporter: PressIngestReporter,
+): Promise<void> {
+  const { data, error } = await supabaseAdmin
+    .from("press_articles")
+    .select("published_at,outlet,title,url,event_group,is_roundup,review_status,reporter_id,promotion_id")
+    .eq("id", articleId)
+    .maybeSingle();
+  if (error) fail("기사 조회", error.message);
+  if (!data) fail("기사 조회", "기사를 찾을 수 없습니다.");
+  const row = data as PressIngestItem["article"] & {
+    review_status: string;
+    reporter_id: string | null;
+    promotion_id: string | null;
+  };
+
+  const { error: upErr } = await supabaseAdmin
+    .from("press_articles")
+    .update({ url, url_status: "ok" })
+    .eq("id", articleId);
+  if (upErr) {
+    if (isUniqueViolation(upErr)) fail("주소 고치기", "같은 주소의 기사가 이미 있습니다.");
+    fail("주소 고치기", upErr.message);
+  }
+  if (row.promotion_id) {
+    const { error: pErr } = await supabaseAdmin
+      .from("business_promotions")
+      .update({ url })
+      .eq("id", row.promotion_id);
+    if (pErr) console.error("[press] 실적 주소 갱신 실패:", pErr.message);
+  }
+
+  const confirmed = row.review_status === "auto" || row.review_status === "approved";
+  if (confirmed && !row.reporter_id && !row.is_roundup && reporter?.name) {
+    const item: PressIngestItem = { article: { ...row, url }, reporter };
+    const r = await upsertReporter(item);
+    await supabaseAdmin
+      .from("press_articles")
+      .update({ reporter_id: r.id, reporter_status: reporterStatusOf(reporter) })
+      .eq("id", articleId);
   }
 }
