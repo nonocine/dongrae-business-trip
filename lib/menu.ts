@@ -96,6 +96,7 @@ export const MENU_GROUP_LABEL: Record<MenuGroup, string> = {
 //       auth_level='M0' 면 참이지만, isManagerAdmin 은 '구글 세션' 이면서
 //       master 이거나 rank='관장' 일 때만 참입니다. 부장(M0)도, 비번 로그인도
 //       /admin 에서는 튕깁니다. m0 로 걸면 눌렀다 튕기는 메뉴가 됩니다.
+//   smsSender: 문자 발송 — 팀장 이상 + SMS_SEND_EMAILS(lib/smsAccess, 가드와 같은 판정).
 export type MenuVisibility =
   | { kind: "everyone" }
   | { kind: "m0" }
@@ -106,7 +107,8 @@ export type MenuVisibility =
   | { kind: "m0Personnel" }
   | { kind: "roleOrPersonnel"; role: string }
   | { kind: "m0OrRoleOrPersonnel"; role: string }
-  | { kind: "managerAdmin" };
+  | { kind: "managerAdmin" }
+  | { kind: "smsSender" };
 
 // 데이터 조건 — 권한이 아니라 '보여 줄 내용이 있을 때만' 나타나는 항목.
 //   myTrainings: 올해 내게 배정된 법정 의무교육이 1건 이상(getMyTrainingSummary).
@@ -189,6 +191,16 @@ export const MENU_ITEMS: MenuItem[] = [
     icon: "🧑‍🏫",
     desc: "외부 강사·프로그램·근무일지 조회 (편성·정산은 담당자)",
     show: { kind: "everyone" },
+  },
+  {
+    // 팀장 이상 + SMS_SEND_EMAILS 만 보입니다 — 가드(lib/smsAccess)와 같은 판정.
+    key: "common-sms",
+    group: "common",
+    label: "문자 발송",
+    href: "/sms",
+    icon: "✉️",
+    desc: "방과후 보호자·직접 입력 번호로 문자 보내기 · 발송 이력",
+    show: { kind: "smsSender" },
   },
   {
     key: "common-profile",
@@ -712,6 +724,8 @@ export type MenuContext = {
   isPersonnel?: boolean;
   // 데이터 조건(MenuDataCondition)의 값. 모르면 해당 항목을 숨깁니다.
   hasMyTrainings?: boolean;
+  // 문자 발송 가능(lib/smsAccess smsSendAllowed). 모르면 false(좁게).
+  canSendSms?: boolean;
 };
 
 function hasRole(ctx: MenuContext, role: string): boolean {
@@ -752,6 +766,8 @@ export function canSeeMenuItem(item: MenuItem, ctx: MenuContext): boolean {
       return ctx.isM0 || hasRole(ctx, item.show.role) || ctx.isPersonnel === true;
     case "managerAdmin":
       return ctx.isManagerAdmin === true;
+    case "smsSender":
+      return ctx.canSendSms === true;
   }
 }
 
