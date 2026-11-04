@@ -420,7 +420,7 @@ export async function buildApplicationPdf(a: ApplicationPdfInput): Promise<Uint8
     })),
     { x: M + 20 },
   );
-  w.signLine([guardianSign, youthSign], date, `${CENTER}장 귀하`);
+  w.signLine([guardianSign], date, `${CENTER}장 귀하`);
 
   // ③ 개인정보 수집·이용 및 제공 동의서 ----------------------------------------
   w.newPage();
