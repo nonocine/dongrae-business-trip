@@ -20,9 +20,14 @@ export default async function BangkaShell({ children }: { children: React.ReactN
           <h2 className="mt-0.5 text-2xl font-bold tracking-[0.1em] text-ink">동래방카 콘텐츠</h2>
           <p className="mt-1 text-xs text-ink-muted">여기서 쓴 글·급식·일정이 보호자 앱(동래방카)에 그대로 보입니다.</p>
         </div>
-        <Link href="/bangka/members" className={`text-sm ${linkCls}`}>
-          학생·보호자 관리 →
-        </Link>
+        <div className="flex flex-wrap gap-3">
+          <Link href="/bangka/enroll" className={`text-sm ${linkCls}`}>
+            신규 접수 →
+          </Link>
+          <Link href="/bangka/members" className={`text-sm ${linkCls}`}>
+            학생·보호자 관리 →
+          </Link>
+        </div>
       </div>
       <BangkaContentTabs pendingAbsences={pendingAbsences} />
       <div className="mt-5">{children}</div>

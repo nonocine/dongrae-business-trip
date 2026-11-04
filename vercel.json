@@ -27,6 +27,10 @@
     {
       "path": "/api/cron/press-collect",
       "schedule": "0 23 * * 0-4"
+    },
+    {
+      "path": "/api/cron/bk-enroll-purge",
+      "schedule": "0 17 * * *"
     }
   ]
 }
