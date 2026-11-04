@@ -495,6 +495,16 @@ export const MENU_ITEMS: MenuItem[] = [
     desc: "방과후아카데미 학생·보호자 명단, 동래방카 초대 링크",
     show: { kind: "m0OrRole", role: "bangka" },
   },
+  // 신규 청소년 온라인 접수 — 가드는 같은 lib/bangkaAccess(enroll/layout).
+  {
+    key: "bangka-enroll",
+    group: "bangka",
+    label: "신규 접수",
+    href: "/bangka/enroll",
+    icon: "📝",
+    desc: "모집 회차·온라인 신청서 확인·보완요청·합격 처리",
+    show: { kind: "m0OrRole", role: "bangka" },
+  },
   // 동래방카 콘텐츠 — 가드는 같은 lib/bangkaAccess(BangkaShell).
   {
     key: "bangka-posts",
