@@ -18,6 +18,7 @@ import {
   normalizeData,
   normalizeSensitive,
   parseStops,
+  chosenStop,
   type AllergyInfo,
   type AppStatus,
   type RecruitmentStatus,
@@ -963,7 +964,7 @@ export async function acceptApplication(input: {
       prevStudentId = (prev as { id: string } | null)?.id ?? null;
     }
     const stops = parseStops(app.bk_recruitments?.shuttle_stops);
-    const stop = d.ret.method === "shuttle" && d.ret.stop_seq != null ? stops.find((s) => s.seq === d.ret.stop_seq) ?? null : null;
+    const stop = chosenStop(stops, d.ret);
     const allergy = app.sensitive != null ? normalizeSensitive(app.sensitive).allergy : null;
     const { data: st, error: se } = prevStudentId
       ? { data: { id: prevStudentId }, error: null }

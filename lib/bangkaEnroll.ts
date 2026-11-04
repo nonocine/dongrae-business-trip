@@ -302,8 +302,10 @@ export type ConsentAnswers = {
 export type ReturnInfo = {
   method: "shuttle" | "guardian" | "alone" | "other" | "";
   other: string;
-  stop_seq: number | null;
+  stop_seq: number | typeof STOP_ETC | null; // 'etc' = 기타(직접 입력) → stop_place 에 장소
+  stop_place: string;
 };
+export const STOP_ETC = "etc" as const;
 export type AllergyInfo = {
   has: boolean | null;
   foods: number[];
@@ -348,7 +350,7 @@ export function emptyData(): AppData {
     guardian: { name: "", relation: "", email: "" },
     priority: [],
     consent: { pledge: PLEDGE_ITEMS.map(() => false), answers: {} },
-    ret: { method: "", other: "", stop_seq: null },
+    ret: { method: "", other: "", stop_seq: null, stop_place: "" },
   };
 }
 
@@ -442,6 +444,8 @@ export function sectionProblems(
   if (key === "extra") {
     if (d.ret.method === "shuttle" && ctx.shuttleStopCount > 0 && d.ret.stop_seq == null)
       p.push("귀가차량 하차 장소를 골라 주세요.");
+    if (d.ret.method === "shuttle" && d.ret.stop_seq === STOP_ETC && !d.ret.stop_place.trim())
+      p.push("기타 하차 장소를 적어 주세요.");
     const a = s.allergy;
     if (a.has == null) p.push("식품 알레르기가 있는지 골라 주세요.");
     if (a.has) {
@@ -511,6 +515,21 @@ export function fmtKst(iso: string | null | undefined, withTime = true): string 
 }
 
 export type ShuttleStop = { seq: number; time: string; place: string };
+// '도보 귀가'처럼 차를 타지 않는 항목은 시간을 보이지 않는다.
+export const stopShowsTime = (st: ShuttleStop) => !!st.time && st.place.replace(/\s/g, "") !== "도보귀가";
+// 신청서에서 고른 하차 장소 — 목록 번호면 그 항목, '기타'면 { seq:'etc', place: 직접 적은 곳 }. 귀가차량이 아니면 null.
+export type ChosenStop = { seq: number | typeof STOP_ETC; time: string; place: string };
+export function chosenStop(stops: ShuttleStop[], ret: ReturnInfo): ChosenStop | null {
+  if (ret.method !== "shuttle" || ret.stop_seq == null) return null;
+  if (ret.stop_seq === STOP_ETC) return ret.stop_place?.trim() ? { seq: STOP_ETC, time: "", place: ret.stop_place.trim() } : null;
+  const st = stops.find((x) => x.seq === ret.stop_seq);
+  return st ? { ...st, time: stopShowsTime(st) ? st.time : "" } : null;
+}
+export function stopText(st: ChosenStop | null): string {
+  if (!st) return "";
+  if (st.seq === STOP_ETC) return `기타 — ${st.place}`;
+  return `${st.seq}. ${st.time ? `${st.time} ` : ""}${st.place}`;
+}
 export function parseStops(raw: unknown): ShuttleStop[] {
   if (!Array.isArray(raw)) return [];
   return raw

@@ -8,6 +8,8 @@ import {
   normalizeData,
   normalizeSensitive,
   parseStops,
+  chosenStop,
+  STOP_ETC,
   priorityLabel,
   returnMethodLabel,
   type AppStatus,
@@ -106,8 +108,7 @@ export async function GET(request: Request, ctx: { params: Promise<{ rid: string
   ws.addRow(head);
   for (const a of rows) {
     const d = normalizeData(a.data);
-    const stop =
-      d.ret.method === "shuttle" && d.ret.stop_seq != null ? stops.find((s) => s.seq === d.ret.stop_seq) : null;
+    const stop = chosenStop(stops, d.ret);
     const line: string[] = [
       a.app_no ?? "",
       d.youth.name,
@@ -123,7 +124,7 @@ export async function GET(request: Request, ctx: { params: Promise<{ rid: string
       formatBkPhone(a.guardian_phone),
       d.priority.map(priorityLabel).join(", "),
       returnMethodLabel(d.ret.method) + (d.ret.method === "other" && d.ret.other ? `(${d.ret.other})` : ""),
-      stop ? `${stop.time ? `${stop.time} ` : ""}${stop.place}` : "",
+      stop ? (stop.seq === STOP_ETC ? `기타: ${stop.place}` : `${stop.time ? `${stop.time} ` : ""}${stop.place}`) : "",
       APP_STATUS_LABEL[a.status] ?? a.status,
       kstDate(a.submitted_at),
     ];

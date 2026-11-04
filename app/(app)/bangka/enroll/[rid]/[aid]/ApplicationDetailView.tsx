@@ -36,6 +36,8 @@ import {
   priorityLabel,
   recommendReasonLabel,
   returnMethodLabel,
+  chosenStop,
+  stopText,
   type AllergyInfo,
 } from "@/lib/bangkaEnroll";
 import { BK_ALLERGENS } from "@/lib/bangkaMenuParse";
@@ -127,7 +129,7 @@ export default function ApplicationDetailView({
   const d = app.data;
   const y = d.youth;
   const stops = recruitment.shuttle_stops;
-  const stop = d.ret.stop_seq != null ? stops.find((s) => s.seq === d.ret.stop_seq) : null;
+  const stop = chosenStop(stops, d.ret);
   const purged = !!app.purged_at;
   const media = (kind: string, q = "") => `/bangka/enroll/media/${app.id}/${kind}${q}`;
 
@@ -203,6 +205,13 @@ export default function ApplicationDetailView({
             </div>
           </div>
           <div className="text-right text-xs text-ink-muted">
+            {app.submitted_at && (
+              <p className="mb-2">
+                <a href={`/bangka/enroll/${app.recruitment_id}/${app.id}/pdf`} className={btnSecondary} download>
+                  신청서 PDF 다운로드
+                </a>
+              </p>
+            )}
             <p>보관기한 {app.retention_until ? fmtKstDate(app.retention_until) : "아직 정해지지 않음"}</p>
             {purged && <p className="text-stamp">보관기간이 지나 {fmtKstDate(app.purged_at)}에 서류를 삭제했습니다.</p>}
             {app.student_id && (
@@ -269,7 +278,7 @@ export default function ApplicationDetailView({
                 {d.ret.method === "shuttle" && (
                   <>
                     <Dt>하차 장소</Dt>
-                    <Dd>{stop ? `${stop.seq}. ${stop.time ? `${stop.time} ` : ""}${stop.place}` : d.ret.stop_seq != null ? `${d.ret.stop_seq}번(회차에 없음)` : "-"}</Dd>
+                    <Dd>{stop ? stopText(stop) : d.ret.stop_seq != null ? `${d.ret.stop_seq}번(회차에 없음)` : "-"}</Dd>
                   </>
                 )}
                 <Dt>식품 알레르기</Dt>
