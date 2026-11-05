@@ -13,7 +13,10 @@ export const dynamic = "force-dynamic";
 // 문자 발송 — 전 직원 공통 메뉴. 로그인 직원 + SMS_SEND_EMAILS(lib/sms/access). 메뉴 조건도 같습니다.
 //   받는 사람 출처 카드는 등록표(lib/sms/sources/index.ts)에서 이 사람이 쓸 수 있는 것만.
 //   발송은 문자 중계 서버(sms-relay) 경유 — 화면은 /api/sms/* 만 부릅니다.
-export default async function SmsPage() {
+//   ?body= 로 내용을 미리 채울 수 있습니다(예: 방카 신규 모집 [문자로 안내]). 받는 사람은 비워 둡니다.
+export default async function SmsPage({ searchParams }: { searchParams: Promise<{ body?: string | string[] }> }) {
+  const sp = await searchParams;
+  const initialBody = (Array.isArray(sp.body) ? sp.body[0] : sp.body ?? "").slice(0, 2000);
   await enforcePasswordChange();
   const user = await resolveSmsAccess();
   if (!user) redirect("/");
@@ -48,6 +51,7 @@ export default async function SmsPage() {
           logs={logsResult.rows}
           programs={programs}
           loadError={logsResult.error}
+          initialBody={initialBody}
         />
       </div>
     </div>

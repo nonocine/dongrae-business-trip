@@ -3,7 +3,9 @@ import { notFound } from "next/navigation";
 import Tabs from "@/app/components/Tabs";
 import { getRecruitment, listApplications } from "@/app/(app)/bangka/enroll/actions";
 import { APP_STATUS_BADGE, RECRUIT_STATUS_BADGE } from "@/app/(app)/bangka/enroll/badges";
-import { APP_STATUS_LABEL, RECRUITMENT_STATUS_LABEL, priorityLabel, type AppStatus } from "@/lib/bangkaEnroll";
+import ApplyLinkPanel from "@/app/(app)/bangka/enroll/[rid]/ApplyLinkPanel";
+import { APP_STATUS_LABEL, RECRUITMENT_STATUS_LABEL, fmtKst, priorityLabel, type AppStatus } from "@/lib/bangkaEnroll";
+import { bangkaBaseUrl } from "@/lib/bangkaEnrollServer";
 import { fmtKstDateTime } from "@/lib/datetime";
 import { btnSecondary, linkCls, panelToneCls, rowLinkCls, sectionTitleCls, tableHeadCls, tableRowCls } from "@/lib/ui";
 
@@ -39,6 +41,18 @@ export default async function EnrollApplicationsPage({
     return `/bangka/enroll/${rid}${q ? `?${q}` : ""}`;
   };
   const accepted = counts.accepted ?? 0;
+
+  // 링크 발행 — 정식 신청 주소 + 문자 본문(머리말 [동래구청소년센터]는 문자 화면이 붙임)
+  const applyUrl = `${bangkaBaseUrl() ?? "https://dongrae-bangka.vercel.app"}/apply`;
+  const smsBody = [
+    `방과후아카데미 ${rec.title} 안내`,
+    `접수 기간: ${fmtKst(rec.apply_start_at)} ~ ${fmtKst(rec.apply_end_at)}`,
+    rec.target_grades.length > 0 ? `대상: ${rec.target_grades.join("·")}` : null,
+    `신청: ${applyUrl}`,
+    "문의: 051-988-0924",
+  ]
+    .filter(Boolean)
+    .join("\n");
   const tabs = [
     { key: "all", label: "전체", href: qs("all"), count: apps.filter((a) => showDrafts || a.status !== "draft").length },
     ...ORDER.filter((s) => s !== "draft" || showDrafts).map((s) => ({
@@ -55,6 +69,9 @@ export default async function EnrollApplicationsPage({
         ← 모집 회차
       </Link>
       <section className={panelToneCls("blue")}>
+        <div className="mb-3">
+          <ApplyLinkPanel url={applyUrl} title={rec.title} smsBody={smsBody} />
+        </div>
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div>
             <h3 className="text-xl font-bold text-ink">

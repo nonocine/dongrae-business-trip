@@ -32,9 +32,11 @@ export const APP_STATUS_LABEL: Record<AppStatus, string> = {
   rejected: "불합격",
 };
 
-export type RecruitmentStatus = "draft" | "open" | "closed" | "ended";
+// scheduled(모집 예정): 보호자 화면에 회차·기간·준비 서류만 미리 보여 주고 인증·신청은 막습니다.
+export type RecruitmentStatus = "draft" | "scheduled" | "open" | "closed" | "ended";
 export const RECRUITMENT_STATUS_LABEL: Record<RecruitmentStatus, string> = {
   draft: "준비",
+  scheduled: "모집 예정",
   open: "접수중",
   closed: "마감",
   ended: "종료",
@@ -485,6 +487,44 @@ export function columnsFrom(d: AppData, s: AppSensitive) {
     return_method: d.ret.method || null,
     has_allergy: s.allergy.has,
   };
+}
+
+// 모집 예정 화면의 "미리 준비해 주세요" 기본 문구(prep_notice 가 비었을 때) — 서류 칸 표에서 만듭니다.
+export function defaultPrepNotice(): string {
+  const lines: string[] = ["■ 모든 신청자 공통"];
+  for (const d of DOC_KINDS.filter((x) => x.forType === "common")) lines.push(`· ${d.label}${d.hint ? ` (${d.hint})` : ""}`);
+  lines.push("", "■ 우선지원 유형별(해당하는 경우만)");
+  for (const p of PRIORITY_TYPES) {
+    const docs = DOC_KINDS.filter((x) => x.forType === p.key);
+    if (p.key === "recommended") {
+      lines.push(`· ${p.label}: 추천서 — 신청 중에 추천자(학교 선생님 등) 휴대폰 번호를 적으면 추천자에게 작성 링크가 갑니다`);
+    } else if (docs.length === 0) {
+      lines.push(`· ${p.label}: 추가 서류 없음(가족관계증명서로 확인)`);
+    } else if (p.key === "dual_income") {
+      lines.push(`· ${p.label}: 부·모 각각 ${docs[0].hint ?? "맞벌이 증명 서류"}`);
+    } else {
+      lines.push(`· ${p.label}: ${docs.map((d) => d.label).join(" / ")}${docs[0].hint ? ` (${docs[0].hint})` : ""}`);
+    }
+  }
+  lines.push("", "서류는 휴대폰으로 찍은 사진이나 PDF로 올릴 수 있습니다.");
+  return lines.join("\n");
+}
+
+// 보호자 첫 화면에 보일 회차 단계 — open 이라도 시작 전이면 '모집 예정', 마감이 지났으면 '마감'.
+//   draft·ended 는 보이지 않음(null).
+export type RecruitmentPhase = "open" | "scheduled" | "closed";
+export function recruitmentPhase(
+  r: { status: string; apply_start_at: string; apply_end_at: string },
+  nowMs = Date.now(),
+): RecruitmentPhase | null {
+  const startMs = new Date(r.apply_start_at).getTime();
+  const endMs = new Date(r.apply_end_at).getTime();
+  if (r.status === "scheduled") return "scheduled";
+  if (r.status === "closed") return "closed";
+  if (r.status !== "open") return null;
+  if (nowMs < startMs) return "scheduled";
+  if (nowMs >= endMs) return "closed";
+  return "open";
 }
 
 // 회차가 지금 접수중인지(상태 open + 기간 안).

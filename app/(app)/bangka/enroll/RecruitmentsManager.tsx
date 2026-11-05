@@ -4,11 +4,13 @@ import Link from "next/link";
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import {
+  deleteRecruitment,
+  hideRecruitment,
   saveRecruitment,
   type RecruitmentInput,
   type RecruitmentListRow,
 } from "@/app/(app)/bangka/enroll/actions";
-import { GRADES, RECRUITMENT_STATUS_LABEL, type RecruitmentStatus } from "@/lib/bangkaEnroll";
+import { GRADES, RECRUITMENT_STATUS_LABEL, defaultPrepNotice, type RecruitmentStatus } from "@/lib/bangkaEnroll";
 import { fmtKstDateTime } from "@/lib/datetime";
 import { RECRUIT_STATUS_BADGE } from "@/app/(app)/bangka/enroll/badges";
 import {
@@ -29,9 +31,18 @@ import {
 // 모집 회차 — 매년 새 회차를 만들어 같은 신청 화면을 다시 씁니다.
 //   · 접수 기간은 한국 시각으로 넣습니다(datetime-local 값 + "+09:00").
 //   · 상태를 '종료'로 바꾸면 결정 안 된 신청서의 보관기간 계산이 시작됩니다.
+//   · '모집 예정'은 보호자 화면에 회차·기간·준비 서류(prep_notice)만 미리 보여 줍니다.
+//   · 삭제: 신청서가 없거나 작성중뿐 → [삭제](회차 이름 입력). 제출된 신청서가 있으면 → [종료·숨김].
 // =====================================================================
 
-const STATUSES: RecruitmentStatus[] = ["draft", "open", "closed", "ended"];
+const STATUSES: RecruitmentStatus[] = ["draft", "scheduled", "open", "closed", "ended"];
+
+// 제출(작성중 아닌) 신청서 수
+function submittedCount(r: RecruitmentListRow): number {
+  return Object.entries(r.counts)
+    .filter(([k]) => k !== "draft")
+    .reduce((n, [, v]) => n + v, 0);
+}
 
 // ISO → "YYYY-MM-DDTHH:mm"(KST)
 function isoToKstLocal(iso: string | null | undefined): string {
@@ -55,6 +66,7 @@ type Form = {
   target_grades: string[];
   status: RecruitmentStatus;
   notice: string;
+  prep_notice: string;
   stops: { time: string; place: string }[];
   years: string;
   months: string;
@@ -71,6 +83,7 @@ function emptyForm(): Form {
     target_grades: ["초4", "초5", "초6", "중1"],
     status: "draft",
     notice: "",
+    prep_notice: defaultPrepNotice(),
     stops: [],
     years: "3",
     months: "6",
@@ -88,19 +101,61 @@ function toForm(r: RecruitmentListRow): Form {
     target_grades: r.target_grades,
     status: r.status,
     notice: r.notice ?? "",
-    stops: r.shuttle_stops.map((s) => ({ time: s.time, place: s.place })),
+    // 비어 있으면 기본 문구를 제안(저장해야 반영)
+    prep_notice: r.prep_notice ?? defaultPrepNotice(),
+    stops:r.shuttle_stops.map((s) => ({ time: s.time, place: s.place })),
     years: String(r.retention_accepted_years),
     months: String(r.retention_rejected_months),
     consent_version: r.consent_version,
   };
 }
 
-export default function RecruitmentsManager({ rows }: { rows: RecruitmentListRow[] }) {
+export default function RecruitmentsManager({ rows: allRows }: { rows: RecruitmentListRow[] }) {
   const router = useRouter();
   const [form, setForm] = useState<Form | null>(null);
   const [err, setErr] = useState<string | null>(null);
   const [msg, setMsg] = useState<string | null>(null);
+  const [listErr, setListErr] = useState<string | null>(null);
+  const [showHidden, setShowHidden] = useState(false);
   const [pending, start] = useTransition();
+  const hiddenCount = allRows.filter((r) => r.deleted_at).length;
+  const rows = showHidden ? allRows : allRows.filter((r) => !r.deleted_at);
+
+  function remove(r: RecruitmentListRow) {
+    setListErr(null);
+    setMsg(null);
+    const drafts = r.counts.draft ?? 0;
+    const typed = prompt(
+      `'${r.title}' 회차를 삭제합니다.${drafts > 0 ? `\n작성중 신청서 ${drafts}건과 올린 파일·인증 기록도 함께 지워집니다.` : ""}\n되돌릴 수 없습니다. 회차 이름을 그대로 입력하세요.`,
+    );
+    if (typed == null) return;
+    start(async () => {
+      const res = await deleteRecruitment(r.id, typed);
+      if (!res.ok) return setListErr(res.message);
+      if (form?.id === r.id) setForm(null);
+      setMsg(`'${r.title}' 회차를 삭제했습니다${res.drafts > 0 ? `(작성중 ${res.drafts}건, 파일 ${res.files}개)` : ""}.`);
+      router.refresh();
+    });
+  }
+
+  function hide(r: RecruitmentListRow, on: boolean) {
+    setListErr(null);
+    setMsg(null);
+    if (
+      on &&
+      !confirm(
+        `'${r.title}' 회차를 종료하고 목록에서 숨깁니다.\n제출된 신청서는 그대로 남고, 합격하지 않은 신청서는 지금부터 ${r.retention_rejected_months}개월 보관 뒤 서류가 자동 삭제됩니다. 계속할까요?`,
+      )
+    )
+      return;
+    start(async () => {
+      const res = await hideRecruitment(r.id, on);
+      if (!res.ok) return setListErr(res.message);
+      if (form?.id === r.id) setForm(null);
+      setMsg(on ? `'${r.title}' 회차를 종료·숨김 했습니다.` : `'${r.title}' 회차 숨김을 풀었습니다.`);
+      router.refresh();
+    });
+  }
 
   function set<K extends keyof Form>(k: K, v: Form[K]) {
     setForm((f) => (f ? { ...f, [k]: v } : f));
@@ -139,6 +194,7 @@ export default function RecruitmentsManager({ rows }: { rows: RecruitmentListRow
       target_grades: form.target_grades,
       status: form.status,
       notice: form.notice,
+      prep_notice: form.prep_notice,
       shuttle_stops: form.stops,
       retention_accepted_years: Number(form.years),
       retention_rejected_months: Number(form.months),
@@ -165,9 +221,18 @@ export default function RecruitmentsManager({ rows }: { rows: RecruitmentListRow
             새 회차
           </button>
         </div>
+        {hiddenCount > 0 && (
+          <label className="mt-2 inline-flex items-center gap-1 text-sm text-ink-muted">
+            <input type="checkbox" checked={showHidden} onChange={(e) => setShowHidden(e.target.checked)} />
+            숨긴 회차 보기({hiddenCount})
+          </label>
+        )}
         {msg && <p className={`mt-3 ${noticeSuccess}`}>{msg}</p>}
+        {listErr && <p className={`mt-3 ${noticeError}`}>{listErr}</p>}
         {rows.length === 0 ? (
-          <p className="mt-3 text-sm text-ink-muted">아직 회차가 없습니다. [새 회차]로 만드세요.</p>
+          <p className="mt-3 text-sm text-ink-muted">
+            {hiddenCount > 0 ? "보이는 회차가 없습니다(숨긴 회차만 있음)." : "아직 회차가 없습니다. [새 회차]로 만드세요."}
+          </p>
         ) : (
           <div className="mt-3 overflow-x-auto">
             <table className="w-full min-w-[720px] text-sm">
@@ -184,15 +249,19 @@ export default function RecruitmentsManager({ rows }: { rows: RecruitmentListRow
               </thead>
               <tbody>
                 {rows.map((r) => {
-                  const submitted = Object.entries(r.counts)
-                    .filter(([k]) => k !== "draft")
-                    .reduce((n, [, v]) => n + v, 0);
+                  const submitted = submittedCount(r);
                   return (
-                    <tr key={r.id} className={tableRowCls}>
+                    <tr key={r.id} className={`${tableRowCls} ${r.deleted_at ? "opacity-60" : ""}`}>
                       <td className="py-2 pr-2">
                         <Link href={`/bangka/enroll/${r.id}`} className={linkCls}>
                           {r.title}
                         </Link>
+                        {r.deleted_at && (
+                          <span className="block text-xs text-ink-hint">
+                            숨김 {fmtKstDateTime(r.deleted_at)}
+                            {r.deleted_by ? ` · ${r.deleted_by}` : ""}
+                          </span>
+                        )}
                       </td>
                       <td className="py-2 pr-2">
                         <span className={RECRUIT_STATUS_BADGE[r.status]}>{RECRUITMENT_STATUS_LABEL[r.status]}</span>
@@ -209,17 +278,38 @@ export default function RecruitmentsManager({ rows }: { rows: RecruitmentListRow
                         {r.counts.accepted ?? 0}/{r.capacity ?? "-"}
                       </td>
                       <td className="py-2 text-right">
-                        <button
-                          type="button"
-                          className={btnSecondary}
-                          onClick={() => {
-                            setErr(null);
-                            setMsg(null);
-                            setForm(toForm(r));
-                          }}
-                        >
-                          고치기
-                        </button>
+                        <div className="flex flex-wrap justify-end gap-1">
+                          <button
+                            type="button"
+                            className={btnSecondary}
+                            disabled={pending}
+                            onClick={() => {
+                              setErr(null);
+                              setMsg(null);
+                              setForm(toForm(r));
+                            }}
+                          >
+                            고치기
+                          </button>
+                          {r.deleted_at ? (
+                            <button type="button" className={btnSecondary} disabled={pending} onClick={() => hide(r, false)}>
+                              숨김 풀기
+                            </button>
+                          ) : submitted > 0 ? (
+                            <button type="button" className={btnSecondary} disabled={pending} onClick={() => hide(r, true)}>
+                              종료·숨김
+                            </button>
+                          ) : (
+                            <button
+                              type="button"
+                              className={`${btnSecondary} !text-stamp`}
+                              disabled={pending}
+                              onClick={() => remove(r)}
+                            >
+                              삭제
+                            </button>
+                          )}
+                        </div>
                       </td>
                     </tr>
                   );
@@ -290,6 +380,22 @@ export default function RecruitmentsManager({ rows }: { rows: RecruitmentListRow
               <span className={labelCls}>신청 화면 첫 안내 문구</span>
               <textarea className={`${inputCls} min-h-[100px]`} value={form.notice} onChange={(e) => set("notice", e.target.value)} />
             </label>
+            <div className="sm:col-span-2">
+              <div className="flex flex-wrap items-end justify-between gap-2">
+                <span className={labelCls}>미리 준비할 서류·안내(모집 예정 화면의 &quot;미리 준비해 주세요&quot;)</span>
+                <button type="button" className={btnSecondary} onClick={() => set("prep_notice", defaultPrepNotice())}>
+                  기본 문구로 채우기
+                </button>
+              </div>
+              <textarea
+                className={`${inputCls} min-h-[200px]`}
+                value={form.prep_notice}
+                onChange={(e) => set("prep_notice", e.target.value)}
+              />
+              <p className="mt-1 text-xs text-ink-hint">
+                비워 두고 저장하면 보호자 화면에는 기본 문구(공통 서류 + 우선지원 유형별 서류)가 보입니다.
+              </p>
+            </div>
 
             <div className="sm:col-span-2">
               <span className={labelCls}>귀가차량 하차 장소(순서대로)</span>
