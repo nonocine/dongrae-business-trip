@@ -4,6 +4,7 @@ import { badgeDanger, badgeNavy, badgeNeutral, badgeSuccess, badgeWarning } from
 
 export const RECRUIT_STATUS_BADGE: Record<RecruitmentStatus, string> = {
   draft: badgeNeutral,
+  scheduled: badgeNavy,
   open: badgeSuccess,
   closed: badgeWarning,
   ended: badgeNavy,

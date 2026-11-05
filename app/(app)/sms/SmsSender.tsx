@@ -62,12 +62,14 @@ export default function SmsSender({
   logs,
   programs,
   loadError,
+  initialBody = "",
 }: {
   sources: SmsSourceMeta[];
   channels: SmsChannelMeta[];
   logs: SmsLogRow[];
   programs: BusinessProgramOption[];
   loadError: string | null;
+  initialBody?: string; // ?body= 로 미리 채운 내용
 }) {
   const router = useRouter();
   const [notice, setNotice] = useState<{ kind: "ok" | "error"; text: string } | null>(null);
@@ -136,7 +138,7 @@ export default function SmsSender({
   }, [preview]);
 
   // --- 3. 내용 ---
-  const [body, setBody] = useState("");
+  const [body, setBody] = useState(initialBody);
   const [headerOn, setHeaderOn] = useState(true);
   const [advertising, setAdvertising] = useState(false);
   const finalText = composeSmsText(body, { header: headerOn, advertising });

@@ -27,6 +27,7 @@ import {
 import {
   T_APPS,
   T_FILES,
+  T_OTPS,
   T_RECRUIT,
   acceptedRetentionUntil,
   actionMeta,
@@ -34,6 +35,7 @@ import {
   fixRequestMessage,
   logStaffAccess,
   rejectedRetentionUntil,
+  removeRecruitmentFolder,
   sendEnrollSms,
 } from "@/lib/bangkaEnrollServer";
 
@@ -74,11 +76,14 @@ export type RecruitmentRow = {
   target_grades: string[];
   status: RecruitmentStatus;
   notice: string | null;
+  prep_notice: string | null; // 모집 예정 화면 "미리 준비해 주세요"
   shuttle_stops: ShuttleStop[];
   retention_accepted_years: number;
   retention_rejected_months: number;
   consent_version: string;
   app_seq: number;
+  deleted_at: string | null; // [종료·숨김] 한 회차
+  deleted_by: string | null;
   created_at: string;
   updated_at: string;
 };
@@ -88,7 +93,7 @@ export type RecruitmentListRow = RecruitmentRow & {
 };
 
 const RECRUIT_COLS =
-  "id, title, apply_start_at, apply_end_at, capacity, target_grades, status, notice, shuttle_stops, retention_accepted_years, retention_rejected_months, consent_version, app_seq, created_at, updated_at";
+  "id, title, apply_start_at, apply_end_at, capacity, target_grades, status, notice, prep_notice, shuttle_stops, retention_accepted_years, retention_rejected_months, consent_version, app_seq, deleted_at, deleted_by, created_at, updated_at";
 
 function toRecruitment(r: Record<string, unknown>): RecruitmentRow {
   return {
@@ -140,13 +145,14 @@ export type RecruitmentInput = {
   target_grades: string[];
   status: RecruitmentStatus;
   notice: string;
+  prep_notice: string;
   shuttle_stops: { time: string; place: string }[]; // 순서대로 — seq 는 서버가 1부터 매김
   retention_accepted_years: number;
   retention_rejected_months: number;
   consent_version: string;
 };
 
-const RECRUIT_STATUSES: RecruitmentStatus[] = ["draft", "open", "closed", "ended"];
+const RECRUIT_STATUSES: RecruitmentStatus[] = ["draft", "scheduled", "open", "closed", "ended"];
 
 export async function saveRecruitment(input: RecruitmentInput): Promise<Result<{ id: string; ended: number }>> {
   try {
@@ -186,6 +192,7 @@ export async function saveRecruitment(input: RecruitmentInput): Promise<Result<{
       target_grades: grades,
       status: input.status,
       notice: cleanStr(input.notice),
+      prep_notice: cleanStr(input.prep_notice),
       shuttle_stops: stops,
       retention_accepted_years: years,
       retention_rejected_months: months,
@@ -214,17 +221,7 @@ export async function saveRecruitment(input: RecruitmentInput): Promise<Result<{
 
     // 종료로 바꾸면 아직 결정 안 된 신청서(작성중 포함)의 보관기간 계산 시작 — 설계 7장 끝.
     let ended = 0;
-    if (input.status === "ended" && prevStatus !== "ended") {
-      const { data: upd, error } = await supabaseAdmin
-        .from(T_APPS)
-        .update({ retention_until: rejectedRetentionUntil(months), updated_at: new Date().toISOString() })
-        .eq("recruitment_id", id)
-        .neq("status", "accepted")
-        .is("retention_until", null)
-        .select("id");
-      if (error) throw new Error(`보관기간 설정 실패: ${error.message}`);
-      ended = (upd ?? []).length;
-    }
+    if (input.status === "ended" && prevStatus !== "ended") ended = await startRetention(id, months);
     if (prevStatus !== null && prevStatus !== input.status) {
       await logStaffAccess(me, await actionMeta(), {
         recruitmentId: id,
@@ -238,6 +235,125 @@ export async function saveRecruitment(input: RecruitmentInput): Promise<Result<{
     return { ok: true, id, ended };
   } catch (e) {
     return fail(e, "회차를 저장하지 못했습니다.");
+  }
+}
+
+// 종료 시 아직 결정 안 된 신청서(작성중 포함)의 보관기한을 정합니다. 정한 건수.
+async function startRetention(rid: string, months: number): Promise<number> {
+  const { data: upd, error } = await supabaseAdmin
+    .from(T_APPS)
+    .update({ retention_until: rejectedRetentionUntil(months), updated_at: new Date().toISOString() })
+    .eq("recruitment_id", rid)
+    .neq("status", "accepted")
+    .is("retention_until", null)
+    .select("id");
+  if (error) throw new Error(`보관기간 설정 실패: ${error.message}`);
+  return (upd ?? []).length;
+}
+
+// 회차 삭제 — 신청서가 없거나 작성중(draft)뿐일 때만. 회차 이름을 그대로 입력해야 합니다.
+//   작성중 신청서(추천서·파일 행은 cascade)·버킷 파일({rid}/ 아래 전부)·그 번호들의 인증번호 기록을 함께 지웁니다.
+//   인증번호 기록은 다른 회차에 신청서가 없는 번호만 지웁니다(다른 신청서 주인의 잠금 기록 보존).
+//   동의 기록(consent_records)은 제출 때만 생기므로 작성중 신청서에는 없습니다.
+export async function deleteRecruitment(
+  id: string,
+  typedTitle: string,
+): Promise<Result<{ drafts: number; files: number }>> {
+  try {
+    const me = await requireBangkaAccess();
+    const { data: rec, error: re } = await supabaseAdmin
+      .from(T_RECRUIT)
+      .select("id, title, status")
+      .eq("id", id)
+      .maybeSingle();
+    if (re) throw new Error(re.message);
+    if (!rec) return { ok: false, message: "회차를 찾을 수 없습니다." };
+    const r = rec as { id: string; title: string; status: string };
+    if ((typedTitle ?? "").trim() !== r.title.trim())
+      return { ok: false, message: "회차 이름이 맞지 않습니다. 그대로 입력해 주세요." };
+
+    const { data: apps, error: ae } = await supabaseAdmin
+      .from(T_APPS)
+      .select("id, status, guardian_phone")
+      .eq("recruitment_id", id);
+    if (ae) throw new Error(ae.message);
+    const list = (apps ?? []) as { id: string; status: string; guardian_phone: string }[];
+    if (list.some((a) => a.status !== "draft"))
+      return { ok: false, message: "제출된 신청서가 있어 삭제할 수 없습니다. [종료·숨김]을 쓰세요." };
+
+    const files = await removeRecruitmentFolder(id);
+
+    const phones = [...new Set(list.map((a) => a.guardian_phone))];
+    let otps = 0;
+    if (phones.length > 0) {
+      const { data: others, error: oe } = await supabaseAdmin
+        .from(T_APPS)
+        .select("guardian_phone")
+        .in("guardian_phone", phones)
+        .neq("recruitment_id", id);
+      if (oe) throw new Error(oe.message);
+      const keep = new Set(((others ?? []) as { guardian_phone: string }[]).map((o) => o.guardian_phone));
+      const drop = phones.filter((p) => !keep.has(p));
+      if (drop.length > 0) {
+        const { data: del, error: de } = await supabaseAdmin.from(T_OTPS).delete().in("phone", drop).select("id");
+        if (de) throw new Error(`인증번호 기록 삭제 실패: ${de.message}`);
+        otps = (del ?? []).length;
+      }
+    }
+
+    if (list.length > 0) {
+      const { error } = await supabaseAdmin.from(T_APPS).delete().eq("recruitment_id", id).eq("status", "draft");
+      if (error) throw new Error(`작성중 신청서 삭제 실패: ${error.message}`);
+    }
+    const { error: delErr } = await supabaseAdmin.from(T_RECRUIT).delete().eq("id", id);
+    if (delErr) throw new Error(`회차 삭제 실패: ${delErr.message}`);
+
+    // 회차 행이 없어지므로 recruitment_id 는 비우고 target·detail 에 남깁니다.
+    await logStaffAccess(me, await actionMeta(), {
+      recruitmentId: null,
+      action: "recruitment_delete",
+      target: id,
+      detail: { recruitment_id: id, title: r.title, status: r.status, drafts: list.length, files, otps },
+    });
+    revalidatePath(BASE);
+    return { ok: true, drafts: list.length, files };
+  } catch (e) {
+    return fail(e, "회차를 삭제하지 못했습니다.");
+  }
+}
+
+// 회차 종료·숨김 — 제출된 신청서가 있는 회차. status='ended'(보관기한 시작) + deleted_at·deleted_by.
+//   hide=false 면 숨김만 풉니다(상태는 종료 그대로).
+export async function hideRecruitment(id: string, hide = true): Promise<Result<{ ended: number }>> {
+  try {
+    const me = await requireBangkaAccess();
+    const { data: rec, error: re } = await supabaseAdmin
+      .from(T_RECRUIT)
+      .select("id, title, status, retention_rejected_months")
+      .eq("id", id)
+      .maybeSingle();
+    if (re) throw new Error(re.message);
+    if (!rec) return { ok: false, message: "회차를 찾을 수 없습니다." };
+    const r = rec as { id: string; title: string; status: string; retention_rejected_months: number };
+    const now = new Date().toISOString();
+    let ended = 0;
+    const patch = hide
+      ? { status: "ended", deleted_at: now, deleted_by: me.name, updated_by: me.name, updated_at: now }
+      : { deleted_at: null, deleted_by: null, updated_by: me.name, updated_at: now };
+    const { error } = await supabaseAdmin.from(T_RECRUIT).update(patch).eq("id", id);
+    if (error) throw new Error(error.message);
+    if (hide && r.status !== "ended") ended = await startRetention(id, r.retention_rejected_months);
+    await logStaffAccess(me, await actionMeta(), {
+      recruitmentId: id,
+      action: hide ? "recruitment_hide" : "recruitment_unhide",
+      target: id,
+      detail: { title: r.title, from: r.status, to: hide ? "ended" : r.status, retention_set: ended },
+    });
+    revalidatePath(BASE);
+    revalidatePath(`${BASE}/${id}`);
+    return { ok: true, ended };
+  } catch (e) {
+    return fail(e, hide ? "회차를 숨기지 못했습니다." : "숨김을 풀지 못했습니다.");
   }
 }
 

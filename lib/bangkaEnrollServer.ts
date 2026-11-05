@@ -21,6 +21,7 @@ export const T_FILES = "bk_application_files";
 export const T_RECS = "bk_application_recommendations";
 export const T_LOGS = "bk_application_access_logs";
 export const T_CONSENTS = "consent_records";
+export const T_OTPS = "bk_application_otps";
 
 export const ENROLL_SENDER = "0519880924";
 export const SIGNED_URL_SECONDS = 300; // 직원 열람 — 5분 서명 URL
@@ -412,6 +413,14 @@ async function referencedPaths(aid: string): Promise<Set<string> | null> {
   for (const f of (files ?? []) as { path: string }[]) set.add(f.path);
   for (const r of (recs ?? []) as { signature_path: string }[]) set.add(r.signature_path);
   return set;
+}
+
+// 회차 삭제용 — {recruitment_id}/ 아래 객체를 전부 지웁니다(작성중 신청서뿐인 회차만 부름). 지운 개수.
+export async function removeRecruitmentFolder(recruitmentId: string): Promise<number> {
+  if (!UUID_RE.test(recruitmentId)) throw new Error("회차 id 가 올바르지 않습니다.");
+  const paths = (await listObjectsDeep(recruitmentId)).map((o) => o.path);
+  if (paths.length > 0) await removePaths(paths);
+  return paths.length;
 }
 
 export async function runEnrollOrphanCleanup(opts: { dryRun: boolean }): Promise<OrphanSummary> {
