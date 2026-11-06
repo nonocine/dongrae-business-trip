@@ -20,6 +20,8 @@ import { PRESS_COLLECT_DAYS } from "@/lib/pressCollect/config";
 
 // =====================================================================
 // "보도자료 기자" 화면 서버 액션 — 관장 전용.
+//   * 공통 메뉴 '언론보도'(/press-news)도 restoreRejectedArticle 을 부르지만
+//     가드는 똑같이 여기서 겁니다(직원 화면에는 버튼 자체가 없습니다).
 //   * 가드: isManagerAdmin (구글 세션이면서 직급 관장 또는 master).
 //     부장·personnel·일반 직원은 모두 거부합니다(관장 결정, 문서 2-2·4장).
 //   * 테이블은 RLS on + 정책 없음 → service_role(supabaseAdmin)로만 읽고 씁니다.
@@ -31,6 +33,12 @@ import { PRESS_COLLECT_DAYS } from "@/lib/pressCollect/config";
 export type PressActionResult = { ok: true } | { ok: false; error: string };
 
 const DENIED = "보도자료 기자 명단은 관장만 사용할 수 있습니다.";
+
+// 기사 상태가 바뀌면 공통 메뉴 '언론보도'(/press-news) 목록도 같이 갱신합니다.
+function revalidatePress(): void {
+  revalidatePath("/press");
+  revalidatePath("/press-news");
+}
 
 async function requirePressAdmin(): Promise<void> {
   if (!(await isManagerAdmin())) throw new Error(DENIED);
@@ -114,7 +122,7 @@ export async function createManualReporter(
     .from("press_reporters")
     .insert({ name, outlet, email, source: "manual", ...m.patch });
   if (error) return { ok: false, error: uniqueMessage(error.code, error.message) };
-  revalidatePath("/press");
+  revalidatePress();
   return { ok: true };
 }
 
@@ -130,7 +138,7 @@ export async function updateReporterManual(
     .update({ ...m.patch, updated_at: new Date().toISOString() })
     .eq("id", id);
   if (error) return { ok: false, error: error.message };
-  revalidatePath("/press");
+  revalidatePress();
   return { ok: true };
 }
 
@@ -139,7 +147,7 @@ export async function deleteReporter(id: string): Promise<PressActionResult> {
   await requirePressAdmin();
   const { error } = await supabaseAdmin.from("press_reporters").delete().eq("id", id);
   if (error) return { ok: false, error: error.message };
-  revalidatePath("/press");
+  revalidatePress();
   return { ok: true };
 }
 
@@ -165,7 +173,7 @@ export async function applyPendingEmail(id: string): Promise<PressActionResult> 
     })
     .eq("id", id);
   if (upErr) return { ok: false, error: uniqueMessage(upErr.code, upErr.message) };
-  revalidatePath("/press");
+  revalidatePress();
   return { ok: true };
 }
 
@@ -181,7 +189,7 @@ export async function dismissPendingEmail(id: string): Promise<PressActionResult
     })
     .eq("id", id);
   if (error) return { ok: false, error: error.message };
-  revalidatePath("/press");
+  revalidatePress();
   return { ok: true };
 }
 
@@ -245,7 +253,7 @@ export async function approveArticle(id: string): Promise<PressActionResult> {
   } catch (e) {
     return { ok: false, error: e instanceof Error ? e.message : "승인하지 못했습니다." };
   }
-  revalidatePath("/press");
+  revalidatePress();
   return { ok: true };
 }
 
@@ -260,7 +268,7 @@ export async function rejectArticle(id: string): Promise<PressActionResult> {
     .select("id");
   if (error) return { ok: false, error: error.message };
   if (!data || data.length === 0) return { ok: false, error: "확인 필요 상태의 기사만 제외할 수 있습니다." };
-  revalidatePath("/press");
+  revalidatePress();
   return { ok: true };
 }
 
@@ -275,7 +283,7 @@ export async function restoreRejectedArticle(id: string): Promise<PressActionRes
     .select("id");
   if (error) return { ok: false, error: error.message };
   if (!data || data.length === 0) return { ok: false, error: "제외된 기사만 되돌릴 수 있습니다." };
-  revalidatePath("/press");
+  revalidatePress();
   return { ok: true };
 }
 
@@ -293,7 +301,7 @@ export async function fixArticleUrl(id: string, rawUrl: string): Promise<PressAc
   } catch (e) {
     return { ok: false, error: e instanceof Error ? e.message : "주소를 고치지 못했습니다." };
   }
-  revalidatePath("/press");
+  revalidatePress();
   return { ok: true };
 }
 
@@ -306,7 +314,7 @@ export async function collectPressNow(): Promise<PressActionResult & { summary?:
       since: new Date(Date.now() - PRESS_COLLECT_DAYS * 86_400_000),
     });
     const s = r.saved!;
-    revalidatePath("/press");
+    revalidatePress();
     return {
       ok: true,
       summary:

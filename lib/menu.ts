@@ -281,6 +281,18 @@ export const MENU_ITEMS: MenuItem[] = [
     show: { kind: "smsSender" },
   },
   {
+    // 2026-11 관장 지시 — 관리자 영역 '보도자료 기자' 의 기사 목록을 공통으로 옮겼습니다.
+    //   조회 전용. 가드는 로그인만(app/(app)/press-news/data.ts loadPressNews).
+    //   기자 명단·확인 대기열·수집은 관리자 영역 /press(managerAdmin)에 그대로 둡니다.
+    key: "common-press-news",
+    group: "common",
+    label: "언론보도",
+    href: "/press-news",
+    icon: "📰",
+    desc: "우리 센터 기사 목록·홍보 실적 연결 현황 (조회)",
+    show: { kind: "everyone" },
+  },
+  {
     key: "common-my-contracts",
     group: "common",
     label: "내 계약서",
@@ -666,7 +678,8 @@ export const MENU_ITEMS: MenuItem[] = [
     label: "보도자료 기자",
     href: "/press",
     icon: "📰",
-    desc: "우리 센터 기사를 쓴 기자 명단·기사 목록",
+    // 기사 목록은 공통 '언론보도'(/press-news)로 옮겼습니다 — 여기는 명단·확인·수집.
+    desc: "기자 명단 관리·기사 확인(승인/제외)·지금 수집",
     show: { kind: "managerAdmin" },
   },
   {

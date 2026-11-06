@@ -5,7 +5,6 @@ import { useRouter } from "next/navigation";
 import {
   badgeNavy,
   badgeNeutral,
-  badgeSuccess,
   badgeWarning,
   btnDanger,
   btnPrimary,
@@ -35,15 +34,11 @@ import {
   dismissPendingEmail,
   fixArticleUrl,
   rejectArticle,
-  restoreRejectedArticle,
   updateReporterManual,
   type ManualFieldsInput,
   type PressActionResult,
   type PressCollectRun,
 } from "./actions";
-import Tabs from "@/app/components/Tabs";
-
-type Tab = "reporters" | "articles";
 
 type Notice = { kind: "ok" | "error"; text: string } | null;
 
@@ -89,39 +84,19 @@ export default function PressManager({
   articles,
   lastRun,
   today,
-  initialTab,
 }: {
   reporters: PressReporter[];
   articles: PressArticle[];
   lastRun: PressCollectRun | null;
   today: string;
-  initialTab: Tab;
 }) {
-  const visibleCount = articles.filter((a) => a.review_status !== "rejected").length;
-  const [tab, setTab] = useState<Tab>(initialTab);
-  const switchTab = (t: Tab) => {
-    setTab(t);
-    window.history.replaceState(null, "", t === "articles" ? "?tab=articles" : "?");
-  };
-
+  // 기사 목록(예전 '기사' 탭)은 2026-11 공통 메뉴 '언론보도'(/press-news)로 옮겼습니다.
+  //   여기에는 관장 전용인 수집·확인 대기열·기자 명단만 남습니다.
   return (
     <div className="space-y-4">
       <CollectBar lastRun={lastRun} />
       <ReviewQueue articles={articles} />
-      <Tabs
-        ariaLabel="보도자료"
-        value={tab}
-        onChange={switchTab}
-        items={[
-          { key: "reporters", label: "기자", icon: "contact", count: reporters.length },
-          { key: "articles", label: "기사", icon: "newspaper", count: visibleCount },
-        ]}
-      />
-      {tab === "reporters" ? (
-        <ReportersTab reporters={reporters} articles={articles} today={today} />
-      ) : (
-        <ArticlesTab reporters={reporters} articles={articles} today={today} />
-      )}
+      <ReportersTab reporters={reporters} articles={articles} today={today} />
     </div>
   );
 }
@@ -675,175 +650,6 @@ function ReporterDetail({
               </li>
             ))}
           </ul>
-        )}
-      </div>
-    </section>
-  );
-}
-
-// ---------------------------------------------------------------------
-// 기사 탭
-// ---------------------------------------------------------------------
-
-const STATUS_LABEL: Record<PressArticle["reporter_status"], string> = {
-  found: "",
-  name_only: "이름만",
-  not_found: "못 찾음",
-};
-
-function ArticlesTab({
-  reporters,
-  articles,
-  today,
-}: {
-  reporters: PressReporter[];
-  articles: PressArticle[];
-  today: string;
-}) {
-  const [from, setFrom] = useState(`${today.slice(0, 4)}-01-01`);
-  const [to, setTo] = useState(today);
-  const [grouped, setGrouped] = useState(false);
-  const [showRejected, setShowRejected] = useState(false);
-  const [notice, setNotice] = useState<Notice>(null);
-  const { pending, run } = useAction(setNotice);
-  const names = useMemo(() => new Map(reporters.map((r) => [r.id, r.name])), [reporters]);
-  const rejectedCount = articles.filter((a) => a.review_status === "rejected").length;
-
-  const inRange = useMemo(
-    () =>
-      articles.filter(
-        (a) =>
-          (showRejected || a.review_status !== "rejected") &&
-          (!from || a.published_at >= from) &&
-          (!to || a.published_at <= to),
-      ),
-    [articles, from, to, showRejected],
-  );
-
-  // event_group 별 묶음 — 키 없는 기사는 맨 뒤 한 묶음.
-  const groups = useMemo(() => {
-    const m = new Map<string, PressArticle[]>();
-    for (const a of inRange) {
-      const k = a.event_group ?? "";
-      m.set(k, [...(m.get(k) ?? []), a]);
-    }
-    return [...m.entries()].sort(([ka, va], [kb, vb]) =>
-      ka === "" ? 1 : kb === "" ? -1 : vb[0].published_at.localeCompare(va[0].published_at),
-    );
-  }, [inRange]);
-
-  const linkedCount = inRange.filter((a) => a.promotion_id).length;
-
-  const table = (list: PressArticle[]) => (
-    <div className="overflow-x-auto">
-      <table className="w-full min-w-[720px] text-sm">
-        <thead>
-          <tr className={tableHeadCls}>
-            <th className="py-2 pr-2">날짜</th>
-            <th className="py-2 pr-2">언론사</th>
-            <th className="py-2 pr-2">제목</th>
-            <th className="py-2 pr-2">기자</th>
-            <th className="py-2">실적</th>
-          </tr>
-        </thead>
-        <tbody>
-          {list.map((a) => {
-            const name = a.reporter_id ? names.get(a.reporter_id) : null;
-            return (
-              <tr key={a.id} className={tableRowCls}>
-                <td className="whitespace-nowrap py-2 pr-2 text-ink-body">{a.published_at}</td>
-                <td className="py-2 pr-2 text-ink-body">{a.outlet}</td>
-                <td className="py-2 pr-2">
-                  <a href={a.url} target="_blank" rel="noreferrer" className={linkCls}>
-                    {a.title}
-                  </a>
-                  {a.is_roundup && <span className={`ml-1 ${badgeWarning}`}>묶음기사</span>}
-                  {a.review_status === "needs_review" && <span className={`ml-1 ${badgeWarning}`}>확인 필요</span>}
-                  {a.url_status === "needs_check" && <span className={`ml-1 ${badgeWarning}`}>주소 확인 필요</span>}
-                  {a.review_status === "rejected" && (
-                    <>
-                      <span className={`ml-1 ${badgeNeutral}`}>제외함</span>{" "}
-                      <button
-                        type="button"
-                        className="text-xs text-ink-muted underline"
-                        disabled={pending}
-                        onClick={() => run(() => restoreRejectedArticle(a.id), "확인 필요로 되돌렸습니다.")}
-                      >
-                        되돌리기
-                      </button>
-                    </>
-                  )}
-                </td>
-                <td className="py-2 pr-2 text-ink-body">
-                  {name ?? <span className="text-ink-hint">{STATUS_LABEL[a.reporter_status] || "삭제됨"}</span>}
-                </td>
-                <td className="py-2">
-                  {a.promotion_id ? (
-                    <span className={badgeSuccess}>연결됨</span>
-                  ) : a.review_status === "needs_review" || a.review_status === "rejected" ? (
-                    <span className="text-ink-hint">보류</span>
-                  ) : (
-                    <span className="text-ink-hint">—</span>
-                  )}
-                </td>
-              </tr>
-            );
-          })}
-        </tbody>
-      </table>
-    </div>
-  );
-
-  return (
-    <section className={cardCls}>
-      <div className="flex flex-wrap items-end gap-3">
-        <label className={labelCls}>
-          시작
-          <input type="date" className={inputCls} value={from} onChange={(e) => setFrom(e.target.value)} />
-        </label>
-        <label className={labelCls}>
-          끝
-          <input type="date" className={inputCls} value={to} onChange={(e) => setTo(e.target.value)} />
-        </label>
-        <label className="inline-flex h-[38px] cursor-pointer items-center gap-2 rounded-lg border border-line bg-surface px-3 text-sm">
-          <input type="checkbox" checked={grouped} onChange={(e) => setGrouped(e.target.checked)} className="h-4 w-4 rounded border-line" />
-          <span className="text-ink-body">같은 내용끼리 묶어 보기</span>
-        </label>
-        {rejectedCount > 0 && (
-          <label className="inline-flex h-[38px] cursor-pointer items-center gap-2 rounded-lg border border-line bg-surface px-3 text-sm">
-            <input type="checkbox" checked={showRejected} onChange={(e) => setShowRejected(e.target.checked)} className="h-4 w-4 rounded border-line" />
-            <span className="text-ink-body">제외한 기사도 보기 ({rejectedCount})</span>
-          </label>
-        )}
-      </div>
-      <p className="mt-3 text-xs text-ink-muted">
-        {inRange.length}건 · 홍보 실적(언론보도) 연결 {linkedCount}건. 묶음기사도 실적에 넣고 ‘[묶음기사]’로 구분합니다. 확인 필요 기사는 승인 전까지 넣지 않습니다.
-      </p>
-      {notice && (
-        <div className="mt-2">
-          <NoticeLine notice={notice} />
-        </div>
-      )}
-
-      <div className="mt-3">
-        {inRange.length === 0 ? (
-          <p className="text-sm text-ink-muted">이 기간에 기사가 없습니다.</p>
-        ) : grouped ? (
-          <div className="space-y-5">
-            {groups.map(([key, list]) => (
-              <div key={key || "__none__"}>
-                <h4 className="mb-1 text-sm font-semibold text-ink">
-                  {key || "묶음 없음"}{" "}
-                  <span className="text-xs font-medium text-ink-hint">
-                    언론사 {new Set(list.map((a) => a.outlet)).size}곳 · {list.length}건
-                  </span>
-                </h4>
-                {table(list)}
-              </div>
-            ))}
-          </div>
-        ) : (
-          table(inRange)
         )}
       </div>
     </section>

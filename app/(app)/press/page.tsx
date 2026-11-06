@@ -1,6 +1,8 @@
+import Link from "next/link";
 import { redirect } from "next/navigation";
 import { enforcePasswordChange, isManagerAdmin } from "@/app/actions";
 import { kstTodayYmd } from "@/lib/trainings";
+import { linkCls } from "@/lib/ui";
 import { loadLastCollectRun, loadPressData } from "./actions";
 import PressManager from "./PressManager";
 
@@ -16,9 +18,12 @@ export default async function PressPage({
   searchParams: Promise<{ tab?: string }>;
 }) {
   await enforcePasswordChange();
+  const { tab } = await searchParams;
+  // 옛 '기사' 탭 주소(/press?tab=articles)는 공통 메뉴 '언론보도'로 옮겼습니다(2026-11).
+  //   기사 목록은 직원 누구나 보는 화면이라 관장 판정보다 먼저 보냅니다.
+  if (tab === "articles") redirect("/press-news");
   if (!(await isManagerAdmin())) redirect("/");
 
-  const { tab } = await searchParams;
   const [{ reporters, articles }, lastRun] = await Promise.all([loadPressData(), loadLastCollectRun()]);
 
   return (
@@ -35,13 +40,19 @@ export default async function PressPage({
           채우고, 메모·전화·담당 분야·보도자료 받기는 직접 고칩니다.
           기자 명단은 슬랙 등에 공유하지 않습니다.
         </p>
+        <p className="mt-1 text-xs text-ink-muted">
+          기사 목록·홍보 실적 연결 현황은 공통 메뉴{" "}
+          <Link href="/press-news" className={linkCls}>
+            언론보도
+          </Link>
+          로 옮겼습니다(직원 누구나 조회).
+        </p>
       </div>
       <PressManager
         reporters={reporters}
         articles={articles}
         lastRun={lastRun}
         today={kstTodayYmd()}
-        initialTab={tab === "articles" ? "articles" : "reporters"}
       />
     </div>
   );
