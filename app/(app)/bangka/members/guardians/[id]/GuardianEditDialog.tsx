@@ -74,7 +74,7 @@ export default function GuardianEditDialog({
     setErr(null);
     if (!form.name.trim()) return setErr("이름을 입력하세요.");
     if (!phoneDigits) return setErr("연락처를 입력하세요.");
-    if (!isValidBkPhone(phoneDigits)) return setErr("연락처 형식이 올바르지 않습니다. 예: 010-1234-5678");
+    if (!isValidBkPhone(phoneDigits)) return setErr("휴대폰 번호를 입력해 주세요. 예: 010-1234-5678");
     if (changes.length === 0) return setErr("바뀐 내용이 없습니다.");
     setStep("confirm");
   }

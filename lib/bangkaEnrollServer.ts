@@ -128,6 +128,7 @@ export async function sendEnrollSms(input: {
   text: string;
   sentBy: string | null;
   purpose: string; // audience_desc — "방카 신규접수 보완요청" 등
+  program?: "bk_enroll" | "bk_guardian"; // 문자 이력 분류 — 기본 bk_enroll(접수·합격), 보호자 정보 수정 문자는 bk_guardian
 }): Promise<{ ok: true } | { ok: false; error: string }> {
   const to = (input.to ?? "").replace(/\D/g, "");
   if (!/^01[0-9]{8,9}$/.test(to)) return { ok: false, error: "보호자 휴대전화 번호가 올바르지 않습니다." };
@@ -135,7 +136,7 @@ export async function sendEnrollSms(input: {
   const log: Record<string, unknown> = {
     sent_by: input.sentBy,
     channel: "sms",
-    program: "bk_enroll",
+    program: input.program ?? "bk_enroll",
     audience_desc: input.purpose.slice(0, 500),
     recipient_count: 1,
     text_body: input.text,

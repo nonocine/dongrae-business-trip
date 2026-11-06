@@ -412,7 +412,7 @@ export async function updateGuardianInfo(input: {
     const phone = normalizeBkPhone(input.phone);
     if (!phone) return { ok: false, message: "연락처를 입력하세요." };
     if (!isValidBkPhone(phone))
-      return { ok: false, message: "연락처 형식이 올바르지 않습니다. 예: 010-1234-5678" };
+      return { ok: false, message: "휴대폰 번호를 입력해 주세요. 예: 010-1234-5678" };
     const relation = cleanStr(input.relation);
     const memo = cleanStr(input.memo);
 
@@ -532,6 +532,7 @@ export async function resendGuardianInviteSms(
       text: bkInviteMessage({ guardianName: g.name, url: `${base}/invite/${token}`, expiresAt: expiresAt! }),
       sentBy: me.driverId,
       purpose: "방카 보호자 연락처 변경(초대 문자 재발송)",
+      program: "bk_guardian",
     });
     const smsError = r.ok ? null : `문자를 보내지 못했습니다: ${r.error}`;
 
@@ -573,6 +574,7 @@ export async function sendGuardianPhoneNotice(
       text: guardianPhoneNoticeText(g.phone),
       sentBy: me.driverId,
       purpose: "방카 보호자 연락처 변경 안내",
+      program: "bk_guardian",
     });
     const smsError = r.ok ? null : `문자를 보내지 못했습니다: ${r.error}`;
     await logStaffAccess(me, await actionMeta(), {

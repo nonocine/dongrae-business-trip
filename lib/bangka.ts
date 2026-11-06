@@ -42,9 +42,10 @@ export function normalizeBkPhone(input: string): string {
   return (input ?? "").replace(/\D/g, "");
 }
 
-// 휴대폰·일반전화 자릿수(9~11).
+// 보호자 연락처 = 휴대폰만(01로 시작 10~11자리). 일반전화는 거부(2026-11 관장 결정 —
+//   로그인·문자 모두 휴대폰 기준). 일괄 등록·보호자 정보 수정 공용.
 export function isValidBkPhone(digits: string): boolean {
-  return /^0\d{8,10}$/.test(digits);
+  return /^01\d{8,9}$/.test(digits);
 }
 
 export function formatBkPhone(digits: string): string {
@@ -130,7 +131,7 @@ export function parseBkBulkText(text: string): BkBulkLine[] {
     if (!classCode) errors.push(`반을 알 수 없습니다("${classRaw}") — 이음반/지음반`);
     if (guardianName && !phone) errors.push("보호자 전화가 비었습니다");
     if (!guardianName && phone) errors.push("보호자명이 비었습니다");
-    if (phone && !isValidBkPhone(phone)) errors.push(`전화번호 형식이 이상합니다("${phoneRaw}")`);
+    if (phone && !isValidBkPhone(phone)) errors.push(`휴대폰 번호를 입력해 주세요("${phoneRaw}")`);
     out.push({ line: i + 1, name, school, grade, classCode, classRaw, guardianName, relation, phone, errors });
   });
   return out;
