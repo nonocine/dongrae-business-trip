@@ -8,7 +8,9 @@ import type { PressArticle } from "@/lib/press";
 //     기자 명단(이메일·전화·메모)·확인 대기열·수집·홈페이지 게시는 /press(관장 전용)에 남습니다.
 //   * press_* 테이블은 RLS on + 정책 없음 → service_role 로 읽으므로, 여기서 직접
 //     세션을 확인하고 내려보낼 칸을 좁힙니다(기자는 기사 바이라인 이름만).
-//   * 제외(rejected) 기사는 관장(isManagerAdmin)에게만 내려갑니다 — 되돌리기 버튼도 관장만.
+//   * 관장(isManagerAdmin)에게는 모든 기사(확인 대기·제외 포함)가 내려갑니다 — 되돌리기 버튼도 관장만.
+//   * 직원에게는 '승인된 기사'(auto·approved, lib/press isConfirmedArticle 과 같은 기준)만 내려갑니다.
+//     확인 대기(needs_review)·제외(rejected)는 서버에서 걸러 화면에 아예 가지 않습니다.
 // =====================================================================
 
 export type PressNewsArticle = Pick<
@@ -44,7 +46,7 @@ export async function loadPressNews(): Promise<PressNewsData | null> {
   const canManage = await isManagerAdmin();
 
   let q = supabaseAdmin.from("press_articles").select(COLS).order("published_at", { ascending: false });
-  if (!canManage) q = q.neq("review_status", "rejected");
+  if (!canManage) q = q.in("review_status", ["auto", "approved"]);
   const { data, error } = await q;
   if (error) throw new Error(error.message);
   const articles = (data ?? []) as PressNewsArticle[];

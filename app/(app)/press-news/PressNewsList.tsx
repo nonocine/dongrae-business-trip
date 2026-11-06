@@ -21,7 +21,8 @@ import type { PressNewsArticle } from "./data";
 import { restoreRejectedArticle } from "@/app/(app)/press/actions";
 
 // 예전 /press 의 '기사' 탭을 옮긴 화면입니다(2026-11).
-//   직원: 조회만. 관장(canManage): 제외한 기사 보기·되돌리기가 더 있습니다.
+//   직원: 조회만, 승인된 기사만 받습니다(data.ts 에서 거름) — '확인 대기' 표시·문구도 없습니다.
+//   관장(canManage): 확인 대기 표시, 제외한 기사 보기·되돌리기가 더 있습니다.
 
 type Notice = { kind: "ok" | "error"; text: string } | null;
 
@@ -182,7 +183,7 @@ export default function PressNewsList({
                       {a.title}
                     </a>
                     {a.is_roundup && <span className={`ml-1 ${badgeWarning}`}>묶음기사</span>}
-                    {a.review_status === "needs_review" && <span className={`ml-1 ${badgeWarning}`}>확인 대기</span>}
+                    {canManage && a.review_status === "needs_review" && <span className={`ml-1 ${badgeWarning}`}>확인 대기</span>}
                     {a.url_status === "needs_check" && <span className={`ml-1 ${badgeWarning}`}>주소 확인 필요</span>}
                     {a.review_status === "rejected" && (
                       <>
@@ -264,7 +265,7 @@ export default function PressNewsList({
         )}
       </div>
       <p className="mt-3 text-xs text-ink-muted">
-        {inRange.length}건 · 홍보 실적(언론보도) 연결 {linkedCount}건. 묶음기사도 실적에 넣고 ‘[묶음기사]’로 구분합니다. 확인 대기 기사는 승인 전까지 넣지 않습니다. 줄을 누르면 상세가 열립니다.
+        {inRange.length}건 · 홍보 실적(언론보도) 연결 {linkedCount}건. 묶음기사도 실적에 넣고 ‘[묶음기사]’로 구분합니다. {canManage ? "확인 대기 기사는 승인 전까지 넣지 않습니다. " : ""}줄을 누르면 상세가 열립니다.
       </p>
       {notice && (
         <p className={`mt-2 ${notice.kind === "ok" ? noticeSuccess : noticeError}`}>{notice.text}</p>
