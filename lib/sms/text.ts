@@ -223,7 +223,8 @@ export type SmsSendRequest = {
   advertising: boolean;
   sender?: string;
   test: boolean;
-  testNumber?: string;
+  testNumber?: string; // 발송 점검(test) 또는 본인 확인용(self) 받을 내 번호
+  self?: boolean; // 본인 확인용 — testNumber 한 곳으로만 실제 발송(test:false), 명단 무시
 };
 
 export type SmsSendResponse =

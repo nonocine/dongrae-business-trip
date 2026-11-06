@@ -184,18 +184,25 @@ export default function SmsSender({
     baseReady && !previewing && !previewError && total > 0 && total <= SMS_MAX_RECIPIENTS && !adNightBlocked;
   const testDigits = normalizeSmsPhone(testNumber);
   const testReady = baseReady && testDigits.startsWith("010") && isValidSmsPhone(testDigits);
+  // 본인 확인용은 실제 발송이라 광고 야간 차단을 그대로 받습니다.
+  const selfReady = testReady && !adNightBlocked;
+  const [confirmingSelf, setConfirmingSelf] = useState(false);
 
-  async function send(test: boolean) {
+  // mode — check: 발송 점검(시험 모드, 실제 미발송) / self: 내 번호 1곳 실제 발송 / real: 담긴 명단 실제 발송
+  async function send(mode: "check" | "self" | "real") {
+    const test = mode === "check";
+    const toMe = mode !== "real";
     setBusy(true);
     setNotice(null);
     const req: SmsSendRequest = {
       channel: channel?.key,
-      bundles: test ? [] : bundles,
+      bundles: toMe ? [] : bundles,
       text: finalText,
       advertising,
       sender,
       test,
-      ...(test ? { testNumber } : {}),
+      ...(toMe ? { testNumber } : {}),
+      ...(mode === "self" ? { self: true } : {}),
     };
     try {
       const r = await fetch("/api/sms/send", {
@@ -205,11 +212,17 @@ export default function SmsSender({
       });
       const d = (await r.json().catch(() => ({ ok: false, error: `발송 실패(${r.status})` }))) as SmsSendResponse;
       if (!d.ok) setNotice({ kind: "error", text: d.error });
+      else if (test)
+        setNotice(
+          d.failed === 0
+            ? { kind: "ok", text: "점검 통과 — 실제 문자는 발송되지 않았습니다." }
+            : { kind: "error", text: `점검 실패 — ${d.partial ?? "번호·내용을 확인하세요."}` },
+        );
       else
         setNotice({
           kind: d.partial ? "error" : "ok",
           text:
-            `${test ? "테스트 " : ""}발송 요청 완료 — 성공 ${won.format(d.sent)}건 · 실패 ${won.format(d.failed)}건 (${d.msg_type ?? msgType}).` +
+            `${mode === "self" ? "내 번호로 " : ""}발송 요청 완료 — 성공 ${won.format(d.sent)}건 · 실패 ${won.format(d.failed)}건 (${d.msg_type ?? msgType}).` +
             (d.partial ? ` 일부 실패: ${d.partial}` : " 최종 결과는 아래 [결과 조회]로 확인하세요."),
         });
     } catch {
@@ -217,6 +230,7 @@ export default function SmsSender({
     } finally {
       setBusy(false);
       setConfirming(false);
+      setConfirmingSelf(false);
       router.refresh();
     }
   }
@@ -402,7 +416,7 @@ export default function SmsSender({
         {advertising && (
           <p className={`${noticeWarning} mt-2`}>
             광고성 문자: 맨 앞 “{SMS_AD_PREFIX}”와 맨 끝 “수신거부 {SMS_OPTOUT_NUMBER}”를 자동으로 붙입니다(바이트에 포함).
-            밤 9시~아침 8시에는 실제 발송이 막힙니다(테스트 발송은 가능).
+            밤 9시~아침 8시에는 실제 발송이 막힙니다(발송 점검은 가능).
           </p>
         )}
         {adHint && <p className={`${noticeWarning} mt-2`}>광고성 문자일 수 있어요. 광고성 문자 체크를 확인하세요.</p>}
@@ -462,7 +476,7 @@ export default function SmsSender({
           </label>
           <div className="flex items-end gap-2">
             <label className="block flex-1">
-              <span className={labelCls}>테스트 받을 내 번호</span>
+              <span className={labelCls}>내 번호</span>
               <input
                 className={inputCls}
                 value={testNumber}
@@ -471,12 +485,20 @@ export default function SmsSender({
                 inputMode="tel"
               />
             </label>
-            <button type="button" className={btnSecondary} disabled={!testReady} onClick={() => send(true)}>
-              테스트 발송
-            </button>
           </div>
         </div>
-        <p className="mt-1 text-xs text-ink-muted">테스트 발송은 내 번호 1개로, 포인트를 쓰지 않습니다.</p>
+        <div className="mt-2 flex flex-wrap items-center justify-end gap-2">
+          <button type="button" className={btnSecondary} disabled={!testReady} onClick={() => send("check")}>
+            발송 점검
+          </button>
+          <button type="button" className={btnSecondary} disabled={!selfReady} onClick={() => setConfirmingSelf(true)}>
+            내 번호로 미리 받아보기
+          </button>
+        </div>
+        <ul className="mt-1 space-y-0.5 text-right text-xs text-ink-muted">
+          <li>[발송 점검] 실제로 문자가 가지 않는 점검입니다. 번호·내용 오류만 확인하며 포인트를 쓰지 않습니다.</li>
+          <li>[내 번호로 미리 받아보기] 위 내 번호 1곳으로만 실제 문자가 갑니다(담긴 명단과 무관, 비용 발생).</li>
+        </ul>
         {adNightBlocked && <p className={`${noticeError} mt-3`}>광고성 문자는 밤 9시~아침 8시에 보낼 수 없습니다.</p>}
         <div className="mt-4 flex justify-end">
           <button
@@ -531,8 +553,39 @@ export default function SmsSender({
               <button type="button" className={btnSecondary} disabled={busy} onClick={() => setConfirming(false)}>
                 취소
               </button>
-              <button type="button" className={btnPrimary} disabled={busy} onClick={() => send(false)}>
+              <button type="button" className={btnPrimary} disabled={busy} onClick={() => send("real")}>
                 {busy ? "보내는 중…" : `${won.format(total)}명에게 보내기`}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 본인 확인용 실제 발송 확인 */}
+      {confirmingSelf && (
+        <div className={modalBackdrop} role="dialog" aria-modal="true">
+          <div className={`${modalPanel} max-w-md`}>
+            <h3 className="text-lg font-bold text-ink">내 번호로 미리 받아볼까요?</h3>
+            <p className={`${noticeWarning} mt-3`}>문자 1건이 실제로 발송되고 비용이 발생합니다.</p>
+            <dl className="mt-3 grid grid-cols-[6rem_1fr] gap-y-1.5 text-sm">
+              <dt className="text-ink-muted">받는 번호</dt>
+              <dd className="font-semibold">{testNumber}</dd>
+              <dt className="text-ink-muted">발신번호</dt>
+              <dd>{senderDisplay}</dd>
+              <dt className="text-ink-muted">유형</dt>
+              <dd>
+                {msgType} ({won.format(bytes)}바이트){advertising && " · 광고성"}
+              </dd>
+              <dt className="text-ink-muted">예상 비용</dt>
+              <dd>약 {won.format(smsCostWon(msgType, 1))}원</dd>
+            </dl>
+            <p className="mt-3 text-xs text-ink-muted">담긴 명단에는 보내지 않습니다. 이 번호 1곳에만 갑니다.</p>
+            <div className="mt-5 flex justify-end gap-2">
+              <button type="button" className={btnSecondary} disabled={busy} onClick={() => setConfirmingSelf(false)}>
+                취소
+              </button>
+              <button type="button" className={btnPrimary} disabled={busy} onClick={() => send("self")}>
+                {busy ? "보내는 중…" : "내 번호로 보내기"}
               </button>
             </div>
           </div>

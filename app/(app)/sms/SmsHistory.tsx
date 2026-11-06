@@ -73,7 +73,8 @@ export default function SmsHistory({ logs }: { logs: SmsLogRow[] }) {
                   </td>
                   <td className="px-2 py-1.5 text-right">{row.recipient_count}</td>
                   <td className="whitespace-nowrap px-2 py-1.5">
-                    {row.msg_type ?? "-"} {row.is_test && <span className={badgeNeutral}>시험</span>}
+                    {row.msg_type ?? "-"} {row.is_test && <span className={badgeNeutral}>점검</span>}
+                    {row.program === "self" && <span className={badgeWarning}>본인 확인용</span>}
                   </td>
                   <td className="px-2 py-1.5">
                     {!row.ok ? (

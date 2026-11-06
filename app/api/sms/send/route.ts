@@ -12,7 +12,8 @@ import {
 
 // 발송 — 담긴 명단(묶음들)을 서버가 다시 계산해 번호를 정하고, 고른 발송 수단(channel)으로 보냅니다.
 //   * 수단별 검사·발송은 lib/sms/channels/*(지금은 문자만). 문자는 1,000명 초과 시 500명씩 나눠 보냄.
-//   * 광고성: "(광고)"·"수신거부 051-988-0924" 확인, 밤 9시~아침 8시 실제 발송 차단(테스트는 허용).
+//   * 광고성: "(광고)"·"수신거부 051-988-0924" 확인, 밤 9시~아침 8시 실제 발송 차단(발송 점검은 허용).
+//   * 발송 점검(test): 알리고 시험 모드 — 실제 문자 안 감. 본인 확인용(self): 내 번호 1곳으로 실제 발송.
 //   * 성공·실패 모두 sms_send_logs 에 기록 — 출처 요약은 audience_desc("동래미래 4차시 158 + 강사 5").
 //   ⚠️ 전화번호는 DB·로그·콘솔·응답 어디에도 남기지 않습니다(인원 수만).
 export const runtime = "nodejs";
@@ -29,6 +30,8 @@ export async function POST(req: Request) {
   if (!channel.canUse(user)) return smsFail(403, `"${channel.label}"(으)로 보낼 권한이 없습니다.`);
 
   const text = typeof body.text === "string" ? body.text.trim() : "";
+  // 본인 확인용(self): 내 번호 1곳으로 실제 발송 — 시험 모드가 아니므로 광고 야간 차단 등 실제 발송 규칙 그대로.
+  const self = body.self === true && body.test !== true;
   const test = body.test === true;
   const advertising = body.advertising === true;
   if (advertising && !channel.allowsAd)
@@ -39,12 +42,12 @@ export async function POST(req: Request) {
   let to: string[];
   let summary: string;
   let program: string;
-  if (test) {
+  if (test || self) {
     const d = normalizeSmsPhone(body.testNumber ?? "");
-    if (!d.startsWith("010") || !isValidSmsPhone(d)) return smsFail(400, "테스트 받을 내 번호(010)를 확인하세요.");
+    if (!d.startsWith("010") || !isValidSmsPhone(d)) return smsFail(400, "내 번호(010)를 확인하세요.");
     to = [d];
-    summary = "테스트 발송(내 번호)";
-    program = "test";
+    summary = test ? "발송 점검(실제 미발송)" : "본인 확인용(내 번호로 미리 받기)";
+    program = test ? "test" : "self";
   } else {
     const bundles = cleanBundles(body.bundles);
     if (bundles.length === 0) return smsFail(400, "받는 사람을 담으세요.");

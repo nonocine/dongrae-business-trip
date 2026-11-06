@@ -34,7 +34,7 @@ export const smsChannel: SmsChannel = {
       if (!text.startsWith(SMS_AD_PREFIX) || !text.includes(`수신거부 ${SMS_OPTOUT_NUMBER}`))
         errors.push(`광고성 문자는 맨 앞 "${SMS_AD_PREFIX}"와 "수신거부 ${SMS_OPTOUT_NUMBER}"가 있어야 합니다.`);
       if (!opts.test && night)
-        errors.push("광고성 문자는 밤 9시부터 아침 8시까지 보낼 수 없습니다(테스트 발송은 가능).");
+        errors.push("광고성 문자는 밤 9시부터 아침 8시까지 보낼 수 없습니다(발송 점검은 가능).");
     }
     if (night && !opts.test) warnings.push("야간 발송입니다.");
     return { errors, warnings };
