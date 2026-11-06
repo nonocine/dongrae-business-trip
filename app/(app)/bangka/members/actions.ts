@@ -5,11 +5,16 @@ import { revalidatePath } from "next/cache";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
 import { requireBangkaAccess } from "@/lib/bangkaAccess";
 import {
+  INVITE_DAYS_DEFAULT,
   inviteExpiresAt,
   inviteState,
   normalizeInviteDays,
 } from "@/lib/saemInvite";
+import { actionMeta, logStaffAccess, sendEnrollSms } from "@/lib/bangkaEnrollServer";
 import {
+  bkInviteMessage,
+  isValidBkPhone,
+  normalizeBkPhone,
   bkStudentKey,
   isBkClassCode,
   isBkLocked,
@@ -352,6 +357,232 @@ export async function reissueGuardianInvite(input: {
     };
   } catch (e) {
     return fail(e, "초대 링크를 발급하지 못했습니다.");
+  }
+}
+
+// =====================================================================
+// 보호자 정보 수정(조유경 팀장 요청 2026-11) — 이름·연락처·관계·메모만.
+//   · 비밀번호(PIN)·상태·초대 토큰은 건드리지 않습니다.
+//   · 연락처 = 동래방카 로그인 번호. 숫자만 저장(로그인 조회 규칙과 같음).
+//   · 다른 보호자가 쓰는 번호면 거부(자동 합치기 없음).
+//   · 기록: bk_application_access_logs(action='guardian_edit'). 전체 번호는 남기지 않고 끝 4자리만.
+//   · 문자는 자동으로 보내지 않습니다 — 저장 뒤 화면 버튼으로 따로(아래 두 액션).
+// =====================================================================
+
+const GUARDIAN_FIELD_LABEL = {
+  name: "이름",
+  phone: "연락처",
+  relation: "관계",
+  memo: "메모",
+} as const;
+
+const last4 = (p: string | null | undefined) => (p ?? "").replace(/\D/g, "").slice(-4) || null;
+
+// 같은 번호를 쓰는 다른 보호자 안내 문구.
+async function phoneTakenMessage(phone: string, exceptId: string): Promise<string | null> {
+  const { data, error } = await supabaseAdmin
+    .from(GUARDIANS)
+    .select("id, name, bk_guardian_students(bk_students(name))")
+    .eq("phone", phone)
+    .neq("id", exceptId)
+    .maybeSingle();
+  if (error) throw new Error(error.message);
+  if (!data) return null;
+  const o = data as unknown as {
+    name: string;
+    bk_guardian_students: { bk_students: { name: string } | null }[];
+  };
+  const kids = o.bk_guardian_students
+    .map((l) => l.bk_students?.name)
+    .filter((n): n is string => !!n);
+  return `${o.name} 보호자(연결 학생: ${kids.length ? kids.join(", ") : "없음"})가 이미 사용 중인 번호입니다.`;
+}
+
+export async function updateGuardianInfo(input: {
+  id: string;
+  name: string;
+  phone: string;
+  relation: string | null;
+  memo: string | null;
+}): Promise<Result<{ changed: string[]; phoneChanged: boolean; status: BkGuardianStatus }>> {
+  try {
+    const me = await requireBangkaAccess();
+    const name = cleanStr(input.name);
+    if (!name) return { ok: false, message: "이름을 입력하세요." };
+    const phone = normalizeBkPhone(input.phone);
+    if (!phone) return { ok: false, message: "연락처를 입력하세요." };
+    if (!isValidBkPhone(phone))
+      return { ok: false, message: "연락처 형식이 올바르지 않습니다. 예: 010-1234-5678" };
+    const relation = cleanStr(input.relation);
+    const memo = cleanStr(input.memo);
+
+    const { data: cur, error: ce } = await supabaseAdmin
+      .from(GUARDIANS)
+      .select("id, name, phone, relation, memo, status")
+      .eq("id", input.id)
+      .maybeSingle();
+    if (ce) throw new Error(ce.message);
+    if (!cur) return { ok: false, message: "보호자를 찾을 수 없습니다." };
+    const before = cur as {
+      name: string;
+      phone: string;
+      relation: string | null;
+      memo: string | null;
+      status: BkGuardianStatus;
+    };
+
+    const next = { name, phone, relation, memo };
+    const changedKeys = (Object.keys(next) as (keyof typeof next)[]).filter(
+      (k) => (before[k] ?? null) !== (next[k] ?? null)
+    );
+    if (changedKeys.length === 0) return { ok: false, message: "바뀐 내용이 없습니다." };
+    const phoneChanged = changedKeys.includes("phone");
+
+    if (phoneChanged) {
+      const taken = await phoneTakenMessage(phone, input.id);
+      if (taken) return { ok: false, message: taken };
+    }
+
+    const { error } = await supabaseAdmin
+      .from(GUARDIANS)
+      .update({ ...next, updated_at: new Date().toISOString() })
+      .eq("id", input.id);
+    if (error) {
+      // 확인과 저장 사이에 같은 번호가 생긴 경우(UNIQUE phone).
+      if (error.code === "23505") {
+        const taken = await phoneTakenMessage(phone, input.id);
+        return { ok: false, message: taken ?? "이미 다른 보호자가 사용 중인 번호입니다." };
+      }
+      throw new Error(error.message);
+    }
+
+    await logStaffAccess(me, await actionMeta(), {
+      action: "guardian_edit",
+      target: input.id,
+      detail: {
+        changed: changedKeys.map((k) => GUARDIAN_FIELD_LABEL[k]),
+        ...(phoneChanged
+          ? { phone_old_last4: last4(before.phone), phone_new_last4: last4(phone) }
+          : {}),
+      },
+    });
+
+    revalidateAll(input.id);
+    return {
+      ok: true,
+      changed: changedKeys.map((k) => GUARDIAN_FIELD_LABEL[k]),
+      phoneChanged,
+      status: before.status,
+    };
+  } catch (e) {
+    return fail(e, "보호자 정보를 저장하지 못했습니다.");
+  }
+}
+
+// 초대 문자 다시 보내기 — 초대중(invited) 보호자에게 지금 번호로.
+//   살아 있는 초대 링크가 있으면 그대로 쓰고, 없거나 만료됐으면 새로 발급(14일).
+//   문자 실패는 화면에 메시지만(링크 발급·정보 저장은 유지).
+export async function resendGuardianInviteSms(
+  guardianId: string
+): Promise<Result<{ smsError: string | null; reissued: boolean }>> {
+  try {
+    const me = await requireBangkaAccess();
+    const base = bangkaBaseUrl();
+    if (!base)
+      return {
+        ok: false,
+        message: "BANGKA_BASE_URL 환경변수가 없어 초대 링크를 만들 수 없습니다(Vercel 환경변수 등록 필요).",
+      };
+    const { data, error: ge } = await supabaseAdmin
+      .from(GUARDIANS)
+      .select("id, name, phone, status, invite_token, invite_expires_at")
+      .eq("id", guardianId)
+      .maybeSingle();
+    if (ge) throw new Error(ge.message);
+    if (!data) return { ok: false, message: "보호자를 찾을 수 없습니다." };
+    const g = data as {
+      name: string;
+      phone: string;
+      status: string;
+      invite_token: string | null;
+      invite_expires_at: string | null;
+    };
+    if (g.status !== "invited")
+      return { ok: false, message: "초대중인 보호자에게만 초대 문자를 보낼 수 있습니다." };
+
+    let token = g.invite_token;
+    let expiresAt = g.invite_expires_at;
+    const live = !!token && !!expiresAt && new Date(expiresAt).getTime() > Date.now();
+    if (!live) {
+      token = randomBytes(24).toString("hex");
+      expiresAt = inviteExpiresAt(INVITE_DAYS_DEFAULT);
+      const { data: upd, error } = await supabaseAdmin
+        .from(GUARDIANS)
+        .update({ invite_token: token, invite_expires_at: expiresAt, updated_at: new Date().toISOString() })
+        .eq("id", guardianId)
+        .eq("status", "invited")
+        .select("id");
+      if (error) throw new Error(error.message);
+      if (!upd || upd.length === 0)
+        return { ok: false, message: "보호자 상태가 방금 바뀌었습니다. 새로고침해 주세요." };
+    }
+
+    const r = await sendEnrollSms({
+      to: g.phone,
+      text: bkInviteMessage({ guardianName: g.name, url: `${base}/invite/${token}`, expiresAt: expiresAt! }),
+      sentBy: me.driverId,
+      purpose: "방카 보호자 연락처 변경(초대 문자 재발송)",
+    });
+    const smsError = r.ok ? null : `문자를 보내지 못했습니다: ${r.error}`;
+
+    await logStaffAccess(me, await actionMeta(), {
+      action: "guardian_invite_resend",
+      target: guardianId,
+      detail: { phone_last4: last4(g.phone), reissued: !live, sms: r.ok ? "sent" : "failed" },
+    });
+    revalidateAll(guardianId);
+    return { ok: true, smsError, reissued: !live };
+  } catch (e) {
+    return fail(e, "초대 문자를 보내지 못했습니다.");
+  }
+}
+
+function guardianPhoneNoticeText(phone: string): string {
+  return `[동래구청소년센터 방과후아카데미] 보호자 연락처가 ${last4(phone) ?? ""}로 변경되었습니다. 방카 로그인은 새 번호로 해 주세요.`;
+}
+
+// 연락처 변경 안내 문자 — 가입한(active) 보호자에게 새 번호로. 직원이 누를 때만.
+export async function sendGuardianPhoneNotice(
+  guardianId: string
+): Promise<Result<{ smsError: string | null }>> {
+  try {
+    const me = await requireBangkaAccess();
+    const { data, error: ge } = await supabaseAdmin
+      .from(GUARDIANS)
+      .select("id, phone, status")
+      .eq("id", guardianId)
+      .maybeSingle();
+    if (ge) throw new Error(ge.message);
+    if (!data) return { ok: false, message: "보호자를 찾을 수 없습니다." };
+    const g = data as { phone: string; status: string };
+    if (g.status !== "active")
+      return { ok: false, message: "가입한(사용중) 보호자에게만 보낼 수 있습니다." };
+
+    const r = await sendEnrollSms({
+      to: g.phone,
+      text: guardianPhoneNoticeText(g.phone),
+      sentBy: me.driverId,
+      purpose: "방카 보호자 연락처 변경 안내",
+    });
+    const smsError = r.ok ? null : `문자를 보내지 못했습니다: ${r.error}`;
+    await logStaffAccess(me, await actionMeta(), {
+      action: "guardian_notice_send",
+      target: guardianId,
+      detail: { phone_last4: last4(g.phone), sms: r.ok ? "sent" : "failed" },
+    });
+    return { ok: true, smsError };
+  } catch (e) {
+    return fail(e, "안내 문자를 보내지 못했습니다.");
   }
 }
 

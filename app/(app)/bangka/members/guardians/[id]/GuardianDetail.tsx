@@ -14,6 +14,7 @@ import {
   IssuedLink,
 } from "@/app/(app)/bangka/members/GuardianInvite";
 import { GUARDIAN_STATUS_BADGE } from "@/app/(app)/bangka/members/guardians/GuardiansList";
+import GuardianEditDialog from "@/app/(app)/bangka/members/guardians/[id]/GuardianEditDialog";
 import {
   bkClassLabel,
   bkGuardianStatusLabel,
@@ -40,6 +41,7 @@ import {
 //   · 잠금 해제: PIN 을 여러 번 틀려 잠긴 경우(failed_attempts·locked_until 초기화).
 //   · 정지/해제: 삭제 대신 쓰는 유일한 내리기 수단(관장 지시 — 삭제 없음).
 //   · 학생 연결 추가·해제: 연결된 학생의 반 자료만 앱에서 보입니다.
+//   · [수정]: 이름·연락처(로그인 번호)·관계·메모 — GuardianEditDialog.
 // =====================================================================
 
 type Brief = { id: string; name: string; school: string | null; grade: string | null; class_code: string };
@@ -55,6 +57,7 @@ export default function GuardianDetail({
   const [pending, start] = useTransition();
   const [err, setErr] = useState<string | null>(null);
   const [pick, setPick] = useState("");
+  const [editing, setEditing] = useState(false);
   const suspended = g.status === "suspended";
 
   function run(fn: () => Promise<{ ok: boolean; message?: string }>, after?: () => void) {
@@ -100,6 +103,9 @@ export default function GuardianDetail({
           />
         </dl>
         <div className="mt-3 flex flex-wrap gap-2">
+          <button type="button" disabled={pending} className={btnSecondary} onClick={() => setEditing(true)}>
+            수정
+          </button>
           {g.locked && (
             <button type="button" disabled={pending} className={btnPrimary} onClick={() => run(() => unlockGuardian(g.id))}>
               잠금 해제
@@ -212,6 +218,7 @@ export default function GuardianDetail({
       </section>
 
       {err && <p className={noticeError}>{err}</p>}
+      {editing && <GuardianEditDialog guardian={g} onClose={() => setEditing(false)} />}
     </div>
   );
 }
