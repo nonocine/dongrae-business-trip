@@ -201,6 +201,26 @@ export const MENU_ITEMS: MenuItem[] = [
     desc: "내 인사정보·증명사진·첨부서류 입력/수정",
     show: { kind: "everyone" },
   },
+  // ERP 연동 3단계(2026-11) — ERP 복제 데이터(erp_*) 조회 전용. 로그인한 직원 모두.
+  //   현황판은 직원에게 휴가 유형을 '휴가'로 묶어 보이고, 관장(M0)에게만 원래 유형을 보입니다(화면이 판정).
+  {
+    key: "common-duty-board",
+    group: "common",
+    label: "복무 현황판",
+    href: "/duties",
+    icon: "🗓",
+    desc: "오늘·이번 주·다음 주 휴가·출장·외근 현황 (ERP)",
+    show: { kind: "everyone" },
+  },
+  {
+    key: "common-my-leave",
+    group: "common",
+    label: "내 연차·대휴",
+    href: "/profile/leave",
+    icon: "🌿",
+    desc: "ERP 연차·대휴 잔여와 이번 달 내 복무",
+    show: { kind: "everyone" },
+  },
   // 명함첩·거래처 — 관장 결정으로 전 직원 열람(협업 자산)이 되어 관리자
   //   영역에서 여기로 내렸습니다. 비공개(🔒) 항목만 관장·부장·인사 담당자에게
   //   보이며, 그 필터는 서버에서 겁니다.

@@ -17,6 +17,7 @@ import {
   type MenuItem,
 } from "@/lib/menu";
 import { cardCls } from "@/lib/ui";
+import { countAbsentToday } from "@/lib/erp/view";
 
 // =====================================================================
 // 직원 첫 접속 대시보드 — 권한등급(M0)·직무(employee_roles)별 메뉴 분기.
@@ -230,6 +231,7 @@ export default async function EmployeeDashboard({
     recentAnnouncements,
     judgeAssignments,
     leavePlanNotice,
+    absentToday,
   ] = await Promise.all([
     getShellData(),
     getMyProfile(),
@@ -237,6 +239,8 @@ export default async function EmployeeDashboard({
     listAnnouncements(3),
     getMyJudgeAssignments(),
     getMyLeavePlanNotice(),
+    // ERP 복무 — 오늘 부재 인원(재직자, 휴근·초과·야근 제외). 실패해도 대시보드는 그립니다.
+    countAbsentToday().catch(() => null),
   ]);
 
   // 공용 비밀번호 — 내가 열람 가능한 건수만(항목 이름·비번은 받지 않습니다).
@@ -375,6 +379,29 @@ export default async function EmployeeDashboard({
             ))}
           </ul>
         </section>
+      )}
+
+      {/* 오늘 부재 — ERP 복무(진행·완료) 기준. 누르면 복무 현황판. */}
+      {absentToday != null && (
+        <Link
+          href="/duties"
+          className={`${cardCls} flex items-center justify-between gap-3 transition hover:border-navy hover:bg-navy-soft/30`}
+        >
+          <span className="flex items-center gap-2">
+            <span aria-hidden className="text-2xl">
+              🗓
+            </span>
+            <span>
+              <span className="block text-sm font-semibold text-ink">
+                오늘 부재 <b className="text-navy">{absentToday}</b>명
+              </span>
+              <span className="block text-xs text-ink-muted">휴가·출장·외근 등 — 복무 현황판에서 보기 (ERP 기준)</span>
+            </span>
+          </span>
+          <span aria-hidden className="text-ink-hint">
+            →
+          </span>
+        </Link>
       )}
 
       {/* 공지사항 미리보기 — 최신 3건(고정 우선) */}

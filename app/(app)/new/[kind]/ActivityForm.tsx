@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { useState, useTransition } from "react";
+import ErpDutySuggest from "@/app/(app)/new/[kind]/ErpDutySuggest";
 import { useRouter } from "next/navigation";
 import { createActivity, updateActivity } from "@/app/actions";
 import { activityFileUrl, type TripBucket } from "@/lib/tripStorage";
@@ -342,6 +343,9 @@ export default function ActivityForm({
           </div>
         )}
       </div>
+
+      {/* ERP 출장·외근 제안 — 새로 쓸 때만(외근·출장 = 운행일지가 생기는 유형). */}
+      {!editing && showTransport && <ErpDutySuggest />}
 
       {/* 장소 / 국가·도시 */}
       {showLocationField && (

@@ -15,6 +15,7 @@ import { requireSalaryAccess } from "@/lib/salaryAccess";
 import { sendSlackDM, siteBaseUrl, slackLink } from "@/lib/slack";
 import { kstTodayYmd } from "@/lib/trainings";
 import { currentAssignment } from "@/lib/appointments";
+import { erpLastSyncedAt, leaveBalancesOf } from "@/lib/erp/view";
 import { downloadHrImage } from "@/lib/recruitmentApplicantDocData";
 import {
   buildLeavePlanPdf,
@@ -53,6 +54,9 @@ export type LeavePlanEmployee = {
   name: string;
   email: string | null;
   department: string | null;
+  // ERP 연차 잔여(erp_leave_balances.annual_remaining_days) — ERP 계정이 연결된 직원만, 없으면 null.
+  //   발부 모달이 미사용 일수 기본값으로 씁니다(직원이 고칠 수 있음).
+  erpAnnualRemaining: number | null;
 };
 
 async function loadRoster(): Promise<LeavePlanEmployee[]> {
@@ -61,14 +65,14 @@ async function loadRoster(): Promise<LeavePlanEmployee[]> {
       supabaseAdmin.from(DRV).select("id, name, is_active"),
       supabaseAdmin
         .from(PROF)
-        .select("driver_id, employment_status, email, appointments"),
+        .select("driver_id, employment_status, email, appointments, erp_employee_id"),
     ]);
   if (dErr) throw new Error(dErr.message);
   if (pErr) throw new Error(pErr.message);
 
   const profByDriver = new Map<
     string,
-    { status: string; email: string | null; department: string | null }
+    { status: string; email: string | null; department: string | null; erpId: string | null }
   >();
   const today = kstTodayYmd();
   for (const p of profs ?? []) {
@@ -79,8 +83,11 @@ async function loadRoster(): Promise<LeavePlanEmployee[]> {
       // 현재 소속 — lib/appointments 단일 출처(인사기록카드·증명서와 같은 규칙).
       department:
         currentAssignment(r.appointments, today).current?.department ?? null,
+      erpId: (r.erp_employee_id as string | null) ?? null,
     });
   }
+  const erpIds = [...profByDriver.values()].map((p) => p.erpId).filter((v): v is string => !!v);
+  const balances = await leaveBalancesOf(erpIds).catch(() => new Map());
 
   const out: LeavePlanEmployee[] = [];
   for (const d of drivers ?? []) {
@@ -96,6 +103,7 @@ async function loadRoster(): Promise<LeavePlanEmployee[]> {
       email: prof?.email ?? null,
       // 발령 부서가 없으면 비워 둡니다 — drivers.rank(직급)는 부서가 아닙니다.
       department: prof?.department ?? null,
+      erpAnnualRemaining: prof?.erpId ? balances.get(prof.erpId)?.annual ?? null : null,
     });
   }
   return out.sort((a, b) => a.name.localeCompare(b.name, "ko"));
@@ -126,6 +134,7 @@ export type LeavePlanOverview = {
   years: number[]; // 데이터가 있는 연도(내림차순) + 올해
   rows: LeavePlanRow[]; // 발부된 건(제출 여부 무관)
   roster: LeavePlanEmployee[]; // 재직자 전체(발부 모달용)
+  erpLeaveSyncedAt: string | null; // ERP 휴가 잔여 마지막 동기화(발부 모달 "ERP 기준" 표시)
   issuedCount: number;
   submittedCount: number;
   pendingNames: string[]; // 미제출자
@@ -175,9 +184,10 @@ export async function getLeavePlanOverview(
       ? Math.round(yearInput)
       : years[0] ?? thisYear;
 
-  const [roster, { data: reqs, error }] = await Promise.all([
+  const [roster, { data: reqs, error }, erpLeaveSyncedAt] = await Promise.all([
     loadRoster(),
     supabaseAdmin.from(REQ).select("*").eq("year", year),
+    erpLastSyncedAt("leaveBalances").catch(() => null),
   ]);
   if (error) throw new Error(error.message);
 
@@ -192,6 +202,7 @@ export async function getLeavePlanOverview(
     years,
     rows,
     roster,
+    erpLeaveSyncedAt,
     issuedCount: rows.length,
     submittedCount,
     pendingNames: rows

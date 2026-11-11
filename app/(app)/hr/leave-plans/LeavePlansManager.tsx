@@ -553,6 +553,16 @@ function IssueModal({
 }) {
   const issuedById = new Map(overview.rows.map((r) => [r.employee_id, r]));
   const year = overview.year;
+  // ERP 휴가 잔여 동기화 시각 — "ERP 기준 (동기화 시각)" 표시.
+  const erpSyncedLabel = overview.erpLeaveSyncedAt
+    ? new Date(overview.erpLeaveSyncedAt).toLocaleString("ko-KR", {
+        timeZone: "Asia/Seoul",
+        month: "2-digit",
+        day: "2-digit",
+        hour: "2-digit",
+        minute: "2-digit",
+      })
+    : "동기화 기록 없음";
 
   // 공통 기본값 — 잔여기간은 보통 그 해 말까지.
   const [baseDays, setBaseDays] = useState("");
@@ -564,7 +574,12 @@ function IssueModal({
       const prev = issuedById.get(e.driver_id);
       init[e.driver_id] = {
         checked: false,
-        days: prev ? formatDays(prev.unused_days) : "",
+        // 이미 발부된 값이 우선, 없으면 ERP 연차 잔여로 미리 채웁니다(직원이 고칠 수 있음).
+        days: prev
+          ? formatDays(prev.unused_days)
+          : e.erpAnnualRemaining != null && e.erpAnnualRemaining > 0
+            ? formatDays(roundHalf(e.erpAnnualRemaining))
+            : "",
         start: prev?.period_start ?? `${year}-01-01`,
         end: prev?.period_end ?? `${year}-12-31`,
       };
@@ -810,6 +825,14 @@ function IssueModal({
                         }
                         className="w-24 rounded-md border border-line bg-card px-2 py-1 text-sm disabled:bg-surface"
                       />
+                      {!prev && e.erpAnnualRemaining != null && (
+                        <span
+                          className="mt-0.5 block text-[10px] text-ink-hint"
+                          title="ERP에서 가져온 정보입니다. 수정은 ERP에서 해 주세요"
+                        >
+                          ERP 기준 {formatDays(e.erpAnnualRemaining)}일 ({erpSyncedLabel})
+                        </span>
+                      )}
                     </td>
                     <td className={tdCls}>
                       <div className="flex items-center gap-1">

@@ -215,3 +215,125 @@ export async function linkErpEmployee(profileId: string, erpEmployeeId: string):
     return { ok: false, message: e instanceof Error ? e.message : "연결하지 못했습니다." };
   }
 }
+
+// =====================================================================
+// 대관 차이 대조 — erp_rentals(사라진 건 제외) ↔ rental_reservations 시설대관(reservation_type='rental').
+//   rental_id = reservation_no. 기간은 예약일 기준.
+//   세 목록: ERP에만 / 동업자씨에만 / 양쪽 다 있는데 날짜·시간·상태·인원이 다름.
+// =====================================================================
+export type RentalSide = {
+  date: string | null;
+  start: string | null;
+  end: string | null;
+  status: string | null;
+  persons: number | null;
+  space: string | null;
+  program: string | null;
+  team: string | null;
+};
+export type RentalDiffRow = { id: string; erp: RentalSide | null; ours: RentalSide | null; diffs: string[] };
+export type RentalDiffResult = {
+  start: string;
+  end: string;
+  erpCount: number;
+  oursCount: number;
+  bothSame: number;
+  erpOnly: RentalDiffRow[];
+  oursOnly: RentalDiffRow[];
+  different: RentalDiffRow[];
+  erpSyncedAt: string | null;
+};
+
+const isYmd = (s: string) => /^\d{4}-\d{2}-\d{2}$/.test(s);
+
+export async function compareErpRentals(start: string, end: string): Promise<RentalDiffResult> {
+  await gate();
+  if (!isYmd(start) || !isYmd(end) || start > end) throw new Error("기간이 올바르지 않습니다.");
+  const page = async <T,>(fn: (from: number) => PromiseLike<{ data: T[] | null; error: { message: string } | null }>) => {
+    const out: T[] = [];
+    for (let from = 0; ; from += 1000) {
+      const { data, error } = await fn(from);
+      if (error) throw new Error(error.message);
+      out.push(...(data ?? []));
+      if (!data || data.length < 1000) break;
+    }
+    return out;
+  };
+  const [erpRows, ourRows, syncedRun] = await Promise.all([
+    page((from) =>
+      supabaseAdmin
+        .from("erp_rentals")
+        .select("rental_id, reservation_date, start_time, end_time, status, person_total, space_name, program_name, team_name")
+        .is("removed_at", null)
+        .gte("reservation_date", start)
+        .lte("reservation_date", end)
+        .order("rental_id")
+        .range(from, from + 999)
+    ),
+    page((from) =>
+      supabaseAdmin
+        .from("rental_reservations")
+        .select("reservation_no, reservation_date, start_time, end_time, status, person_total, space_name, program_name, team_name")
+        .eq("reservation_type", "rental")
+        .gte("reservation_date", start)
+        .lte("reservation_date", end)
+        .order("reservation_no")
+        .range(from, from + 999)
+    ),
+    supabaseAdmin
+      .from("erp_sync_runs")
+      .select("finished_at")
+      .eq("api", "rentals")
+      .eq("ok", true)
+      .order("started_at", { ascending: false })
+      .limit(1)
+      .maybeSingle(),
+  ]);
+  const side = (r: Record<string, unknown>): RentalSide => ({
+    date: (r.reservation_date as string | null) ?? null,
+    start: (r.start_time as string | null) ?? null,
+    end: (r.end_time as string | null) ?? null,
+    status: r.status == null ? null : String(r.status).trim().toUpperCase(),
+    persons: r.person_total == null ? null : Number(r.person_total),
+    space: (r.space_name as string | null) ?? null,
+    program: (r.program_name as string | null) ?? null,
+    team: (r.team_name as string | null) ?? null,
+  });
+  const erp = new Map((erpRows as Record<string, unknown>[]).map((r) => [String(r.rental_id), side(r)]));
+  const ours = new Map((ourRows as Record<string, unknown>[]).map((r) => [String(r.reservation_no), side(r)]));
+  const hm = (v: string | null) => (v ?? "").slice(0, 5);
+
+  const erpOnly: RentalDiffRow[] = [];
+  const different: RentalDiffRow[] = [];
+  let bothSame = 0;
+  for (const [id, e] of erp) {
+    const o = ours.get(id);
+    if (!o) {
+      erpOnly.push({ id, erp: e, ours: null, diffs: [] });
+      continue;
+    }
+    const diffs: string[] = [];
+    if (e.date !== o.date) diffs.push("날짜");
+    if (hm(e.start) !== hm(o.start) || hm(e.end) !== hm(o.end)) diffs.push("시간");
+    if ((e.status ?? "") !== (o.status ?? "")) diffs.push("상태");
+    if ((e.persons ?? null) !== (o.persons ?? null)) diffs.push("인원");
+    if (diffs.length) different.push({ id, erp: e, ours: o, diffs });
+    else bothSame++;
+  }
+  const oursOnly: RentalDiffRow[] = [...ours]
+    .filter(([id]) => !erp.has(id))
+    .map(([id, o]) => ({ id, erp: null, ours: o, diffs: [] }));
+  const byDate = (a: RentalDiffRow, b: RentalDiffRow) =>
+    ((a.erp ?? a.ours)?.date ?? "").localeCompare((b.erp ?? b.ours)?.date ?? "") || a.id.localeCompare(b.id);
+  return {
+    start,
+    end,
+    erpCount: erp.size,
+    oursCount: ours.size,
+    bothSame,
+    erpOnly: erpOnly.sort(byDate),
+    oursOnly: oursOnly.sort(byDate),
+    different: different.sort(byDate),
+    erpSyncedAt: (syncedRun.data as { finished_at?: string } | null)?.finished_at ?? null,
+  };
+}
