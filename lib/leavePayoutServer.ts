@@ -20,7 +20,7 @@ import { isFinalized, toStatus } from "@/lib/contractCore";
 import { listRolesForDriver } from "@/lib/employeeRolesServer";
 import { erpLastSyncedAt, leaveBalancesOf, loadDutiesOverlapping, resolveErpViewer, type ErpViewer } from "@/lib/erp/view";
 import { kstTodayYmd, kstYmdOf } from "@/lib/erp/duty";
-import { noticeCompleted } from "@/lib/leavePromotion";
+import { isFirstYear, noticeCompleted } from "@/lib/leavePromotion";
 import { isPayoutStaffVisible } from "@/lib/leaveSettings";
 import {
   PROMOTED_EXCLUDE_REASON,
@@ -175,7 +175,7 @@ export async function planPayoutLines(year: number, basisIn?: unknown): Promise<
     const joinDate = typeof p.join_date === "string" && p.join_date ? p.join_date.slice(0, 10) : null;
     const erpId = typeof p.erp_employee_id === "string" ? p.erp_employee_id : null;
     const remaining = erpId ? bal.get(erpId)?.annual ?? null : null;
-    const firstYear = !!joinDate && joinDate.slice(0, 4) === String(year);
+    const firstYear = isFirstYear(joinDate, year);
     const promoted = (done.get(profileId)?.has(1) && done.get(profileId)?.has(2)) ?? false;
     if (remaining != null && remaining <= 0) continue; // 남은 연차 없음
     const category: PayoutCategory = firstYear ? "first_year_monthly" : promoted ? "annual_promoted" : "annual_unpromoted";

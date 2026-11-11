@@ -13,6 +13,7 @@ import "server-only";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
 import { dutyDashboardData, employedErpEmployees, type DutyDashboard } from "@/lib/erp/view";
 import { kstTodayYmd } from "@/lib/erp/duty";
+import { isFirstYear } from "@/lib/leavePromotion";
 
 export type LeaveTableRow = {
   erpEmployeeId: string;
@@ -61,7 +62,7 @@ export async function loadLeaveTable(dashIn?: DutyDashboard): Promise<LeaveTable
       name: drv?.name ?? person.name,
       rank: drv?.rank ?? null,
       joinDate,
-      firstYear: !!joinDate && joinDate.slice(0, 4) === String(year),
+      firstYear: isFirstYear(joinDate, year),
       allocation: num(b?.annual_allocation_override_days),
       used: usedBy.get(id) ?? 0,
       remaining: num(b?.annual_remaining_days),

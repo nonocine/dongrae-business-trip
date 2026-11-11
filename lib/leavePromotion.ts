@@ -85,16 +85,16 @@ export function firstYearSchedule(joinDate: string): PromotionSchedule {
   };
 }
 
-// 그 해 이 직원에게 해당하는 track — 회계연도 대상(그 해 1/1 전에 입사)과
-//   1년 미만 대상(최초 1년의 끝이 그 해 안이거나 그 해 입사)이 함께일 수 있습니다.
+// 그 해 이 직원에게 해당하는 track — 그 해 입사자는 first_year 만, 그 밖(전년도 이전 입사·입사일 없음)은 annual 만.
+// '첫해' 판정 — 단일 기준: 입사일(join_date)의 연도 = 그 연도(산정 연도).
+//   연차 사용촉진 1년 미만 줄·연차수당 first_year_monthly·'첫해' 배지·첫해 칩이 모두 이 함수를 씁니다.
+//   (2026-11 확정) 전년도 입사자(예: 2025-07-16)는 그 해에는 회계연도 트랙만입니다.
+export function isFirstYear(joinDate: string | null | undefined, year: number): boolean {
+  return !!joinDate && joinDate.slice(0, 4) === String(year);
+}
+
 export function tracksFor(year: number, joinDate: string | null): PromotionTrack[] {
-  const out: PromotionTrack[] = [];
-  if (!joinDate || joinDate < `${year}-01-01`) out.push("annual");
-  if (joinDate) {
-    const end = firstYearEnd(joinDate);
-    if (end.slice(0, 4) === String(year) || joinDate.slice(0, 4) === String(year)) out.push("first_year");
-  }
-  return out;
+  return isFirstYear(joinDate, year) ? ["first_year"] : ["annual"];
 }
 
 export function scheduleFor(track: PromotionTrack, year: number, joinDate: string | null): PromotionSchedule {
