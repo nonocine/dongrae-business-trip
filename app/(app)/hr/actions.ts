@@ -81,7 +81,9 @@ import { withAppointmentIds } from "@/lib/appointmentsServer";
 // =====================================================================
 
 // /hr 안에서 갈리는 영역. 탭과 1:1 은 아닙니다(계약서·증명서 탭은 인사에 속함).
-export type HrScope = "records" | "recruitment";
+// recordsView — 직원 인사기록카드 '열람'만(2026-11: hr 직무 보유자). 목록·카드 조회만 열고,
+//   저장·삭제·첨부 다운로드·사진·발령 처리 등은 여전히 "records"(인사 파일 열람 보유자)만.
+export type HrScope = "records" | "recordsView" | "recruitment";
 
 export type HrAccess = {
   name: string;
@@ -138,7 +140,10 @@ async function resolveHrAccess(): Promise<HrAccess | null> {
   const isM0 = isM0Grant({ rank, email, authLevel });
   const personnel = !!(await resolvePersonnelViewer())?.isPersonnel;
   if (isM0) {
-    return { name, isM0: true, scopes: personnel ? ["records", "recruitment"] : ["recruitment"] };
+    if (personnel) return { name, isM0: true, scopes: ["records", "recruitment"] };
+    // 인사 파일 열람이 없는 M0 라도 hr 직무가 있으면 카드 열람만.
+    const m0Roles = driverId ? await listRolesForDriver(driverId) : [];
+    return { name, isM0: true, scopes: m0Roles.includes("hr") ? ["recordsView", "recruitment"] : ["recruitment"] };
   }
 
   // --- 직무로 여는 경로 ---
@@ -157,6 +162,8 @@ async function resolveHrAccess(): Promise<HrAccess | null> {
   const scopes = [
     ...new Set([
       ...(personnel ? (["records"] as HrScope[]) : []),
+      // hr 직무 — 인사 파일 열람이 없으면 카드 '열람'만(recordsView).
+      ...(!personnel && roles.includes("hr") ? (["recordsView"] as HrScope[]) : []),
       ...roles
         .map((r) => HR_SCOPE_BY_ROLE[r])
         .filter((s): s is HrScope => s !== undefined),
@@ -225,9 +232,17 @@ async function requireHrManagerOrAdmin(): Promise<void> {
 // 인사기록카드 (employee_profiles)
 // =====================================================================
 
+// 직원 카드 열람 — 인사 파일 열람(records) 또는 hr 직무의 열람 전용(recordsView).
+//   목록·카드 조회 두 함수에만 씁니다. 그 밖의 인사기록 액션은 requireHrAdmin("records") 그대로.
+async function requireHrRecordsView(): Promise<HrAccess> {
+  const ctx = await resolveHrAccess();
+  if (!ctx || !(ctx.scopes.includes("records") || ctx.scopes.includes("recordsView"))) redirect("/");
+  return ctx;
+}
+
 // 인사기록카드 입력 대상 후보 — drivers 전체(활성/비활성).
 export async function listDriversForHrProfile(): Promise<Driver[]> {
-  await requireHrAdmin("records");
+  await requireHrRecordsView();
   const { data, error } = await supabaseAdmin
     .from("drivers")
     .select("id,name,rank,is_active,created_at")
@@ -246,7 +261,7 @@ export async function listDriversForHrProfile(): Promise<Driver[]> {
 
 // 전체 인사기록카드 목록 (직원명은 drivers 목록으로 매칭).
 export async function listEmployeeProfiles(): Promise<EmployeeProfile[]> {
-  await requireHrAdmin("records");
+  await requireHrRecordsView();
   const { data, error } = await supabaseAdmin.from("employee_profiles").select("*");
   if (error) throw new Error(error.message);
   return (data ?? []).map((row) =>

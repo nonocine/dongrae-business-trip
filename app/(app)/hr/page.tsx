@@ -41,9 +41,11 @@ export default async function HrPage({
   //     다시 막습니다. 여기서는 조회 자체를 하지 않는 것이 핵심입니다 —
   //     채용 담당자에게 전 직원 인사기록을 내려보내지 않습니다.
   const canRecords = me.scopes.includes("records");
+  // hr 직무(인사 파일 열람 없음) — 인사기록카드 탭만 '열람 전용'으로. 계약서·증명서 탭은 그대로 records 만.
+  const canRecordsView = canRecords || me.scopes.includes("recordsView");
   const canRecruitment = me.scopes.includes("recruitment");
   const allowedTabs: TabKey[] = VALID_TABS.filter((t) =>
-    t === "recruitment" ? canRecruitment : canRecords,
+    t === "recruitment" ? canRecruitment : t === "records" ? canRecordsView : canRecords,
   );
 
   const { tab, driver } = await searchParams;
@@ -56,8 +58,8 @@ export default async function HrPage({
     : allowedTabs[0];
 
   const [drivers, profiles, recruitmentPostings] = await Promise.all([
-    canRecords ? listDriversForHrProfile() : Promise.resolve([]),
-    canRecords ? listEmployeeProfiles() : Promise.resolve([]),
+    canRecordsView ? listDriversForHrProfile() : Promise.resolve([]),
+    canRecordsView ? listEmployeeProfiles() : Promise.resolve([]),
     canRecruitment ? listRecruitmentPostings() : Promise.resolve([]),
   ]);
 
@@ -87,6 +89,7 @@ export default async function HrPage({
         today={kstTodayYmd()}
         canViewDutyRecord={await canViewOthersDutyRecord().catch(() => false)}
         initialDriverId={driver ?? null}
+        recordsViewOnly={!canRecords}
       />
     </div>
   );

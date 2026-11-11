@@ -35,6 +35,7 @@ export default function HrDashboard({
   today,
   canViewDutyRecord = false,
   initialDriverId = null,
+  recordsViewOnly = false,
 }: {
   drivers: Driver[];
   profiles: EmployeeProfile[];
@@ -43,6 +44,8 @@ export default function HrDashboard({
   canViewDutyRecord?: boolean;
   // ?driver=<id> — 복무·연차 대시보드에서 이름을 눌러 들어오면 그 직원 카드를 바로 엽니다.
   initialDriverId?: string | null;
+  // hr 직무(인사 파일 열람 없음) — 직원 카드 열람만(저장·삭제·첨부·사진·발령 처리 없음).
+  recordsViewOnly?: boolean;
   // KST 오늘 "YYYY-MM-DD" — 현재 소속(발효된 발령) 판정 기준. 서버에서 계산.
   today: string;
   initialTab?: TabKey;
@@ -58,7 +61,7 @@ export default function HrDashboard({
 
   return (
     <div className="space-y-6">
-      {allowedTabs.includes("records") && <QuickAccess onTab={setTab} />}
+      {allowedTabs.includes("records") && !recordsViewOnly && <QuickAccess onTab={setTab} />}
       <HrTabs current={tab} onChange={setTab} allowedTabs={allowedTabs} />
 
       {tab === "records" && (
@@ -70,6 +73,7 @@ export default function HrDashboard({
           today={today}
           canViewDutyRecord={canViewDutyRecord}
           initialDriverId={initialDriverId}
+          viewOnly={recordsViewOnly}
         />
       )}
       {/* 계약서·증명서 탭은 "곧 제공될 예정입니다" 자리표시자였습니다.
@@ -206,6 +210,7 @@ function RecordsTab({
   today,
   canViewDutyRecord,
   initialDriverId,
+  viewOnly,
 }: {
   drivers: Driver[];
   profiles: EmployeeProfile[];
@@ -214,6 +219,7 @@ function RecordsTab({
   today: string;
   canViewDutyRecord: boolean;
   initialDriverId: string | null;
+  viewOnly: boolean;
 }) {
   const [selectedId, setSelectedId] = useState(
     initialDriverId && drivers.some((d) => d.id === initialDriverId) ? initialDriverId : ""
@@ -318,6 +324,7 @@ function RecordsTab({
         <div className="space-y-5">
           {selectedDriver ? (
             <EmployeeProfileForm
+              viewOnly={viewOnly}
               key={selectedDriver.id}
               driver={selectedDriver}
               profile={selectedProfile}

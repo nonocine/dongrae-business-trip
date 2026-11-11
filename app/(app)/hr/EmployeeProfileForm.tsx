@@ -93,7 +93,10 @@ export default function EmployeeProfileForm({
   knownDepartments,
   today,
   onDeleted,
+  viewOnly = false,
 }: {
+  // hr 직무 열람 전용 — 모든 칸 읽기 전용, 저장·삭제·첨부서류·사진·발령 처리 숨김(서버도 records 만 허용).
+  viewOnly?: boolean;
   knownDepartments?: string[];
   // KST 오늘 "YYYY-MM-DD" — 현재 소속 판정 기준(서버 계산).
   today: string;
@@ -104,7 +107,8 @@ export default function EmployeeProfileForm({
   canGrantPersonnel: boolean; // '인사 파일 열람' 직무 칸 — 관장(·master)에게만
   onDeleted: () => void;
 }) {
-  const locked = profile?.is_locked === true;
+  const cardLocked = profile?.is_locked === true;
+  const locked = cardLocked || viewOnly;
 
   const [tab, setTab] = useState<ProfileTabKey>("basic");
   const [error, setError] = useState<string | null>(null);
@@ -159,6 +163,8 @@ export default function EmployeeProfileForm({
   // 담당 직무 — 마운트 시 로드(null=로딩중). 저장은 M0만(canManageAuth).
   const [roles, setRoles] = useState<string[] | null>(null);
   useEffect(() => {
+    // 열람 전용(hr 직무)은 직무 목록을 받지 않습니다(인사 파일 영역 — 서버도 records 만).
+    if (viewOnly) return;
     let alive = true;
     getEmployeeRoles(driver.id).then((r) => {
       if (alive) setRoles(r);
@@ -166,7 +172,7 @@ export default function EmployeeProfileForm({
     return () => {
       alive = false;
     };
-  }, [driver.id]);
+  }, [driver.id, viewOnly]);
 
   // 첨부서류 — HR 서버액션을 콜백으로 주입.
   const onDocList = useCallback(() => listEmployeeDocuments(driver.id), [driver.id]);
@@ -238,6 +244,8 @@ export default function EmployeeProfileForm({
       : `${baseInputCls} bg-card`;
 
   useEffect(() => {
+    // 열람 전용은 사진(인사 파일)을 받지 않습니다.
+    if (viewOnly) return;
     let alive = true;
     getEmployeePhotoUrl(driver.id).then((url) => {
       if (alive) setPhotoUrl(url);
@@ -245,11 +253,16 @@ export default function EmployeeProfileForm({
     return () => {
       alive = false;
     };
-  }, [driver.id]);
+  }, [driver.id, viewOnly]);
 
   return (
     <div className="space-y-4">
-      {locked && (
+      {viewOnly && (
+        <div className="rounded-xl border border-line bg-surface px-4 py-3 text-sm text-ink-muted">
+          👁 열람 전용(인사 담당) — 수정·삭제·첨부서류·증명사진·인사발령 처리는 인사 파일 열람 권한자만 할 수 있습니다.
+        </div>
+      )}
+      {cardLocked && (
         <div className="rounded-xl border border-warning bg-warning-soft px-4 py-3 text-sm text-warning">
           🔒 잠긴 인사기록카드입니다. 수정하려면 먼저 잠금을 해제해야 합니다.
           (잠금 해제 기능은 다음 단계에서 제공됩니다.)
@@ -665,13 +678,15 @@ export default function EmployeeProfileForm({
 
           {/* 인사발령 탭 */}
           <div className={`space-y-3 ${tab === "appointment" ? "" : "hidden"}`}>
-            <AppointmentReviewPanel
-              driverId={driver.id}
-              items={apptReview}
-              confirmed={appointments}
-              dirty={apptDirty}
-              onApplied={applyAppointments}
-            />
+            {!viewOnly && (
+              <AppointmentReviewPanel
+                driverId={driver.id}
+                items={apptReview}
+                confirmed={appointments}
+                dirty={apptDirty}
+                onApplied={applyAppointments}
+              />
+            )}
             <AppointmentTab
               appointments={appointments}
               onChange={setAppointments}
@@ -682,6 +697,11 @@ export default function EmployeeProfileForm({
 
           {/* 첨부서류 탭 */}
           <div className={tab === "documents" ? "" : "hidden"}>
+            {viewOnly ? (
+              <p className="rounded-lg border border-dashed border-line bg-surface py-8 text-center text-sm text-ink-muted">
+                첨부서류는 인사 파일 열람 권한자만 볼 수 있습니다.
+              </p>
+            ) : (
             <EmployeeDocumentsSection
               readOnly={locked}
               contractHref={contractsPath({ tab: "employment", driverId: driver.id })}
@@ -690,6 +710,7 @@ export default function EmployeeProfileForm({
               onDelete={onDocDelete}
               onOpen={onDocOpen}
             />
+            )}
           </div>
 
           {error && <p className={noticeError}>{error}</p>}
@@ -706,7 +727,7 @@ export default function EmployeeProfileForm({
               </button>
             )}
 
-            {profile && (
+            {profile && !viewOnly && (
               <button
                 type="button"
                 disabled={deletePending || locked}
@@ -740,7 +761,7 @@ export default function EmployeeProfileForm({
             )}
           </div>
 
-          {locked && profile && (
+          {cardLocked && !viewOnly && profile && (
             <p className="text-xs text-ink-muted">
               🔒 잠금 상태에서는 삭제할 수 없습니다.
             </p>
