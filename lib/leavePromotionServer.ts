@@ -76,6 +76,7 @@ export type PromotionRow = {
   profileId: string;
   driverId: string;
   name: string;
+  rank: string | null; // drivers.rank(직급)
   department: string | null;
   joinDate: string | null;
   track: PromotionTrack;
@@ -103,6 +104,8 @@ export type PromotionBoard = {
   syncedLeave: string | null;
   syncedDuties: string | null;
   firstYearPolicy: FirstYearPolicy;
+  // 그해 연차수당 산정표(무효 제외 최신) — 요약 카드의 예상 금액. 없으면 null.
+  payoutRun: { status: string; amount: number; days: number } | null;
 };
 
 function toNotice(r: Record<string, unknown>): NoticeInfo {
@@ -136,7 +139,7 @@ export async function loadPromotionBoard(year: number): Promise<PromotionBoard> 
   const today = kstTodayYmd();
   const [{ data: drivers }, { data: profs }, { data: notices }, { data: plans }, syncedLeave, syncedDuties, leaveDates, firstYearPolicy] =
     await Promise.all([
-      supabaseAdmin.from("drivers").select("id, name, is_active"),
+      supabaseAdmin.from("drivers").select("id, name, rank, is_active"),
       supabaseAdmin
         .from("employee_profiles")
         .select("id, driver_id, employment_status, join_date, appointments, erp_employee_id"),
@@ -147,7 +150,9 @@ export async function loadPromotionBoard(year: number): Promise<PromotionBoard> 
       annualLeaveDatesByEmployee(year),
       getFirstYearPolicy(),
     ]);
-  const drvMap = new Map(((drivers ?? []) as { id: string; name: string; is_active: boolean | null }[]).map((d) => [d.id, d]));
+  const drvMap = new Map(
+    ((drivers ?? []) as { id: string; name: string; rank: string | null; is_active: boolean | null }[]).map((d) => [d.id, d])
+  );
   const profRows = ((profs ?? []) as Record<string, unknown>[]).filter((p) => {
     const d = drvMap.get(String(p.driver_id));
     return d && d.is_active !== false && p.employment_status !== "resigned";
@@ -209,6 +214,7 @@ export async function loadPromotionBoard(year: number): Promise<PromotionBoard> 
         profileId,
         driverId,
         name: drvMap.get(driverId)?.name ?? "(이름 없음)",
+        rank: drvMap.get(driverId)?.rank ?? null,
         department: currentAssignment(p.appointments, today).current?.department ?? null,
         joinDate,
         track,
@@ -230,7 +236,30 @@ export async function loadPromotionBoard(year: number): Promise<PromotionBoard> 
     });
   }
   rows.sort((a, b) => a.name.localeCompare(b.name, "ko") || a.track.localeCompare(b.track));
-  return { year, today, rows, syncedLeave, syncedDuties, firstYearPolicy };
+  // 연차수당 산정표(무효 제외 최신) — 제외 줄 빼고 합계.
+  let payoutRun: PromotionBoard["payoutRun"] = null;
+  const { data: runs } = await supabaseAdmin
+    .from("leave_payout_runs")
+    .select("id, status")
+    .eq("year", year)
+    .neq("status", "void")
+    .order("created_at", { ascending: false })
+    .limit(1);
+  const run = ((runs ?? []) as { id: string; status: string }[])[0];
+  if (run) {
+    const { data: lines } = await supabaseAdmin
+      .from("leave_payout_lines")
+      .select("amount, unused_days")
+      .eq("run_id", run.id)
+      .eq("excluded", false);
+    const ls = (lines ?? []) as { amount: number; unused_days: number }[];
+    payoutRun = {
+      status: run.status,
+      amount: ls.reduce((a, l) => a + Number(l.amount ?? 0), 0),
+      days: ls.reduce((a, l) => a + Number(l.unused_days ?? 0), 0),
+    };
+  }
+  return { year, today, rows, syncedLeave, syncedDuties, firstYearPolicy, payoutRun };
 }
 
 // --- 관리자 대시보드 알림(D-14·D-3·경과) ---------------------------------------------
