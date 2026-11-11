@@ -63,15 +63,46 @@ export const SIGNING_METHOD_LABEL: Record<SigningMethod, string> = {
 
 // --- 강좌 쪽 값 -----------------------------------------------------------
 export type InstructorMode = "hire" | "staff" | "volunteer" | "external";
+// 원칙: 돈 받는 사람은 반드시 계약서. 표시 문구만 바꿨고 DB 값은 그대로입니다.
 export const INSTRUCTOR_MODE_LABEL: Record<InstructorMode, string> = {
-  hire: "채용함",
+  hire: "유급(계약서 필요)",
   staff: "직원 직접 운영",
-  volunteer: "자원봉사",
+  volunteer: "무급(동아리·자원봉사)",
   external: "외부기관",
 };
 export function normalizeInstructorMode(v: unknown): InstructorMode {
   return v === "staff" || v === "volunteer" || v === "external" ? v : "hire";
 }
+// 새 강좌 기본값 — 동아리(program_type='club')는 무급, 그 밖은 유급.
+export function defaultInstructorMode(programType: string | null | undefined): InstructorMode {
+  return programType === "club" ? "volunteer" : "hire";
+}
+
+// 유급 강좌의 계약서 전제 확인 — 강좌명 2자 이상 + 강사료 금액(방식에 맞는 칸).
+//   강좌 입력 화면은 경고만, 계약서 발송은 이것이 비어 있지 않으면 막습니다.
+export function programInfoIssues(p: {
+  mode: InstructorMode;
+  name: string | null | undefined;
+  payType: ContractPayType;
+  hourlyRate: number | null | undefined;
+  sessionFee: number | null | undefined;
+  shareRate: number | null | undefined;
+}): string[] {
+  if (p.mode !== "hire") return [];
+  const out: string[] = [];
+  if ((p.name ?? "").trim().length < 2) out.push("강좌명이 2자 미만입니다");
+  const amount = p.payType === "per_session" ? p.sessionFee : p.payType === "revenue_share" ? p.shareRate : p.hourlyRate;
+  if (amount == null || !Number.isFinite(Number(amount)) || Number(amount) <= 0)
+    out.push(
+      p.payType === "per_session"
+        ? "회당 강사료가 비어 있습니다"
+        : p.payType === "revenue_share"
+          ? "강사 분배 비율이 비어 있습니다"
+          : "시급이 비어 있습니다"
+    );
+  return out;
+}
+export const PROGRAM_INFO_BLOCK_MESSAGE = "강좌 정보를 먼저 확인해 주세요";
 
 export type TaxType = "business_3_3" | "other_8_8" | "none";
 export const TAX_TYPE_LABEL: Record<TaxType, string> = {

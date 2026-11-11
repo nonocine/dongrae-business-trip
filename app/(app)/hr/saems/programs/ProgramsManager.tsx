@@ -35,6 +35,7 @@ import { STATUS_BADGE } from "@/app/(app)/hr/saems/contracts/ContractsManager";
 import {
   INSTRUCTOR_CONTRACT_STATUS_LABEL,
   INSTRUCTOR_MODE_LABEL,
+  programInfoIssues,
   type InstructorMode,
 } from "@/lib/instructorContract";
 import {
@@ -1770,6 +1771,19 @@ function ProgramModal({
   const set = (p: Partial<typeof f>) => setF((prev) => ({ ...prev, ...p }));
   const numOrNull = (v: string) => (v === "" ? null : Number(v));
 
+  // 유급인데 강좌명이 짧거나 강사료가 비어 있으면 — 저장은 되고 경고만(계약서 발송은 막힘).
+  const infoIssues = programInfoIssues({
+    mode: f.instructor_mode,
+    name: f.name,
+    payType: f.pay_type,
+    hourlyRate: numOrNull(f.hourly_rate),
+    sessionFee: numOrNull(f.session_fee),
+    shareRate: numOrNull(f.share_rate),
+  });
+  const infoWarnText = infoIssues.length
+    ? ` ⚠️ ${infoIssues.join(", ")} — 이대로는 계약서를 보낼 수 없습니다.`
+    : "";
+
   function submit() {
     setErr(null);
     const input: ProgramInput = {
@@ -1806,17 +1820,17 @@ function ProgramModal({
         }
         const s = res.sync;
         onDone(
-          s
+          (s
             ? `수정했습니다. 회차 ${s.created}건 생성` +
-                (s.deleted ? `·${s.deleted}건 삭제` : "") +
-                (s.kept ? `·제출·확정분 ${s.kept}건 보존` : "")
-            : "수정했습니다."
+              (s.deleted ? `·${s.deleted}건 삭제` : "") +
+              (s.kept ? `·제출·확정분 ${s.kept}건 보존` : "")
+            : "수정했습니다.") + infoWarnText
         );
         return;
       }
       const res = await addProgram(termId, input);
       if (!res.ok) return setErr(res.message);
-      onDone(`프로그램을 추가했습니다. 회차 ${res.sessions}건 생성.`);
+      onDone(`프로그램을 추가했습니다. 회차 ${res.sessions}건 생성.` + infoWarnText);
     });
   }
 
@@ -1857,7 +1871,7 @@ function ProgramModal({
           </FieldP>
         ) : (
           <p className="self-end text-[11px] text-ink-hint">
-            채용하지 않는 강좌는 강사 지정·계약서가 없습니다(저장하면 강사 지정이 비워집니다).
+            돈을 받지 않는 강좌는 계약서 대상이 아닙니다. (원칙: 돈 받는 사람은 반드시 계약서 — 강사료를 주면 &lsquo;유급&rsquo;으로)
           </p>
         )}
         {f.instructor_mode === "hire" && quick && (
@@ -2053,6 +2067,11 @@ function ProgramModal({
         )}
       </div>
 
+      {infoIssues.length > 0 && (
+        <p className={`mt-3 ${noticeWarning}`}>
+          유급(계약서 필요) 강좌인데 {infoIssues.join(", ")}. 저장은 되지만 이대로는 계약서를 보낼 수 없습니다.
+        </p>
+      )}
       {err && <p className={`mt-3 ${noticeError}`}>{err}</p>}
       {needsConfirm && (
         <label className="mt-2 flex items-center gap-2 text-xs text-stamp">

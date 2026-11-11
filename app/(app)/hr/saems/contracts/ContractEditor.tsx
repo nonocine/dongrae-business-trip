@@ -20,6 +20,7 @@ import {
   FIELD_LABEL,
   INSTRUCTOR_CONTRACT_EMPLOYER as EMP,
   INSTRUCTOR_CONTRACT_STATUS_LABEL,
+  PROGRAM_INFO_BLOCK_MESSAGE,
   TAX_TYPE_LABEL,
   autoFields,
   bodySegments,
@@ -156,6 +157,8 @@ export default function ContractEditor({
   const tpl = ctx?.templates.find((t) => t.id === tplId) ?? null;
   const readOnly = !!ctx?.existing && ctx.existing.status !== "draft";
   const missing = useMemo(() => (tpl ? missingFields(f, tpl.body) : []), [f, tpl]);
+  // 유급 강좌 정보가 덜 됐으면(강좌명 2자 미만·강사료 금액 없음) 발송을 막습니다.
+  const infoIssues = prog?.infoIssues ?? [];
   const set = (p: Partial<ContractFields>) => setF((prev) => ({ ...prev, ...p }));
 
   function changeProgram(id: string) {
@@ -454,6 +457,11 @@ export default function ContractEditor({
               <>
                 {err && <p className={`mt-3 ${noticeError}`}>{err}</p>}
                 {info && <p className={`mt-3 ${noticeSuccess}`}>{info}</p>}
+                {infoIssues.length > 0 && (
+                  <p className={`mt-3 ${noticeWarning}`}>
+                    {PROGRAM_INFO_BLOCK_MESSAGE}. ({infoIssues.join(", ")}) [프로그램 관리]에서 강좌를 고친 뒤 다시 여세요.
+                  </p>
+                )}
                 {missing.length > 0 && (
                   <p className="mt-3 text-xs text-stamp">
                     빈 칸: {missing.map((k) => FIELD_LABEL[k]).join(", ")} — 모두 채워야 발송할 수 있습니다.
@@ -463,7 +471,7 @@ export default function ContractEditor({
                   <button
                     type="button"
                     className={btnPrimary}
-                    disabled={pending || missing.length > 0 || !tpl || !progId}
+                    disabled={pending || missing.length > 0 || !tpl || !progId || infoIssues.length > 0}
                     onClick={() => save(true)}
                     title="본문을 확정하고 강사에게 서명 요청 문자를 보냅니다"
                   >

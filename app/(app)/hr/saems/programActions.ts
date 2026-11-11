@@ -524,7 +524,9 @@ function progPayload(i: ProgramInput) {
     name: (i.name ?? "").trim(),
     subject: clean(i.subject),
     // 강사 지정은 '채용함'일 때만 — 직원 운영·자원봉사·외부기관이면 비웁니다.
-    instructor_id: mode === "hire" ? i.instructor_id || null : null,
+    // 강사 지정은 방식과 상관없이 보낸 값 그대로 둡니다 — 동아리(무급) 강좌의
+    //   지도자 연결(instructor_id)을 지우면 동아리관리가 깨집니다. 계약서 대상은 hire 만.
+    instructor_id: i.instructor_id || null,
     instructor_mode: mode,
     session_fee: posInt(i.session_fee),
     session_minutes: posInt(i.session_minutes),

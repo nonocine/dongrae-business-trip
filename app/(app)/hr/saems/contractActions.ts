@@ -26,6 +26,8 @@ import {
   INSTRUCTOR_CONTRACT_SMS_SENDER,
   fillBody,
   koreanDate,
+  programInfoIssues,
+  PROGRAM_INFO_BLOCK_MESSAGE,
   instructorContractLink,
   instructorContractPdfPath,
   missingFields,
@@ -456,6 +458,8 @@ export type ContractProgramOption = {
   // 이 강사의 이 강좌 유효 계약(무효 제외) — 있으면 새로 만들지 않고 그것을 엽니다.
   activeContractId: string | null;
   activeStatus: InstructorContractStatus | null;
+  // 유급 강좌의 계약서 전제(강좌명 2자 이상·강사료 금액) 문제 — 있으면 발송 불가.
+  infoIssues: string[];
 };
 export type ContractTemplateOption = {
   id: string;
@@ -553,7 +557,7 @@ export async function getContractContext(input: {
     const { data: progs } = await supabaseAdmin
       .from("saem_programs")
       .select(
-        "id, name, subject, term_id, session_weekdays, session_weekday, time_start, time_end, session_minutes, pay_type, hourly_rate, session_fee, deduction_rate, instructor_mode"
+        "id, name, subject, term_id, session_weekdays, session_weekday, time_start, time_end, session_minutes, pay_type, hourly_rate, session_fee, share_rate, deduction_rate, instructor_mode"
       )
       .eq("instructor_id", instructorId);
     const progRows = ((progs ?? []) as Record<string, unknown>[]).filter(
@@ -611,6 +615,14 @@ export async function getContractContext(input: {
           projectName: t ? projMap.get(t.project_id) ?? null : null,
           activeContractId: activeMap.get(str(p.id))?.id ?? null,
           activeStatus: activeMap.get(str(p.id))?.status ?? null,
+          infoIssues: programInfoIssues({
+            mode: normalizeInstructorMode(p.instructor_mode),
+            name: str(p.name),
+            payType: normalizeContractPayType(p.pay_type),
+            hourlyRate: num(p.hourly_rate),
+            sessionFee: num(p.session_fee),
+            shareRate: num(p.share_rate),
+          }),
         };
       })
       .sort((a, b) => (b.termStart ?? "").localeCompare(a.termStart ?? "") || a.name.localeCompare(b.name, "ko"));
@@ -773,6 +785,27 @@ export async function sendInstructorContract(
     if (!tpl) return { ok: false, message: "양식을 찾을 수 없습니다. 양식을 다시 고르세요." };
     const t = tpl as { title: string; body: string };
     const fields = toFields(cur.fields);
+    // 강좌 정보(유급인데 강좌명 2자 미만·강사료 금액 없음)가 덜 됐으면 발송하지 않습니다.
+    if (cur.program_id) {
+      const { data: pr } = await supabaseAdmin
+        .from("saem_programs")
+        .select("name, pay_type, hourly_rate, session_fee, share_rate, instructor_mode")
+        .eq("id", str(cur.program_id))
+        .maybeSingle();
+      const p = (pr ?? {}) as Record<string, unknown>;
+      const n = (v: unknown) => (v == null || v === "" || !Number.isFinite(Number(v)) ? null : Number(v));
+      const issues = pr
+        ? programInfoIssues({
+            mode: normalizeInstructorMode(p.instructor_mode),
+            name: str(p.name),
+            payType: normalizeContractPayType(p.pay_type),
+            hourlyRate: n(p.hourly_rate),
+            sessionFee: n(p.session_fee),
+            shareRate: n(p.share_rate),
+          })
+        : [];
+      if (issues.length) return { ok: false, message: `${PROGRAM_INFO_BLOCK_MESSAGE}: ${issues.join(", ")}` };
+    }
     const missing = missingFields(fields, t.body);
     if (missing.length)
       return { ok: false, message: `빈 칸이 있습니다: ${missing.map((k) => FIELD_LABEL[k]).join(", ")}` };

@@ -41,6 +41,7 @@ import {
   type ClubExpenseData,
   type ClubExpenseInput,
 } from "@/lib/clubExpenseData";
+import { defaultInstructorMode } from "@/lib/instructorContract";
 
 const CLUB_PROJECT = "청소년동아리 Do Go Do Go 동아리";
 const CLUB_ROLE = "club_teacher";
@@ -825,6 +826,8 @@ export async function createClub(input: {
         status: "active",
         pay_type: "hourly",
         hourly_rate: 0,
+        // 동아리는 무급(계약서 대상 아님) — '계약서 없음' 집계에서 빠집니다.
+        instructor_mode: defaultInstructorMode("club"),
       })
       .select("id")
       .single();
