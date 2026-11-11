@@ -6,6 +6,7 @@ import { usePathname, useSearchParams } from "next/navigation";
 import { logoutCurrent } from "@/app/actions";
 import { MENU_HOME, type MenuTree } from "@/lib/menuTree";
 import { findActive } from "@/lib/menuActive";
+import AppBackButton from "@/app/components/AppBackButton";
 
 type SessionKind = "employee" | null;
 
@@ -54,6 +55,9 @@ export default function HeaderClient({
           열 위에 얹혀 좌측 열이 하나로 이어져 보이게 했습니다.
           폰에서는 사이드바가 없으므로 기존처럼 px-4 만 줍니다. */}
       <div className="flex w-full items-center gap-2 px-4 py-3 sm:gap-3 sm:py-4 md:pl-5">
+        {/* 앱(PWA) 모드 뒤로가기 — 설치형 앱에서만 보입니다(홈 제외). */}
+        <AppBackButton />
+
         {/* 모바일 햄버거 */}
         {loggedIn && (
           <button

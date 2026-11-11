@@ -230,3 +230,17 @@ button {
     max-width: 100%;
   }
 }
+
+/* 앱(PWA) 뒤로가기 버튼 — 설치형 앱에서만 보입니다(app/components/AppBackButton.tsx).
+   브라우저 탭에서는 숨깁니다. iOS 홈 화면 앱은 html.ios-standalone 으로 켭니다. */
+.app-back-btn {
+  display: none;
+}
+@media (display-mode: standalone), (display-mode: minimal-ui) {
+  .app-back-btn {
+    display: inline-flex;
+  }
+}
+html.ios-standalone .app-back-btn {
+  display: inline-flex;
+}
