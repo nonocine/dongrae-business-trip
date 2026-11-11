@@ -5,13 +5,15 @@ import Tabs, { type TabItem } from "@/app/components/Tabs";
 
 // 마이페이지(내 인사기록) 탭 껍데기 — 데이터는 서버에서 받아 children 으로 꽂습니다
 // (프레젠테이션 전용, 서버 액션·조회 로직과 무관).
-export type MyHrTabKey = "info" | "contracts" | "certs" | "trainings" | "leave" | "discipline";
+export type MyHrTabKey = "info" | "contracts" | "certs" | "trainings" | "erpLeave" | "leave" | "discipline";
 
 const TABS: TabItem<MyHrTabKey>[] = [
   { key: "info", label: "내 정보", icon: "user" },
   { key: "contracts", label: "내 계약서", icon: "filePen" },
   { key: "certs", label: "증명서", icon: "stamp" },
   { key: "trainings", label: "내 의무교육", icon: "bookOpen" },
+  // ERP 연동 — 내 연차·대휴(예전 /profile/leave 를 여기로 옮김).
+  { key: "erpLeave", label: "연차·대휴", icon: "calendar" },
   { key: "leave", label: "연차 사용계획서", icon: "calendarCheck" },
   { key: "discipline", label: "경위서", icon: "fileText" },
 ];
@@ -30,6 +32,10 @@ const HASH_TO_TAB: Record<string, MyHrTabKey> = {
   "my-certificates": "certs",
   trainings: "trainings",
   "my-trainings": "trainings",
+  "erp-leave": "erpLeave",
+  erpleave: "erpLeave",
+  annual: "erpLeave",
+  "my-leave": "erpLeave",
   leave: "leave",
   "leave-plan": "leave",
   "my-leave-plan": "leave",
@@ -48,6 +54,7 @@ export default function MyHrTabs({
   contracts,
   certs,
   trainings,
+  erpLeave,
   leave,
   discipline,
 }: {
@@ -55,6 +62,7 @@ export default function MyHrTabs({
   contracts: ReactNode;
   certs: ReactNode;
   trainings: ReactNode;
+  erpLeave: ReactNode;
   leave: ReactNode;
   discipline: ReactNode;
 }) {
@@ -84,6 +92,7 @@ export default function MyHrTabs({
     contracts,
     certs,
     trainings,
+    erpLeave,
     leave,
     discipline,
   };

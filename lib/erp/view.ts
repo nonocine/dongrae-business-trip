@@ -21,7 +21,12 @@ import {
   kstDayStartUtc,
   kstTodayYmd,
   FIELD_TYPES,
+  dutyColorKey,
+  kstYmdOf,
+  monthRange,
+  type DutyColorKey,
 } from "@/lib/erp/duty";
+import { listRolesForDriver } from "@/lib/employeeRolesServer";
 
 // --- 보는 사람 -------------------------------------------------------------
 export type ErpViewer = {
@@ -173,4 +178,247 @@ export async function leaveBalancesOf(employeeIds: string[]): Promise<Map<string
       compensatory: r.compensatory_remaining_days == null ? null : Number(r.compensatory_remaining_days),
     });
   return m;
+}
+
+// =====================================================================
+// 3단계 개편 — 월간 캘린더·내 연차·대휴·복무 대시보드
+// =====================================================================
+export type ErpPerson = { name: string; department: string | null };
+
+export async function employedErpEmployees(): Promise<Map<string, ErpPerson>> {
+  const { data } = await supabaseAdmin
+    .from("erp_employees")
+    .select("employee_id, name, department_name, deleted")
+    .eq("is_employed", true);
+  const m = new Map<string, ErpPerson>();
+  for (const e of (data ?? []) as {
+    employee_id: string;
+    name: string | null;
+    department_name: string | null;
+    deleted: boolean | null;
+  }[])
+    if (e.deleted !== true && e.name) m.set(e.employee_id, { name: e.name, department: e.department_name });
+  return m;
+}
+
+export type CalendarDuty = {
+  id: number;
+  people: ErpPerson[]; // 재직자만
+  type: string; // 보는 사람 기준 표시 유형
+  color: DutyColorKey;
+  start: string; // YYYY-MM-DD(한국시간)
+  end: string;
+  time: string;
+  location: string | null; // 출장·외근만
+  inProgress: boolean;
+};
+
+function toCalendarDuty(d: ErpDutyRow, type: string, people: ErpPerson[]): CalendarDuty {
+  const s = kstYmdOf(d.start_at!);
+  const e0 = d.end_at ? kstYmdOf(d.end_at) : s;
+  return {
+    id: d.duty_id,
+    people,
+    type,
+    color: dutyColorKey(d.type_name),
+    start: s,
+    end: e0 < s ? s : e0,
+    time: dutyTimeText(d.start_at, d.end_at),
+    location: FIELD_TYPES.has((d.type_name ?? "").trim()) ? d.location : null,
+    inProgress: d.process_code === 1,
+  };
+}
+
+export async function dutyCalendarItems(start: string, end: string, isM0: boolean): Promise<CalendarDuty[]> {
+  const [duties, people] = await Promise.all([loadDutiesOverlapping(start, end), employedErpEmployees()]);
+  const out: CalendarDuty[] = [];
+  for (const d of duties) {
+    if (!d.start_at) continue;
+    const type = dutyDisplayType(d.type_name, d.declared_amount, isM0);
+    if (!type) continue;
+    const who = d.employee_ids.map((id) => people.get(id)).filter((p): p is ErpPerson => !!p);
+    if (!who.length) continue; // 재직자만
+    out.push(toCalendarDuty(d, type, who));
+  }
+  return out;
+}
+
+// 올해 연가 사용(일) — ERP 사용 기록(진행·완료) 기준, 시작일의 달로 묶음.
+async function annualUsedByMonth(year: number, employeeId?: string): Promise<Map<string, number[]>> {
+  const duties = await loadDutiesOverlapping(`${year}-01-01`, `${year}-12-31`, employeeId ? { employeeId } : {});
+  const m = new Map<string, number[]>();
+  for (const d of duties) {
+    if ((d.type_name ?? "").trim() !== "연가" || !d.start_at) continue;
+    const ymd = kstYmdOf(d.start_at);
+    if (ymd.slice(0, 4) !== String(year)) continue;
+    const month = Number(ymd.slice(5, 7)) - 1;
+    const amt = d.declared_amount == null ? 1 : Number(d.declared_amount);
+    for (const id of d.employee_ids) {
+      if (employeeId && id !== employeeId) continue;
+      const arr = m.get(id) ?? Array<number>(12).fill(0);
+      arr[month] += amt;
+      m.set(id, arr);
+    }
+  }
+  return m;
+}
+
+export type MyErpLeave = {
+  linked: boolean;
+  year: number;
+  annualRemaining: number | null;
+  compensatoryRemaining: number | null;
+  annualUsed: number; // 올해 연가 사용 합계(ERP 사용 기록 기준)
+  monthlyUsed: number[]; // 1~12월
+  month: string; // YYYY-MM
+  monthDuties: CalendarDuty[]; // 이번 달 내 복무(본인 기록이라 원래 유형)
+  syncedLeave: string | null;
+  syncedDuties: string | null;
+};
+
+export async function myErpLeave(erpEmployeeId: string | null): Promise<MyErpLeave> {
+  const today = kstTodayYmd();
+  const year = Number(today.slice(0, 4));
+  const [syncedLeave, syncedDuties] = await Promise.all([erpLastSyncedAt("leaveBalances"), erpLastSyncedAt("duties")]);
+  const base: MyErpLeave = {
+    linked: !!erpEmployeeId,
+    year,
+    annualRemaining: null,
+    compensatoryRemaining: null,
+    annualUsed: 0,
+    monthlyUsed: Array<number>(12).fill(0),
+    month: today.slice(0, 7),
+    monthDuties: [],
+    syncedLeave,
+    syncedDuties,
+  };
+  if (!erpEmployeeId) return base;
+  const mr = monthRange(today);
+  const [bal, used, duties] = await Promise.all([
+    leaveBalancesOf([erpEmployeeId]),
+    annualUsedByMonth(year, erpEmployeeId),
+    loadDutiesOverlapping(mr.start, mr.end, { employeeId: erpEmployeeId }),
+  ]);
+  const b = bal.get(erpEmployeeId);
+  const monthly = used.get(erpEmployeeId) ?? Array<number>(12).fill(0);
+  return {
+    ...base,
+    annualRemaining: b?.annual ?? null,
+    compensatoryRemaining: b?.compensatory ?? null,
+    annualUsed: monthly.reduce((a, n) => a + n, 0),
+    monthlyUsed: monthly,
+    monthDuties: duties
+      .filter((d) => d.start_at)
+      .map((d) => toCalendarDuty(d, dutyDisplayType(d.type_name, d.declared_amount, true) ?? (d.type_name ?? ""), [])),
+  };
+}
+
+// --- 복무·연차 대시보드(관장·hr) ---------------------------------------------------
+export type DutyDashboardPerson = {
+  id: string;
+  name: string;
+  department: string | null;
+  annual: number | null;
+  compensatory: number | null;
+  annualUsed: number;
+  overtimeMonth: number;
+  overtimeYear: number;
+};
+export type DutyDashboard = {
+  year: number;
+  month: string;
+  todayAbsent: number;
+  monthTrips: number;
+  monthOvertimeHours: number;
+  avgAnnualRemaining: number | null;
+  monthlyByType: Record<string, number | string>[]; // { month: "1월", 연가: 3, ... }
+  types: string[];
+  people: DutyDashboardPerson[];
+  syncedLeave: string | null;
+  syncedDuties: string | null;
+};
+
+export async function dutyDashboardData(): Promise<DutyDashboard> {
+  const today = kstTodayYmd();
+  const year = Number(today.slice(0, 4));
+  const month = today.slice(0, 7);
+  const [duties, people, todayAbsent, syncedLeave, syncedDuties, used] = await Promise.all([
+    loadDutiesOverlapping(`${year}-01-01`, `${year}-12-31`),
+    employedErpEmployees(),
+    countAbsentToday(),
+    erpLastSyncedAt("leaveBalances"),
+    erpLastSyncedAt("duties"),
+    annualUsedByMonth(year),
+  ]);
+  const bal = await leaveBalancesOf([...people.keys()]);
+  const mr = monthRange(today);
+
+  let monthTrips = 0;
+  let monthOvertimeHours = 0;
+  const otMonth = new Map<string, number>();
+  const otYear = new Map<string, number>();
+  const byMonth: Record<string, number>[] = Array.from({ length: 12 }, () => ({}));
+  const typeSet = new Set<string>();
+  for (const d of duties) {
+    if (!d.start_at) continue;
+    const s = kstYmdOf(d.start_at);
+    const e = d.end_at ? kstYmdOf(d.end_at) : s;
+    const t = (d.type_name ?? "").trim() || "기타";
+    if (t === "출장" && s <= mr.end && e >= mr.start) monthTrips++;
+    if (s.slice(0, 4) !== String(year)) continue;
+    const mi = Number(s.slice(5, 7)) - 1;
+    byMonth[mi][t] = (byMonth[mi][t] ?? 0) + 1;
+    typeSet.add(t);
+    if (t === "초과") {
+      const h = Number(d.declared_amount ?? 0) || 0;
+      const inMonth = s.slice(0, 7) === month;
+      if (inMonth) monthOvertimeHours += h;
+      for (const id of d.employee_ids) {
+        if (!people.has(id)) continue;
+        otYear.set(id, (otYear.get(id) ?? 0) + h);
+        if (inMonth) otMonth.set(id, (otMonth.get(id) ?? 0) + h);
+      }
+    }
+  }
+  const types = [...typeSet].sort((a, b) => a.localeCompare(b, "ko"));
+  const monthlyByType = byMonth.map((m, i) => ({
+    month: `${i + 1}월`,
+    ...Object.fromEntries(types.map((t) => [t, m[t] ?? 0])),
+  }));
+
+  const list: DutyDashboardPerson[] = [...people].map(([id, p]) => ({
+    id,
+    name: p.name,
+    department: p.department,
+    annual: bal.get(id)?.annual ?? null,
+    compensatory: bal.get(id)?.compensatory ?? null,
+    annualUsed: (used.get(id) ?? []).reduce((a, n) => a + n, 0),
+    overtimeMonth: otMonth.get(id) ?? 0,
+    overtimeYear: otYear.get(id) ?? 0,
+  }));
+  const withAnnual = list.filter((p) => p.annual != null);
+  return {
+    year,
+    month,
+    todayAbsent,
+    monthTrips,
+    monthOvertimeHours,
+    avgAnnualRemaining: withAnnual.length
+      ? Math.round((withAnnual.reduce((a, p) => a + (p.annual ?? 0), 0) / withAnnual.length) * 10) / 10
+      : null,
+    monthlyByType,
+    types,
+    people: list.sort((a, b) => a.name.localeCompare(b.name, "ko")),
+    syncedLeave,
+    syncedDuties,
+  };
+}
+
+// 대시보드 접근 — 관장(M0) 또는 hr 직무.
+export async function resolveDutyDashboardViewer(): Promise<ErpViewer | null> {
+  const v = await resolveErpViewer();
+  if (!v) return null;
+  if (v.isM0) return v;
+  const roles = v.driverId ? await listRolesForDriver(v.driverId) : [];
+  return roles.includes("hr") ? v : null;
 }

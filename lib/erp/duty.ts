@@ -95,3 +95,44 @@ export function dutyCoversDay(startAt: string | null, endAt: string | null, ymd:
   const e = endAt ? kstYmdOf(endAt) : s;
   return s <= ymd && ymd <= (e < s ? s : e);
 }
+
+// --- 색 구분(캘린더 칩·범례) -----------------------------------------------------
+export type DutyColorKey = "leave" | "trip" | "field" | "training" | "early" | "overtime" | "other";
+export const DUTY_COLOR_LABEL: Record<DutyColorKey, string> = {
+  leave: "휴가",
+  trip: "출장",
+  field: "외근",
+  training: "연수·교육",
+  early: "조퇴",
+  overtime: "휴근·초과·야근",
+  other: "기타",
+};
+// 칩 색(배경·글자·테두리) — Tailwind 기본 팔레트, 밝은 배경 + 진한 글자.
+export const DUTY_COLOR_CLASS: Record<DutyColorKey, string> = {
+  leave: "bg-emerald-100 text-emerald-900 border-emerald-300",
+  trip: "bg-blue-100 text-blue-900 border-blue-300",
+  field: "bg-sky-100 text-sky-900 border-sky-300",
+  training: "bg-violet-100 text-violet-900 border-violet-300",
+  early: "bg-amber-100 text-amber-900 border-amber-300",
+  overtime: "bg-rose-100 text-rose-900 border-rose-300",
+  other: "bg-slate-100 text-slate-800 border-slate-300",
+};
+export const DUTY_COLOR_HEX: Record<DutyColorKey, string> = {
+  leave: "#10b981",
+  trip: "#3b82f6",
+  field: "#0ea5e9",
+  training: "#8b5cf6",
+  early: "#f59e0b",
+  overtime: "#f43f5e",
+  other: "#94a3b8",
+};
+export function dutyColorKey(rawType: string | null | undefined): DutyColorKey {
+  const t = (rawType ?? "").trim();
+  if (LEAVE_TYPES.has(t)) return "leave";
+  if (t === "출장") return "trip";
+  if (t === "외근") return "field";
+  if (t === "연수" || t === "교육") return "training";
+  if (t === "조퇴") return "early";
+  if (M0_ONLY_TYPES.has(t)) return "overtime";
+  return "other";
+}

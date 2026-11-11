@@ -201,8 +201,9 @@ export const MENU_ITEMS: MenuItem[] = [
     desc: "내 인사정보·증명사진·첨부서류 입력/수정",
     show: { kind: "everyone" },
   },
-  // ERP 연동 3단계(2026-11) — ERP 복제 데이터(erp_*) 조회 전용. 로그인한 직원 모두.
-  //   현황판은 직원에게 휴가 유형을 '휴가'로 묶어 보이고, 관장(M0)에게만 원래 유형을 보입니다(화면이 판정).
+  // ERP 연동(2026-11) — ERP 복제 데이터(erp_*) 조회 전용. 로그인한 직원 모두.
+  //   현황판(월간 달력)은 직원에게 휴가 유형을 '휴가'로 묶어 보이고, 관장(M0)에게만 원래 유형을 보입니다(화면이 판정).
+  //   '내 연차·대휴'는 공통 메뉴에서 빼고 내 인사기록카드의 '연차·대휴' 탭(/profile/hr#erp-leave)으로 옮겼습니다.
   {
     key: "common-duty-board",
     group: "common",
@@ -212,15 +213,7 @@ export const MENU_ITEMS: MenuItem[] = [
     desc: "오늘·이번 주·다음 주 휴가·출장·외근 현황 (ERP)",
     show: { kind: "everyone" },
   },
-  {
-    key: "common-my-leave",
-    group: "common",
-    label: "내 연차·대휴",
-    href: "/profile/leave",
-    icon: "🌿",
-    desc: "ERP 연차·대휴 잔여와 이번 달 내 복무",
-    show: { kind: "everyone" },
-  },
+
   // 명함첩·거래처 — 관장 결정으로 전 직원 열람(협업 자산)이 되어 관리자
   //   영역에서 여기로 내렸습니다. 비공개(🔒) 항목만 관장·부장·인사 담당자에게
   //   보이며, 그 필터는 서버에서 겁니다.
@@ -476,6 +469,16 @@ export const MENU_ITEMS: MenuItem[] = [
     desc: "근로·연봉계약서 작성·발송·서명 현황",
     // hr 직무는 서식(조항·명절 날짜)만, 직원별 계약은 인사 파일 열람 보유자.
     show: { kind: "roleOrPersonnel", role: "hr" },
+  },
+  {
+    // ERP 연동 — 복무·연차 대시보드. 가드(lib/erp/view resolveDutyDashboardViewer)와 같은 M0 또는 hr 직무.
+    key: "hr-duty-dashboard",
+    group: "hr",
+    label: "복무·연차 대시보드",
+    href: "/hr/duty-dashboard",
+    icon: "📈",
+    desc: "부재·출장·초과근무·연차 잔여 현황과 그래프 (ERP)",
+    show: { kind: "m0OrRole", role: "hr" },
   },
   {
     key: "hr-trainings",

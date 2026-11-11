@@ -18,6 +18,8 @@ import {
   getMyCertificatePrefill,
 } from "@/app/(app)/hr/certificates/actions";
 import { enforcePasswordChange, getSession } from "@/app/actions";
+import MyErpLeaveSection from "@/app/(app)/profile/hr/MyErpLeaveSection";
+import { myErpLeave, resolveErpViewer } from "@/lib/erp/view";
 
 export const dynamic = "force-dynamic";
 
@@ -40,6 +42,10 @@ export default async function MyHrPage() {
       getMyDisciplineReceipts(),
     ]);
   if (!my) redirect("/");
+  // ERP 연차·대휴 — 본인 것만(세션의 erp_employee_id). 실패해도 다른 탭은 그립니다.
+  const erpLeave = await resolveErpViewer()
+    .then((v) => myErpLeave(v?.erpEmployeeId ?? null))
+    .catch(() => null);
 
   return (
     <div className="mx-auto w-full max-w-3xl px-4 py-6">
@@ -90,6 +96,13 @@ export default async function MyHrPage() {
             <p className="py-6 text-center text-sm text-ink-hint">
               올해 등록된 의무교육이 없습니다.
             </p>
+          )
+        }
+        erpLeave={
+          erpLeave ? (
+            <MyErpLeaveSection data={erpLeave} />
+          ) : (
+            <p className="py-6 text-center text-sm text-ink-hint">ERP 정보를 불러오지 못했습니다.</p>
           )
         }
         leave={

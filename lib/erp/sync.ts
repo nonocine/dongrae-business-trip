@@ -8,7 +8,8 @@ import "server-only";
 //   * 범위
 //     - employees      : 처음 전체, 이후 updated_since = 마지막 성공 실행의 시작 시각(-10분 여유).
 //     - leaveBalances  : 매번 전체.  codes : kind=expenditure·revenue, 올해, 매번 전체(스냅숏).
-//     - duties·schedules·rentals·documents : 오늘 -90일 ~ +180일.
+//     - duties          : 올해 1월 1일 ~ 오늘+180일(366일 초과 → 366일 이하 구간으로 나눠 호출).
+//     - schedules·rentals·documents : 오늘 -90일 ~ +180일.
 //     - transactions·expenditures(회계 키) : 올해 1월 1일 ~ 오늘(366일 제한 안).
 //     - 페이지는 page_size 500 + next_cursor 끝까지(erpGetAll).
 //   * 사라진 건: 기간 API 6종만(removed_at 칸이 있는 표). 받은 기간 안에서 DB 에 있는데
@@ -94,6 +95,11 @@ const operational = () => {
   const today = kstToday();
   return { start: addDays(today, -90), end: addDays(today, 180) };
 };
+// 복무 — 올해 1월 1일 ~ 오늘+180일(연차 사용 집계·앞으로의 일정). 366일을 넘으므로 나눠 부릅니다.
+const dutiesRange = () => {
+  const today = kstToday();
+  return { start: `${today.slice(0, 4)}-01-01`, end: addDays(today, 180) };
+};
 const thisYearToDate = () => {
   const today = kstToday();
   return { start: `${today.slice(0, 4)}-01-01`, end: today };
@@ -105,7 +111,7 @@ const DATED: DatedSpec[] = [
     table: "erp_duties",
     pk: "duty_id",
     scope: { col: "start_at", kind: "ts" },
-    range: operational,
+    range: dutiesRange,
     map: (r) => ({
       duty_id: int(r.duty_id),
       document_number: int(r.document_number),
@@ -439,20 +445,43 @@ async function syncCodes(trigger: ErpSyncTrigger): Promise<ErpRunResult> {
   });
 }
 
+// ERP 는 한 번에 최대 366일(양 끝 포함) — 넘으면 나눕니다.
+const MAX_RANGE_DAYS = 366;
+export function splitRange(range: { start: string; end: string }): { start: string; end: string }[] {
+  const out: { start: string; end: string }[] = [];
+  let s = range.start;
+  while (s <= range.end && out.length < 20) {
+    const e0 = addDays(s, MAX_RANGE_DAYS - 1);
+    const e = e0 < range.end ? e0 : range.end;
+    out.push({ start: s, end: e });
+    s = addDays(e, 1);
+  }
+  return out;
+}
+
 async function syncDated(spec: DatedSpec, trigger: ErpSyncTrigger): Promise<ErpRunResult> {
   const range = spec.range();
   return withRun(spec.api, trigger, range, async () => {
-    const r = await erpGetAll(spec.api, { start_date: range.start, end_date: range.end }, { maxPages: PAGE_LIMIT });
-    const now = new Date().toISOString();
-    const rows: Row[] = r.data
-      .map((x): Row => ({ ...spec.map(x), raw: x, synced_at: now, removed_at: null }))
-      .filter((x) => x[spec.pk] != null);
-    const upserted = await upsertRows(spec.table, spec.pk, rows);
+    let fetched = 0;
+    let upserted = 0;
     let removed = 0;
-    let note: string | undefined;
-    if (r.truncated) note = "페이지 상한 도달 — 사라진 건 처리 생략";
-    else removed = await markRemoved(spec, range, new Set(rows.map((x) => String(x[spec.pk]))));
-    return { fetched: r.data.length, upserted, removed, note };
+    const notes: string[] = [];
+    // 구간마다 받아 저장하고, 사라진 건 처리도 그 구간 안에서만 합니다.
+    for (const part of splitRange(range)) {
+      const r = await erpGetAll(spec.api, { start_date: part.start, end_date: part.end }, { maxPages: PAGE_LIMIT });
+      const now = new Date().toISOString();
+      const byPk = new Map<string, Row>();
+      for (const x of r.data) {
+        const row: Row = { ...spec.map(x), raw: x, synced_at: now, removed_at: null };
+        if (row[spec.pk] != null) byPk.set(String(row[spec.pk]), row);
+      }
+      const rows = [...byPk.values()];
+      fetched += r.data.length;
+      upserted += await upsertRows(spec.table, spec.pk, rows);
+      if (r.truncated) notes.push(`${part.start}~${part.end} 페이지 상한 도달 — 사라진 건 처리 생략`);
+      else removed += await markRemoved(spec, part, new Set(byPk.keys()));
+    }
+    return { fetched, upserted, removed, note: notes.length ? notes.join(" / ") : undefined };
   });
 }
 
