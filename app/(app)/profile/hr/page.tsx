@@ -20,6 +20,7 @@ import {
 import { enforcePasswordChange, getSession } from "@/app/actions";
 import MyErpLeaveSection from "@/app/(app)/profile/hr/MyErpLeaveSection";
 import { myErpLeave, resolveErpViewer } from "@/lib/erp/view";
+import { myLeavePayout } from "@/lib/leavePayoutServer";
 
 export const dynamic = "force-dynamic";
 
@@ -46,6 +47,8 @@ export default async function MyHrPage() {
   const erpLeave = await resolveErpViewer()
     .then((v) => myErpLeave(v?.erpEmployeeId ?? null))
     .catch(() => null);
+  // 연차수당 — leave_payout_staff_visible='true' 이고 확정된 산정표에 본인 줄이 있을 때만(지금은 꺼짐 → null).
+  const myPayout = erpLeave ? await myLeavePayout(my.driver.id, erpLeave.year).catch(() => null) : null;
 
   return (
     <div className="mx-auto w-full max-w-3xl px-4 py-6">
@@ -100,7 +103,7 @@ export default async function MyHrPage() {
         }
         erpLeave={
           erpLeave ? (
-            <MyErpLeaveSection data={erpLeave} />
+            <MyErpLeaveSection data={erpLeave} payout={myPayout} />
           ) : (
             <p className="py-6 text-center text-sm text-ink-hint">ERP 정보를 불러오지 못했습니다.</p>
           )

@@ -227,7 +227,7 @@ export default function LeavePromotionBoard({ board }: { board: PromotionBoard }
           </thead>
           <tbody>
             {board.rows.map((r) => (
-              <tr key={r.key} className="border-b border-line/60 align-top">
+              <tr key={r.key} className={`border-b border-line/60 align-top ${r.payoutPolicy ? "bg-surface/70 text-ink-hint opacity-70" : ""}`}>
                 <td className="px-2 py-2">
                   <p className="font-medium text-ink">{r.name}</p>
                   <p className="text-[11px] text-ink-muted">
@@ -235,6 +235,9 @@ export default function LeavePromotionBoard({ board }: { board: PromotionBoard }
                     {r.track === "first_year" && r.joinDate && ` (입사 ${r.joinDate})`}
                   </p>
                   {!r.erpLinked && <p className="text-[10px] text-stamp">ERP 계정 미연결</p>}
+                  {r.payoutPolicy && (
+                    <p className="mt-0.5 text-[10px] font-semibold text-ink-muted">수당 정산 방식 — 촉진 대상 아님</p>
+                  )}
                 </td>
                 <td className="px-2 py-2 text-right font-mono">{fmt(r.unusedErp)}</td>
                 <td className="px-2 py-2">

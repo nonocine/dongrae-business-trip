@@ -4,6 +4,7 @@ import { enforcePasswordChange } from "@/app/actions";
 import { getLeavePlanOverview } from "@/app/(app)/hr/leave-plans/actions";
 import LeavePlansManager from "@/app/(app)/hr/leave-plans/LeavePlansManager";
 import LeavePromotionBoard from "@/app/(app)/hr/leave-plans/LeavePromotionBoard";
+import LeavePolicySettings from "@/app/(app)/hr/leave-plans/LeavePolicySettings";
 import { loadPromotionBoard, resolveLeavePromotionAccess } from "@/lib/leavePromotionServer";
 import { kstTodayYmd } from "@/lib/erp/duty";
 
@@ -44,7 +45,8 @@ export default async function LeavePlansPage({
           ← 목록
         </Link>
       </div>
-      <div className="space-y-6">
+      <div className="space-y-4">
+        <LeavePolicySettings policy={board.firstYearPolicy} canEdit={access.isM0} />
         <LeavePromotionBoard board={board} />
         {overview ? (
           <div>

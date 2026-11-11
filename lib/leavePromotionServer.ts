@@ -15,6 +15,7 @@ import { listRolesForDriver } from "@/lib/employeeRolesServer";
 import { resolvePersonnelViewer } from "@/lib/personnelAccess";
 import { annualLeaveDatesByEmployee, erpLastSyncedAt, leaveBalancesOf, resolveErpViewer, type ErpViewer } from "@/lib/erp/view";
 import { kstTodayYmd } from "@/lib/erp/duty";
+import { getFirstYearPolicy, type FirstYearPolicy } from "@/lib/leaveSettings";
 import {
   REPLY_DAYS,
   addDays,
@@ -91,6 +92,8 @@ export type PromotionRow = {
   stage2: NoticeInfo | null;
   stage2State: StepState | "na";
   forfeitDays: number | null; // 연말(사용기한) 소멸 예정 = 현재 ERP 잔여
+  // 첫해 월차 처리 방식이 '12월 수당 정산'이면 1년 미만 줄은 촉진 대상이 아님(회색 표시, 알림 제외).
+  payoutPolicy: boolean;
 };
 
 export type PromotionBoard = {
@@ -99,6 +102,7 @@ export type PromotionBoard = {
   rows: PromotionRow[];
   syncedLeave: string | null;
   syncedDuties: string | null;
+  firstYearPolicy: FirstYearPolicy;
 };
 
 function toNotice(r: Record<string, unknown>): NoticeInfo {
@@ -130,7 +134,7 @@ const kstDateOf = (iso: string | null) => (iso ? new Date(new Date(iso).getTime(
 
 export async function loadPromotionBoard(year: number): Promise<PromotionBoard> {
   const today = kstTodayYmd();
-  const [{ data: drivers }, { data: profs }, { data: notices }, { data: plans }, syncedLeave, syncedDuties, leaveDates] =
+  const [{ data: drivers }, { data: profs }, { data: notices }, { data: plans }, syncedLeave, syncedDuties, leaveDates, firstYearPolicy] =
     await Promise.all([
       supabaseAdmin.from("drivers").select("id, name, is_active"),
       supabaseAdmin
@@ -141,6 +145,7 @@ export async function loadPromotionBoard(year: number): Promise<PromotionBoard> 
       erpLastSyncedAt("leaveBalances"),
       erpLastSyncedAt("duties"),
       annualLeaveDatesByEmployee(year),
+      getFirstYearPolicy(),
     ]);
   const drvMap = new Map(((drivers ?? []) as { id: string; name: string; is_active: boolean | null }[]).map((d) => [d.id, d]));
   const profRows = ((profs ?? []) as Record<string, unknown>[]).filter((p) => {
@@ -197,6 +202,8 @@ export async function loadPromotionBoard(year: number): Promise<PromotionBoard> 
         (!needed && !s2) || (plan?.submittedAt && !s2)
           ? "na"
           : stepState({ done: !!s2?.completed, due: schedule.stage2Due, start: planDue ?? schedule.stage1.end, today });
+      // 수당 정산 방식 — 1년 미만 줄은 숨기지 않고 모든 단계를 '해당 없음'으로(알림 집계에서도 빠짐).
+      const payoutPolicy = track === "first_year" && firstYearPolicy === "payout";
       rows.push({
         key: `${profileId}:${track}`,
         profileId,
@@ -210,19 +217,20 @@ export async function loadPromotionBoard(year: number): Promise<PromotionBoard> 
         unusedErp,
         needed,
         stage1: s1,
-        stage1State,
+        stage1State: payoutPolicy ? "na" : stage1State,
         plan,
-        planDue,
-        planState,
-        missedDates,
+        planDue: payoutPolicy ? null : planDue,
+        planState: payoutPolicy ? "na" : planState,
+        missedDates: payoutPolicy ? [] : missedDates,
         stage2: s2,
-        stage2State,
+        stage2State: payoutPolicy ? "na" : stage2State,
         forfeitDays: unusedErp,
+        payoutPolicy,
       });
     });
   }
   rows.sort((a, b) => a.name.localeCompare(b.name, "ko") || a.track.localeCompare(b.track));
-  return { year, today, rows, syncedLeave, syncedDuties };
+  return { year, today, rows, syncedLeave, syncedDuties, firstYearPolicy };
 }
 
 // --- 관리자 대시보드 알림(D-14·D-3·경과) ---------------------------------------------

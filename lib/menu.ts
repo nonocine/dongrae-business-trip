@@ -102,6 +102,8 @@ export type MenuVisibility =
   | { kind: "m0" }
   | { kind: "role"; role: string }
   | { kind: "m0OrRole"; role: string }
+  // M0 이거나 여러 직무 중 하나 — 가드가 `isM0 || 직무A || 직무B` 인 라우트(/hr/leave-payout).
+  | { kind: "m0OrAnyRole"; roles: string[] }
   | { kind: "personnel" }
   | { kind: "personnelStaff" }
   | { kind: "m0Personnel" }
@@ -482,6 +484,16 @@ export const MENU_ITEMS: MenuItem[] = [
     show: { kind: "m0OrRole", role: "hr" },
   },
   {
+    // 연차수당 산정 — 관리자 전용(직원 화면 미노출). 가드(lib/leavePayoutServer)와 같은 M0·hr·erp_finance.
+    key: "hr-leave-payout",
+    group: "hr",
+    label: "연차수당 산정",
+    href: "/hr/leave-payout",
+    icon: "💰",
+    desc: "첫해 월차 리셋분·촉진 미완료 연차 잔여의 연차수당 산정표",
+    show: { kind: "m0OrAnyRole", roles: ["hr", "erp_finance"] },
+  },
+  {
     // ERP 연동 — 복무·연차 대시보드. 가드(lib/erp/view resolveDutyDashboardViewer)와 같은 M0 또는 hr 직무.
     key: "hr-duty-dashboard",
     group: "hr",
@@ -811,6 +823,8 @@ export function canSeeMenuItem(item: MenuItem, ctx: MenuContext): boolean {
       return hasRole(ctx, item.show.role);
     case "m0OrRole":
       return ctx.isM0 || hasRole(ctx, item.show.role);
+    case "m0OrAnyRole":
+      return ctx.isM0 || item.show.roles.some((r) => hasRole(ctx, r));
     case "personnel":
       return ctx.isPersonnel === true;
     case "personnelStaff":

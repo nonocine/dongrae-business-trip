@@ -33,6 +33,7 @@ import {
   type PromotionTrack,
 } from "@/lib/leavePromotion";
 import { buildPromotionNoticePdf } from "@/lib/leavePromotionPdf";
+import { getFirstYearPolicy, writeFirstYearPolicy, type FirstYearPolicy } from "@/lib/leaveSettings";
 
 type Fail = { ok: false; message: string };
 const fail = (e: unknown, fb: string): Fail => ({ ok: false, message: e instanceof Error ? e.message : fb });
@@ -74,6 +75,8 @@ export async function createPromotionNotice(input: {
     const joinDate = typeof p.join_date === "string" && p.join_date ? p.join_date.slice(0, 10) : null;
     if (!tracksFor(year, joinDate).includes(input.track))
       return { ok: false, message: "이 직원에게 해당하지 않는 구분입니다(입사일 확인)." };
+    if (input.track === "first_year" && (await getFirstYearPolicy()) === "payout")
+      return { ok: false, message: "첫해 월차를 12월 수당으로 정산하는 방식이라 1년 미만 사용촉진 대상이 아닙니다." };
     const schedule = scheduleFor(input.track, year, joinDate);
 
     const { data: drv } = await supabaseAdmin.from("drivers").select("name").eq("id", String(p.driver_id)).maybeSingle();
@@ -273,6 +276,21 @@ export async function searchErpDocuments(q: string): Promise<
   return ((data ?? []) as { document_id: number; document_number: number | null; title: string | null; registered_at: string | null; status: string | null }[]).map(
     (d) => ({ id: d.document_id, number: d.document_number, title: d.title ?? "", registeredAt: d.registered_at, status: d.status })
   );
+}
+
+// 첫해 월차 처리 방식 변경 — 관장(M0)만.
+export async function setFirstYearPolicy(policy: FirstYearPolicy): Promise<{ ok: true } | Fail> {
+  try {
+    const access = await requireLeavePromotionAccess();
+    if (!access.isM0) return { ok: false, message: "첫해 월차 처리 방식은 관장·부장만 바꿀 수 있습니다." };
+    if (policy !== "payout" && policy !== "carryover") return { ok: false, message: "알 수 없는 방식입니다." };
+    await writeFirstYearPolicy(policy);
+    revalidatePath("/hr/leave-plans");
+    revalidatePath("/admin");
+    return { ok: true };
+  } catch (e) {
+    return fail(e, "저장하지 못했습니다.");
+  }
 }
 
 // 통보서 PDF·서명 수령본 열기 — 5분 서명 URL.

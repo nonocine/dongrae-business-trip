@@ -29,11 +29,25 @@ function Note({ syncedAt, extra }: { syncedAt: string | null; extra?: string }) 
   );
 }
 
-export default function MyErpLeaveSection({ data }: { data: MyErpLeave }) {
+export default function MyErpLeaveSection({
+  data,
+  payout = null,
+}: {
+  data: MyErpLeave;
+  // 올해 연차수당 예정(확정된 산정표의 본인 줄). 직원 노출 설정이 꺼져 있으면 서버가 null 을 줍니다.
+  payout?: { days: number; amount: number } | null;
+}) {
   if (!data.linked) return <p className={noticeWarning}>ERP 계정 연결이 필요합니다(관리자 문의).</p>;
   return (
     <div className="space-y-4">
       <LeaveCharts data={data} />
+      {payout && (
+        <section className={cardCls}>
+          <p className="text-sm text-ink">
+            올해 연차수당 예정 <b className="text-navy">{fmt(payout.days)}일</b> · <b className="text-navy">{payout.amount.toLocaleString("ko-KR")}원</b>
+          </p>
+        </section>
+      )}
       <DutyRecordPanel thisYear={data.year} />
     </div>
   );
