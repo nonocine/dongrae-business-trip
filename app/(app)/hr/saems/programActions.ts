@@ -22,6 +22,12 @@ import {
   normalizeWeekdays,
   weekdaysLabel,
 } from "@/lib/saemSchedule";
+import {
+  normalizeInstructorMode,
+  toContractStatus,
+  type InstructorContractStatus,
+  type InstructorMode,
+} from "@/lib/instructorContract";
 
 const PROJ = "saem_projects";
 const TERM = "saem_terms";
@@ -101,6 +107,8 @@ export async function listTerms(projectId: string): Promise<SaemTerm[]> {
 
 export type ProgramRow = SaemProgram & {
   instructorName: string | null;
+  // 최신 강사 계약서 상태(무효 제외) — 관리 권한자에게만 채웁니다.
+  contractStatus: InstructorContractStatus | null;
   sessionCount: number;
   lockedCount: number; // 제출·확정·정산 귀속 회차 — 재생성 시 보존된다
   firstSessionDate: string | null;
@@ -129,6 +137,7 @@ export async function listPrograms(termId: string): Promise<ProgramRow[]> {
             hourly_rate: null,
             deduction_rate: null,
             share_rate: null,
+            session_fee: null,
           }
     );
   const insIds = [
@@ -180,10 +189,24 @@ export async function listPrograms(termId: string): Promise<ProgramRow[]> {
     }
   }
 
+  // 강사 계약서 상태 — 계약서는 관리 권한 영역이라 열람 직원에게는 싣지 않습니다.
+  const contractOf = new Map<string, InstructorContractStatus>();
+  if (view.canManage && programs.length) {
+    const { data: cons } = await supabaseAdmin
+      .from("instructor_contracts")
+      .select("program_id, status, created_at")
+      .in("program_id", programs.map((p) => p.id))
+      .neq("status", "void")
+      .order("created_at", { ascending: true });
+    for (const r of (cons ?? []) as { program_id: string; status: string }[])
+      contractOf.set(r.program_id, toContractStatus(r.status));
+  }
+
   return programs.map((p) => {
     const st = stat.get(p.id);
     return {
       ...p,
+      contractStatus: contractOf.get(p.id) ?? null,
       instructorName: p.instructor_id ? nameById.get(p.instructor_id) ?? null : null,
       sessionCount: st?.count ?? 0,
       lockedCount: st?.locked ?? 0,
@@ -421,6 +444,9 @@ export async function copyTerm(input: {
           deduction_rate: p.deduction_rate,
           pay_type: p.pay_type,
           share_rate: p.share_rate,
+          session_fee: p.session_fee,
+          session_minutes: p.session_minutes,
+          instructor_mode: p.instructor_mode,
           status: "active",
           sort_order: p.sort_order,
           // 복제 프로그램도 자기 스케줄을 갖는다(이후 개별 수정 가능).
@@ -470,6 +496,10 @@ export type ProgramInput = {
   // ST-5. 정산 방식 + 분배율. hourly 면 share_rate 는 무시된다(값은 보존).
   pay_type: PayType;
   share_rate: number | null;
+  // 2026-11 강사 계약서 — 회당 강사료·1회 수업시간(분)·강사 채용 방식.
+  session_fee?: number | null;
+  session_minutes?: number | null;
+  instructor_mode?: InstructorMode;
   // 실제 스케줄 — 저장 시 이 값으로 회차를 생성·재생성한다.
   session_start: string | null;
   session_weekdays: number[]; // 0 일 ~ 6 토, 여러 개
@@ -487,10 +517,17 @@ function progPayload(i: ProgramInput) {
     weeks: i.session_weeks,
     holidays: i.session_holidays,
   });
+  const mode = normalizeInstructorMode(i.instructor_mode);
+  const posInt = (v: number | null | undefined) =>
+    v == null || Number.isNaN(Number(v)) ? null : Math.max(0, Math.round(Number(v))) || null;
   return {
     name: (i.name ?? "").trim(),
     subject: clean(i.subject),
-    instructor_id: i.instructor_id || null,
+    // 강사 지정은 '채용함'일 때만 — 직원 운영·자원봉사·외부기관이면 비웁니다.
+    instructor_id: mode === "hire" ? i.instructor_id || null : null,
+    instructor_mode: mode,
+    session_fee: posInt(i.session_fee),
+    session_minutes: posInt(i.session_minutes),
     period_no: num(i.period_no),
     time_start: clean(i.time_start),
     time_end: clean(i.time_end),

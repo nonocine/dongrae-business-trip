@@ -9,9 +9,7 @@
 
 import { headers } from "next/headers";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
-import { sendSms } from "@/lib/sms/relay";
-import { SMS_LOG_TABLE } from "@/lib/sms/logs";
-import { smsMsgType } from "@/lib/sms/text";
+import { sendLoggedSms } from "@/lib/sms/sendOne";
 import { ENROLL_BUCKET } from "@/lib/bangkaEnroll";
 import type { BangkaAccess } from "@/lib/bangkaAccess";
 
@@ -130,38 +128,16 @@ export async function sendEnrollSms(input: {
   purpose: string; // audience_desc — "방카 신규접수 보완요청" 등
   program?: "bk_enroll" | "bk_guardian"; // 문자 이력 분류 — 기본 bk_enroll(접수·합격), 보호자 정보 수정 문자는 bk_guardian
 }): Promise<{ ok: true } | { ok: false; error: string }> {
-  const to = (input.to ?? "").replace(/\D/g, "");
-  if (!/^01[0-9]{8,9}$/.test(to)) return { ok: false, error: "보호자 휴대전화 번호가 올바르지 않습니다." };
-  const r = await sendSms({ to: [to], text: input.text, test: false, sender: ENROLL_SENDER });
-  const log: Record<string, unknown> = {
-    sent_by: input.sentBy,
-    channel: "sms",
+  return sendLoggedSms({
+    to: input.to,
+    text: input.text,
+    sender: ENROLL_SENDER,
+    sentBy: input.sentBy,
     program: input.program ?? "bk_enroll",
-    audience_desc: input.purpose.slice(0, 500),
-    recipient_count: 1,
-    text_body: input.text,
-    msg_type: r.ok ? r.msg_type ?? smsMsgType(input.text) : smsMsgType(input.text),
-    sender: r.ok ? r.sender ?? ENROLL_SENDER : ENROLL_SENDER,
-    is_test: false,
-    ok: r.ok,
-    sent_count: r.ok ? r.sent : 0,
-    failed_count: r.ok ? r.failed : 1,
-    provider_msg_id: r.ok ? r.provider_msg_id : null,
-    error: r.ok ? null : r.error,
-  };
-  let { error } = await supabaseAdmin.from(SMS_LOG_TABLE).insert(log);
-  if (error && /channel/.test(error.message ?? "") && (error.code === "PGRST204" || error.code === "42703")) {
-    const { channel: _omit, ...rest } = log;
-    void _omit;
-    ({ error } = await supabaseAdmin.from(SMS_LOG_TABLE).insert(rest));
-  }
-  if (error) console.error(`[bk-enroll] 문자 이력 기록 실패: ${error.message}`);
-  if (!r.ok) {
-    console.error(`[bk-enroll] 문자 발송 실패(${input.purpose}): ${r.error}`);
-    return { ok: false, error: r.error };
-  }
-  if (r.failed > 0 && r.sent === 0) return { ok: false, error: "문자 발송이 실패로 집계되었습니다." };
-  return { ok: true };
+    purpose: input.purpose,
+    invalidPhoneMessage: "보호자 휴대전화 번호가 올바르지 않습니다.",
+    logTag: "bk-enroll",
+  });
 }
 
 export function fixRequestMessage(youthName: string, reason: string, base: string): string {

@@ -21,6 +21,10 @@ const nextConfig: NextConfig = {
     "/hr/org-records/**": ["./lib/fonts/*.ttf"],
     // 강사 근무일지·출석부 PDF + 일괄 출력용 폰트 라우트(pdf-font).
     "/hr/saems/programs/**": ["./lib/fonts/*.ttf"],
+    // 강사 계약서 직인 날인 → PDF(서버 액션은 계약서 탭·강사 상세 페이지에서 불림).
+    "/hr/saems/contracts": ["./lib/fonts/*.ttf"],
+    "/hr/saems/contracts/**": ["./lib/fonts/*.ttf"],
+    "/hr/saems/instructors/**": ["./lib/fonts/*.ttf"],
     // 동래방카 필수 운영서식(급식계획·공결확인서) — 원본 양식 PDF 위에 나눔고딕으로 찍습니다.
     "/bangka/**": ["./lib/fonts/*.ttf", "./lib/forms/bangka/*.pdf"],
   },

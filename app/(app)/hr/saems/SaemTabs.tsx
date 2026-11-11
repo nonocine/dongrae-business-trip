@@ -10,6 +10,8 @@ const TABS: (TabItem & { manage?: boolean })[] = [
   { key: "/hr/saems/enrollments", href: "/hr/saems/enrollments", label: "수강생", icon: "users" },
   { key: "/hr/saems/logs", href: "/hr/saems/logs", label: "근무일지 확정", icon: "clipboardCheck" },
   { key: "/hr/saems/settlements", href: "/hr/saems/settlements", label: "정산", icon: "wallet", manage: true },
+  // 강사 계약서 — 주민번호 앞자리·주소·강사료가 있어 관리 권한만.
+  { key: "/hr/saems/contracts", href: "/hr/saems/contracts", label: "강사 계약서", icon: "filePen", manage: true },
   { key: "/hr/saems/certificates", href: "/hr/saems/certificates", label: "강의확인증", icon: "award" },
 ];
 

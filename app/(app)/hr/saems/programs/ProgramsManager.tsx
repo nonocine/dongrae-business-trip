@@ -28,6 +28,15 @@ import {
   type ProgramInput,
   type ProgramDeletability,
 } from "@/app/(app)/hr/saems/programActions";
+import { createInstructor } from "@/app/(app)/hr/saems/instructorActions";
+import { InviteReissueButton } from "@/app/(app)/hr/saems/InviteReissue";
+import ContractEditor from "@/app/(app)/hr/saems/contracts/ContractEditor";
+import { STATUS_BADGE } from "@/app/(app)/hr/saems/contracts/ContractsManager";
+import {
+  INSTRUCTOR_CONTRACT_STATUS_LABEL,
+  INSTRUCTOR_MODE_LABEL,
+  type InstructorMode,
+} from "@/lib/instructorContract";
 import {
   TERM_STATUS_LABEL,
   PAY_TYPE_LABEL,
@@ -83,6 +92,7 @@ type Modal =
   | { kind: "program"; program: ProgramRow | null }
   | { kind: "sessions"; program: ProgramRow }
   | { kind: "delete"; program: ProgramRow; check: ProgramDeletability }
+  | { kind: "contract"; program: ProgramRow }
   | null;
 
 // =====================================================================
@@ -744,6 +754,8 @@ export default function ProgramsManager({
   canBulkPrint: boolean;
 }) {
   const router = useRouter();
+  // 강좌 창에서 바로 등록한 강사도 목록에 바로 보이도록 화면 쪽 사본을 둡니다.
+  const [insOptions, setInsOptions] = useState<InstructorOption[]>(instructors);
   const [projectId, setProjectId] = useState(projects[0]?.id ?? "");
   const [terms, setTerms] = useState<SaemTerm[]>([]);
   const [termId, setTermId] = useState("");
@@ -1039,7 +1051,20 @@ export default function ProgramsManager({
                       </td>
                     )}
                     <td className={`${tdCls} font-medium text-ink`}>{p.name}</td>
-                    <td className={tdCls}>{p.instructorName ?? "-"}</td>
+                    <td className={tdCls}>
+                      {p.instructor_mode !== "hire" ? (
+                        <span className={badgeNeutral}>{INSTRUCTOR_MODE_LABEL[p.instructor_mode]}</span>
+                      ) : (
+                        <span className="inline-flex items-center gap-1">
+                          {p.instructorName ?? "-"}
+                          {canManage && p.contractStatus && (
+                            <span className={STATUS_BADGE[p.contractStatus]} title="강사 계약서 상태">
+                              {INSTRUCTOR_CONTRACT_STATUS_LABEL[p.contractStatus]}
+                            </span>
+                          )}
+                        </span>
+                      )}
+                    </td>
                     <td className={tdCls}>{p.period_no ?? "-"}</td>
                     <td className={`${tdCls} font-mono text-xs`}>
                       {p.time_start ? `${hhmm(p.time_start)}~${hhmm(p.time_end)}` : "-"}
@@ -1086,7 +1111,9 @@ export default function ProgramsManager({
                         title={
                           p.pay_type === "revenue_share"
                             ? "등록 인원 × 수강료 × 분배율"
-                            : "확정 근무일지 시간 × 시급"
+                            : p.pay_type === "per_session"
+                              ? "회당 강사료(정산 계산은 아직 시급 경로)"
+                              : "확정 근무일지 시간 × 시급"
                         }
                       >
                         {payTypeSummary(p)}
@@ -1104,6 +1131,16 @@ export default function ProgramsManager({
                           >
                             출력
                           </span>
+                        )}
+                        {p.instructor_mode === "hire" && p.instructor_id && (
+                          <button
+                            type="button"
+                            onClick={() => setModal({ kind: "contract", program: p })}
+                            className={outBtn}
+                            title="이 강좌의 강사 계약서 만들기(전자서명·종이 업로드)"
+                          >
+                            계약서
+                          </button>
                         )}
                         <span aria-hidden className="h-4 w-px bg-line" />
                         <button
@@ -1178,8 +1215,25 @@ export default function ProgramsManager({
         <ProgramModal
           termId={termId}
           term={term}
-          instructors={instructors}
+          instructors={insOptions}
+          onInstructorAdded={(o) =>
+            setInsOptions((prev) =>
+              [...prev.filter((x) => x.id !== o.id), o].sort((a, b) => a.name.localeCompare(b.name, "ko"))
+            )
+          }
           program={modal.program}
+          onClose={() => setModal(null)}
+          onDone={async (text) => {
+            setModal(null);
+            await reloadPrograms();
+            setMsg({ ok: true, text });
+          }}
+        />
+      )}
+      {modal?.kind === "contract" && (
+        <ContractEditor
+          programId={modal.program.id}
+          instructorId={modal.program.instructor_id}
           onClose={() => setModal(null)}
           onDone={async (text) => {
             setModal(null);
@@ -1644,6 +1698,7 @@ function ProgramModal({
   termId,
   term,
   instructors,
+  onInstructorAdded,
   program,
   onClose,
   onDone,
@@ -1651,6 +1706,7 @@ function ProgramModal({
   termId: string;
   term: SaemTerm | null;
   instructors: InstructorOption[];
+  onInstructorAdded: (o: InstructorOption) => void;
   program: ProgramRow | null;
   onClose: () => void;
   onDone: (text: string) => void;
@@ -1677,7 +1733,36 @@ function ProgramModal({
     // 분배율 기본 70 — 분배제로 바꿀 때 바로 쓸 수 있게 미리 채운다.
     share_rate:
       program?.share_rate != null ? trimRate(program.share_rate) : "70",
+    session_fee: program?.session_fee != null ? String(program.session_fee) : "",
+    session_minutes: program?.session_minutes != null ? String(program.session_minutes) : "",
+    instructor_mode: (program?.instructor_mode ?? "hire") as InstructorMode,
   });
+  // 강사 미등록 — 이 창에서 바로 등록(기존 강사 등록·초대 기능 그대로).
+  const [quick, setQuick] = useState<null | { name: string; phone: string }>(null);
+  const [justAdded, setJustAdded] = useState<InstructorOption | null>(null);
+  const [quickErr, setQuickErr] = useState<string | null>(null);
+  function quickRegister() {
+    if (!quick) return;
+    setQuickErr(null);
+    start(async () => {
+      const res = await createInstructor({ name: quick.name, phone: quick.phone });
+      if (!res.ok) {
+        if (res.duplicate) {
+          // 이미 있는 강사 — 그 사람을 고릅니다.
+          onInstructorAdded(res.duplicate);
+          set({ instructor_id: res.duplicate.id });
+          setQuick(null);
+          return setQuickErr(`이미 등록된 강사(${res.duplicate.name})를 선택했습니다.`);
+        }
+        return setQuickErr(res.message);
+      }
+      const o = { id: res.id, name: quick.name.trim() };
+      onInstructorAdded(o);
+      set({ instructor_id: o.id });
+      setJustAdded(o);
+      setQuick(null);
+    });
+  }
   const [err, setErr] = useState<string | null>(null);
   const [needsConfirm, setNeedsConfirm] = useState(false);
   const [acceptDiscard, setAcceptDiscard] = useState(false);
@@ -1702,6 +1787,9 @@ function ProgramModal({
       deduction_rate: numOrNull(f.deduction_rate),
       pay_type: f.pay_type,
       share_rate: numOrNull(f.share_rate),
+      session_fee: numOrNull(f.session_fee),
+      session_minutes: numOrNull(f.session_minutes),
+      instructor_mode: f.instructor_mode,
       session_start: sc.start || null,
       session_weekdays: sc.weekdays,
       session_weeks: sc.weeks === "" ? null : Number(sc.weeks),
@@ -1738,14 +1826,78 @@ function ProgramModal({
         <FieldP label="프로그램명 *" full>
           <input value={f.name} onChange={(e) => set({ name: e.target.value })} className={inCls} />
         </FieldP>
-        <FieldP label="강사">
-          <select value={f.instructor_id} onChange={(e) => set({ instructor_id: e.target.value })} className={inCls}>
-            <option value="">(미지정)</option>
-            {instructors.map((i) => (
-              <option key={i.id} value={i.id}>{i.name}</option>
+        <FieldP label="강사 채용">
+          <select
+            value={f.instructor_mode}
+            onChange={(e) => set({ instructor_mode: e.target.value as InstructorMode })}
+            className={inCls}
+          >
+            {(Object.keys(INSTRUCTOR_MODE_LABEL) as InstructorMode[]).map((m) => (
+              <option key={m} value={m}>{INSTRUCTOR_MODE_LABEL[m]}</option>
             ))}
           </select>
         </FieldP>
+        {f.instructor_mode === "hire" ? (
+          <FieldP label="강사">
+            <select value={f.instructor_id} onChange={(e) => set({ instructor_id: e.target.value })} className={inCls}>
+              <option value="">(미지정)</option>
+              {instructors.map((i) => (
+                <option key={i.id} value={i.id}>{i.name}</option>
+              ))}
+            </select>
+            {!quick && (
+              <button
+                type="button"
+                className="mt-1 text-[11px] text-navy hover:underline"
+                onClick={() => setQuick({ name: "", phone: "" })}
+              >
+                + 목록에 없는 강사 바로 등록
+              </button>
+            )}
+          </FieldP>
+        ) : (
+          <p className="self-end text-[11px] text-ink-hint">
+            채용하지 않는 강좌는 강사 지정·계약서가 없습니다(저장하면 강사 지정이 비워집니다).
+          </p>
+        )}
+        {f.instructor_mode === "hire" && quick && (
+          <div className="rounded-lg border border-line p-2 sm:col-span-2">
+            <p className="text-[11px] font-semibold text-navy">강사 바로 등록</p>
+            <div className="mt-1 grid grid-cols-1 gap-2 sm:grid-cols-3">
+              <input
+                placeholder="이름"
+                value={quick.name}
+                onChange={(e) => setQuick({ ...quick, name: e.target.value })}
+                className={inCls}
+              />
+              <input
+                placeholder="휴대전화(숫자)"
+                inputMode="numeric"
+                value={quick.phone}
+                onChange={(e) => setQuick({ ...quick, phone: e.target.value })}
+                className={inCls}
+              />
+              <div className="flex gap-1">
+                <button type="button" className={btnPrimary} disabled={pending || !quick.name.trim()} onClick={quickRegister}>
+                  등록
+                </button>
+                <button type="button" className={btnSecondary} onClick={() => setQuick(null)}>
+                  취소
+                </button>
+              </div>
+            </div>
+            <p className="mt-1 text-[10px] text-ink-hint">
+              등록 후 동래샘들 초대 링크를 발급해 보내세요. 계좌·주민번호·주소는 강사 상세에서 채웁니다.
+            </p>
+          </div>
+        )}
+        {quickErr && <p className={`sm:col-span-2 ${noticeWarning}`}>{quickErr}</p>}
+        {f.instructor_mode === "hire" && justAdded && justAdded.id === f.instructor_id && (
+          <div className="flex flex-wrap items-center gap-2 sm:col-span-2">
+            <span className="text-[11px] text-success">{justAdded.name} 강사를 등록했습니다.</span>
+            <InviteReissueButton instructorId={justAdded.id} name={justAdded.name} state={{ kind: "none" }} />
+          </div>
+        )}
         <FieldP label="교시">
           <input type="number" value={f.period_no} onChange={(e) => set({ period_no: e.target.value })} className={inCls} />
         </FieldP>
@@ -1778,18 +1930,26 @@ function ProgramModal({
         <FieldP label="수강료">
           <input type="number" value={f.tuition} onChange={(e) => set({ tuition: e.target.value })} className={inCls} />
         </FieldP>
-        {/* ST-5. 정산 방식 — 시급/분배율 중 쓰는 칸만 보여 준다. */}
-        <FieldP label="정산 방식 *">
+        {/* ST-5. 강사료 방식 — 시간당/회당/수익배분 중 쓰는 칸만 보여 준다. */}
+        <FieldP label="강사료 방식 *">
           <select
             value={f.pay_type}
             onChange={(e) => set({ pay_type: e.target.value as PayType })}
             className={inCls}
           >
             <option value="hourly">{PAY_TYPE_LABEL.hourly}</option>
+            <option value="per_session">{PAY_TYPE_LABEL.per_session}</option>
             <option value="revenue_share">{PAY_TYPE_LABEL.revenue_share}</option>
           </select>
         </FieldP>
-        {f.pay_type === "revenue_share" ? (
+        {f.pay_type === "per_session" ? (
+          <FieldP label="회당 강사료">
+            <input type="number" min={0} value={f.session_fee} onChange={(e) => set({ session_fee: e.target.value })} className={inCls} />
+            <p className="mt-1 text-[11px] text-warning">
+              정산 화면은 아직 회당 계산을 하지 않습니다(시급 경로로 계산됨) — 정산 전에 확인하세요.
+            </p>
+          </FieldP>
+        ) : f.pay_type === "revenue_share" ? (
           <FieldP label="강사 비율(%)">
             <input
               type="number"
@@ -1809,6 +1969,17 @@ function ProgramModal({
             <input type="number" value={f.hourly_rate} onChange={(e) => set({ hourly_rate: e.target.value })} className={inCls} />
           </FieldP>
         )}
+        <FieldP label="1회 수업시간(분)">
+          <input
+            type="number"
+            min={0}
+            value={f.session_minutes}
+            onChange={(e) => set({ session_minutes: e.target.value })}
+            placeholder="예: 90"
+            className={inCls}
+          />
+          <p className="mt-1 text-[11px] text-ink-hint">계약서 &lsquo;강의 1회당 수업시간&rsquo;에 들어갑니다.</p>
+        </FieldP>
         <FieldP label="공제율(%)">
           <input
             type="number"

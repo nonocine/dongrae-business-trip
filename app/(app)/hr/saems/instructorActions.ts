@@ -71,6 +71,7 @@ function maskInstructor<T extends SaemInstructor>(row: T, canManage: boolean): T
     bank_account: null,
     account_holder: null,
     rrnMask: null,
+    address: null,
     invite_token: null,
   };
 }
@@ -168,6 +169,7 @@ export type InstructorInput = {
   bank_account?: string;
   account_holder?: string;
   memo?: string;
+  address?: string;
 };
 
 // --- 신규 등록(전화 중복 차단) ---
@@ -266,6 +268,15 @@ export async function updateInstructor(
       account_holder: clean(input.account_holder),
       memo: clean(input.memo),
     };
+    // 주소(강사 계약서 을 주소란) — 보낸 값이 있을 때만, 바뀌었을 때만 갱신 시각을 찍습니다.
+    if (input.address !== undefined) {
+      const next = clean(input.address);
+      const { data: cur } = await supabaseAdmin.from(INSTR).select("address").eq("id", id).maybeSingle();
+      if (((cur as { address?: string | null } | null)?.address ?? null) !== next) {
+        patch.address = next;
+        patch.address_updated_at = new Date().toISOString();
+      }
+    }
     if (input.status === "active" || input.status === "inactive") {
       patch.status = input.status;
     }

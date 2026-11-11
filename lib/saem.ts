@@ -47,24 +47,28 @@ export const TERM_STATUS_LABEL: Record<TermStatus, string> = {
   closed: "종료",
 };
 
-// ST-5. 정산 방식 — 시급제(기본) / 수강료 분배제.
+// ST-5. 정산 방식 — 시급제(기본) / 수강료 분배제 / 회당(2026-11 강사 계약서).
 //   계산 규칙은 lib/settlement.ts(양쪽 저장소 공용)에 있다.
-export type PayType = "hourly" | "revenue_share";
+//   ⚠️ per_session(회당)은 아직 정산 계산에 없다 — 정산은 지금처럼 시급제 경로로 계산된다.
+export type PayType = "hourly" | "per_session" | "revenue_share";
 export const PAY_TYPE_LABEL: Record<PayType, string> = {
-  hourly: "시급제",
-  revenue_share: "수강료 분배",
+  hourly: "시간당",
+  per_session: "회당",
+  revenue_share: "수익배분",
 };
 export function normalizePayType(v: unknown): PayType {
-  return v === "revenue_share" ? "revenue_share" : "hourly";
+  return v === "revenue_share" || v === "per_session" ? v : "hourly";
 }
 // 목록용 짧은 표기 — "시급 40,000" / "분배 70%".
 export function payTypeSummary(p: {
   pay_type: PayType;
   hourly_rate: number | null;
   share_rate: number | null;
+  session_fee?: number | null;
 }): string {
   if (p.pay_type === "revenue_share")
     return `분배 ${p.share_rate == null ? "-" : trimRate(p.share_rate)}%`;
+  if (p.pay_type === "per_session") return `회당 ${formatKRW(p.session_fee)}`;
   return `시급 ${formatKRW(p.hourly_rate)}`;
 }
 // 비율 표기 — 70.00 → "70", 66.67 → "66.67".
@@ -93,6 +97,8 @@ export type SaemInstructor = {
   //   가지 않습니다. 평문·암호문이 필요한 곳은 서버에서 직접 조회합니다
   //   (lib/payrollLedgerExport 를 쓰는 지급대장 라우트 하나뿐).
   rrnMask: string | null;
+  // 주소 — 강사 채용 계약서 을 주소란(발송 시 address_snapshot 으로 확정).
+  address: string | null;
 };
 
 export type SaemInstructorDoc = {
@@ -147,6 +153,10 @@ export type SaemProgram = {
   // ST-5. 정산 방식. hourly 면 hourly_rate, revenue_share 면 share_rate 를 쓴다.
   pay_type: PayType;
   share_rate: number | null; // 강사 분배 비율(%) — 기본 70.00
+  session_fee: number | null; // 회당 강사료(pay_type='per_session')
+  session_minutes: number | null; // 1회 수업시간(분) — 계약서 칸
+  // 강사 채용 방식 — hire(채용함)일 때만 강사 지정·계약서. lib/instructorContract 참고.
+  instructor_mode: "hire" | "staff" | "volunteer" | "external";
   status: string;
   sort_order: number;
   // 실제 스케줄(진실의 원천) — 이 값으로 saem_sessions 를 생성·재생성한다.
@@ -187,6 +197,7 @@ export function toInstructor(r: Record<string, unknown>): SaemInstructor {
     memo: s(r.memo),
     // rrn_enc 는 의도적으로 빠져 있습니다(위 타입 주석 참조).
     rrnMask: s(r.rrn_mask),
+    address: s(r.address),
   };
 }
 
@@ -246,6 +257,12 @@ export function toProgram(r: Record<string, unknown>): SaemProgram {
     deduction_rate: nOrNull(r.deduction_rate),
     pay_type: normalizePayType(r.pay_type),
     share_rate: nOrNull(r.share_rate),
+    session_fee: nOrNull(r.session_fee),
+    session_minutes: nOrNull(r.session_minutes),
+    instructor_mode:
+      r.instructor_mode === "staff" || r.instructor_mode === "volunteer" || r.instructor_mode === "external"
+        ? r.instructor_mode
+        : "hire",
     status: String(r.status ?? "active"),
     sort_order: Number(r.sort_order ?? 0),
     session_start: s(r.session_start),

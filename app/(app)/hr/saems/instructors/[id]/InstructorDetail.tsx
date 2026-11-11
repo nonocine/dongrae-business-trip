@@ -26,6 +26,7 @@ import {
   InviteStatusBadge,
 } from "@/app/(app)/hr/saems/InviteReissue";
 import type { InviteState } from "@/lib/saemInvite";
+import InstructorContractsSection from "@/app/(app)/hr/saems/contracts/InstructorContractsSection";
 import type { InstructorProgramRow } from "@/app/(app)/hr/saems/instructorActions";
 import { weekdaysLabel } from "@/lib/saemSchedule";
 import {
@@ -77,6 +78,7 @@ export default function InstructorDetail({
     bank_account: instructor.bank_account ?? "",
     account_holder: instructor.account_holder ?? "",
     memo: instructor.memo ?? "",
+    address: instructor.address ?? "",
     status: instructor.status,
   });
   const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
@@ -152,6 +154,14 @@ export default function InstructorDetail({
           <Field label="예금주">
             <input value={f.account_holder} onChange={(e) => patch({ account_holder: e.target.value })} className={inCls} />
           </Field>
+          <Field label="주소(계약서용)" full>
+            <input
+              value={f.address}
+              onChange={(e) => patch({ address: e.target.value })}
+              placeholder="강사 채용 계약서 을 주소란에 들어갑니다"
+              className={inCls}
+            />
+          </Field>
           <Field label="메모" full>
             <input value={f.memo} onChange={(e) => patch({ memo: e.target.value })} className={inCls} />
           </Field>
@@ -222,6 +232,9 @@ export default function InstructorDetail({
           </ul>
         )}
       </section>
+
+      {/* 강사 채용 계약서 — 이 화면은 관리 권한자만 옵니다(page.tsx 가드). */}
+      <InstructorContractsSection instructorId={instructor.id} />
 
       {/* 계정 완전 삭제 — M0 전용. 사전 점검 후 삭제(PurgeAccountDialog). */}
       {isM0 && (
