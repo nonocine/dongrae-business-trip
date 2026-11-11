@@ -31,6 +31,10 @@
     {
       "path": "/api/cron/bk-enroll-purge",
       "schedule": "0 17 * * *"
+    },
+    {
+      "path": "/api/cron/erp-sync",
+      "schedule": "0 3,9,22 * * *"
     }
   ]
 }

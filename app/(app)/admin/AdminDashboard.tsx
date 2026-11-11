@@ -152,7 +152,31 @@ function DashboardTab({ stats }: { stats: ActivityAdminStats }) {
       </div>
       <RecentActivitiesCard stats={stats} />
       <BackupCard />
+      <ErpCard />
     </div>
+  );
+}
+
+// ERP 동기화 상태판 바로가기 — /admin/erp(관장·master).
+function ErpCard() {
+  return (
+    <Link
+      href="/admin/erp"
+      className={`${cardCls} flex items-center justify-between gap-3 transition hover:-translate-y-0.5 hover:border-navy hover:shadow-md`}
+    >
+      <div>
+        <h3 className="flex items-center gap-1.5 text-sm font-semibold text-ink">
+          <span aria-hidden>🔄</span>
+          ERP 동기화
+        </h3>
+        <p className="mt-1 text-xs text-ink-muted">
+          ERP(직원·휴가·일정·대관·문서·회계) 자동 동기화 상태, 직원 연결, 지금 동기화.
+        </p>
+      </div>
+      <span aria-hidden className="shrink-0 text-lg text-ink-hint">
+        →
+      </span>
+    </Link>
   );
 }
 
