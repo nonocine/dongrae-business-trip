@@ -25,6 +25,7 @@ import {
   INSTRUCTOR_CONTRACT_SMS_PROGRAM,
   INSTRUCTOR_CONTRACT_SMS_SENDER,
   fillBody,
+  koreanDate,
   instructorContractLink,
   instructorContractPdfPath,
   missingFields,
@@ -49,11 +50,43 @@ const T_TPL = "instructor_contract_templates";
 const T_LOG = "instructor_contract_logs";
 const SIGNED_URL_SECONDS = 300; // 파일 열기 — 5분 서명 URL
 
-type Fail = { ok: false; message: string };
+// existingId — 같은 강사·같은 강좌의 유효 계약이 이미 있을 때 그 계약 id(화면이 그쪽으로 이동).
+type Fail = { ok: false; message: string; existingId?: string };
 const fail = (e: unknown, fb = "오류가 발생했습니다."): Fail => ({
   ok: false,
   message: e instanceof Error ? e.message : fb,
 });
+
+// =====================================================================
+// 원칙: 강사 1명 × 강좌 1개 = 유효 계약 1건(무효 제외).
+//   DB 유니크 인덱스 instructor_contracts_one_active_per_program
+//   (instructor_id, program_id) where status <> 'void' 가 최종 방어선이고,
+//   여기서는 먼저 찾아 보고(친절한 안내) 그래도 부딪히면 23505 를 같은 안내로 바꿉니다.
+// =====================================================================
+const DUP_MESSAGE = "이 강사의 이 강좌 계약서가 이미 있습니다. 기존 계약서를 엽니다.";
+
+async function activeContractId(instructorId: string, programId: string | null, exceptId?: string | null): Promise<string | null> {
+  if (!instructorId || !programId) return null;
+  let q = supabaseAdmin
+    .from("instructor_contracts")
+    .select("id")
+    .eq("instructor_id", instructorId)
+    .eq("program_id", programId)
+    .neq("status", "void")
+    .limit(1);
+  if (exceptId) q = q.neq("id", exceptId);
+  const { data } = await q;
+  return ((data ?? []) as { id: string }[])[0]?.id ?? null;
+}
+
+function isUniqueViolation(error: { code?: string } | null | undefined): boolean {
+  return error?.code === "23505";
+}
+
+async function dupFail(instructorId: string, programId: string | null, exceptId?: string | null): Promise<Fail> {
+  const existingId = (await activeContractId(instructorId, programId, exceptId)) ?? undefined;
+  return { ok: false, message: DUP_MESSAGE, existingId };
+}
 
 // 동래샘들 계약서 화면 주소 — 동래샘들 쪽에 /contracts/[id] 페이지가 있어야 합니다.
 function contractLink(id: string): string {
@@ -122,7 +155,7 @@ export async function listInstructorContracts(filter: ContractListFilter = {}): 
   let q = supabaseAdmin
     .from(T_CON)
     .select(
-      "id, contract_no, instructor_id, project_id, term_id, program_id, signing_method, status, sent_at, first_viewed_at, instructor_signed_at, employer_signed_at, pdf_path, paper_file_path, void_reason, created_at, created_by, instructor_name_snapshot"
+      "id, contract_no, instructor_id, project_id, term_id, program_id, signing_method, status, sent_at, first_viewed_at, instructor_signed_at, employer_signed_at, pdf_path, paper_file_path, void_reason, created_at, created_by, instructor_name_snapshot, fields"
     )
     .order("created_at", { ascending: false })
     .limit(500);
@@ -145,14 +178,31 @@ export async function listInstructorContracts(filter: ContractListFilter = {}): 
     for (const r of (d ?? []) as { id: string; name: string }[]) m.set(r.id, r.name);
     return m;
   };
-  const [ins, proj, term, prog] = await Promise.all([
+  const termInfo = async (list: string[]) => {
+    const m = new Map<string, { name: string; start_date: string | null; end_date: string | null }>();
+    if (!list.length) return m;
+    const { data: d } = await supabaseAdmin.from("saem_terms").select("id, name, start_date, end_date").in("id", list);
+    for (const r of (d ?? []) as { id: string; name: string; start_date: string | null; end_date: string | null }[]) m.set(r.id, r);
+    return m;
+  };
+  const [ins, proj, terms, prog] = await Promise.all([
     nameMap("saem_instructors", ids("instructor_id")),
     nameMap("saem_projects", ids("project_id")),
-    nameMap("saem_terms", ids("term_id")),
+    termInfo(ids("term_id")),
     nameMap("saem_programs", ids("program_id")),
   ]);
+  const term = new Map([...terms].map(([k, v]) => [k, v.name]));
+  // 계약기간 — 계약서 칸(시작·종료일)이 있으면 그것, 없으면(종이 등) 학기 기간.
+  const periodOf = (r: Record<string, unknown>): string => {
+    const f = toFields(r.fields);
+    if (f.start_date || f.end_date) return `${f.start_date || "?"} ~ ${f.end_date || "?"}`;
+    const t = terms.get(str(r.term_id));
+    if (t?.start_date || t?.end_date) return `${koreanDate(t?.start_date) || "?"} ~ ${koreanDate(t?.end_date) || "?"}`;
+    return "";
+  };
 
   return rows.map((r) => ({
+    period: periodOf(r),
     id: str(r.id),
     contract_no: str(r.contract_no),
     instructor_id: str(r.instructor_id),
@@ -175,6 +225,192 @@ export async function listInstructorContracts(filter: ContractListFilter = {}): 
     created_at: str(r.created_at),
     created_by: strOrNull(r.created_by),
   }));
+}
+
+// =====================================================================
+// 강좌 단위 보기 — 계약이 없는 강좌, 강사별 강좌·계약 묶음, [강좌 연결] 후보
+// =====================================================================
+export type ProgramRef = {
+  programId: string;
+  programName: string;
+  projectName: string | null;
+  termName: string | null;
+  termPeriod: string; // 학기 기간(한국어 날짜)
+  instructorId: string;
+  instructorName: string;
+};
+
+// 채용함(hire)·강사 지정 강좌를 사업·학기 이름과 함께. 필터는 사업/학기/강사.
+async function hirePrograms(filter: { projectId?: string; termId?: string; instructorId?: string }): Promise<ProgramRef[]> {
+  let termIds: string[] | null = null;
+  if (filter.termId) termIds = [filter.termId];
+  else if (filter.projectId) {
+    const { data } = await supabaseAdmin.from("saem_terms").select("id").eq("project_id", filter.projectId);
+    termIds = ((data ?? []) as { id: string }[]).map((t) => t.id);
+    if (!termIds.length) return [];
+  }
+  let q = supabaseAdmin
+    .from("saem_programs")
+    .select("id, name, term_id, instructor_id, instructor_mode")
+    .not("instructor_id", "is", null)
+    .eq("instructor_mode", "hire");
+  if (termIds) q = q.in("term_id", termIds);
+  if (filter.instructorId) q = q.eq("instructor_id", filter.instructorId);
+  const { data: progs } = await q;
+  const rows = (progs ?? []) as { id: string; name: string; term_id: string; instructor_id: string }[];
+  if (!rows.length) return [];
+  const tIds = [...new Set(rows.map((p) => p.term_id))];
+  const { data: terms } = await supabaseAdmin.from("saem_terms").select("id, name, project_id, start_date, end_date").in("id", tIds);
+  const tMap = new Map(((terms ?? []) as { id: string; name: string; project_id: string; start_date: string | null; end_date: string | null }[]).map((t) => [t.id, t]));
+  const pIds = [...new Set([...tMap.values()].map((t) => t.project_id))];
+  const { data: projs } = pIds.length ? await supabaseAdmin.from("saem_projects").select("id, name").in("id", pIds) : { data: [] };
+  const pMap = new Map(((projs ?? []) as { id: string; name: string }[]).map((p) => [p.id, p.name]));
+  const iIds = [...new Set(rows.map((p) => p.instructor_id))];
+  const { data: ins } = await supabaseAdmin.from("saem_instructors").select("id, name").in("id", iIds);
+  const iMap = new Map(((ins ?? []) as { id: string; name: string }[]).map((i) => [i.id, i.name]));
+  return rows
+    .map((p) => {
+      const t = tMap.get(p.term_id);
+      return {
+        programId: p.id,
+        programName: p.name,
+        projectName: t ? pMap.get(t.project_id) ?? null : null,
+        termName: t?.name ?? null,
+        termPeriod:
+          t && (t.start_date || t.end_date) ? `${koreanDate(t.start_date) || "?"} ~ ${koreanDate(t.end_date) || "?"}` : "",
+        instructorId: p.instructor_id,
+        instructorName: iMap.get(p.instructor_id) ?? "",
+        _start: t?.start_date ?? "",
+      };
+    })
+    .sort((a, b) => b._start.localeCompare(a._start) || a.programName.localeCompare(b.programName, "ko"))
+    .map(({ _start, ...rest }) => {
+      void _start;
+      return rest;
+    });
+}
+
+// 유효 계약(무효 제외)이 있는 (강사, 강좌) 쌍.
+async function activePairs(programIds: string[]): Promise<Set<string>> {
+  const out = new Set<string>();
+  if (!programIds.length) return out;
+  const { data } = await supabaseAdmin
+    .from(T_CON)
+    .select("instructor_id, program_id")
+    .in("program_id", programIds)
+    .neq("status", "void");
+  for (const r of (data ?? []) as { instructor_id: string; program_id: string }[]) out.add(`${r.instructor_id}:${r.program_id}`);
+  return out;
+}
+
+// 계약서 탭 집계 — 강좌 단위. 미서명 = 서명 대기(sent) 계약이 걸린 강좌 수,
+//   계약 없음 = 채용함·강사 지정인데 그 강사의 유효 계약이 없는 강좌.
+export async function getContractSummary(filter: { projectId?: string; termId?: string }): Promise<{
+  unsignedPrograms: number;
+  noContract: ProgramRef[];
+}> {
+  await requireSaemAccess();
+  const progs = await hirePrograms(filter);
+  const pairs = await activePairs(progs.map((p) => p.programId));
+  const noContract = progs.filter((p) => !pairs.has(`${p.instructorId}:${p.programId}`));
+
+  let q = supabaseAdmin.from(T_CON).select("id, program_id").eq("status", "sent");
+  if (filter.projectId) q = q.eq("project_id", filter.projectId);
+  if (filter.termId) q = q.eq("term_id", filter.termId);
+  const { data } = await q;
+  // 강좌가 연결된 건은 강좌 단위로, 강좌 미지정 건은 한 건씩 셉니다.
+  const keys = new Set(((data ?? []) as { id: string; program_id: string | null }[]).map((r) => r.program_id ?? `c:${r.id}`));
+  return { unsignedPrograms: keys.size, noContract };
+}
+
+// 강사 상세 — 그 강사의 강좌별 계약 묶음 + 강좌 미지정 계약.
+export type InstructorProgramContracts = {
+  program: ProgramRef;
+  contracts: InstructorContractRow[]; // 최신 먼저(무효 포함)
+  hasActive: boolean;
+};
+export async function getInstructorContractOverview(instructorId: string): Promise<{
+  programs: InstructorProgramContracts[];
+  unlinked: InstructorContractRow[];
+}> {
+  await requireSaemAccess();
+  const [progs, rows] = await Promise.all([
+    hirePrograms({ instructorId }),
+    listInstructorContracts({ instructorId }),
+  ]);
+  const byProgram = new Map<string, InstructorContractRow[]>();
+  for (const r of rows) {
+    if (!r.program_id) continue;
+    const list = byProgram.get(r.program_id) ?? [];
+    list.push(r);
+    byProgram.set(r.program_id, list);
+  }
+  const listed = new Set(progs.map((p) => p.programId));
+  const programs: InstructorProgramContracts[] = progs.map((p) => {
+    const contracts = byProgram.get(p.programId) ?? [];
+    return { program: p, contracts, hasActive: contracts.some((c) => c.status !== "void") };
+  });
+  // 지금은 다른 강사·다른 방식이 된 강좌라도 이 강사의 계약이 있으면 함께 보여 줍니다.
+  for (const [pid, contracts] of byProgram) {
+    if (listed.has(pid)) continue;
+    const c = contracts[0];
+    programs.push({
+      program: {
+        programId: pid,
+        programName: c.program_name ?? "(삭제된 강좌)",
+        projectName: c.project_name,
+        termName: c.term_name,
+        termPeriod: "",
+        instructorId,
+        instructorName: c.instructor_name,
+      },
+      contracts,
+      hasActive: contracts.some((x) => x.status !== "void"),
+    });
+  }
+  return { programs, unlinked: rows.filter((r) => !r.program_id) };
+}
+
+// [강좌 연결] 후보 — 그 강사가 맡은 강좌(채용함) + 이미 유효 계약이 있는지.
+export async function listInstructorProgramOptions(
+  instructorId: string
+): Promise<(ProgramRef & { hasActive: boolean })[]> {
+  await requireSaemAccess();
+  const progs = await hirePrograms({ instructorId });
+  const pairs = await activePairs(progs.map((p) => p.programId));
+  return progs.map((p) => ({ ...p, hasActive: pairs.has(`${instructorId}:${p.programId}`) }));
+}
+
+// 강좌 미지정 계약(옛 종이 계약 등)에 강좌를 연결합니다. program_id·term_id·project_id 를 채웁니다.
+export async function linkInstructorContractProgram(id: string, programId: string): Promise<{ ok: true } | Fail> {
+  try {
+    const access = await requireSaemAccess();
+    if (!programId) return { ok: false, message: "강좌를 고르세요." };
+    const cur = await loadContract(id);
+    if (!cur) return { ok: false, message: "계약서를 찾을 수 없습니다." };
+    if (cur.program_id) return { ok: false, message: "이미 강좌가 연결된 계약서입니다." };
+    if (cur.status === "void") return { ok: false, message: "무효 처리된 계약서는 연결하지 않습니다." };
+    const instructorId = str(cur.instructor_id);
+    const { data: p } = await supabaseAdmin.from("saem_programs").select("id, instructor_id").eq("id", programId).maybeSingle();
+    if (!p || (p as { instructor_id: string | null }).instructor_id !== instructorId)
+      return { ok: false, message: "이 강사가 맡은 강좌만 연결할 수 있습니다." };
+    if (await activeContractId(instructorId, programId, id)) return dupFail(instructorId, programId, id);
+
+    const scope = await programScope(programId);
+    const { error, count } = await supabaseAdmin
+      .from(T_CON)
+      .update({ program_id: programId, ...scope, updated_at: new Date().toISOString() }, { count: "exact" })
+      .eq("id", id)
+      .is("program_id", null);
+    if (isUniqueViolation(error)) return dupFail(instructorId, programId, id);
+    if (error) throw new Error(error.message);
+    if (!count) return { ok: false, message: "이미 다른 곳에서 처리되었습니다. 새로고침해 주세요." };
+    await writeLog(id, "program_linked", access, { program_id: programId, term_id: scope.term_id });
+    revalidateAll(instructorId);
+    return { ok: true };
+  } catch (e) {
+    return fail(e);
+  }
 }
 
 // 필터용 학기 목록(사업별).
@@ -209,6 +445,10 @@ export type ContractProgramOption = {
   hourlyRate: number | null;
   sessionFee: number | null;
   deductionRate: number | null;
+  projectName: string | null;
+  // 이 강사의 이 강좌 유효 계약(무효 제외) — 있으면 새로 만들지 않고 그것을 엽니다.
+  activeContractId: string | null;
+  activeStatus: InstructorContractStatus | null;
 };
 export type ContractTemplateOption = {
   id: string;
@@ -244,6 +484,7 @@ export type ContractContext = {
     nameSnapshot: string | null;
     rrnSnapshot: string | null;
     addressSnapshot: string | null;
+    openedExisting: boolean; // 강좌에서 [계약서]를 눌렀는데 이미 있어서 연 것
   };
 };
 
@@ -256,8 +497,23 @@ export async function getContractContext(input: {
     const access = await requireSaemAccess();
     let existing: ContractContext["existing"] = null;
     let instructorId = input.instructorId ?? null;
-    if (input.contractId) {
-      const c = await loadContract(input.contractId);
+    if (!instructorId && input.programId && !input.contractId) {
+      const { data: p } = await supabaseAdmin
+        .from("saem_programs")
+        .select("instructor_id")
+        .eq("id", input.programId)
+        .maybeSingle();
+      instructorId = strOrNull((p as { instructor_id?: string } | null)?.instructor_id);
+    }
+    // 강좌의 [계약서] — 그 강좌·그 강사의 유효 계약이 있으면 새로 만들지 않고 그것을 엽니다.
+    let contractId = input.contractId ?? null;
+    let openedExisting = false;
+    if (!contractId && instructorId && input.programId) {
+      contractId = await activeContractId(instructorId, input.programId);
+      openedExisting = !!contractId;
+    }
+    if (contractId) {
+      const c = await loadContract(contractId);
       if (!c) return { ok: false, message: "계약서를 찾을 수 없습니다." };
       instructorId = str(c.instructor_id);
       existing = {
@@ -273,15 +529,8 @@ export async function getContractContext(input: {
         nameSnapshot: strOrNull(c.instructor_name_snapshot),
         rrnSnapshot: strOrNull(c.rrn_mask_snapshot),
         addressSnapshot: strOrNull(c.address_snapshot),
+        openedExisting,
       };
-    }
-    if (!instructorId && input.programId) {
-      const { data: p } = await supabaseAdmin
-        .from("saem_programs")
-        .select("instructor_id")
-        .eq("id", input.programId)
-        .maybeSingle();
-      instructorId = strOrNull((p as { instructor_id?: string } | null)?.instructor_id);
     }
     if (!instructorId) return { ok: false, message: "강좌에 강사를 먼저 지정하세요." };
 
@@ -313,6 +562,23 @@ export async function getContractContext(input: {
       for (const t of (terms ?? []) as { id: string; name: string; project_id: string; start_date: string | null; end_date: string | null }[])
         termMap.set(t.id, t);
     }
+    const projIds = [...new Set([...termMap.values()].map((t) => t.project_id))];
+    const projMap = new Map<string, string>();
+    if (projIds.length) {
+      const { data: pj } = await supabaseAdmin.from("saem_projects").select("id, name").in("id", projIds);
+      for (const p of (pj ?? []) as { id: string; name: string }[]) projMap.set(p.id, p.name);
+    }
+    const activeMap = new Map<string, { id: string; status: InstructorContractStatus }>();
+    if (progRows.length) {
+      const { data: act } = await supabaseAdmin
+        .from(T_CON)
+        .select("id, program_id, status")
+        .eq("instructor_id", instructorId)
+        .in("program_id", progRows.map((p) => str(p.id)))
+        .neq("status", "void");
+      for (const a of (act ?? []) as { id: string; program_id: string; status: string }[])
+        activeMap.set(a.program_id, { id: a.id, status: toContractStatus(a.status) });
+    }
     const num = (v: unknown) => (v == null || v === "" || !Number.isFinite(Number(v)) ? null : Number(v));
     const programs: ContractProgramOption[] = progRows
       .map((p) => {
@@ -335,6 +601,9 @@ export async function getContractContext(input: {
           hourlyRate: num(p.hourly_rate),
           sessionFee: num(p.session_fee),
           deductionRate: num(p.deduction_rate),
+          projectName: t ? projMap.get(t.project_id) ?? null : null,
+          activeContractId: activeMap.get(str(p.id))?.id ?? null,
+          activeStatus: activeMap.get(str(p.id))?.status ?? null,
         };
       })
       .sort((a, b) => (b.termStart ?? "").localeCompare(a.termStart ?? "") || a.name.localeCompare(b.name, "ko"));
@@ -400,6 +669,10 @@ export async function saveInstructorContractDraft(input: {
     const access = await requireSaemAccess();
     if (!input.instructorId) return { ok: false, message: "강사를 확인하세요." };
     if (!input.templateId) return { ok: false, message: "양식을 고르세요." };
+    // 계약서는 강좌마다 1건 — 강좌 없이 새로 만들지 않습니다(옛 강좌 미지정 초안은 고칠 때 강좌를 고르게 함).
+    if (!input.programId) return { ok: false, message: "강좌를 고르세요. 계약서는 강좌마다 1건입니다." };
+    if (await activeContractId(input.instructorId, input.programId, input.id))
+      return dupFail(input.instructorId, input.programId, input.id);
     const fields = cleanFields(input.fields);
     const scope = await programScope(input.programId || null);
     const payload = {
@@ -418,6 +691,7 @@ export async function saveInstructorContractDraft(input: {
         .update({ ...payload, updated_at: new Date().toISOString() }, { count: "exact" })
         .eq("id", input.id)
         .eq("status", "draft");
+      if (isUniqueViolation(error)) return dupFail(input.instructorId, input.programId, input.id);
       if (error) throw new Error(error.message);
       if (!count) return { ok: false, message: "이미 다른 곳에서 처리되었습니다. 새로고침해 주세요." };
       await writeLog(input.id, "updated", access);
@@ -429,6 +703,7 @@ export async function saveInstructorContractDraft(input: {
       .insert({ ...payload, signing_method: "electronic", status: "draft", created_by: access.name })
       .select("id")
       .single();
+    if (isUniqueViolation(error)) return dupFail(input.instructorId, input.programId);
     if (error) throw new Error(error.message);
     const id = str((data as { id: string }).id);
     await writeLog(id, "created", access, { signing_method: "electronic" });
@@ -590,6 +865,9 @@ export async function uploadPaperInstructorContract(formData: FormData): Promise
     const programId = String(formData.get("program_id") ?? "").trim() || null;
     const file = formData.get("file");
     if (!instructorId) return { ok: false, message: "강사를 확인하세요." };
+    // 새 종이 계약도 강좌마다 1건 — 강좌 선택 필수.
+    if (!programId) return { ok: false, message: "강좌를 고르세요. 계약서는 강좌마다 1건입니다." };
+    if (await activeContractId(instructorId, programId)) return dupFail(instructorId, programId);
     if (!(file instanceof File) || file.size === 0) return { ok: false, message: "업로드할 파일을 선택하세요." };
     if (file.size > 16 * 1024 * 1024) return { ok: false, message: "파일 용량은 16MB 이하여야 합니다." };
     const ext = PAPER_EXT[file.type];
@@ -619,6 +897,7 @@ export async function uploadPaperInstructorContract(formData: FormData): Promise
       })
       .select("id, contract_no")
       .single();
+    if (isUniqueViolation(error)) return dupFail(instructorId, programId);
     if (error) throw new Error(error.message);
     const r = row as { id: string; contract_no: string };
     const path = `${INSTRUCTOR_CONTRACT_DIR}/${instructorId}/${r.contract_no}_paper.${ext}`;

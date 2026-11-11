@@ -4,6 +4,8 @@ import { useEffect, useState, useTransition } from "react";
 import {
   listContractTerms,
   listInstructorContracts,
+  getContractSummary,
+  type ProgramRef,
   listInstructorContractLogs,
   openInstructorContractFile,
   resendInstructorContractSms,
@@ -13,6 +15,7 @@ import {
 } from "@/app/(app)/hr/saems/contractActions";
 import ContractEditor from "@/app/(app)/hr/saems/contracts/ContractEditor";
 import ContractLinkCopyButton from "@/app/(app)/hr/saems/contracts/ContractLinkCopyButton";
+import LinkProgramDialog, { programLabel } from "@/app/(app)/hr/saems/contracts/LinkProgramDialog";
 import {
   INSTRUCTOR_CONTRACT_STATUS_LABEL,
   SIGNING_METHOD_LABEL,
@@ -61,6 +64,7 @@ const ACTION_LABEL: Record<string, string> = {
   file_viewed: "파일 열람",
   file_downloaded: "파일 다운로드",
   link_copied: "링크 복사",
+  program_linked: "강좌 연결",
   viewed: "강사 열람",
   signed: "강사 서명",
 };
@@ -93,7 +97,11 @@ export default function ContractsManager({
   const [termId, setTermId] = useState("");
   const [status, setStatus] = useState<ContractListFilter["status"]>("");
   const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
-  const [editing, setEditing] = useState<string | null>(null);
+  // 계약서 창 — 기존 계약(contractId) 또는 계약 없는 강좌의 새 계약(programId+instructorId).
+  const [editing, setEditing] = useState<{ contractId?: string; programId?: string; instructorId?: string } | null>(null);
+  const [linking, setLinking] = useState<InstructorContractRow | null>(null);
+  const [summary, setSummary] = useState<{ unsignedPrograms: number; noContract: ProgramRef[] } | null>(null);
+  const [showNoContract, setShowNoContract] = useState(false);
   const [voiding, setVoiding] = useState<InstructorContractRow | null>(null);
   const [logsOf, setLogsOf] = useState<InstructorContractRow | null>(null);
   const [pending, start] = useTransition();
@@ -115,8 +123,22 @@ export default function ContractsManager({
       termId: f?.termId ?? termId,
       status: f?.status ?? status,
     };
-    setRows(await listInstructorContracts(filter));
+    const [list, sum] = await Promise.all([
+      listInstructorContracts(filter),
+      getContractSummary({ projectId: filter.projectId, termId: filter.termId }),
+    ]);
+    setRows(list);
+    setSummary(sum);
   }
+
+  // 첫 화면 집계(강좌 단위).
+  useEffect(() => {
+    let alive = true;
+    getContractSummary({}).then((s) => alive && setSummary(s));
+    return () => {
+      alive = false;
+    };
+  }, []);
 
   function run(fn: () => Promise<{ ok: boolean; message?: string }>, okText: string) {
     setMsg(null);
@@ -137,8 +159,8 @@ export default function ContractsManager({
     });
   }
 
-  const unsigned = rows.filter((r) => r.status === "sent").length;
-  const waitingSeal = rows.filter((r) => r.status === "instructor_signed").length;
+  // 집계는 강사 수가 아니라 강좌 단위(계약서 = 강좌마다 1건).
+  const waitingSeal = new Set(rows.filter((r) => r.status === "instructor_signed").map((r) => r.program_id ?? r.id)).size;
 
   return (
     <div className="space-y-4">
@@ -197,12 +219,45 @@ export default function ContractsManager({
             ))}
           </select>
           <span className="ml-auto text-xs text-ink-muted">
-            미서명 <b className="text-warning">{unsigned}</b> · 직인 대기 <b className="text-navy">{waitingSeal}</b>
+            강좌 기준 · 미서명 <b className="text-warning">{summary?.unsignedPrograms ?? "-"}</b> · 직인 대기{" "}
+            <b className="text-navy">{waitingSeal}</b> ·{" "}
+            <button
+              type="button"
+              className="underline decoration-dotted hover:text-ink"
+              onClick={() => setShowNoContract((v) => !v)}
+              title="채용함·강사 지정 강좌 중 그 강사의 계약서가 없는 강좌"
+            >
+              계약서 없음 <b className="text-stamp">{summary?.noContract.length ?? "-"}</b>
+            </button>
           </span>
         </div>
         <p className="mt-2 text-xs text-ink-hint">
-          새 계약서는 [프로그램 관리]의 강좌 행 또는 강사 상세에서 [계약서 만들기]로 만듭니다.
+          계약서는 강좌마다 1건입니다. 새 계약서는 [프로그램 관리]의 강좌 행, 강사 상세, 아래 &lsquo;계약서 없음&rsquo; 목록에서 만듭니다.
         </p>
+        {showNoContract && summary && (
+          <div className="mt-3 rounded-lg border border-line p-2">
+            {summary.noContract.length === 0 ? (
+              <p className="text-xs text-ink-hint">계약서가 없는 강좌가 없습니다.</p>
+            ) : (
+              <ul className="space-y-1">
+                {summary.noContract.map((p) => (
+                  <li key={`${p.instructorId}:${p.programId}`} className="flex flex-wrap items-center gap-2 text-sm">
+                    <span className="text-ink">{programLabel(p)}</span>
+                    {p.termPeriod && <span className="text-xs text-ink-hint">{p.termPeriod}</span>}
+                    <span className="text-xs text-ink-muted">{p.instructorName} 강사</span>
+                    <button
+                      type="button"
+                      className={`${smBtn} ml-auto`}
+                      onClick={() => setEditing({ programId: p.programId, instructorId: p.instructorId })}
+                    >
+                      계약서 만들기
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+        )}
       </section>
 
       {msg && <p className={msg.ok ? noticeSuccess : noticeError}>{msg.text}</p>}
@@ -215,11 +270,13 @@ export default function ContractsManager({
             <table className="w-full min-w-[920px] border-collapse">
               <thead>
                 <tr className="border-b border-line">
-                  <th className={thCls}>번호</th>
-                  <th className={thCls}>강사</th>
-                  <th className={thCls}>사업 · 학기 · 강좌</th>
-                  <th className={thCls}>방식</th>
+                  <th className={thCls}>[사업] 강좌</th>
+                  <th className={thCls}>학기</th>
+                  <th className={thCls}>계약기간</th>
+                  <th className={thCls}>계약번호</th>
                   <th className={thCls}>상태</th>
+                  <th className={thCls}>강사</th>
+                  <th className={thCls}>방식</th>
                   <th className={thCls}>발송</th>
                   <th className={thCls}>강사 서명</th>
                   <th className={`${thCls} text-right`}>관리</th>
@@ -228,12 +285,26 @@ export default function ContractsManager({
               <tbody>
                 {rows.map((r) => (
                   <tr key={r.id} className="border-b border-line/60">
-                    <td className={`${tdCls} font-mono text-xs`}>{r.contract_no}</td>
-                    <td className={`${tdCls} font-medium text-ink`}>{r.instructor_name}</td>
-                    <td className={`${tdCls} text-xs`}>
-                      {[r.project_name, r.term_name, r.program_name].filter(Boolean).join(" · ") || "-"}
+                    <td className={`${tdCls} font-medium text-ink`}>
+                      {r.program_id ? (
+                        <>
+                          {r.project_name && <span className="text-ink-muted">[{r.project_name}] </span>}
+                          {r.program_name ?? "(삭제된 강좌)"}
+                        </>
+                      ) : (
+                        <span className="inline-flex items-center gap-1">
+                          <span className={badgeWarning}>강좌 미지정</span>
+                          {r.status !== "void" && (
+                            <button type="button" className={smBtn} onClick={() => setLinking(r)}>
+                              강좌 연결
+                            </button>
+                          )}
+                        </span>
+                      )}
                     </td>
-                    <td className={tdCls}>{SIGNING_METHOD_LABEL[r.signing_method]}</td>
+                    <td className={`${tdCls} text-xs`}>{r.term_name ?? "-"}</td>
+                    <td className={`${tdCls} text-xs`}>{r.period || "-"}</td>
+                    <td className={`${tdCls} font-mono text-xs`}>{r.contract_no}</td>
                     <td className={tdCls}>
                       <span className={STATUS_BADGE[r.status]} title={r.void_reason ? `사유: ${r.void_reason}` : undefined}>
                         {INSTRUCTOR_CONTRACT_STATUS_LABEL[r.status]}
@@ -242,12 +313,14 @@ export default function ContractsManager({
                         <span className="ml-1 text-[11px] text-ink-hint">열람함</span>
                       )}
                     </td>
+                    <td className={tdCls}>{r.instructor_name}</td>
+                    <td className={tdCls}>{SIGNING_METHOD_LABEL[r.signing_method]}</td>
                     <td className={`${tdCls} text-xs`}>{kst(r.sent_at)}</td>
                     <td className={`${tdCls} text-xs`}>{kst(r.instructor_signed_at)}</td>
                     <td className={`${tdCls} text-right`}>
                       <div className="flex flex-wrap items-center justify-end gap-1">
                         {r.signing_method === "electronic" && (
-                          <button type="button" className={smBtn} onClick={() => setEditing(r.id)}>
+                          <button type="button" className={smBtn} onClick={() => setEditing({ contractId: r.id })}>
                             {r.status === "draft" ? "이어 쓰기" : "내용"}
                           </button>
                         )}
@@ -309,8 +382,13 @@ export default function ContractsManager({
 
       {editing && (
         <ContractEditor
-          contractId={editing}
-          onClose={() => setEditing(null)}
+          contractId={editing.contractId ?? null}
+          programId={editing.programId ?? null}
+          instructorId={editing.instructorId ?? null}
+          onClose={() => {
+            setEditing(null);
+            void reload();
+          }}
           onDone={async (text) => {
             setEditing(null);
             setMsg({ ok: true, text });
@@ -330,6 +408,22 @@ export default function ContractsManager({
         />
       )}
       {logsOf && <LogsDialog row={logsOf} onClose={() => setLogsOf(null)} />}
+      {linking && (
+        <LinkProgramDialog
+          row={linking}
+          onClose={() => setLinking(null)}
+          onDone={async () => {
+            setLinking(null);
+            setMsg({ ok: true, text: "강좌를 연결했습니다." });
+            await reload();
+          }}
+          onExisting={(id, message) => {
+            setLinking(null);
+            setMsg({ ok: false, text: message });
+            setEditing({ contractId: id });
+          }}
+        />
+      )}
     </div>
   );
 }

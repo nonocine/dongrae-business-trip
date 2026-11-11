@@ -103,23 +103,38 @@ export default function ContractEditor({
   const [err, setErr] = useState<string | null>(null);
   const [info, setInfo] = useState<string | null>(null);
   const [sentInfo, setSentInfo] = useState<{ id: string; smsError: string | null } | null>(null);
+  // 지금 열고 있는 대상. 같은 강좌 계약서가 이미 있으면 그 계약서로 바꿔 엽니다.
+  const [target, setTarget] = useState({ instructorId, programId, contractId });
+  const [notice, setNotice] = useState<string | null>(null);
   const [pending, start] = useTransition();
 
   useEffect(() => {
     let alive = true;
     (async () => {
-      const r = await getContractContext({ instructorId, programId, contractId });
+      const r = await getContractContext(target);
       if (!alive) return;
       if (!r.ok) return setLoadErr(r.message);
+      setLoadErr(null);
+      setErr(null);
       setCtx(r);
       if (r.existing) {
+        setDraftId(r.existing.id);
         setMethod(r.existing.signingMethod);
         setProgId(r.existing.programId ?? "");
         setTplId(r.existing.templateId ?? pickTemplate(r.templates, null)?.id ?? "");
         setF(r.existing.fields);
+        if (r.existing.openedExisting)
+          setNotice(
+            `이 강좌의 계약서가 이미 있어 새로 만들지 않고 기존 계약서(${r.existing.contractNo}, ${INSTRUCTOR_CONTRACT_STATUS_LABEL[r.existing.status]})를 열었습니다.`
+          );
         return;
       }
-      const prog = r.programs.find((p) => p.id === programId) ?? r.programs[0] ?? null;
+      setDraftId(null);
+      // 새 계약 — 지정된 강좌, 없으면 아직 계약이 없는 첫 강좌.
+      const prog =
+        r.programs.find((p) => p.id === target.programId) ??
+        r.programs.find((p) => !p.activeContractId) ??
+        null;
       const tpl = pickTemplate(r.templates, prog?.projectId ?? null);
       setProgId(prog?.id ?? "");
       setTplId(tpl?.id ?? "");
@@ -128,7 +143,14 @@ export default function ContractEditor({
     return () => {
       alive = false;
     };
-  }, [instructorId, programId, contractId]);
+  }, [target]);
+
+  // 이미 있는 계약서로 옮겨 엽니다(강좌 선택·저장 중 중복 발견 시).
+  function openExisting(id: string, message: string) {
+    setNotice(message);
+    setCtx(null);
+    setTarget({ instructorId: null, programId: null, contractId: id });
+  }
 
   const prog = ctx?.programs.find((p) => p.id === progId) ?? null;
   const tpl = ctx?.templates.find((t) => t.id === tplId) ?? null;
@@ -138,8 +160,12 @@ export default function ContractEditor({
 
   function changeProgram(id: string) {
     if (!ctx) return;
-    setProgId(id);
     const p = ctx.programs.find((x) => x.id === id) ?? null;
+    if (p?.activeContractId && p.activeContractId !== draftId) {
+      openExisting(p.activeContractId, `「${p.name}」 강좌는 이 강사의 계약서가 이미 있어 그 계약서를 열었습니다.`);
+      return;
+    }
+    setProgId(id);
     const t = pickTemplate(ctx.templates, p?.projectId ?? null);
     setTplId(t?.id ?? "");
     setF(fieldsFor(ctx, p, t));
@@ -163,7 +189,10 @@ export default function ContractEditor({
         templateId: tplId,
         fields: f,
       });
-      if (!saved.ok) return setErr(saved.message);
+      if (!saved.ok) {
+        if (saved.existingId) return openExisting(saved.existingId, saved.message);
+        return setErr(saved.message);
+      }
       setDraftId(saved.id);
       if (!thenSend) {
         onDone("계약서를 저장했습니다(작성 중).");
@@ -188,14 +217,18 @@ export default function ContractEditor({
   function uploadPaper() {
     if (!ctx) return;
     setErr(null);
+    if (!progId) return setErr("강좌를 고르세요. 계약서는 강좌마다 1건입니다.");
     if (!file) return setErr("파일을 선택하세요.");
     const fd = new FormData();
     fd.set("instructor_id", ctx.instructor.id);
-    if (progId) fd.set("program_id", progId);
+    fd.set("program_id", progId);
     fd.set("file", file);
     start(async () => {
       const r = await uploadPaperInstructorContract(fd);
-      if (!r.ok) return setErr(r.message);
+      if (!r.ok) {
+        if (r.existingId) return openExisting(r.existingId, r.message);
+        return setErr(r.message);
+      }
       onDone("종이 계약서를 올렸습니다(체결 완료).");
     });
   }
@@ -219,6 +252,7 @@ export default function ContractEditor({
         </div>
 
         {loadErr && <p className={noticeError}>{loadErr}</p>}
+        {notice && <p className={`mb-3 ${noticeWarning}`}>{notice}</p>}
         {!ctx && !loadErr && <p className="py-8 text-center text-sm text-ink-hint">불러오는 중…</p>}
 
         {/* 발송 완료 안내창 */}
@@ -265,16 +299,32 @@ export default function ContractEditor({
 
             <div className="mb-3 grid grid-cols-1 gap-2 sm:grid-cols-2">
               <div>
-                <label className={lblCls}>강좌</label>
-                <select value={progId} onChange={(e) => changeProgram(e.target.value)} className={`${inCls} mt-1`}>
-                  <option value="">(강좌 지정 안 함)</option>
+                <label className={lblCls}>강좌 *</label>
+                <select
+                  value={progId}
+                  onChange={(e) => changeProgram(e.target.value)}
+                  className={`${inCls} mt-1 ${progId ? "" : "border-stamp"}`}
+                >
+                  <option value="" disabled>
+                    강좌를 고르세요
+                  </option>
                   {ctx.programs.map((p) => (
                     <option key={p.id} value={p.id}>
-                      {p.termName ? `[${p.termName}] ` : ""}
+                      {p.projectName ? `[${p.projectName}] ` : ""}
                       {p.name}
+                      {p.termName ? ` · ${p.termName}` : ""}
+                      {p.activeContractId && p.activeContractId !== draftId && p.activeStatus
+                        ? ` — 계약서 있음(${INSTRUCTOR_CONTRACT_STATUS_LABEL[p.activeStatus]})`
+                        : ""}
                     </option>
                   ))}
                 </select>
+                {ctx.programs.length === 0 && (
+                  <p className="mt-1 text-[11px] text-stamp">
+                    이 강사가 맡은 강좌(채용함)가 없습니다. 강좌에 먼저 강사를 지정하세요.
+                  </p>
+                )}
+                <p className="mt-1 text-[11px] text-ink-hint">계약서는 강좌마다 1건입니다.</p>
               </div>
               {method === "electronic" && (
                 <div>
@@ -304,7 +354,7 @@ export default function ContractEditor({
                 />
                 {err && <p className={`mt-3 ${noticeError}`}>{err}</p>}
                 <div className="mt-3 flex gap-2">
-                  <button type="button" className={btnPrimary} disabled={pending || !file} onClick={uploadPaper}>
+                  <button type="button" className={btnPrimary} disabled={pending || !file || !progId} onClick={uploadPaper}>
                     {pending ? "올리는 중…" : "업로드"}
                   </button>
                   <button type="button" className={btnSecondary} onClick={onClose}>
@@ -413,13 +463,13 @@ export default function ContractEditor({
                   <button
                     type="button"
                     className={btnPrimary}
-                    disabled={pending || missing.length > 0 || !tpl}
+                    disabled={pending || missing.length > 0 || !tpl || !progId}
                     onClick={() => save(true)}
                     title="본문을 확정하고 강사에게 서명 요청 문자를 보냅니다"
                   >
                     {pending ? "처리 중…" : "발송"}
                   </button>
-                  <button type="button" className={btnSecondary} disabled={pending || !tpl} onClick={() => save(false)}>
+                  <button type="button" className={btnSecondary} disabled={pending || !tpl || !progId} onClick={() => save(false)}>
                     저장(작성 중)
                   </button>
                   <button type="button" className={btnSecondary} onClick={onClose}>

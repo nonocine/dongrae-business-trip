@@ -292,6 +292,7 @@ export type InstructorContractRow = {
   term_name: string | null;
   program_id: string | null;
   program_name: string | null;
+  period: string; // 계약기간 "2026년 11월 7일 ~ 2026년 12월 26일" (없으면 "")
   signing_method: SigningMethod;
   status: InstructorContractStatus;
   sent_at: string | null;
