@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useMemo, useState } from "react";
 import EmployeeProfileForm from "@/app/(app)/hr/EmployeeProfileForm";
+import DutyRecordPanel from "@/app/(app)/profile/hr/DutyRecordPanel";
 import RecruitmentPostingsTab from "@/app/(app)/hr/RecruitmentPostingsTab";
 import PasswordMigrationCard from "@/app/(app)/hr/PasswordMigrationCard";
 import CurrentAssignment from "@/app/(app)/hr/CurrentAssignment";
@@ -32,10 +33,13 @@ export default function HrDashboard({
   canGrantPersonnel,
   allowedTabs,
   today,
+  canViewDutyRecord = false,
 }: {
   drivers: Driver[];
   profiles: EmployeeProfile[];
   recruitmentPostings: RecruitmentPostingAdmin[];
+  // 직원 카드의 '복무 기록'(ERP) — 관장(M0)·hr 직무만. 서버(getDutyRecord)도 같은 기준으로 다시 확인.
+  canViewDutyRecord?: boolean;
   // KST 오늘 "YYYY-MM-DD" — 현재 소속(발효된 발령) 판정 기준. 서버에서 계산.
   today: string;
   initialTab?: TabKey;
@@ -61,6 +65,7 @@ export default function HrDashboard({
           canManageAuth={canManageAuth}
           canGrantPersonnel={canGrantPersonnel}
           today={today}
+          canViewDutyRecord={canViewDutyRecord}
         />
       )}
       {/* 계약서·증명서 탭은 "곧 제공될 예정입니다" 자리표시자였습니다.
@@ -195,12 +200,14 @@ function RecordsTab({
   canManageAuth,
   canGrantPersonnel,
   today,
+  canViewDutyRecord,
 }: {
   drivers: Driver[];
   profiles: EmployeeProfile[];
   canManageAuth: boolean;
   canGrantPersonnel: boolean;
   today: string;
+  canViewDutyRecord: boolean;
 }) {
   const [selectedId, setSelectedId] = useState("");
   // 재직/퇴사 필터 — 기본은 재직만 노출(퇴사자는 분리). 기록은 삭제하지 않고 보존.
@@ -312,7 +319,12 @@ function RecordsTab({
               today={today}
               onDeleted={() => setSelectedId("")}
             />
-          ) : (
+          ) : null}
+          {/* 복무 기록(ERP) — 관장·hr 직무만. 본인 카드와 같은 화면. */}
+          {selectedDriver && canViewDutyRecord && (
+            <DutyRecordPanel key={`duty-${selectedDriver.id}`} driverId={selectedDriver.id} thisYear={Number(today.slice(0, 4))} />
+          )}
+          {selectedDriver ? null : (
             <section className={cardCls}>
               <div className="flex flex-col items-center justify-center gap-2 py-16 text-center">
                 <div

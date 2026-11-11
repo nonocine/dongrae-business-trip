@@ -27,6 +27,9 @@ const nextConfig: NextConfig = {
     "/hr/saems/instructors/**": ["./lib/fonts/*.ttf"],
     // 동래방카 필수 운영서식(급식계획·공결확인서) — 원본 양식 PDF 위에 나눔고딕으로 찍습니다.
     "/bangka/**": ["./lib/fonts/*.ttf", "./lib/forms/bangka/*.pdf"],
+    // 연차 사용촉진 촉구서·지정 통보서·이행 현황 PDF(나눔고딕).
+    "/hr/leave-plans": ["./lib/fonts/*.ttf"],
+    "/hr/leave-plans/**": ["./lib/fonts/*.ttf"],
   },
 };
 

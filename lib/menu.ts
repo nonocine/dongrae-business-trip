@@ -471,6 +471,17 @@ export const MENU_ITEMS: MenuItem[] = [
     show: { kind: "roleOrPersonnel", role: "hr" },
   },
   {
+    // 연차 사용촉진(개편) — 가드(lib/leavePromotionServer)는 M0·hr 직무·인사 파일 열람.
+    //   회계 그룹의 같은 항목(인사 파일 열람 보유자)은 그대로 둡니다.
+    key: "hr-leave-promotion",
+    group: "hr",
+    label: "연차 사용촉진",
+    href: "/hr/leave-plans",
+    icon: "🌴",
+    desc: "1차 촉구·사용계획·2차 지정 통보 진행 현황과 서식",
+    show: { kind: "m0OrRole", role: "hr" },
+  },
+  {
     // ERP 연동 — 복무·연차 대시보드. 가드(lib/erp/view resolveDutyDashboardViewer)와 같은 M0 또는 hr 직무.
     key: "hr-duty-dashboard",
     group: "hr",

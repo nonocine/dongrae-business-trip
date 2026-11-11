@@ -9,6 +9,7 @@ import {
 import { enforcePasswordChange } from "@/app/actions";
 import { kstTodayYmd } from "@/lib/trainings";
 import { resolvePersonnelViewer } from "@/lib/personnelAccess";
+import { canViewOthersDutyRecord } from "@/app/(app)/profile/hr/dutyRecordActions";
 
 export const dynamic = "force-dynamic";
 
@@ -84,6 +85,7 @@ export default async function HrPage({
         canGrantPersonnel={canGrantPersonnel}
         allowedTabs={allowedTabs}
         today={kstTodayYmd()}
+        canViewDutyRecord={await canViewOthersDutyRecord().catch(() => false)}
       />
     </div>
   );

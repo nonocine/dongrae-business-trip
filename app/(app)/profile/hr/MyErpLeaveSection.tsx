@@ -12,6 +12,7 @@ import type { MyErpLeave } from "@/lib/erp/view";
 import { DUTY_COLOR_CLASS, DUTY_COLOR_HEX, ERP_NOTE, addDaysYmd, dayLabel } from "@/lib/erp/duty";
 import { getHolidayName } from "@/lib/koreanHolidays";
 import { badgeWarning, cardCls, noticeWarning } from "@/lib/ui";
+import DutyRecordPanel from "@/app/(app)/profile/hr/DutyRecordPanel";
 
 const fmt = (v: number | null | undefined) => (v == null ? "-" : Number.isInteger(v) ? String(v) : Number(v).toFixed(1));
 const when = (iso: string | null) =>
@@ -30,6 +31,15 @@ function Note({ syncedAt, extra }: { syncedAt: string | null; extra?: string }) 
 
 export default function MyErpLeaveSection({ data }: { data: MyErpLeave }) {
   if (!data.linked) return <p className={noticeWarning}>ERP 계정 연결이 필요합니다(관리자 문의).</p>;
+  return (
+    <div className="space-y-4">
+      <LeaveCharts data={data} />
+      <DutyRecordPanel thisYear={data.year} />
+    </div>
+  );
+}
+
+function LeaveCharts({ data }: { data: MyErpLeave }) {
 
   const remaining = data.annualRemaining ?? 0;
   const used = data.annualUsed;

@@ -12,8 +12,8 @@ const TABS: TabItem<MyHrTabKey>[] = [
   { key: "contracts", label: "내 계약서", icon: "filePen" },
   { key: "certs", label: "증명서", icon: "stamp" },
   { key: "trainings", label: "내 의무교육", icon: "bookOpen" },
-  // ERP 연동 — 내 연차·대휴(예전 /profile/leave 를 여기로 옮김).
-  { key: "erpLeave", label: "연차·대휴", icon: "calendar" },
+  // ERP 연동 — 복무 기록(연차·대휴 그래프 + 하위 탭). 예전 /profile/leave·'연차·대휴' 탭을 확장.
+  { key: "erpLeave", label: "복무 기록", icon: "calendar" },
   { key: "leave", label: "연차 사용계획서", icon: "calendarCheck" },
   { key: "discipline", label: "경위서", icon: "fileText" },
 ];
@@ -33,6 +33,8 @@ const HASH_TO_TAB: Record<string, MyHrTabKey> = {
   trainings: "trainings",
   "my-trainings": "trainings",
   "erp-leave": "erpLeave",
+  "duty-record": "erpLeave",
+  duty: "erpLeave",
   erpleave: "erpLeave",
   annual: "erpLeave",
   "my-leave": "erpLeave",

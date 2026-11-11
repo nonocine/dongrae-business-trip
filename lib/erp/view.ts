@@ -25,6 +25,8 @@ import {
   kstYmdOf,
   monthRange,
   type DutyColorKey,
+  LEAVE_TYPES,
+  addDaysYmd,
 } from "@/lib/erp/duty";
 import { listRolesForDriver } from "@/lib/employeeRolesServer";
 
@@ -421,4 +423,114 @@ export async function resolveDutyDashboardViewer(): Promise<ErpViewer | null> {
   if (v.isM0) return v;
   const roles = v.driverId ? await listRolesForDriver(v.driverId) : [];
   return roles.includes("hr") ? v : null;
+}
+
+// =====================================================================
+// 인사기록카드 '복무 기록' — 한 직원·한 해의 복무를 네 갈래로(연차 / 대휴 / 공가·병가 / 출장·외근·교육).
+//   진행·완료만, 사라진 건 제외. 일수: 신고 일수(declared_amount)가 있으면 그것, 없으면 걸친 날 수.
+//   시간: 시간 단위(연수 등)는 신고 시간, 그 밖에는 시작~끝 차이(하루 안일 때).
+// =====================================================================
+export type DutyRecordKind = "annual" | "comp" | "publicSick" | "field";
+export const DUTY_RECORD_LABEL: Record<DutyRecordKind, string> = {
+  annual: "연차 사용일",
+  comp: "대휴 사용일",
+  publicSick: "공가·병가",
+  field: "출장·외근·교육",
+};
+export type DutyRecordRow = {
+  id: number;
+  type: string;
+  start: string;
+  end: string;
+  time: string;
+  days: number;
+  hours: number | null;
+  location: string | null;
+  inProgress: boolean;
+};
+export type DutyRecord = {
+  year: number;
+  linked: boolean;
+  groups: Record<DutyRecordKind, { rows: DutyRecordRow[]; days: number; hours: number }>;
+  syncedAt: string | null;
+};
+
+function recordKind(type: string): DutyRecordKind | null {
+  if (type === "연가") return "annual";
+  if (type === "대휴") return "comp";
+  if (type === "공가" || type === "병가") return "publicSick";
+  if (type === "출장" || type === "외근" || type === "연수" || type === "교육") return "field";
+  return null;
+}
+
+export async function dutyRecordOf(erpEmployeeId: string | null, year: number): Promise<DutyRecord> {
+  const empty = () => ({ rows: [] as DutyRecordRow[], days: 0, hours: 0 });
+  const groups: DutyRecord["groups"] = { annual: empty(), comp: empty(), publicSick: empty(), field: empty() };
+  const syncedAt = await erpLastSyncedAt("duties");
+  if (!erpEmployeeId) return { year, linked: false, groups, syncedAt };
+  const duties = await loadDutiesOverlapping(`${year}-01-01`, `${year}-12-31`, { employeeId: erpEmployeeId });
+  const { data: units } = await supabaseAdmin
+    .from("erp_duties")
+    .select("duty_id, amount_unit")
+    .in("duty_id", duties.map((d) => d.duty_id).slice(0, 1000));
+  const unitOf = new Map(((units ?? []) as { duty_id: number; amount_unit: string | null }[]).map((u) => [u.duty_id, u.amount_unit]));
+  for (const d of duties) {
+    if (!d.start_at) continue;
+    const type = (d.type_name ?? "").trim();
+    const kind = recordKind(type);
+    if (!kind) continue;
+    const s = kstYmdOf(d.start_at);
+    if (s.slice(0, 4) !== String(year)) continue; // 시작일 기준으로 그 해에 셉니다
+    const e0 = d.end_at ? kstYmdOf(d.end_at) : s;
+    const e = e0 < s ? s : e0;
+    const span = Math.round((Date.parse(`${e}T00:00:00Z`) - Date.parse(`${s}T00:00:00Z`)) / 86400000) + 1;
+    const amt = d.declared_amount == null ? null : Number(d.declared_amount);
+    const unit = unitOf.get(d.duty_id) ?? null;
+    const days = unit === "days" && amt && amt > 0 ? amt : span;
+    let hours: number | null = null;
+    if (unit === "hours" && amt != null) hours = amt;
+    else if (d.end_at && s === e) hours = Math.round(((Date.parse(d.end_at) - Date.parse(d.start_at)) / 3600000) * 10) / 10;
+    const g = groups[kind];
+    g.rows.push({
+      id: d.duty_id,
+      type: LEAVE_TYPES.has(type) && amt === 0.5 ? `${type}(반일)` : type,
+      start: s,
+      end: e,
+      time: dutyTimeText(d.start_at, d.end_at),
+      days,
+      hours,
+      location: kind === "field" ? d.location : null,
+      inProgress: d.process_code === 1,
+    });
+    g.days += days;
+    g.hours += hours ?? 0;
+  }
+  for (const k of Object.keys(groups) as DutyRecordKind[]) {
+    groups[k].rows.sort((a, b) => a.start.localeCompare(b.start));
+    groups[k].days = Math.round(groups[k].days * 10) / 10;
+    groups[k].hours = Math.round(groups[k].hours * 10) / 10;
+  }
+  return { year, linked: true, groups, syncedAt };
+}
+
+// 연가 사용 날짜(그 해) — 연차 촉진의 '계획 대비 실제' 대조용. 여러 날이면 하루씩 펼칩니다.
+export async function annualLeaveDatesByEmployee(year: number): Promise<Map<string, Map<string, number>>> {
+  const duties = await loadDutiesOverlapping(`${year}-01-01`, `${year}-12-31`);
+  const out = new Map<string, Map<string, number>>();
+  for (const d of duties) {
+    if ((d.type_name ?? "").trim() !== "연가" || !d.start_at) continue;
+    const s = kstYmdOf(d.start_at);
+    const e0 = d.end_at ? kstYmdOf(d.end_at) : s;
+    const e = e0 < s ? s : e0;
+    const amt = d.declared_amount == null ? null : Number(d.declared_amount);
+    for (let day = s; day <= e; day = addDaysYmd(day, 1)) {
+      const v = s === e && amt != null && amt > 0 ? amt : 1;
+      for (const id of d.employee_ids) {
+        const m = out.get(id) ?? new Map<string, number>();
+        m.set(day, (m.get(day) ?? 0) + v);
+        out.set(id, m);
+      }
+    }
+  }
+  return out;
 }

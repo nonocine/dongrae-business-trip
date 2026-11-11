@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import AdminDashboard from "@/app/(app)/admin/AdminDashboard";
+import PromotionAlerts from "@/app/(app)/admin/PromotionAlerts";
 import {
   enforcePasswordChange,
   getActivityAdminStats,
@@ -35,6 +36,8 @@ export default async function AdminPage() {
           ← 목록
         </Link>
       </div>
+      {/* 연차 사용촉진 기한 알림(D-14·D-3·경과) */}
+      <PromotionAlerts />
       <AdminDashboard
         employees={employees}
         stats={stats}
