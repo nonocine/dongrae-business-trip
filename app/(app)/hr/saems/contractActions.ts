@@ -34,6 +34,8 @@ import {
   normalizeContractPayType,
   normalizeInstructorMode,
   normalizeTaxType,
+  payKey,
+  programTimeTag,
   rrnMaskDisplay,
   toContractStatus,
   toFields,
@@ -50,6 +52,7 @@ import {
 const T_CON = "instructor_contracts";
 const T_TPL = "instructor_contract_templates";
 const T_LOG = "instructor_contract_logs";
+const T_LINK = "instructor_contract_programs"; // 계약서–강좌 연결(어느 강좌가 어느 계약에 들었나의 기준)
 const SIGNED_URL_SECONDS = 300; // 파일 열기 — 5분 서명 URL
 
 // existingId — 같은 강사·같은 강좌의 유효 계약이 이미 있을 때 그 계약 id(화면이 그쪽으로 이동).
@@ -60,35 +63,145 @@ const fail = (e: unknown, fb = "오류가 발생했습니다."): Fail => ({
 });
 
 // =====================================================================
-// 원칙: 강사 1명 × 강좌 1개 = 유효 계약 1건(무효 제외).
-//   DB 유니크 인덱스 instructor_contracts_one_active_per_program
-//   (instructor_id, program_id) where status <> 'void' 가 최종 방어선이고,
+// 원칙: 계약서 1건 = 강좌 여러 개. 모든 유급 강좌는 유효 계약 1건에만 들어갑니다.
+//   기준은 연결표 instructor_contract_programs(active). DB 유니크
+//   instructor_contract_programs_one_active(program_id where active) 가 최종 방어선이고,
 //   여기서는 먼저 찾아 보고(친절한 안내) 그래도 부딪히면 23505 를 같은 안내로 바꿉니다.
+//   active 는 트리거가 관리(연결 추가 시 계약이 void 가 아니면 true, 계약이 void 가 되면 false).
+//   instructor_contracts.program_id 는 '대표 강좌' — 채우면 트리거가 연결표에도 넣습니다.
 // =====================================================================
-const DUP_MESSAGE = "이 강사의 이 강좌 계약서가 이미 있습니다. 기존 계약서를 엽니다.";
+const DUP_MESSAGE = "이미 계약서에 들어 있는 강좌가 있습니다.";
 
-async function activeContractId(instructorId: string, programId: string | null, exceptId?: string | null): Promise<string | null> {
-  if (!instructorId || !programId) return null;
-  let q = supabaseAdmin
-    .from("instructor_contracts")
-    .select("id")
-    .eq("instructor_id", instructorId)
-    .eq("program_id", programId)
-    .neq("status", "void")
-    .limit(1);
-  if (exceptId) q = q.neq("id", exceptId);
-  const { data } = await q;
-  return ((data ?? []) as { id: string }[])[0]?.id ?? null;
+const chunks = <T,>(list: T[], n = 150): T[][] => {
+  const out: T[][] = [];
+  for (let i = 0; i < list.length; i += n) out.push(list.slice(i, i + n));
+  return out;
+};
+
+type ActiveLink = { contractId: string; contractNo: string; status: InstructorContractStatus; instructorId: string };
+
+// 강좌 → 그 강좌가 든 유효 계약(연결표 active).
+async function activeLinks(programIds: string[]): Promise<Map<string, ActiveLink>> {
+  const out = new Map<string, ActiveLink>();
+  const ids = [...new Set(programIds.filter(Boolean))];
+  for (const part of chunks(ids)) {
+    const { data, error } = await supabaseAdmin
+      .from(T_LINK)
+      .select("program_id, contract_id, instructor_contracts(contract_no, status, instructor_id)")
+      .eq("active", true)
+      .in("program_id", part);
+    if (error) throw new Error(error.message);
+    for (const r of (data ?? []) as Record<string, unknown>[]) {
+      const raw = r.instructor_contracts as Record<string, unknown> | Record<string, unknown>[] | null;
+      const c = (Array.isArray(raw) ? raw[0] : raw) ?? {};
+      out.set(str(r.program_id), {
+        contractId: str(r.contract_id),
+        contractNo: str(c.contract_no),
+        status: toContractStatus(c.status),
+        instructorId: str(c.instructor_id),
+      });
+    }
+  }
+  return out;
+}
+
+// 계약 → 든 강좌 id 목록(연결표 전체 — 무효 계약의 비활성 연결 포함). 대표 강좌는 호출하는 쪽에서 앞으로.
+async function contractProgramIds(contractIds: string[]): Promise<Map<string, string[]>> {
+  const out = new Map<string, string[]>();
+  const ids = [...new Set(contractIds.filter(Boolean))];
+  for (const part of chunks(ids)) {
+    const { data, error } = await supabaseAdmin
+      .from(T_LINK)
+      .select("contract_id, program_id, created_at")
+      .in("contract_id", part)
+      .order("created_at", { ascending: true });
+    if (error) throw new Error(error.message);
+    for (const r of (data ?? []) as { contract_id: string; program_id: string }[]) {
+      const list = out.get(r.contract_id) ?? [];
+      list.push(r.program_id);
+      out.set(r.contract_id, list);
+    }
+  }
+  return out;
+}
+
+// 고른 강좌 중 다른 유효 계약에 이미 든 것(exceptId = 지금 고치는 계약).
+async function conflictOf(programIds: string[], exceptId?: string | null): Promise<{ programId: string; link: ActiveLink } | null> {
+  const m = await activeLinks(programIds);
+  for (const pid of programIds) {
+    const l = m.get(pid);
+    if (l && l.contractId !== exceptId) return { programId: pid, link: l };
+  }
+  return null;
 }
 
 function isUniqueViolation(error: { code?: string } | null | undefined): boolean {
   return error?.code === "23505";
 }
 
-async function dupFail(instructorId: string, programId: string | null, exceptId?: string | null): Promise<Fail> {
-  const existingId = (await activeContractId(instructorId, programId, exceptId)) ?? undefined;
-  return { ok: false, message: DUP_MESSAGE, existingId };
+async function dupFail(programIds: string[], exceptId?: string | null): Promise<Fail> {
+  const c = await conflictOf(programIds, exceptId);
+  if (!c) return { ok: false, message: `${DUP_MESSAGE} 새로고침 뒤 다시 고르세요.` };
+  return {
+    ok: false,
+    message: `${DUP_MESSAGE}(${c.link.contractNo}) 기존 계약서를 엽니다.`,
+    existingId: c.link.contractId,
+  };
 }
+
+// 묶을 수 있는지 — 이 강사가 맡은 강좌, 같은 학기, 같은 강사료 방식·금액.
+type BundleRow = { id: string; name: string; term_id: string; instructor_id: string | null };
+async function checkBundle(
+  instructorId: string,
+  programIds: string[]
+): Promise<{ ok: true; rows: BundleRow[] } | Fail> {
+  if (!programIds.length) return { ok: false, message: "강좌를 하나 이상 고르세요." };
+  const { data, error } = await supabaseAdmin
+    .from("saem_programs")
+    .select("id, name, term_id, instructor_id, pay_type, hourly_rate, session_fee, share_rate")
+    .in("id", programIds);
+  if (error) throw new Error(error.message);
+  const rows = (data ?? []) as Record<string, unknown>[];
+  if (rows.length !== programIds.length) return { ok: false, message: "강좌를 찾을 수 없습니다. 새로고침해 주세요." };
+  if (rows.some((r) => str(r.instructor_id) !== instructorId))
+    return { ok: false, message: "이 강사가 맡은 강좌만 넣을 수 있습니다." };
+  if (new Set(rows.map((r) => str(r.term_id))).size > 1)
+    return { ok: false, message: "같은 학기 강좌만 한 계약서에 묶을 수 있습니다." };
+  const n = (v: unknown) => (v == null || v === "" || !Number.isFinite(Number(v)) ? null : Number(v));
+  const keys = new Set(
+    rows.map((r) =>
+      payKey({
+        payType: normalizeContractPayType(r.pay_type),
+        hourlyRate: n(r.hourly_rate),
+        sessionFee: n(r.session_fee),
+        shareRate: n(r.share_rate),
+      })
+    )
+  );
+  if (keys.size > 1) return { ok: false, message: "강사료 방식·금액이 다른 강좌는 별도 계약서로 만드세요." };
+  const byId = new Map(rows.map((r) => [str(r.id), r]));
+  return {
+    ok: true,
+    rows: programIds.map((id) => {
+      const r = byId.get(id)!;
+      return { id, name: str(r.name), term_id: str(r.term_id), instructor_id: strOrNull(r.instructor_id) };
+    }),
+  };
+}
+
+// 연결표에 강좌를 넣습니다(이미 있는 (계약, 강좌) 쌍은 건너뜀). 다른 유효 계약과 겹치면 23505.
+async function addLinks(contractId: string, programIds: string[]): Promise<{ code?: string; message: string } | null> {
+  if (!programIds.length) return null;
+  const { error } = await supabaseAdmin
+    .from(T_LINK)
+    .upsert(
+      programIds.map((pid) => ({ contract_id: contractId, program_id: pid })),
+      { onConflict: "contract_id,program_id", ignoreDuplicates: true }
+    );
+  return error ? { code: error.code, message: error.message } : null;
+}
+
+const uniqIds = (list: (string | null | undefined)[]) => [...new Set(list.map((x) => (x ?? "").trim()).filter(Boolean))];
 
 // 동래샘들 계약서 화면 주소 — 동래샘들 쪽에 /contracts/[id] 페이지가 있어야 합니다.
 function contractLink(id: string): string {
@@ -164,7 +277,13 @@ export async function listInstructorContracts(filter: ContractListFilter = {}): 
   if (filter.projectId) q = q.eq("project_id", filter.projectId);
   if (filter.termId) q = q.eq("term_id", filter.termId);
   if (filter.instructorId) q = q.eq("instructor_id", filter.instructorId);
-  if (filter.programId) q = q.eq("program_id", filter.programId);
+  if (filter.programId) {
+    // 강좌 필터 — 연결표 기준(대표 강좌가 아니어도 그 강좌가 든 계약).
+    const { data: lk } = await supabaseAdmin.from(T_LINK).select("contract_id").eq("program_id", filter.programId);
+    const cids = ((lk ?? []) as { contract_id: string }[]).map((x) => x.contract_id);
+    if (!cids.length) return [];
+    q = q.in("id", cids);
+  }
   // '미서명' = 보냈는데 강사가 아직 서명하지 않은 것.
   if (filter.status === "unsigned") q = q.eq("status", "sent");
   else if (filter.status) q = q.eq("status", filter.status);
@@ -173,6 +292,14 @@ export async function listInstructorContracts(filter: ContractListFilter = {}): 
   const rows = (data ?? []) as Record<string, unknown>[];
 
   const ids = (k: string) => [...new Set(rows.map((r) => r[k]).filter(Boolean) as string[])];
+  // 계약별 강좌(연결표). 대표 강좌(program_id)를 앞에, 연결이 아직 없으면 대표 강좌만.
+  const linkMap = await contractProgramIds(rows.map((r) => str(r.id)));
+  const progIdsOf = (r: Record<string, unknown>): string[] => {
+    const rep = strOrNull(r.program_id);
+    const linked = linkMap.get(str(r.id)) ?? [];
+    return rep ? [rep, ...linked.filter((x) => x !== rep)] : linked;
+  };
+  const allProgIds = [...new Set(rows.flatMap(progIdsOf))];
   const nameMap = async (table: string, list: string[]) => {
     const m = new Map<string, string>();
     if (!list.length) return m;
@@ -191,7 +318,7 @@ export async function listInstructorContracts(filter: ContractListFilter = {}): 
     nameMap("saem_instructors", ids("instructor_id")),
     nameMap("saem_projects", ids("project_id")),
     termInfo(ids("term_id")),
-    nameMap("saem_programs", ids("program_id")),
+    nameMap("saem_programs", allProgIds),
   ]);
   const term = new Map([...terms].map(([k, v]) => [k, v.name]));
   // 계약기간 — 계약서 칸(시작·종료일)이 있으면 그것, 없으면(종이 등) 학기 기간.
@@ -213,8 +340,9 @@ export async function listInstructorContracts(filter: ContractListFilter = {}): 
     project_name: proj.get(str(r.project_id)) ?? null,
     term_id: strOrNull(r.term_id),
     term_name: term.get(str(r.term_id)) ?? null,
-    program_id: strOrNull(r.program_id),
-    program_name: prog.get(str(r.program_id)) ?? null,
+    program_id: strOrNull(r.program_id) ?? progIdsOf(r)[0] ?? null,
+    program_name: prog.get(strOrNull(r.program_id) ?? progIdsOf(r)[0] ?? "") ?? null,
+    programs: progIdsOf(r).map((id) => ({ id, name: prog.get(id) ?? "(삭제된 강좌)" })),
     signing_method: (r.signing_method === "paper" ? "paper" : "electronic") as SigningMethod,
     status: toContractStatus(r.status),
     sent_at: strOrNull(r.sent_at),
@@ -240,8 +368,11 @@ export type ProgramRef = {
   termPeriod: string; // 학기 기간(한국어 날짜)
   // 지난 학기(종료일 < 오늘, 서울 기준) — '계약서 없음' 집계·[계약서 만들기]에서 뺍니다.
   termEnded: boolean;
+  termId: string;
   instructorId: string;
   instructorName: string;
+  payKey: string; // 같은 강사료 방식·금액이면 같은 값 — 묶음 판단
+  timeTag: string; // "화 16:00~17:00" — 이름이 같은 강좌 구분
 };
 
 // 채용함(hire)·강사 지정 강좌를 사업·학기 이름과 함께. 필터는 사업/학기/강사.
@@ -255,14 +386,17 @@ async function hirePrograms(filter: { projectId?: string; termId?: string; instr
   }
   let q = supabaseAdmin
     .from("saem_programs")
-    .select("id, name, term_id, instructor_id, instructor_mode")
+    .select(
+      "id, name, term_id, instructor_id, instructor_mode, pay_type, hourly_rate, session_fee, share_rate, session_weekdays, session_weekday, time_start, time_end"
+    )
     .not("instructor_id", "is", null)
     .eq("instructor_mode", "hire");
   if (termIds) q = q.in("term_id", termIds);
   if (filter.instructorId) q = q.eq("instructor_id", filter.instructorId);
   const { data: progs } = await q;
-  const rows = (progs ?? []) as { id: string; name: string; term_id: string; instructor_id: string }[];
+  const rows = (progs ?? []) as ({ id: string; name: string; term_id: string; instructor_id: string } & Record<string, unknown>)[];
   if (!rows.length) return [];
+  const n = (v: unknown) => (v == null || v === "" || !Number.isFinite(Number(v)) ? null : Number(v));
   const tIds = [...new Set(rows.map((p) => p.term_id))];
   const { data: terms } = await supabaseAdmin.from("saem_terms").select("id, name, project_id, start_date, end_date").in("id", tIds);
   const tMap = new Map(((terms ?? []) as { id: string; name: string; project_id: string; start_date: string | null; end_date: string | null }[]).map((t) => [t.id, t]));
@@ -286,6 +420,22 @@ async function hirePrograms(filter: { projectId?: string; termId?: string; instr
         instructorId: p.instructor_id,
         instructorName: iMap.get(p.instructor_id) ?? "",
         termEnded: !!t?.end_date && t.end_date < today,
+        termId: p.term_id,
+        payKey: payKey({
+          payType: normalizeContractPayType(p.pay_type),
+          hourlyRate: n(p.hourly_rate),
+          sessionFee: n(p.session_fee),
+          shareRate: n(p.share_rate),
+        }),
+        timeTag: programTimeTag({
+          weekdays: Array.isArray(p.session_weekdays) && p.session_weekdays.length
+            ? (p.session_weekdays as number[])
+            : p.session_weekday == null
+              ? []
+              : [Number(p.session_weekday)],
+          timeStart: strOrNull(p.time_start),
+          timeEnd: strOrNull(p.time_end),
+        }),
         _start: t?.start_date ?? "",
       };
     })
@@ -296,45 +446,40 @@ async function hirePrograms(filter: { projectId?: string; termId?: string; instr
     });
 }
 
-// 유효 계약(무효 제외)이 있는 (강사, 강좌) 쌍.
-async function activePairs(programIds: string[]): Promise<Set<string>> {
-  const out = new Set<string>();
-  if (!programIds.length) return out;
-  const { data } = await supabaseAdmin
-    .from(T_CON)
-    .select("instructor_id, program_id")
-    .in("program_id", programIds)
-    .neq("status", "void");
-  for (const r of (data ?? []) as { instructor_id: string; program_id: string }[]) out.add(`${r.instructor_id}:${r.program_id}`);
-  return out;
-}
-
-// 계약서 탭 집계 — 강좌 단위. 미서명 = 서명 대기(sent) 계약이 걸린 강좌 수,
-//   계약 없음 = 채용함·강사 지정인데 그 강사의 유효 계약이 없는 강좌.
+// 계약서 탭 집계 — 강좌 단위(연결표 기준). 미서명 = 서명 대기(sent) 계약에 든 강좌 수,
+//   계약 없음 = 유급·강사 지정인데 유효 계약에 들지 않은 강좌(지난 학기 제외).
 export async function getContractSummary(filter: { projectId?: string; termId?: string }): Promise<{
   unsignedPrograms: number;
   noContract: ProgramRef[];
 }> {
   await requireSaemAccess();
   const progs = await hirePrograms(filter);
-  const pairs = await activePairs(progs.map((p) => p.programId));
+  const active = await activeLinks(progs.map((p) => p.programId));
   // 지난 학기 강좌는 이제 계약할 일이 없으므로 '계약서 없음'에서 뺍니다.
-  const noContract = progs.filter((p) => !p.termEnded && !pairs.has(`${p.instructorId}:${p.programId}`));
+  const noContract = progs.filter((p) => !p.termEnded && !active.has(p.programId));
 
   let q = supabaseAdmin.from(T_CON).select("id, program_id").eq("status", "sent");
   if (filter.projectId) q = q.eq("project_id", filter.projectId);
   if (filter.termId) q = q.eq("term_id", filter.termId);
   const { data } = await q;
-  // 강좌가 연결된 건은 강좌 단위로, 강좌 미지정 건은 한 건씩 셉니다.
-  const keys = new Set(((data ?? []) as { id: string; program_id: string | null }[]).map((r) => r.program_id ?? `c:${r.id}`));
+  const sent = (data ?? []) as { id: string; program_id: string | null }[];
+  const links = await contractProgramIds(sent.map((r) => r.id));
+  // 연결된 강좌는 강좌 단위로, 강좌가 없는 건은 한 건씩 셉니다.
+  const keys = new Set<string>();
+  for (const r of sent) {
+    const pids = links.get(r.id) ?? (r.program_id ? [r.program_id] : []);
+    if (pids.length) pids.forEach((x) => keys.add(x));
+    else keys.add(`c:${r.id}`);
+  }
   return { unsignedPrograms: keys.size, noContract };
 }
 
 // 강사 상세 — 그 강사의 강좌별 계약 묶음 + 강좌 미지정 계약.
+//   계약 1건에 강좌가 여럿이면 그 계약은 각 강좌 아래에 모두 보입니다.
 export type InstructorProgramContracts = {
   program: ProgramRef;
   contracts: InstructorContractRow[]; // 최신 먼저(무효 포함)
-  hasActive: boolean;
+  hasActive: boolean; // 연결표 active 기준
 };
 export async function getInstructorContractOverview(instructorId: string): Promise<{
   programs: InstructorProgramContracts[];
@@ -346,18 +491,21 @@ export async function getInstructorContractOverview(instructorId: string): Promi
     hirePrograms({ instructorId }),
     listInstructorContracts({ instructorId }),
   ]);
+  const active = await activeLinks(progs.map((p) => p.programId));
   const byProgram = new Map<string, InstructorContractRow[]>();
   for (const r of rows) {
-    if (!r.program_id) continue;
-    const list = byProgram.get(r.program_id) ?? [];
-    list.push(r);
-    byProgram.set(r.program_id, list);
+    for (const pg of r.programs) {
+      const list = byProgram.get(pg.id) ?? [];
+      list.push(r);
+      byProgram.set(pg.id, list);
+    }
   }
   const listed = new Set(progs.map((p) => p.programId));
-  const programs: InstructorProgramContracts[] = progs.map((p) => {
-    const contracts = byProgram.get(p.programId) ?? [];
-    return { program: p, contracts, hasActive: contracts.some((c) => c.status !== "void") };
-  });
+  const programs: InstructorProgramContracts[] = progs.map((p) => ({
+    program: p,
+    contracts: byProgram.get(p.programId) ?? [],
+    hasActive: active.has(p.programId),
+  }));
   // 지금은 다른 강사·다른 방식이 된 강좌라도 이 강사의 계약이 있으면 함께 보여 줍니다.
   for (const [pid, contracts] of byProgram) {
     if (listed.has(pid)) continue;
@@ -365,56 +513,74 @@ export async function getInstructorContractOverview(instructorId: string): Promi
     programs.push({
       program: {
         programId: pid,
-        programName: c.program_name ?? "(삭제된 강좌)",
+        programName: c.programs.find((x) => x.id === pid)?.name ?? "(삭제된 강좌)",
         projectName: c.project_name,
         termName: c.term_name,
         termPeriod: "",
         termEnded: false,
+        termId: c.term_id ?? "",
         instructorId,
         instructorName: c.instructor_name,
+        payKey: "",
+        timeTag: "",
       },
       contracts,
       hasActive: contracts.some((x) => x.status !== "void"),
     });
   }
-  return { programs, unlinked: rows.filter((r) => !r.program_id), saemBase: saemAppUrl() };
+  return { programs, unlinked: rows.filter((r) => r.programs.length === 0), saemBase: saemAppUrl() };
 }
 
-// [강좌 연결] 후보 — 그 강사가 맡은 강좌(채용함) + 이미 유효 계약이 있는지.
-export async function listInstructorProgramOptions(
-  instructorId: string
-): Promise<(ProgramRef & { hasActive: boolean })[]> {
+// [강좌 연결] 후보 — 그 강사가 맡은 강좌(유급) + 이미 든 유효 계약(번호).
+export type ProgramLinkOption = ProgramRef & { hasActive: boolean; activeContractNo: string | null };
+export async function listInstructorProgramOptions(instructorId: string): Promise<ProgramLinkOption[]> {
   await requireSaemAccess();
   const progs = await hirePrograms({ instructorId });
-  const pairs = await activePairs(progs.map((p) => p.programId));
-  return progs.map((p) => ({ ...p, hasActive: pairs.has(`${instructorId}:${p.programId}`) }));
+  const active = await activeLinks(progs.map((p) => p.programId));
+  return progs.map((p) => ({
+    ...p,
+    hasActive: active.has(p.programId),
+    activeContractNo: active.get(p.programId)?.contractNo ?? null,
+  }));
 }
 
-// 강좌 미지정 계약(옛 종이 계약 등)에 강좌를 연결합니다. program_id·term_id·project_id 를 채웁니다.
-export async function linkInstructorContractProgram(id: string, programId: string): Promise<{ ok: true } | Fail> {
+// 강좌 미지정 계약(옛 종이 계약 등)에 강좌(여러 개)를 연결합니다 — 작성과 같은 규칙
+//   (같은 학기·같은 강사료). 대표 강좌 = 첫 강좌(program_id·term_id·project_id 채움),
+//   나머지는 연결표에. 겹치면(23505) 넣은 것을 되돌립니다.
+export async function linkInstructorContractProgram(id: string, programIdsIn: string[]): Promise<{ ok: true } | Fail> {
   try {
     const access = await requireSaemAccess();
-    if (!programId) return { ok: false, message: "강좌를 고르세요." };
+    const programIds = uniqIds(programIdsIn ?? []);
+    if (!programIds.length) return { ok: false, message: "강좌를 고르세요." };
     const cur = await loadContract(id);
     if (!cur) return { ok: false, message: "계약서를 찾을 수 없습니다." };
-    if (cur.program_id) return { ok: false, message: "이미 강좌가 연결된 계약서입니다." };
     if (cur.status === "void") return { ok: false, message: "무효 처리된 계약서는 연결하지 않습니다." };
     const instructorId = str(cur.instructor_id);
-    const { data: p } = await supabaseAdmin.from("saem_programs").select("id, instructor_id").eq("id", programId).maybeSingle();
-    if (!p || (p as { instructor_id: string | null }).instructor_id !== instructorId)
-      return { ok: false, message: "이 강사가 맡은 강좌만 연결할 수 있습니다." };
-    if (await activeContractId(instructorId, programId, id)) return dupFail(instructorId, programId, id);
+    const already = (await contractProgramIds([id])).get(id) ?? [];
+    if (cur.program_id || already.length) return { ok: false, message: "이미 강좌가 연결된 계약서입니다." };
+    const chk = await checkBundle(instructorId, programIds);
+    if (!chk.ok) return chk;
+    if (await conflictOf(programIds, id)) return dupFail(programIds, id);
 
-    const scope = await programScope(programId);
+    const scope = await programScope(programIds[0]);
+    const prev = { project_id: cur.project_id ?? null, term_id: cur.term_id ?? null };
     const { error, count } = await supabaseAdmin
       .from(T_CON)
-      .update({ program_id: programId, ...scope, updated_at: new Date().toISOString() }, { count: "exact" })
+      .update({ program_id: programIds[0], ...scope, updated_at: new Date().toISOString() }, { count: "exact" })
       .eq("id", id)
       .is("program_id", null);
-    if (isUniqueViolation(error)) return dupFail(instructorId, programId, id);
+    if (isUniqueViolation(error)) return dupFail(programIds, id);
     if (error) throw new Error(error.message);
     if (!count) return { ok: false, message: "이미 다른 곳에서 처리되었습니다. 새로고침해 주세요." };
-    await writeLog(id, "program_linked", access, { program_id: programId, term_id: scope.term_id });
+    const linkErr = await addLinks(id, programIds);
+    if (linkErr) {
+      // 되돌리기 — 연결 지우고 대표 강좌·범위 원래대로.
+      await supabaseAdmin.from(T_LINK).delete().eq("contract_id", id);
+      await supabaseAdmin.from(T_CON).update({ program_id: null, ...prev }).eq("id", id);
+      if (linkErr.code === "23505") return dupFail(programIds, id);
+      throw new Error(linkErr.message);
+    }
+    await writeLog(id, "program_linked", access, { program_ids: programIds, term_id: scope.term_id });
     revalidateAll(instructorId);
     return { ok: true };
   } catch (e) {
@@ -453,10 +619,13 @@ export type ContractProgramOption = {
   payType: ContractPayType;
   hourlyRate: number | null;
   sessionFee: number | null;
+  shareRate: number | null;
   deductionRate: number | null;
   projectName: string | null;
-  // 이 강사의 이 강좌 유효 계약(무효 제외) — 있으면 새로 만들지 않고 그것을 엽니다.
+  payKey: string; // 같은 강사료 방식·금액이면 같은 값 — 묶음 판단
+  // 이 강좌가 든 유효 계약(연결표 active) — 다른 계약에 들었으면 고를 수 없습니다.
   activeContractId: string | null;
+  activeContractNo: string | null;
   activeStatus: InstructorContractStatus | null;
   // 유급 강좌의 계약서 전제(강좌명 2자 이상·강사료 금액) 문제 — 있으면 발송 불가.
   infoIssues: string[];
@@ -487,7 +656,8 @@ export type ContractContext = {
     contractNo: string;
     status: InstructorContractStatus;
     signingMethod: SigningMethod;
-    programId: string | null;
+    programId: string | null; // 대표 강좌
+    programIds: string[]; // 든 강좌 전체(대표 먼저)
     templateId: string | null;
     fields: ContractFields;
     titleSnapshot: string | null;
@@ -519,15 +689,18 @@ export async function getContractContext(input: {
     // 강좌의 [계약서] — 그 강좌·그 강사의 유효 계약이 있으면 새로 만들지 않고 그것을 엽니다.
     let contractId = input.contractId ?? null;
     let openedExisting = false;
-    if (!contractId && instructorId && input.programId) {
-      contractId = await activeContractId(instructorId, input.programId);
+    if (!contractId && input.programId) {
+      contractId = (await activeLinks([input.programId])).get(input.programId)?.contractId ?? null;
       openedExisting = !!contractId;
     }
     if (contractId) {
       const c = await loadContract(contractId);
       if (!c) return { ok: false, message: "계약서를 찾을 수 없습니다." };
       instructorId = str(c.instructor_id);
+      const rep = strOrNull(c.program_id);
+      const linked = (await contractProgramIds([str(c.id)])).get(str(c.id)) ?? [];
       existing = {
+        programIds: rep ? [rep, ...linked.filter((x) => x !== rep)] : linked,
         id: str(c.id),
         contractNo: str(c.contract_no),
         status: toContractStatus(c.status),
@@ -560,8 +733,9 @@ export async function getContractContext(input: {
         "id, name, subject, term_id, session_weekdays, session_weekday, time_start, time_end, session_minutes, pay_type, hourly_rate, session_fee, share_rate, deduction_rate, instructor_mode"
       )
       .eq("instructor_id", instructorId);
+    const keep = new Set([input.programId ?? "", ...(existing?.programIds ?? [])]);
     const progRows = ((progs ?? []) as Record<string, unknown>[]).filter(
-      (p) => normalizeInstructorMode(p.instructor_mode) === "hire" || p.id === input.programId
+      (p) => normalizeInstructorMode(p.instructor_mode) === "hire" || keep.has(str(p.id))
     );
     const termIds = [...new Set(progRows.map((p) => str(p.term_id)))];
     const termMap = new Map<string, { name: string; project_id: string; start_date: string | null; end_date: string | null }>();
@@ -579,17 +753,7 @@ export async function getContractContext(input: {
       const { data: pj } = await supabaseAdmin.from("saem_projects").select("id, name").in("id", projIds);
       for (const p of (pj ?? []) as { id: string; name: string }[]) projMap.set(p.id, p.name);
     }
-    const activeMap = new Map<string, { id: string; status: InstructorContractStatus }>();
-    if (progRows.length) {
-      const { data: act } = await supabaseAdmin
-        .from(T_CON)
-        .select("id, program_id, status")
-        .eq("instructor_id", instructorId)
-        .in("program_id", progRows.map((p) => str(p.id)))
-        .neq("status", "void");
-      for (const a of (act ?? []) as { id: string; program_id: string; status: string }[])
-        activeMap.set(a.program_id, { id: a.id, status: toContractStatus(a.status) });
-    }
+    const activeMap = await activeLinks(progRows.map((p) => str(p.id)));
     const num = (v: unknown) => (v == null || v === "" || !Number.isFinite(Number(v)) ? null : Number(v));
     const programs: ContractProgramOption[] = progRows
       .map((p) => {
@@ -611,9 +775,17 @@ export async function getContractContext(input: {
           payType: normalizeContractPayType(p.pay_type),
           hourlyRate: num(p.hourly_rate),
           sessionFee: num(p.session_fee),
+          shareRate: num(p.share_rate),
           deductionRate: num(p.deduction_rate),
           projectName: t ? projMap.get(t.project_id) ?? null : null,
-          activeContractId: activeMap.get(str(p.id))?.id ?? null,
+          payKey: payKey({
+            payType: normalizeContractPayType(p.pay_type),
+            hourlyRate: num(p.hourly_rate),
+            sessionFee: num(p.session_fee),
+            shareRate: num(p.share_rate),
+          }),
+          activeContractId: activeMap.get(str(p.id))?.contractId ?? null,
+          activeContractNo: activeMap.get(str(p.id))?.contractNo ?? null,
           activeStatus: activeMap.get(str(p.id))?.status ?? null,
           infoIssues: programInfoIssues({
             mode: normalizeInstructorMode(p.instructor_mode),
@@ -680,7 +852,7 @@ async function programScope(programId: string | null): Promise<{ project_id: str
 export async function saveInstructorContractDraft(input: {
   id?: string | null;
   instructorId: string;
-  programId: string | null;
+  programIds: string[]; // 첫 강좌 = 대표 강좌
   templateId: string;
   fields: ContractFields;
 }): Promise<{ ok: true; id: string } | Fail> {
@@ -688,44 +860,80 @@ export async function saveInstructorContractDraft(input: {
     const access = await requireSaemAccess();
     if (!input.instructorId) return { ok: false, message: "강사를 확인하세요." };
     if (!input.templateId) return { ok: false, message: "양식을 고르세요." };
-    // 계약서는 강좌마다 1건 — 강좌 없이 새로 만들지 않습니다(옛 강좌 미지정 초안은 고칠 때 강좌를 고르게 함).
-    if (!input.programId) return { ok: false, message: "강좌를 고르세요. 계약서는 강좌마다 1건입니다." };
-    if (await activeContractId(input.instructorId, input.programId, input.id))
-      return dupFail(input.instructorId, input.programId, input.id);
+    let programIds = uniqIds(input.programIds ?? []);
+    // 모든 유급 강좌는 유효 계약 1건에 — 강좌 없이 만들지 않습니다.
+    if (!programIds.length) return { ok: false, message: "강좌를 고르세요." };
+    const chk = await checkBundle(input.instructorId, programIds);
+    if (!chk.ok) return chk;
+    if (await conflictOf(programIds, input.id)) return dupFail(programIds, input.id);
     const fields = cleanFields(input.fields);
-    const scope = await programScope(input.programId || null);
-    const payload = {
-      instructor_id: input.instructorId,
-      program_id: input.programId || null,
-      template_id: input.templateId,
-      fields,
-      ...scope,
-    };
+
     if (input.id) {
       const cur = await loadContract(input.id);
       if (!cur) return { ok: false, message: "계약서를 찾을 수 없습니다." };
+      // 강좌 추가·빼기는 작성 중(draft)일 때만 — 보낸 뒤에는 고정.
       if (cur.status !== "draft") return { ok: false, message: "작성 중인 계약서만 고칠 수 있습니다." };
+      if (str(cur.instructor_id) !== input.instructorId) return { ok: false, message: "강사를 바꿀 수 없습니다." };
+      // 대표 강좌는 그대로 둘 수 있으면 그대로(연결표 흔들지 않게).
+      const curRep = strOrNull(cur.program_id);
+      if (curRep && programIds.includes(curRep)) programIds = [curRep, ...programIds.filter((x) => x !== curRep)];
+      const before = (await contractProgramIds([input.id])).get(input.id) ?? [];
+      const removed = before.filter((x) => !programIds.includes(x));
+      const scope = await programScope(programIds[0]);
+      if (removed.length) {
+        const { error: delErr } = await supabaseAdmin.from(T_LINK).delete().eq("contract_id", input.id).in("program_id", removed);
+        if (delErr) throw new Error(delErr.message);
+      }
       const { error, count } = await supabaseAdmin
         .from(T_CON)
-        .update({ ...payload, updated_at: new Date().toISOString() }, { count: "exact" })
+        .update(
+          { program_id: programIds[0], template_id: input.templateId, fields, ...scope, updated_at: new Date().toISOString() },
+          { count: "exact" }
+        )
         .eq("id", input.id)
         .eq("status", "draft");
-      if (isUniqueViolation(error)) return dupFail(input.instructorId, input.programId, input.id);
-      if (error) throw new Error(error.message);
+      const linkErr = error ? null : await addLinks(input.id, programIds);
+      if (error || linkErr) {
+        // 되돌리기 — 빼낸 연결·대표 강좌를 원래대로.
+        if (removed.length) await addLinks(input.id, removed);
+        if (!error) await supabaseAdmin.from(T_CON).update({ program_id: curRep, project_id: cur.project_id ?? null, term_id: cur.term_id ?? null }).eq("id", input.id);
+        const code = error?.code ?? linkErr?.code;
+        if (code === "23505") return dupFail(programIds, input.id);
+        throw new Error(error?.message ?? linkErr?.message ?? "저장하지 못했습니다.");
+      }
       if (!count) return { ok: false, message: "이미 다른 곳에서 처리되었습니다. 새로고침해 주세요." };
-      await writeLog(input.id, "updated", access);
+      await writeLog(input.id, "updated", access, { program_ids: programIds });
       revalidateAll(input.instructorId);
       return { ok: true, id: input.id };
     }
+
+    const scope = await programScope(programIds[0]);
     const { data, error } = await supabaseAdmin
       .from(T_CON)
-      .insert({ ...payload, signing_method: "electronic", status: "draft", created_by: access.name })
+      .insert({
+        instructor_id: input.instructorId,
+        program_id: programIds[0], // 대표 강좌 — 트리거가 연결표에도 넣습니다.
+        template_id: input.templateId,
+        fields,
+        ...scope,
+        signing_method: "electronic",
+        status: "draft",
+        created_by: access.name,
+      })
       .select("id")
       .single();
-    if (isUniqueViolation(error)) return dupFail(input.instructorId, input.programId);
+    if (isUniqueViolation(error)) return dupFail(programIds);
     if (error) throw new Error(error.message);
     const id = str((data as { id: string }).id);
-    await writeLog(id, "created", access, { signing_method: "electronic" });
+    const linkErr = await addLinks(id, programIds);
+    if (linkErr) {
+      // 나머지 강좌 연결이 실패하면 방금 만든 작성 중 계약을 지웁니다.
+      await supabaseAdmin.from(T_LINK).delete().eq("contract_id", id);
+      await supabaseAdmin.from(T_CON).delete().eq("id", id);
+      if (linkErr.code === "23505") return dupFail(programIds);
+      throw new Error(linkErr.message);
+    }
+    await writeLog(id, "created", access, { signing_method: "electronic", program_ids: programIds });
     revalidateAll(input.instructorId);
     return { ok: true, id };
   } catch (e) {
@@ -785,25 +993,26 @@ export async function sendInstructorContract(
     if (!tpl) return { ok: false, message: "양식을 찾을 수 없습니다. 양식을 다시 고르세요." };
     const t = tpl as { title: string; body: string };
     const fields = toFields(cur.fields);
+    // 든 강좌(연결표) — 하나도 없으면 보내지 않습니다.
+    const linked = uniqIds([strOrNull(cur.program_id), ...((await contractProgramIds([id])).get(id) ?? [])]);
+    if (!linked.length) return { ok: false, message: "강좌를 고르세요." };
     // 강좌 정보(유급인데 강좌명 2자 미만·강사료 금액 없음)가 덜 됐으면 발송하지 않습니다.
-    if (cur.program_id) {
-      const { data: pr } = await supabaseAdmin
+    {
+      const { data: prs } = await supabaseAdmin
         .from("saem_programs")
         .select("name, pay_type, hourly_rate, session_fee, share_rate, instructor_mode")
-        .eq("id", str(cur.program_id))
-        .maybeSingle();
-      const p = (pr ?? {}) as Record<string, unknown>;
+        .in("id", linked);
       const n = (v: unknown) => (v == null || v === "" || !Number.isFinite(Number(v)) ? null : Number(v));
-      const issues = pr
-        ? programInfoIssues({
-            mode: normalizeInstructorMode(p.instructor_mode),
-            name: str(p.name),
-            payType: normalizeContractPayType(p.pay_type),
-            hourlyRate: n(p.hourly_rate),
-            sessionFee: n(p.session_fee),
-            shareRate: n(p.share_rate),
-          })
-        : [];
+      const issues = ((prs ?? []) as Record<string, unknown>[]).flatMap((p) =>
+        programInfoIssues({
+          mode: normalizeInstructorMode(p.instructor_mode),
+          name: str(p.name),
+          payType: normalizeContractPayType(p.pay_type),
+          hourlyRate: n(p.hourly_rate),
+          sessionFee: n(p.session_fee),
+          shareRate: n(p.share_rate),
+        }).map((x) => (linked.length > 1 ? `${str(p.name) || "(이름 없음)"}: ${x}` : x))
+      );
       if (issues.length) return { ok: false, message: `${PROGRAM_INFO_BLOCK_MESSAGE}: ${issues.join(", ")}` };
     }
     const missing = missingFields(fields, t.body);
@@ -902,12 +1111,14 @@ export async function uploadPaperInstructorContract(formData: FormData): Promise
   try {
     const access = await requireSaemAccess();
     const instructorId = String(formData.get("instructor_id") ?? "").trim();
-    const programId = String(formData.get("program_id") ?? "").trim() || null;
+    // 강좌 여러 개(첫 강좌 = 대표). 작성과 같은 규칙(같은 학기·같은 강사료).
+    const programIds = uniqIds(formData.getAll("program_id").map((v) => String(v)));
     const file = formData.get("file");
     if (!instructorId) return { ok: false, message: "강사를 확인하세요." };
-    // 새 종이 계약도 강좌마다 1건 — 강좌 선택 필수.
-    if (!programId) return { ok: false, message: "강좌를 고르세요. 계약서는 강좌마다 1건입니다." };
-    if (await activeContractId(instructorId, programId)) return dupFail(instructorId, programId);
+    if (!programIds.length) return { ok: false, message: "강좌를 고르세요." };
+    const chk = await checkBundle(instructorId, programIds);
+    if (!chk.ok) return chk;
+    if (await conflictOf(programIds)) return dupFail(programIds);
     if (!(file instanceof File) || file.size === 0) return { ok: false, message: "업로드할 파일을 선택하세요." };
     if (file.size > 16 * 1024 * 1024) return { ok: false, message: "파일 용량은 16MB 이하여야 합니다." };
     const ext = PAPER_EXT[file.type];
@@ -915,19 +1126,15 @@ export async function uploadPaperInstructorContract(formData: FormData): Promise
 
     const { data: ins } = await supabaseAdmin.from("saem_instructors").select("name").eq("id", instructorId).maybeSingle();
     if (!ins) return { ok: false, message: "강사를 찾을 수 없습니다." };
-    const scope = await programScope(programId);
-    let programName = "";
-    if (programId) {
-      const { data: p } = await supabaseAdmin.from("saem_programs").select("name").eq("id", programId).maybeSingle();
-      programName = str((p as { name?: string } | null)?.name);
-    }
+    const scope = await programScope(programIds[0]);
+    const programName = [...new Set(chk.rows.map((r) => r.name.trim()).filter(Boolean))].join(", ");
     const fields = { ...emptyFields(), program_name: programName, instructor_name: str((ins as { name: string }).name), contract_date: kstTodayYmd() };
 
     const { data: row, error } = await supabaseAdmin
       .from(T_CON)
       .insert({
         instructor_id: instructorId,
-        program_id: programId,
+        program_id: programIds[0],
         ...scope,
         signing_method: "paper",
         status: "draft", // 파일을 올린 뒤 completed 로 — 업로드 실패 시 지웁니다.
@@ -937,14 +1144,22 @@ export async function uploadPaperInstructorContract(formData: FormData): Promise
       })
       .select("id, contract_no")
       .single();
-    if (isUniqueViolation(error)) return dupFail(instructorId, programId);
+    if (isUniqueViolation(error)) return dupFail(programIds);
     if (error) throw new Error(error.message);
     const r = row as { id: string; contract_no: string };
+    const linkErr = await addLinks(r.id, programIds);
+    if (linkErr) {
+      await supabaseAdmin.from(T_LINK).delete().eq("contract_id", r.id);
+      await supabaseAdmin.from(T_CON).delete().eq("id", r.id);
+      if (linkErr.code === "23505") return dupFail(programIds);
+      throw new Error(linkErr.message);
+    }
     const path = `${INSTRUCTOR_CONTRACT_DIR}/${instructorId}/${r.contract_no}_paper.${ext}`;
     const { error: upErr } = await supabaseAdmin.storage
       .from(HR_DOCUMENTS_BUCKET)
       .upload(path, file, { contentType: file.type, upsert: true });
     if (upErr) {
+      await supabaseAdmin.from(T_LINK).delete().eq("contract_id", r.id);
       await supabaseAdmin.from(T_CON).delete().eq("id", r.id);
       return { ok: false, message: `업로드 실패: ${upErr.message}` };
     }
@@ -954,7 +1169,7 @@ export async function uploadPaperInstructorContract(formData: FormData): Promise
       .update({ status: "completed", paper_file_path: path, updated_at: now })
       .eq("id", r.id);
     if (updErr) throw new Error(updErr.message);
-    await writeLog(r.id, "paper_uploaded", access, { original_name: file.name, size: file.size });
+    await writeLog(r.id, "paper_uploaded", access, { original_name: file.name, size: file.size, program_ids: programIds });
     revalidateAll(instructorId);
     return { ok: true, id: r.id };
   } catch (e) {

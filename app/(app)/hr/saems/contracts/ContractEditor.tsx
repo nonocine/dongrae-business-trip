@@ -24,6 +24,8 @@ import {
   TAX_TYPE_LABEL,
   autoFields,
   bodySegments,
+  distinctProgramNames,
+  usedKeys,
   emptyFields,
   koreanDate,
   missingFields,
@@ -58,26 +60,39 @@ function pickTemplate(templates: ContractTemplateOption[], projectId: string | n
 
 function fieldsFor(
   ctx: ContractContext,
-  prog: ContractProgramOption | null,
+  progs: ContractProgramOption[],
   tpl: ContractTemplateOption | null
 ): ContractFields {
-  if (!prog) return { ...emptyFields(), instructor_name: ctx.instructor.name, contract_date: ctx.today, tax_type: tpl?.defaultTaxType ?? "business_3_3", tax_clause: taxClause(tpl?.defaultTaxType ?? "business_3_3") };
+  const first = progs[0];
+  if (!first) return { ...emptyFields(), instructor_name: ctx.instructor.name, contract_date: ctx.today, tax_type: tpl?.defaultTaxType ?? "business_3_3", tax_clause: taxClause(tpl?.defaultTaxType ?? "business_3_3") };
+  // 묶음 — 강좌명·근무시간·수업시간은 강좌 전체, 학기·강사료는 첫 강좌(묶음은 같은 학기·같은 강사료).
   return autoFields({
-    programName: prog.name,
-    subject: prog.subject,
+    programs: progs.map((p) => ({
+      name: p.name,
+      subject: p.subject,
+      weekdays: p.weekdays,
+      timeStart: p.timeStart,
+      timeEnd: p.timeEnd,
+      sessionMinutes: p.sessionMinutes,
+    })),
     instructorName: ctx.instructor.name,
-    termStart: prog.termStart,
-    termEnd: prog.termEnd,
-    weekdays: prog.weekdays,
-    timeStart: prog.timeStart,
-    timeEnd: prog.timeEnd,
-    sessionMinutes: prog.sessionMinutes,
-    payType: prog.payType,
-    hourlyRate: prog.hourlyRate,
-    sessionFee: prog.sessionFee,
+    termStart: first.termStart,
+    termEnd: first.termEnd,
+    payType: first.payType,
+    hourlyRate: first.hourlyRate,
+    sessionFee: first.sessionFee,
     taxType: tpl?.defaultTaxType ?? "business_3_3",
     today: ctx.today,
   });
+}
+
+// 새 계약 기본 선택 — 기준 강좌 + 같은 학기·같은 강사료·아직 계약에 안 든 강좌.
+function defaultSelection(programs: ContractProgramOption[], anchor: ContractProgramOption | null): string[] {
+  if (!anchor) return [];
+  const rest = programs.filter(
+    (p) => p.id !== anchor.id && p.termId === anchor.termId && p.payKey === anchor.payKey && !p.activeContractId
+  );
+  return [anchor.id, ...rest.map((p) => p.id)];
 }
 
 export default function ContractEditor({
@@ -96,7 +111,9 @@ export default function ContractEditor({
   const [ctx, setCtx] = useState<ContractContext | null>(null);
   const [loadErr, setLoadErr] = useState<string | null>(null);
   const [method, setMethod] = useState<SigningMethod>("electronic");
-  const [progId, setProgId] = useState<string>("");
+  // 고른 강좌(첫 강좌 = 대표 강좌)와 보고 있는 학기.
+  const [selIds, setSelIds] = useState<string[]>([]);
+  const [termSel, setTermSel] = useState<string>("");
   const [tplId, setTplId] = useState<string>("");
   const [f, setF] = useState<ContractFields>(emptyFields());
   const [draftId, setDraftId] = useState<string | null>(contractId ?? null);
@@ -121,7 +138,8 @@ export default function ContractEditor({
       if (r.existing) {
         setDraftId(r.existing.id);
         setMethod(r.existing.signingMethod);
-        setProgId(r.existing.programId ?? "");
+        setSelIds(r.existing.programIds);
+        setTermSel(r.programs.find((p) => p.id === r.existing!.programIds[0])?.termId ?? r.programs[0]?.termId ?? "");
         setTplId(r.existing.templateId ?? pickTemplate(r.templates, null)?.id ?? "");
         setF(r.existing.fields);
         if (r.existing.openedExisting)
@@ -137,9 +155,11 @@ export default function ContractEditor({
         r.programs.find((p) => !p.activeContractId) ??
         null;
       const tpl = pickTemplate(r.templates, prog?.projectId ?? null);
-      setProgId(prog?.id ?? "");
+      const sel = defaultSelection(r.programs, prog);
+      setSelIds(sel);
+      setTermSel(prog?.termId ?? r.programs[0]?.termId ?? "");
       setTplId(tpl?.id ?? "");
-      setF(fieldsFor(r, prog, tpl));
+      setF(fieldsFor(r, sel.map((id) => r.programs.find((p) => p.id === id)!).filter(Boolean), tpl));
     })();
     return () => {
       alive = false;
@@ -153,25 +173,54 @@ export default function ContractEditor({
     setTarget({ instructorId: null, programId: null, contractId: id });
   }
 
-  const prog = ctx?.programs.find((p) => p.id === progId) ?? null;
+  const selProgs = useMemo(
+    () => selIds.map((id) => ctx?.programs.find((p) => p.id === id)).filter((p): p is ContractProgramOption => !!p),
+    [selIds, ctx]
+  );
+  const prog = selProgs[0] ?? null; // 대표 강좌
+  const progId = prog?.id ?? "";
   const tpl = ctx?.templates.find((t) => t.id === tplId) ?? null;
   const readOnly = !!ctx?.existing && ctx.existing.status !== "draft";
   const missing = useMemo(() => (tpl ? missingFields(f, tpl.body) : []), [f, tpl]);
+  const used = useMemo(() => new Set(tpl ? usedKeys(tpl.body) : []), [tpl]);
   // 유급 강좌 정보가 덜 됐으면(강좌명 2자 미만·강사료 금액 없음) 발송을 막습니다.
-  const infoIssues = prog?.infoIssues ?? [];
+  const infoIssues = selProgs.flatMap((p) => p.infoIssues.map((x) => (selProgs.length > 1 ? `${p.name}: ${x}` : x)));
   const set = (p: Partial<ContractFields>) => setF((prev) => ({ ...prev, ...p }));
 
-  function changeProgram(id: string) {
+  // 학기 목록(강사가 맡은 유급 강좌의 학기, 최신 먼저)과 지금 학기의 후보 강좌.
+  const termOptions = useMemo(() => {
+    const m = new Map<string, string>();
+    for (const p of ctx?.programs ?? [])
+      if (!m.has(p.termId)) m.set(p.termId, `${p.projectName ? `[${p.projectName}] ` : ""}${p.termName || "학기 미정"}`);
+    return [...m];
+  }, [ctx]);
+  const termProgs = useMemo(() => (ctx?.programs ?? []).filter((p) => p.termId === termSel), [ctx, termSel]);
+  const nameOf = useMemo(() => distinctProgramNames(termProgs), [termProgs]);
+
+  // 선택이 바뀌면 묶음 기준으로 칸을 다시 채웁니다(원천징수·체결일·차시 꼬리는 유지).
+  function applySelection(ids: string[]) {
     if (!ctx) return;
-    const p = ctx.programs.find((x) => x.id === id) ?? null;
-    if (p?.activeContractId && p.activeContractId !== draftId) {
-      openExisting(p.activeContractId, `「${p.name}」 강좌는 이 강사의 계약서가 이미 있어 그 계약서를 열었습니다.`);
-      return;
-    }
-    setProgId(id);
-    const t = pickTemplate(ctx.templates, p?.projectId ?? null);
-    setTplId(t?.id ?? "");
-    setF(fieldsFor(ctx, p, t));
+    setSelIds(ids);
+    const progs = ids.map((id) => ctx.programs.find((p) => p.id === id)).filter((p): p is ContractProgramOption => !!p);
+    const t = tpl ?? pickTemplate(ctx.templates, progs[0]?.projectId ?? null);
+    if (!tpl && t) setTplId(t.id);
+    setF((prev) => ({
+      ...fieldsFor(ctx, progs, t),
+      tax_type: prev.tax_type,
+      tax_clause: prev.tax_clause,
+      contract_date: prev.contract_date || ctx.today,
+      round_label: prev.round_label,
+    }));
+  }
+  function toggleProgram(id: string) {
+    const next = selIds.includes(id) ? selIds.filter((x) => x !== id) : [...selIds, id];
+    applySelection(next);
+  }
+  function changeTerm(id: string) {
+    if (!ctx) return;
+    setTermSel(id);
+    const anchor = ctx.programs.find((p) => p.termId === id && (!p.activeContractId || p.activeContractId === draftId)) ?? null;
+    applySelection(defaultSelection(ctx.programs, anchor));
   }
   function changePay(t: ContractPayType) {
     set({ pay_type: t, pay_clause: payClause(t, { hourly_rate: prog?.hourlyRate ?? null, session_fee: prog?.sessionFee ?? null }) });
@@ -188,7 +237,7 @@ export default function ContractEditor({
       const saved = await saveInstructorContractDraft({
         id: draftId,
         instructorId: ctx.instructor.id,
-        programId: progId || null,
+        programIds: selIds,
         templateId: tplId,
         fields: f,
       });
@@ -220,11 +269,11 @@ export default function ContractEditor({
   function uploadPaper() {
     if (!ctx) return;
     setErr(null);
-    if (!progId) return setErr("강좌를 고르세요. 계약서는 강좌마다 1건입니다.");
+    if (!selIds.length) return setErr("강좌를 고르세요.");
     if (!file) return setErr("파일을 선택하세요.");
     const fd = new FormData();
     fd.set("instructor_id", ctx.instructor.id);
-    fd.set("program_id", progId);
+    for (const id of selIds) fd.append("program_id", id);
     fd.set("file", file);
     start(async () => {
       const r = await uploadPaperInstructorContract(fd);
@@ -283,6 +332,13 @@ export default function ContractEditor({
                 <span className="text-[11px] text-ink-hint">강사 본인이 동래샘들에 로그인해야 열립니다.</span>
               </div>
             )}
+            <p className="mb-2 text-xs text-ink-muted">
+              강좌:{" "}
+              {(ctx.existing?.programIds ?? [])
+                .map((id) => ctx.programs.find((p) => p.id === id)?.name ?? "(목록에 없는 강좌)")
+                .join(", ") || "강좌 미지정"}
+              <span className="ml-1 text-ink-hint">— 보낸 뒤에는 강좌를 바꿀 수 없습니다.</span>
+            </p>
             <ReadOnlyView ctx={ctx} />
           </>
         )}
@@ -301,36 +357,71 @@ export default function ContractEditor({
             )}
 
             <div className="mb-3 grid grid-cols-1 gap-2 sm:grid-cols-2">
-              <div>
-                <label className={lblCls}>강좌 *</label>
-                <select
-                  value={progId}
-                  onChange={(e) => changeProgram(e.target.value)}
-                  className={`${inCls} mt-1 ${progId ? "" : "border-stamp"}`}
-                >
-                  <option value="" disabled>
-                    강좌를 고르세요
-                  </option>
-                  {ctx.programs.map((p) => (
-                    <option key={p.id} value={p.id}>
-                      {p.projectName ? `[${p.projectName}] ` : ""}
-                      {p.name}
-                      {p.termName ? ` · ${p.termName}` : ""}
-                      {p.activeContractId && p.activeContractId !== draftId && p.activeStatus
-                        ? ` — 계약서 있음(${INSTRUCTOR_CONTRACT_STATUS_LABEL[p.activeStatus]})`
-                        : ""}
-                    </option>
-                  ))}
-                </select>
-                {ctx.programs.length === 0 && (
+              <div className="sm:col-span-2">
+                <div className="flex flex-wrap items-center gap-2">
+                  <label className={lblCls}>강좌 * (같은 학기·같은 강사료면 1건으로 묶음)</label>
+                  {termOptions.length > 1 && (
+                    <select
+                      value={termSel}
+                      onChange={(e) => changeTerm(e.target.value)}
+                      className={`${inCls} !w-auto !py-1 text-xs`}
+                      aria-label="학기"
+                    >
+                      {termOptions.map(([id, label]) => (
+                        <option key={id} value={id}>
+                          {label}
+                        </option>
+                      ))}
+                    </select>
+                  )}
+                </div>
+                {ctx.programs.length === 0 ? (
                   <p className="mt-1 text-[11px] text-stamp">
-                    이 강사가 맡은 강좌(채용함)가 없습니다. 강좌에 먼저 강사를 지정하세요.
+                    이 강사가 맡은 강좌(유급)가 없습니다. 강좌에 먼저 강사를 지정하세요.
                   </p>
+                ) : (
+                  <ul className={`mt-1 space-y-1 rounded-md border p-2 ${selIds.length ? "border-line" : "border-stamp"}`}>
+                    {termProgs.map((p) => {
+                      const checked = selIds.includes(p.id);
+                      const occupied = !!p.activeContractId && p.activeContractId !== draftId;
+                      const anchorKey = selProgs[0]?.payKey ?? null;
+                      const payDiff = !checked && anchorKey != null && p.payKey !== anchorKey;
+                      const disabled = occupied || payDiff;
+                      return (
+                        <li key={p.id} className={`flex flex-wrap items-center gap-2 text-sm ${disabled ? "text-ink-hint" : ""}`}>
+                          <label className="flex items-center gap-1.5">
+                            <input type="checkbox" checked={checked} disabled={disabled && !checked} onChange={() => toggleProgram(p.id)} />
+                            <span>
+                              {nameOf.get(p.id) ?? p.name}
+                              {selIds[0] === p.id && selIds.length > 1 && (
+                                <span className="ml-1 text-[10px] text-navy">대표</span>
+                              )}
+                            </span>
+                          </label>
+                          {occupied && (
+                            <>
+                              <span className="text-[11px]">
+                                계약서 있음({p.activeContractNo}
+                                {p.activeStatus ? ` · ${INSTRUCTOR_CONTRACT_STATUS_LABEL[p.activeStatus]}` : ""})
+                              </span>
+                              <button
+                                type="button"
+                                className="text-[11px] text-navy hover:underline"
+                                onClick={() => openExisting(p.activeContractId!, `「${p.name}」 강좌가 든 계약서를 열었습니다.`)}
+                              >
+                                열기
+                              </button>
+                            </>
+                          )}
+                          {!occupied && payDiff && <span className="text-[11px]">강사료가 달라 별도 계약</span>}
+                        </li>
+                      );
+                    })}
+                  </ul>
                 )}
-                <p className="mt-1 text-[11px] text-ink-hint">계약서는 강좌마다 1건입니다.</p>
               </div>
               {method === "electronic" && (
-                <div>
+                <div className="sm:col-span-2 sm:max-w-sm">
                   <label className={lblCls}>양식</label>
                   <select value={tplId} onChange={(e) => setTplId(e.target.value)} className={`${inCls} mt-1`}>
                     {ctx.templates.map((t) => (
@@ -374,7 +465,7 @@ export default function ContractEditor({
                     <button
                       type="button"
                       className="text-xs text-navy hover:underline"
-                      onClick={() => setF(fieldsFor(ctx, prog, tpl))}
+                      onClick={() => setF(fieldsFor(ctx, selProgs, tpl))}
                       title="강좌·학기 값으로 다시 채웁니다(직접 고친 내용은 사라짐)"
                     >
                       강좌 값으로 다시 채우기
@@ -388,9 +479,14 @@ export default function ContractEditor({
                     <TextField k="start_date" f={f} set={set} missing={missing} placeholder="2026년 11월 7일" />
                     <TextField k="end_date" f={f} set={set} missing={missing} placeholder="2026년 12월 26일" />
                   </div>
-                  <TextField k="schedule" f={f} set={set} missing={missing} placeholder="매주 토요일 10:00부터 11:30까지 (1시간 30분)" />
+                  {/* 새 양식은 근무시간·수업시간 '조항', 예전 양식은 근무시간·분 — 양식에 있는 칸만 보입니다. */}
+                  {used.has("schedule_clause") && <AreaField k="schedule_clause" f={f} set={set} missing={missing} />}
+                  {used.has("session_clause") && <AreaField k="session_clause" f={f} set={set} missing={missing} />}
+                  {used.has("schedule") && (
+                    <TextField k="schedule" f={f} set={set} missing={missing} placeholder="매주 토요일 10:00부터 11:30까지 (1시간 30분)" />
+                  )}
                   <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
-                    <TextField k="session_minutes" f={f} set={set} missing={missing} placeholder="90" />
+                    {used.has("session_minutes") && <TextField k="session_minutes" f={f} set={set} missing={missing} placeholder="90" />}
                     <div>
                       <label className={lblCls}>{FIELD_LABEL.contract_date}</label>
                       <input
@@ -526,7 +622,7 @@ function AreaField({
   missing,
   placeholder,
 }: {
-  k: "pay_clause" | "tax_clause";
+  k: "pay_clause" | "tax_clause" | "schedule_clause" | "session_clause";
   f: ContractFields;
   set: (p: Partial<ContractFields>) => void;
   missing: string[];
@@ -536,7 +632,7 @@ function AreaField({
     <div>
       <label className={lblCls}>{FIELD_LABEL[k]}</label>
       <textarea
-        rows={2}
+        rows={Math.max(2, f[k].split("\n").length)}
         value={f[k]}
         placeholder={placeholder}
         onChange={(e) => set({ [k]: e.target.value } as Partial<ContractFields>)}

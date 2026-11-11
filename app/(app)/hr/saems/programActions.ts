@@ -192,14 +192,21 @@ export async function listPrograms(termId: string): Promise<ProgramRow[]> {
   // 강사 계약서 상태 — 계약서는 관리 권한 영역이라 열람 직원에게는 싣지 않습니다.
   const contractOf = new Map<string, InstructorContractStatus>();
   if (view.canManage && programs.length) {
-    const { data: cons } = await supabaseAdmin
-      .from("instructor_contracts")
-      .select("program_id, status, created_at")
-      .in("program_id", programs.map((p) => p.id))
-      .neq("status", "void")
-      .order("created_at", { ascending: true });
-    for (const r of (cons ?? []) as { program_id: string; status: string }[])
-      contractOf.set(r.program_id, toContractStatus(r.status));
+    // 계약서 1건에 강좌 여러 개 — 연결표(instructor_contract_programs, active) 기준.
+    const ids = programs.map((p) => p.id);
+    for (let i = 0; i < ids.length; i += 150) {
+      const { data: links } = await supabaseAdmin
+        .from("instructor_contract_programs")
+        .select("program_id, instructor_contracts(status)")
+        .eq("active", true)
+        .in("program_id", ids.slice(i, i + 150));
+      for (const r of (links ?? []) as { program_id: string; instructor_contracts: unknown }[]) {
+        const c = (Array.isArray(r.instructor_contracts) ? r.instructor_contracts[0] : r.instructor_contracts) as
+          | { status?: string }
+          | null;
+        if (c) contractOf.set(r.program_id, toContractStatus(c.status));
+      }
+    }
   }
 
   return programs.map((p) => {

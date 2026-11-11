@@ -1,6 +1,7 @@
 "use client";
 
-// 강사 상세 — 이 강사의 강좌별 계약서. 계약서는 강좌마다 1건(무효 제외)입니다.
+// 강사 상세 — 이 강사의 강좌별 계약서. 계약서 1건에 강좌가 여럿일 수 있고(같은 학기·같은 강사료),
+//   그런 계약은 든 강좌 아래에 모두 보입니다. '계약서 없음'은 연결표(active) 기준.
 //   채용함인데 계약이 없는 강좌는 "계약서 없음" + [계약서 만들기],
 //   강좌가 비어 있는 옛 계약(종이 등)은 "강좌 미지정" + [강좌 연결].
 //   관리(날인·무효·재발송·파일)는 [강사 계약서] 탭에서.
@@ -160,6 +161,11 @@ function ContractLine({ c, saemBase, onOpen }: { c: InstructorContractRow; saemB
       {c.term_name && <span className="text-ink-hint">{c.term_name}</span>}
       {c.period && <span className="text-ink-hint">{c.period}</span>}
       <span className="text-ink-hint">{SIGNING_METHOD_LABEL[c.signing_method]}</span>
+      {c.programs.length > 1 && (
+        <span className="text-ink-hint" title={c.programs.map((p) => p.name).join(", ")}>
+          강좌 {c.programs.length}개 묶음
+        </span>
+      )}
       <span className={STATUS_BADGE[c.status]} title={c.void_reason ? `사유: ${c.void_reason}` : undefined}>
         {INSTRUCTOR_CONTRACT_STATUS_LABEL[c.status]}
       </span>

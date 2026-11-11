@@ -104,6 +104,8 @@ export default function ContractsManager({
   const [showNoContract, setShowNoContract] = useState(false);
   const [voiding, setVoiding] = useState<InstructorContractRow | null>(null);
   const [logsOf, setLogsOf] = useState<InstructorContractRow | null>(null);
+  // 강좌가 여럿인 계약 — 펼쳐서 강좌 전체 보기.
+  const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const [pending, start] = useTransition();
 
   useEffect(() => {
@@ -159,8 +161,10 @@ export default function ContractsManager({
     });
   }
 
-  // 집계는 강사 수가 아니라 강좌 단위(계약서 = 강좌마다 1건).
-  const waitingSeal = new Set(rows.filter((r) => r.status === "instructor_signed").map((r) => r.program_id ?? r.id)).size;
+  // 집계는 강사 수가 아니라 강좌 단위(계약서 1건에 든 강좌를 모두 셈).
+  const waitingSeal = new Set(
+    rows.filter((r) => r.status === "instructor_signed").flatMap((r) => (r.programs.length ? r.programs.map((p) => p.id) : [`c:${r.id}`]))
+  ).size;
 
   return (
     <div className="space-y-4">
@@ -232,7 +236,7 @@ export default function ContractsManager({
           </span>
         </div>
         <p className="mt-2 text-xs text-ink-hint">
-          계약서는 강좌마다 1건입니다. 새 계약서는 [프로그램 관리]의 강좌 행, 강사 상세, 아래 &lsquo;계약서 없음&rsquo; 목록에서 만듭니다.
+          모든 유급 강좌는 유효 계약서 1건에 들어갑니다. 같은 강사·같은 학기·같은 강사료면 1건으로 묶습니다. 새 계약서는 [프로그램 관리]의 강좌 행, 강사 상세, 아래 &lsquo;계약서 없음&rsquo; 목록에서 만듭니다.
         </p>
         {showNoContract && summary && (
           <div className="mt-3 rounded-lg border border-line p-2">
@@ -241,7 +245,7 @@ export default function ContractsManager({
             ) : (
               <ul className="space-y-1">
                 {summary.noContract.map((p) => (
-                  <li key={`${p.instructorId}:${p.programId}`} className="flex flex-wrap items-center gap-2 text-sm">
+                  <li key={p.programId} className="flex flex-wrap items-center gap-2 text-sm">
                     <span className="text-ink">{programLabel(p)}</span>
                     {p.termPeriod && <span className="text-xs text-ink-hint">{p.termPeriod}</span>}
                     <span className="text-xs text-ink-muted">{p.instructorName} 강사</span>
@@ -286,10 +290,34 @@ export default function ContractsManager({
                 {rows.map((r) => (
                   <tr key={r.id} className="border-b border-line/60">
                     <td className={`${tdCls} font-medium text-ink`}>
-                      {r.program_id ? (
+                      {r.programs.length > 0 ? (
                         <>
                           {r.project_name && <span className="text-ink-muted">[{r.project_name}] </span>}
-                          {r.program_name ?? "(삭제된 강좌)"}
+                          {r.program_name ?? r.programs[0].name}
+                          {r.programs.length > 1 && (
+                            <button
+                              type="button"
+                              className="ml-1 text-xs font-normal text-navy hover:underline"
+                              aria-expanded={expanded.has(r.id)}
+                              onClick={() =>
+                                setExpanded((cur) => {
+                                  const next = new Set(cur);
+                                  if (next.has(r.id)) next.delete(r.id);
+                                  else next.add(r.id);
+                                  return next;
+                                })
+                              }
+                            >
+                              외 {r.programs.length - 1}개 {expanded.has(r.id) ? "▲" : "▼"}
+                            </button>
+                          )}
+                          {expanded.has(r.id) && (
+                            <ul className="mt-1 list-disc pl-5 text-xs font-normal text-ink-body">
+                              {r.programs.map((p) => (
+                                <li key={p.id}>{p.name}</li>
+                              ))}
+                            </ul>
+                          )}
                         </>
                       ) : (
                         <span className="inline-flex items-center gap-1">

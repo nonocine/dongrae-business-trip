@@ -148,6 +148,8 @@ export const BODY_FIELD_KEYS = [
   "end_date",
   "schedule",
   "session_minutes",
+  "schedule_clause",
+  "session_clause",
   "pay_clause",
   "tax_clause",
   "field_label",
@@ -162,6 +164,8 @@ export const FIELD_LABEL: Record<BodyFieldKey | "contract_date", string> = {
   end_date: "계약 종료일",
   schedule: "근무시간",
   session_minutes: "1회 수업시간(분)",
+  schedule_clause: "근무시간 조항",
+  session_clause: "수업시간 조항",
   pay_clause: "강사료 조항",
   tax_clause: "원천징수 조항",
   field_label: "분야(예: 뉴스포츠)",
@@ -269,35 +273,102 @@ export function scheduleText(weekdays: number[] | null | undefined, start: strin
   return `매주 ${days}요일 ${s}부터 ${e}까지${dur ? ` (${durationLabel(dur)})` : ""}`;
 }
 
-// 강좌·학기·강사 값으로 칸을 채웁니다(직원이 이후 수정).
-export function autoFields(input: {
-  programName: string;
-  subject: string | null;
-  instructorName: string;
-  termStart: string | null;
-  termEnd: string | null;
+// --- 계약서 1건 = 강좌 여러 개(묶음) -------------------------------------------
+// 원칙: 같은 강사·같은 학기·같은 강사료 방식과 금액이면 1건으로 묶고, 다르면 따로.
+export function payKey(p: {
+  payType: ContractPayType;
+  hourlyRate: number | null;
+  sessionFee: number | null;
+  shareRate: number | null;
+}): string {
+  const amount = p.payType === "per_session" ? p.sessionFee : p.payType === "revenue_share" ? p.shareRate : p.hourlyRate;
+  return `${p.payType}:${amount == null ? "" : Number(amount)}`;
+}
+
+// 칸 채우기에 쓰는 강좌 한 개의 값.
+export type BundleProgram = {
+  name: string;
   weekdays: number[];
   timeStart: string | null;
   timeEnd: string | null;
   sessionMinutes: number | null;
+};
+
+// 이름이 같은 강좌 구분 — "강좌명 (화 16:00~17:00)".
+export function programTimeTag(p: Pick<BundleProgram, "weekdays" | "timeStart" | "timeEnd">): string {
+  const w = normalizeWeekdays(p.weekdays)
+    .map((d) => WEEKDAY_LABELS[d])
+    .join("·");
+  const s = (p.timeStart ?? "").slice(0, 5);
+  const e = (p.timeEnd ?? "").slice(0, 5);
+  return [w, s && e ? `${s}~${e}` : s].filter(Boolean).join(" ");
+}
+export function distinctProgramNames<T extends BundleProgram & { id: string }>(list: T[]): Map<string, string> {
+  const count = new Map<string, number>();
+  for (const p of list) count.set(p.name, (count.get(p.name) ?? 0) + 1);
+  const out = new Map<string, string>();
+  for (const p of list) {
+    const tag = (count.get(p.name) ?? 0) > 1 ? programTimeTag(p) : "";
+    out.set(p.id, tag ? `${p.name} (${tag})` : p.name);
+  }
+  return out;
+}
+
+const programMinutes = (p: BundleProgram) => p.sessionMinutes ?? lessonMinutes(p.timeStart, p.timeEnd);
+
+// 묶음 칸 — program_name·schedule_clause·session_clause(+ 예전 양식용 schedule·session_minutes).
+export function bundleFields(list: BundleProgram[]): Pick<
+  ContractFields,
+  "program_name" | "schedule" | "session_minutes" | "schedule_clause" | "session_clause"
+> {
+  const names = [...new Set(list.map((p) => p.name.trim()).filter(Boolean))];
+  const scheds = list.map((p) => scheduleText(p.weekdays, p.timeStart, p.timeEnd));
+  const mins = list.map(programMinutes);
+  const sameMin = mins.length > 0 && mins.every((m) => m != null && m === mins[0]);
+  let scheduleClause = "";
+  if (list.length === 1) {
+    scheduleClause = scheds[0] ? `근무시간 : ${scheds[0]}로 한다.` : "";
+  } else if (list.length > 1) {
+    scheduleClause = [
+      "근무시간은 아래와 같이 한다.",
+      ...list.map((p, i) => `   - ${p.name}: ${scheds[i] || "(시간 미정)"}`),
+    ].join("\n");
+  }
+  let sessionClause = "";
+  if (sameMin) sessionClause = `강의 1회당 수업시간은 ${mins[0]}분으로 한다.`;
+  else if (list.length > 1) sessionClause = "강의 1회당 수업시간은 강좌별 근무시간에 따른다.";
+  return {
+    program_name: names.join(", "),
+    // 예전 양식({{schedule}}·{{session_minutes}}) 호환 — 강좌가 여럿이면 강좌명을 붙여 이어 씁니다.
+    schedule: list.length === 1 ? scheds[0] : list.map((p, i) => `${p.name} ${scheds[i]}`.trim()).join(", "),
+    session_minutes: sameMin ? String(mins[0]) : "",
+    schedule_clause: scheduleClause,
+    session_clause: sessionClause,
+  };
+}
+
+// 강좌(여럿)·학기·강사 값으로 칸을 채웁니다(직원이 이후 수정). 강사료·분야·학기는 첫 강좌 기준.
+export function autoFields(input: {
+  programs: (BundleProgram & { subject: string | null })[];
+  instructorName: string;
+  termStart: string | null;
+  termEnd: string | null;
   payType: ContractPayType;
   hourlyRate: number | null;
   sessionFee: number | null;
   taxType: TaxType;
   today: string; // YYYY-MM-DD(KST)
 }): ContractFields {
-  const minutes = input.sessionMinutes ?? lessonMinutes(input.timeStart, input.timeEnd);
+  const subjects = [...new Set(input.programs.map((p) => (p.subject ?? "").trim()).filter(Boolean))];
   return {
-    program_name: input.programName,
+    ...bundleFields(input.programs),
     round_label: "",
     instructor_name: input.instructorName,
     start_date: koreanDate(input.termStart),
     end_date: koreanDate(input.termEnd),
-    schedule: scheduleText(input.weekdays, input.timeStart, input.timeEnd),
-    session_minutes: minutes ? String(minutes) : "",
     pay_clause: payClause(input.payType, { hourly_rate: input.hourlyRate, session_fee: input.sessionFee }),
     tax_clause: taxClause(input.taxType),
-    field_label: input.subject ?? "",
+    field_label: subjects.join(", "),
     contract_date: input.today,
     pay_type: input.payType,
     tax_type: input.taxType,
@@ -321,8 +392,10 @@ export type InstructorContractRow = {
   project_name: string | null;
   term_id: string | null;
   term_name: string | null;
-  program_id: string | null;
+  program_id: string | null; // 대표 강좌
   program_name: string | null;
+  // 이 계약에 든 강좌 전체(연결표 instructor_contract_programs 기준, 대표 강좌 먼저).
+  programs: { id: string; name: string }[];
   period: string; // 계약기간 "2026년 11월 7일 ~ 2026년 12월 26일" (없으면 "")
   signing_method: SigningMethod;
   status: InstructorContractStatus;
