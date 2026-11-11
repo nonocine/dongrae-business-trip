@@ -1113,7 +1113,7 @@ export default function ProgramsManager({
                           p.pay_type === "revenue_share"
                             ? "등록 인원 × 수강료 × 분배율"
                             : p.pay_type === "per_session"
-                              ? "회당 강사료(정산 계산은 아직 시급 경로)"
+                              ? "실시 회기 수 × 회당 강사료"
                               : "확정 근무일지 시간 × 시급"
                         }
                       >
@@ -1735,6 +1735,8 @@ function ProgramModal({
     share_rate:
       program?.share_rate != null ? trimRate(program.share_rate) : "70",
     session_fee: program?.session_fee != null ? String(program.session_fee) : "",
+    // 수강료 구간(분배제) — 이름·금액 문자열로 편집.
+    tuition_tiers: (program?.tuition_tiers ?? []).map((t) => ({ label: t.label, fee: String(t.fee) })),
     session_minutes: program?.session_minutes != null ? String(program.session_minutes) : "",
     instructor_mode: (program?.instructor_mode ?? "hire") as InstructorMode,
   });
@@ -1804,6 +1806,7 @@ function ProgramModal({
       session_fee: numOrNull(f.session_fee),
       session_minutes: numOrNull(f.session_minutes),
       instructor_mode: f.instructor_mode,
+      tuition_tiers: f.tuition_tiers.map((t) => ({ label: t.label, fee: Number(t.fee) || 0 })),
       session_start: sc.start || null,
       session_weekdays: sc.weekdays,
       session_weeks: sc.weeks === "" ? null : Number(sc.weeks),
@@ -1959,9 +1962,7 @@ function ProgramModal({
         {f.pay_type === "per_session" ? (
           <FieldP label="회당 강사료">
             <input type="number" min={0} value={f.session_fee} onChange={(e) => set({ session_fee: e.target.value })} className={inCls} />
-            <p className="mt-1 text-[11px] text-warning">
-              정산 화면은 아직 회당 계산을 하지 않습니다(시급 경로로 계산됨) — 정산 전에 확인하세요.
-            </p>
+            <p className="mt-1 text-[11px] text-ink-hint">정산: 실시한 회기 수(확정 근무일지) × 회당 강사료.</p>
           </FieldP>
         ) : f.pay_type === "revenue_share" ? (
           <FieldP label="강사 비율(%)">
@@ -1982,6 +1983,62 @@ function ProgramModal({
           <FieldP label="시급">
             <input type="number" value={f.hourly_rate} onChange={(e) => set({ hourly_rate: e.target.value })} className={inCls} />
           </FieldP>
+        )}
+        {f.pay_type === "revenue_share" && (
+          <div className="sm:col-span-2">
+            <span className="block text-[11px] font-semibold text-navy">수강료 구간</span>
+            <p className="text-[11px] text-ink-hint">
+              정상·할인처럼 수강료가 다른 구간. 정산 때 구간별 인원을 넣어 계산합니다. 비우면 위 수강료 하나를 &lsquo;정상&rsquo;으로 봅니다.
+            </p>
+            <ul className="mt-1 space-y-1">
+              {f.tuition_tiers.map((t, i) => (
+                <li key={i} className="flex items-center gap-1.5">
+                  <input
+                    value={t.label}
+                    placeholder="이름(예: 할인)"
+                    onChange={(e) =>
+                      set({ tuition_tiers: f.tuition_tiers.map((x, k) => (k === i ? { ...x, label: e.target.value } : x)) })
+                    }
+                    className={`${inCls} max-w-[10rem]`}
+                    aria-label="구간 이름"
+                  />
+                  <input
+                    type="number"
+                    min={0}
+                    value={t.fee}
+                    placeholder="금액"
+                    onChange={(e) =>
+                      set({ tuition_tiers: f.tuition_tiers.map((x, k) => (k === i ? { ...x, fee: e.target.value } : x)) })
+                    }
+                    className={`${inCls} max-w-[9rem]`}
+                    aria-label="구간 수강료"
+                  />
+                  <span className="text-xs text-ink-hint">원</span>
+                  <button
+                    type="button"
+                    onClick={() => set({ tuition_tiers: f.tuition_tiers.filter((_, k) => k !== i) })}
+                    className="text-xs text-stamp hover:underline"
+                  >
+                    삭제
+                  </button>
+                </li>
+              ))}
+            </ul>
+            <button
+              type="button"
+              onClick={() =>
+                set({
+                  tuition_tiers: [
+                    ...f.tuition_tiers,
+                    f.tuition_tiers.length === 0 ? { label: "정상", fee: f.tuition } : { label: "", fee: "" },
+                  ],
+                })
+              }
+              className="mt-1 rounded border border-line px-2 py-0.5 text-xs text-ink-muted hover:bg-surface"
+            >
+              + 구간 추가
+            </button>
+          </div>
         )}
         <FieldP label="1회 수업시간(분)">
           <input

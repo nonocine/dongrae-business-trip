@@ -49,7 +49,7 @@ export const TERM_STATUS_LABEL: Record<TermStatus, string> = {
 
 // ST-5. 정산 방식 — 시급제(기본) / 수강료 분배제 / 회당(2026-11 강사 계약서).
 //   계산 규칙은 lib/settlement.ts(양쪽 저장소 공용)에 있다.
-//   ⚠️ per_session(회당)은 아직 정산 계산에 없다 — 정산은 지금처럼 시급제 경로로 계산된다.
+//   per_session(회당) = 실시 회기 수 × 회당 강사료(ST-6, 시급제와 같은 회기 기준·같은 공제).
 export type PayType = "hourly" | "per_session" | "revenue_share";
 export const PAY_TYPE_LABEL: Record<PayType, string> = {
   hourly: "시간당",
@@ -154,6 +154,8 @@ export type SaemProgram = {
   pay_type: PayType;
   share_rate: number | null; // 강사 분배 비율(%) — 기본 70.00
   session_fee: number | null; // 회당 강사료(pay_type='per_session')
+  // 수강료 구간(분배제) — [{label, fee}]. 비면 tuition 하나를 '정상' 구간으로 본다.
+  tuition_tiers: { label: string; fee: number }[] | null;
   session_minutes: number | null; // 1회 수업시간(분) — 계약서 칸
   // 강사 채용 방식 — hire(채용함)일 때만 강사 지정·계약서. lib/instructorContract 참고.
   instructor_mode: "hire" | "staff" | "volunteer" | "external";
@@ -258,6 +260,11 @@ export function toProgram(r: Record<string, unknown>): SaemProgram {
     pay_type: normalizePayType(r.pay_type),
     share_rate: nOrNull(r.share_rate),
     session_fee: nOrNull(r.session_fee),
+    tuition_tiers: Array.isArray(r.tuition_tiers)
+      ? (r.tuition_tiers as { label?: unknown; fee?: unknown }[])
+          .map((t) => ({ label: String(t?.label ?? "").trim(), fee: Number(t?.fee ?? 0) || 0 }))
+          .filter((t) => t.label || t.fee)
+      : null,
     session_minutes: nOrNull(r.session_minutes),
     instructor_mode:
       r.instructor_mode === "staff" || r.instructor_mode === "volunteer" || r.instructor_mode === "external"

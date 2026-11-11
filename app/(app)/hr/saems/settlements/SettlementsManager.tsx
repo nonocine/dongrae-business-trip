@@ -13,6 +13,7 @@ import {
 import {
   ProgramLine,
   AdjustControl,
+  TierEditor,
 } from "@/app/(app)/hr/saems/settlements/ProgramLine";
 import { formatKRW } from "@/lib/saem";
 import { deductionRateLabel, detailMethod } from "@/lib/settlement";
@@ -49,9 +50,10 @@ export default function SettlementsManager({
           <div>
             <h3 className="text-base font-bold text-ink">강사비 정산</h3>
             <p className="mt-1 text-xs text-ink-hint">
-              시급제는 확정된 근무일지를, 수강료 분배제는 등록 인원을 기준으로
-              기간별 정산을 생성합니다. 분배제 항목만 담당자가 인원·금액을 조정할
-              수 있고, 시급제는 근무일지를 고친 뒤 재계산으로 반영합니다.
+              시급제·회당제는 확정된 근무일지(회당제 = 실시 회기 수 × 회당 강사료)를,
+              수강료 분배제는 등록 인원 또는 수강료 구간별 인원을 기준으로 기간별 정산을
+              생성합니다. 분배제 항목만 담당자가 인원·금액·구간 인원을 조정할 수 있고,
+              시급제·회당제는 근무일지를 고친 뒤 재계산으로 반영합니다.
             </p>
           </div>
           <button
@@ -225,11 +227,20 @@ function CreateModal({
   }
 
   // 조정 적용/해제 → 서버에 다시 계산을 맡긴다(공제·차인지급까지 일관되게).
-  function applyAdjustment(a: SettlementAdjustment) {
+  //   인원·금액 조정과 구간 인원(ST-6)은 같은 (강사, 프로그램) 조정에 함께 담긴다.
+  function applyAdjustment(
+    instructorId: string,
+    programId: string,
+    patch: Partial<Pick<SettlementAdjustment, "enrolled" | "amount" | "lines">>
+  ) {
+    const cur = adjustments.find(
+      (x) => x.instructor_id === instructorId && x.program_id === programId
+    ) ?? { instructor_id: instructorId, program_id: programId, enrolled: null, amount: null, lines: null };
+    const a: SettlementAdjustment = { ...cur, ...patch };
     const next = adjustments.filter(
-      (x) => !(x.instructor_id === a.instructor_id && x.program_id === a.program_id)
+      (x) => !(x.instructor_id === instructorId && x.program_id === programId)
     );
-    if (a.enrolled != null || a.amount != null) next.push(a);
+    if (a.enrolled != null || a.amount != null || (a.lines && a.lines.length)) next.push(a);
     setAdjustments(next);
     load(next);
   }
@@ -428,18 +439,26 @@ function CreateModal({
                               <li key={d.program_id ?? i}>
                                 <ProgramLine d={d} />
                                 {detailMethod(d) === "revenue_share" && (
-                                  <AdjustControl
-                                    d={d}
-                                    disabled={pendingPreview}
-                                    onApply={(enrolled, amount) =>
-                                      applyAdjustment({
-                                        instructor_id: row.instructor_id,
-                                        program_id: d.program_id ?? "",
-                                        enrolled,
-                                        amount,
-                                      })
-                                    }
-                                  />
+                                  <>
+                                    <AdjustControl
+                                      d={d}
+                                      disabled={pendingPreview}
+                                      onApply={(enrolled, amount) =>
+                                        applyAdjustment(row.instructor_id, d.program_id ?? "", {
+                                          enrolled,
+                                          amount,
+                                        })
+                                      }
+                                    />
+                                    <TierEditor
+                                      key={`${JSON.stringify(d.revenue_lines ?? null)}|${d.amount}`}
+                                      d={d}
+                                      disabled={pendingPreview}
+                                      onApply={(lines) =>
+                                        applyAdjustment(row.instructor_id, d.program_id ?? "", { lines })
+                                      }
+                                    />
+                                  </>
                                 )}
                               </li>
                             ))}

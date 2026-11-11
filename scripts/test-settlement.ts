@@ -16,6 +16,9 @@ import {
   calcFormula,
   deductionRateLabel,
   uniqueDeductionRates,
+  calcTuitionTotal,
+  cleanRevenueLines,
+  effectiveTiers,
   type SettlementSessionInput,
   type SettlementRevenueInput,
 } from "../lib/settlement";
@@ -247,6 +250,106 @@ expectEq(
   "전부 0",
   [none.gross_amount, none.deduction_amount, none.net_amount, none.detail.length],
   [0, 0, 0, 0]
+);
+
+console.log("\n--- ST-6 분배제 수강료 구간 ---");
+// 40,000×5 + 20,000×3 = 260,000 → ×80% = 208,000. 공제 3.3% = 6,864 → 10원 절사 6,860.
+const TIERED: SettlementRevenueInput = {
+  program_id: "pt",
+  program_name: "유튜브 크리에이터",
+  deduction_rate: 3.3,
+  enrolled: 9, // 자동 인원(등록) — 구간이 있으면 쓰지 않는다
+  tuition: 40000,
+  share_rate: 80,
+  tiers: [
+    { label: "정상", fee: 40000 },
+    { label: "할인", fee: 20000 },
+  ],
+  revenue_lines: [
+    { label: "정상", fee: 40000, count: 5 },
+    { label: "할인", fee: 20000, count: 3 },
+  ],
+};
+expectEq(
+  "수강료 합계",
+  calcTuitionTotal([
+    { label: "정상", fee: 40000, count: 5 },
+    { label: "할인", fee: 20000, count: 3 },
+  ]),
+  260000
+);
+const tier = calcInstructorSettlement([], [TIERED]);
+expectEq("구간 gross = 208,000", tier.gross_amount, 208000);
+expectEq("구간 공제(3.3%, 10원 절사)", tier.deduction_amount, 6860);
+expectEq("구간 net", tier.net_amount, 208000 - 6860);
+expectEq("detail.tuition_total", tier.detail[0].tuition_total, 260000);
+expectEq("detail.revenue_lines", tier.detail[0].revenue_lines, TIERED.revenue_lines);
+expectEq("구간 인원 합 = enrolled", tier.detail[0].enrolled, 8);
+expectEq("구간 적용은 조정으로 표시", [tier.adjusted, tier.detail[0].auto_amount], [true, calcRevenueShareAmount(9, 40000, 80)]);
+expectEq(
+  "산출내역 문구",
+  calcFormula(tier.detail[0]),
+  "정상 40,000×5명 + 할인 20,000×3명 = 260,000 × 80%"
+);
+// 구간 계산이 금액(직접)·인원 조정보다 우선.
+const tierOverAdj = calcInstructorSettlement([], [{ ...TIERED, adjusted_amount: 999999, adjusted_enrolled: 1 }]);
+expectEq("구간이 금액 조정보다 우선", tierOverAdj.gross_amount, 208000);
+// 담당자가 이 정산에서만 쓰는 줄 추가.
+const tierExtra = calcInstructorSettlement([], [
+  { ...TIERED, revenue_lines: [...TIERED.revenue_lines!, { label: "형제할인", fee: 30000, count: 2 }] },
+]);
+expectEq("추가 줄 포함 gross", tierExtra.gross_amount, Math.round((260000 + 60000) * 0.8));
+// 빈 구간이면 종전 자동 계산과 동일.
+const tierEmpty = calcInstructorSettlement([], [{ ...TIERED, revenue_lines: [] }]);
+expectEq("빈 구간 = 자동", [tierEmpty.gross_amount, tierEmpty.adjusted], [calcRevenueShareAmount(9, 40000, 80), false]);
+expectEq("강좌 구간 보존(표 미리 채움)", tierEmpty.detail[0].tuition_tiers, TIERED.tiers);
+expectEq("구간 비면 수강료 하나 = 정상", effectiveTiers(null, 55000), [{ label: "정상", fee: 55000 }]);
+expectEq(
+  "구간 정리(음수·소수·빈 줄)",
+  cleanRevenueLines([
+    { label: " 할인 ", fee: 19999.6, count: -2 },
+    { label: "", fee: 0, count: 3 },
+  ]),
+  [{ label: "할인", fee: 20000, count: 0 }]
+);
+
+console.log("\n--- ST-6 회당(per_session) ---");
+// 회기 4회 × 50,000 = 200,000. 공제 3.3% = 6,600.
+const perSession: SettlementSessionInput[] = Array.from({ length: 4 }, () => ({
+  program_id: "pp",
+  program_name: "MOVE! 비보잉 교실",
+  hourly_rate: 30000, // 회당이면 쓰지 않는다
+  deduction_rate: 3.3,
+  work_hours: 1.5,
+  pay_type: "per_session" as const,
+  session_fee: 50000,
+}));
+const ps = calcInstructorSettlement(perSession);
+expectEq("회당 gross = 4 × 50,000", ps.gross_amount, 200000);
+expectEq("회당 공제", ps.deduction_amount, 6600);
+expectEq("회당 net", ps.net_amount, 193400);
+expectEq("method per_session", [ps.detail[0].method, detailMethod(ps.detail[0])], ["per_session", "per_session"]);
+expectEq("회기/회당 강사료", [ps.detail[0].sessions, ps.detail[0].rate], [4, 50000]);
+expectEq("산출내역 문구", calcFormula(ps.detail[0]), "4회 × 50,000");
+// 회당 공제 8.8%: 200,000 × 8.8% = 17,600.
+expectEq(
+  "회당 다른 공제율",
+  calcInstructorSettlement(perSession.map((s) => ({ ...s, deduction_rate: 8.8 }))).deduction_amount,
+  17600
+);
+// 혼합: 시급제 + 회당 + 분배제 구간 — 시급제 결과는 단독일 때와 같다.
+const all3 = calcInstructorSettlement([...hourlySessions, ...perSession], [TIERED]);
+expectEq(
+  "혼합 gross = 480,000 + 200,000 + 208,000",
+  all3.gross_amount,
+  888000
+);
+// 15,840 + 6,600 + 6,864 = 29,304 → 29,300.
+expectEq("혼합 공제", all3.deduction_amount, 29300);
+expectEq(
+  "혼합 속 시급제 항목 불변",
+  all3.detail.find((d) => d.program_id === "ph"),
+  h.detail[0]
 );
 
 console.log(`\n${failures === 0 ? "✅ 전부 통과" : `❌ 실패 ${failures}건`}`);

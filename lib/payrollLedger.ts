@@ -66,7 +66,7 @@ export function ledgerCalcLines(list: SettlementProgramDetail[]): string {
     { rate: number; per: number; sessions: number }
   >();
   for (const d of list) {
-    if (detailMethod(d) === "revenue_share") continue;
+    if (detailMethod(d) !== "hourly") continue;
     const sessions = d.sessions ?? 0;
     const hours = d.hours ?? 0;
     const per =
@@ -80,8 +80,19 @@ export function ledgerCalcLines(list: SettlementProgramDetail[]): string {
   for (const g of hourly.values())
     lines.push(`${krw(g.rate)}원*${hourText(g.per)}H*${g.sessions}회`);
 
+  // ST-6 회당 — "50,000원*4회".
+  for (const d of list) {
+    if (detailMethod(d) !== "per_session") continue;
+    lines.push(`${krw(d.rate ?? 0)}원*${d.sessions ?? 0}회`);
+  }
+
   for (const d of list) {
     if (detailMethod(d) !== "revenue_share") continue;
+    // ST-6 구간 인원이 있으면 수강료 합계 기준 — "260,000원*80%".
+    if (d.revenue_lines && d.revenue_lines.length && d.tuition_total != null) {
+      lines.push(`${krw(d.tuition_total)}원*${d.share_rate ?? 0}%`);
+      continue;
+    }
     lines.push(
       `${d.enrolled ?? 0}명*${krw(d.tuition ?? 0)}원*${d.share_rate ?? 0}%`
     );

@@ -19,13 +19,22 @@
 //       프로그램별이므로 화면·엑셀은 detail 의 프로그램별 공제를 표시한다.
 //   * 합계는 반올림 전 원본으로 계산하므로, 프로그램이 1개인 정산(대부분)의
 //     결과는 프로그램별 공제 도입 전과 완전히 동일하다.
+//   * ST-6 회당(per_session): amount = 실시 회기 수 × session_fee.
+//       회기 = 시급제와 같은 기준(기간 내·직원 확정·미정산 세션 1건 = 1회). 공제 규칙 동일.
+//   * ST-6 분배제 수강료 구간: 담당자가 구간별 인원(revenue_lines)을 넣으면
+//       수강료 합계 = Σ(fee × count) → amount = round(합계 × share_rate/100).
+//       구간 계산이 금액(직접)·인원 조정보다 우선한다. detail 에 revenue_lines·tuition_total 저장.
 //   * 담당자 조정(ST-5): 분배제만 조정 가능. 인원 또는 금액을 직접 지정하면
 //     그 값으로 amount 를 정하고, 자동 계산값을 auto_enrolled/auto_amount 에
 //     보존한다(화면 툴팁·"조정됨" 배지 근거). 시급제는 조정하지 않는다 —
 //     금액이 틀리면 근무일지를 고쳐 재계산한다(단일 진실 원칙).
 // =====================================================================
 
-export type SettlementPayType = "hourly" | "revenue_share";
+export type SettlementPayType = "hourly" | "per_session" | "revenue_share";
+
+// ST-6. 분배제 수강료 구간 — 강좌 설정(saem_programs.tuition_tiers)과 정산 입력 줄.
+export type TuitionTier = { label: string; fee: number };
+export type RevenueLine = { label: string; fee: number; count: number };
 
 // 정산 대상 세션 1건(시급제 계산 입력).
 export type SettlementSessionInput = {
@@ -34,6 +43,10 @@ export type SettlementSessionInput = {
   hourly_rate: number; // 프로그램 시급
   deduction_rate: number; // 프로그램 공제율(%)
   work_hours: number; // 세션 근무시간
+  // ST-6 회당 — pay_type 이 'per_session' 이면 회기 수 × session_fee(시급·시간은 쓰지 않음).
+  //   없으면 시급제(종전과 동일).
+  pay_type?: "hourly" | "per_session";
+  session_fee?: number;
 };
 
 // 분배제 프로그램 1개(계산 입력). 세션이 아니라 프로그램 단위로 들어온다.
@@ -49,6 +62,10 @@ export type SettlementRevenueInput = {
   //   adjusted_amount 가 없고 adjusted_enrolled 만 있으면 그 인원으로 재계산한다.
   adjusted_enrolled?: number | null;
   adjusted_amount?: number | null;
+  // ST-6 강좌의 수강료 구간(표시·기본값). 없으면 tuition 하나를 '정상' 구간으로 본다.
+  tiers?: TuitionTier[] | null;
+  // ST-6 담당자가 넣은 구간별 인원 — 있으면(1줄 이상) 이 계산이 금액·인원 조정보다 우선.
+  revenue_lines?: RevenueLine[] | null;
 };
 
 // detail jsonb 항목(프로그램별 내역).
@@ -76,6 +93,10 @@ export type SettlementProgramDetail = {
   adjusted?: boolean; // 담당자가 인원/금액을 직접 지정했다
   auto_enrolled?: number; // 조정 전 자동 인원
   auto_amount?: number; // 조정 전 자동 금액
+  // --- 분배제 수강료 구간(ST-6) ---
+  tuition_tiers?: TuitionTier[]; // 강좌 설정 구간(정산 화면이 표를 미리 채우는 근거)
+  revenue_lines?: RevenueLine[]; // 담당자가 넣은 구간별 인원 — 있으면 이 계산이 쓰임
+  tuition_total?: number; // Σ(fee × count)
 };
 
 // 강사 1명 정산 결과.
@@ -109,7 +130,31 @@ export function calcRevenueShareAmount(
 
 // detail 항목의 정산 방식. ST-5 이전 항목에는 method 가 없으므로 hourly 로 본다.
 export function detailMethod(d: SettlementProgramDetail): SettlementPayType {
-  return d.method === "revenue_share" ? "revenue_share" : "hourly";
+  return d.method === "revenue_share" || d.method === "per_session" ? d.method : "hourly";
+}
+
+// ST-6. 구간 정리 — 이름 공백 정리, 금액·인원은 0 이상 정수. 이름·금액 모두 비면 버림.
+export function cleanRevenueLines(lines: RevenueLine[] | null | undefined): RevenueLine[] {
+  const out: RevenueLine[] = [];
+  for (const l of lines ?? []) {
+    const label = String(l?.label ?? "").trim();
+    const fee = Math.max(0, Math.round(Number(l?.fee) || 0));
+    const count = Math.max(0, Math.round(Number(l?.count) || 0));
+    if (!label && !fee) continue;
+    out.push({ label: label || "구간", fee, count });
+  }
+  return out;
+}
+
+// ST-6. 강좌의 구간 — tuition_tiers 가 비면 tuition 하나를 '정상' 구간으로.
+export function effectiveTiers(tiers: TuitionTier[] | null | undefined, tuition: number): TuitionTier[] {
+  const list = cleanRevenueLines((tiers ?? []).map((t) => ({ ...t, count: 0 }))).map(({ label, fee }) => ({ label, fee }));
+  return list.length ? list : [{ label: "정상", fee: Math.max(0, Math.round(Number(tuition) || 0)) }];
+}
+
+// ST-6. 수강료 합계 = Σ(fee × count).
+export function calcTuitionTotal(lines: RevenueLine[]): number {
+  return lines.reduce((s, l) => s + l.fee * l.count, 0);
 }
 
 // 한 강사의 세션(시급제)·프로그램(분배제)으로 정산 항목을 계산.
@@ -135,23 +180,42 @@ export function calcInstructorSettlement(
   // --- 시급제: 프로그램별 그룹핑 후 Σhours × 시급 ---
   const byProgram = new Map<
     string,
-    { name: string; rate: number; ded: number; hours: number; count: number }
+    { name: string; rate: number; ded: number; hours: number; count: number; perSession: boolean }
   >();
   for (const s of sessions) {
+    const perSession = s.pay_type === "per_session";
     const g =
       byProgram.get(s.program_id) ??
       {
         name: s.program_name,
-        rate: s.hourly_rate,
+        rate: perSession ? Number(s.session_fee ?? 0) : s.hourly_rate,
         ded: s.deduction_rate,
         hours: 0,
         count: 0,
+        perSession,
       };
     g.hours += s.work_hours;
     g.count += 1;
     byProgram.set(s.program_id, g);
   }
   for (const [programId, g] of byProgram) {
+    if (g.perSession) {
+      // ST-6 회당: 실시 회기 수 × 회당 강사료. rate 에 회당 강사료를 담는다.
+      const amount = Math.round(g.count * g.rate);
+      const raw = accumulate(amount, g.ded);
+      detail.push({
+        program_name: g.name,
+        amount,
+        sessions: g.count,
+        hours: g.hours,
+        rate: g.rate,
+        deduction_rate: g.ded,
+        deduction_amount: Math.floor(raw),
+        program_id: programId,
+        method: "per_session",
+      });
+      continue;
+    }
     const amount = Math.round(g.hours * g.rate);
     const raw = accumulate(amount, g.ded);
     detail.push({
@@ -174,16 +238,21 @@ export function calcInstructorSettlement(
       r.adjusted_enrolled == null ? null : Math.max(0, Math.round(r.adjusted_enrolled));
     const adjAmount =
       r.adjusted_amount == null ? null : Math.max(0, Math.round(r.adjusted_amount));
-    const isAdjusted = adjEnrolled != null || adjAmount != null;
+    const lines = cleanRevenueLines(r.revenue_lines);
+    const useLines = lines.length > 0;
+    const isAdjusted = useLines || adjEnrolled != null || adjAmount != null;
+    const tuitionTotal = useLines ? calcTuitionTotal(lines) : null;
 
-    // 금액 지정이 우선. 인원만 지정하면 그 인원으로 다시 계산한다.
-    const enrolled = adjEnrolled ?? r.enrolled;
+    // ST-6 구간 인원이 있으면 그 계산이 최우선. 그다음 금액 지정, 인원 지정 순.
+    const enrolled = useLines ? lines.reduce((n, l) => n + l.count, 0) : adjEnrolled ?? r.enrolled;
     const amount =
-      adjAmount != null
-        ? adjAmount
-        : adjEnrolled != null
-          ? calcRevenueShareAmount(adjEnrolled, r.tuition, r.share_rate)
-          : autoAmount;
+      tuitionTotal != null
+        ? Math.round((tuitionTotal * r.share_rate) / 100)
+        : adjAmount != null
+          ? adjAmount
+          : adjEnrolled != null
+            ? calcRevenueShareAmount(adjEnrolled, r.tuition, r.share_rate)
+            : autoAmount;
 
     const raw = accumulate(amount, r.deduction_rate);
     const entry: SettlementProgramDetail = {
@@ -197,6 +266,11 @@ export function calcInstructorSettlement(
       tuition: r.tuition,
       share_rate: r.share_rate,
     };
+    if (r.tiers && r.tiers.length) entry.tuition_tiers = effectiveTiers(r.tiers, r.tuition);
+    if (tuitionTotal != null) {
+      entry.revenue_lines = lines;
+      entry.tuition_total = tuitionTotal;
+    }
     if (isAdjusted) {
       entry.adjusted = true;
       entry.auto_enrolled = r.enrolled;
@@ -251,11 +325,20 @@ function trimNum(n: number): string {
 // 산출내역 문구 — 화면·엑셀·강사앱이 같은 문장을 쓴다.
 //   hourly        : "4회 × 3h × 40,000"
 //   revenue_share : "13명 × 88,000 × 70%"
-//   조정된 항목은 "(조정)" 접미가 붙는다.
+//   구간(ST-6)     : "정상 40,000×5명 + 할인 20,000×3명 = 260,000 × 80%"
+//   per_session   : "4회 × 50,000"
+//   조정된 항목은 "(조정)" 접미가 붙는다(구간 계산은 붙이지 않음 — 담당자 입력이 기준).
 export function calcFormula(d: SettlementProgramDetail): string {
   const krw = (n: number) => n.toLocaleString("ko-KR");
   let text: string;
-  if (detailMethod(d) === "revenue_share") {
+  const method = detailMethod(d);
+  if (method === "revenue_share" && d.revenue_lines && d.revenue_lines.length && d.tuition_total != null) {
+    const parts = d.revenue_lines.map((l) => `${l.label} ${krw(l.fee)}×${l.count}명`).join(" + ");
+    return `${parts} = ${krw(d.tuition_total)} × ${trimNum(d.share_rate ?? 0)}%`;
+  }
+  if (method === "per_session") {
+    text = `${d.sessions ?? 0}회 × ${krw(d.rate ?? 0)}`;
+  } else if (method === "revenue_share") {
     text = `${d.enrolled ?? 0}명 × ${krw(d.tuition ?? 0)} × ${trimNum(
       d.share_rate ?? 0
     )}%`;

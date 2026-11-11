@@ -13,6 +13,7 @@ import {
 import {
   ProgramLine,
   AdjustControl,
+  TierEditor,
 } from "@/app/(app)/hr/saems/settlements/ProgramLine";
 import { formatKRW } from "@/lib/saem";
 import { deductionRateLabel, detailMethod } from "@/lib/settlement";
@@ -331,6 +332,27 @@ export default function SettlementDetail({
                                     enrolled == null && amount == null
                                       ? "조정을 해제했습니다. (자동 계산)"
                                       : "조정을 반영했습니다."
+                                  )
+                                }
+                              />
+                            )}
+                            {isDraft && detailMethod(d) === "revenue_share" && (
+                              <TierEditor
+                                key={`${JSON.stringify(d.revenue_lines ?? null)}|${d.amount}`}
+                                d={d}
+                                disabled={pending}
+                                onApply={(lines) =>
+                                  run(
+                                    () =>
+                                      adjustSettlementItem({
+                                        settlementId: detail.id,
+                                        instructorId: it.instructor_id,
+                                        programId: d.program_id ?? "",
+                                        enrolled: null,
+                                        amount: null,
+                                        lines,
+                                      }),
+                                    lines ? "구간 인원을 반영했습니다." : "구간 계산을 해제했습니다."
                                   )
                                 }
                               />

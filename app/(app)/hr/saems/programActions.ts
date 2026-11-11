@@ -138,6 +138,7 @@ export async function listPrograms(termId: string): Promise<ProgramRow[]> {
             deduction_rate: null,
             share_rate: null,
             session_fee: null,
+            tuition_tiers: null,
           }
     );
   const insIds = [
@@ -452,6 +453,7 @@ export async function copyTerm(input: {
           pay_type: p.pay_type,
           share_rate: p.share_rate,
           session_fee: p.session_fee,
+          tuition_tiers: p.tuition_tiers,
           session_minutes: p.session_minutes,
           instructor_mode: p.instructor_mode,
           status: "active",
@@ -507,6 +509,8 @@ export type ProgramInput = {
   session_fee?: number | null;
   session_minutes?: number | null;
   instructor_mode?: InstructorMode;
+  // 수강료 구간(분배제). undefined 면 건드리지 않음, 빈 배열이면 비움(tuition 하나 = '정상').
+  tuition_tiers?: { label: string; fee: number }[] | null;
   // 실제 스케줄 — 저장 시 이 값으로 회차를 생성·재생성한다.
   session_start: string | null;
   session_weekdays: number[]; // 0 일 ~ 6 토, 여러 개
@@ -536,6 +540,20 @@ function progPayload(i: ProgramInput) {
     instructor_id: i.instructor_id || null,
     instructor_mode: mode,
     session_fee: posInt(i.session_fee),
+    ...(i.tuition_tiers === undefined
+      ? {}
+      : {
+          tuition_tiers: (() => {
+            const list = (i.tuition_tiers ?? [])
+              .map((t) => ({
+                label: String(t?.label ?? "").trim(),
+                fee: Math.max(0, Math.round(Number(t?.fee) || 0)),
+              }))
+              .filter((t) => t.label || t.fee)
+              .map((t) => ({ label: t.label || "구간", fee: t.fee }));
+            return list.length ? list : null;
+          })(),
+        }),
     session_minutes: posInt(i.session_minutes),
     period_no: num(i.period_no),
     time_start: clean(i.time_start),

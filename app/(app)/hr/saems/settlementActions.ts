@@ -7,7 +7,10 @@ import { requireSaemAccess } from "@/lib/saemAccess";
 import { decryptSecret } from "@/lib/credentialCrypto";
 import {
   calcInstructorSettlement,
+  cleanRevenueLines,
   detailMethod,
+  type RevenueLine,
+  type TuitionTier,
   type SettlementSessionInput,
   type SettlementRevenueInput,
   type SettlementProgramDetail,
@@ -47,9 +50,14 @@ export type SettlementAdjustment = {
   program_id: string;
   enrolled: number | null;
   amount: number | null;
+  // ST-6 수강료 구간별 인원 — 있으면 이 계산이 금액·인원보다 우선.
+  lines?: RevenueLine[] | null;
 };
 
-type AdjustmentMap = Map<string, { enrolled: number | null; amount: number | null }>;
+type AdjustmentMap = Map<
+  string,
+  { enrolled: number | null; amount: number | null; lines: RevenueLine[] | null }
+>;
 const adjKey = (instructorId: string, programId: string) =>
   `${instructorId}|${programId}`;
 
@@ -65,8 +73,13 @@ function toAdjustmentMap(list: SettlementAdjustment[] | undefined): AdjustmentMa
       a.amount == null || !Number.isFinite(Number(a.amount))
         ? null
         : Math.max(0, Math.round(Number(a.amount)));
-    if (enrolled == null && amount == null) continue; // 조정 해제
-    map.set(adjKey(a.instructor_id, a.program_id), { enrolled, amount });
+    const lines = cleanRevenueLines(a.lines);
+    if (enrolled == null && amount == null && !lines.length) continue; // 조정 해제
+    map.set(adjKey(a.instructor_id, a.program_id), {
+      enrolled,
+      amount,
+      lines: lines.length ? lines : null,
+    });
   }
   return map;
 }
@@ -79,10 +92,20 @@ function adjustmentsFromItems(
   for (const it of items) {
     for (const d of it.detail) {
       if (d.adjusted !== true || !d.program_id) continue;
+      // 구간 인원(ST-6)이 있으면 그것만 되살린다(금액은 구간에서 다시 나옴).
+      if (d.revenue_lines && d.revenue_lines.length) {
+        map.set(adjKey(it.instructor_id, d.program_id), {
+          enrolled: null,
+          amount: null,
+          lines: d.revenue_lines,
+        });
+        continue;
+      }
       // 저장된 amount 가 조정 결과. 인원도 함께 보존한다.
       map.set(adjKey(it.instructor_id, d.program_id), {
         enrolled: d.enrolled ?? null,
         amount: d.amount ?? null,
+        lines: null,
       });
     }
   }
@@ -108,7 +131,21 @@ type ProgRow = {
   pay_type: string;
   share_rate: number;
   tuition: number;
+  session_fee: number; // ST-6 회당 강사료(pay_type='per_session')
+  tuition_tiers: TuitionTier[] | null; // ST-6 수강료 구간(분배제)
 };
+
+function parseTiers(v: unknown): TuitionTier[] | null {
+  if (!Array.isArray(v)) return null;
+  const list = cleanRevenueLines(
+    v.map((t) => ({
+      label: String((t as { label?: unknown })?.label ?? ""),
+      fee: Number((t as { fee?: unknown })?.fee ?? 0),
+      count: 0,
+    }))
+  ).map(({ label, fee }) => ({ label, fee }));
+  return list.length ? list : null;
+}
 
 // 기간이 겹치는 다른 정산이 이미 분배제로 정산한 program_id 집합.
 async function revenueProgramsSettledElsewhere(
@@ -207,7 +244,7 @@ async function gatherEligible(
   const { data: progs } = await supabaseAdmin
     .from(PROG)
     .select(
-      "id, name, instructor_id, hourly_rate, deduction_rate, pay_type, share_rate, tuition"
+      "id, name, instructor_id, hourly_rate, deduction_rate, pay_type, share_rate, tuition, session_fee, tuition_tiers"
     )
     .in("term_id", termIds)
     .not("instructor_id", "is", null);
@@ -221,6 +258,8 @@ async function gatherEligible(
       pay_type: normalizePayType(p.pay_type),
       share_rate: Number(p.share_rate ?? 0),
       tuition: Number(p.tuition ?? 0),
+      session_fee: Number(p.session_fee ?? 0),
+      tuition_tiers: parseTiers(p.tuition_tiers),
     })
   );
   if (!progRows.length) return empty;
@@ -264,6 +303,10 @@ async function gatherEligible(
       hourly_rate: prog.hourly_rate,
       deduction_rate: prog.deduction_rate,
       work_hours: Number(row.work_hours ?? 0),
+      // ST-6 회당 — 회기 수는 시급제와 같은 기준(확정·미정산 세션 1건 = 1회).
+      ...(prog.pay_type === "per_session"
+        ? { pay_type: "per_session" as const, session_fee: prog.session_fee }
+        : {}),
     });
     byInstructor.set(prog.instructor_id, list);
     const ids = sessionIdsByInstructor.get(prog.instructor_id) ?? [];
@@ -308,6 +351,8 @@ async function gatherEligible(
           share_rate: prog.share_rate,
           adjusted_enrolled: adj?.enrolled ?? null,
           adjusted_amount: adj?.amount ?? null,
+          tiers: prog.tuition_tiers ?? [{ label: "정상", fee: prog.tuition }],
+          revenue_lines: adj?.lines ?? null,
         });
         revenueByInstructor.set(prog.instructor_id, list);
       }
@@ -820,6 +865,8 @@ export async function adjustSettlementItem(input: {
   programId: string;
   enrolled: number | null;
   amount: number | null;
+  // ST-6 구간별 인원. undefined = 기존 구간 유지, null·[] = 구간 해제.
+  lines?: RevenueLine[] | null;
 }): Promise<{ ok: true } | { ok: false; message: string }> {
   try {
     await requireSaemAccess();
@@ -865,12 +912,20 @@ export async function adjustSettlementItem(input: {
       if (detailMethod(d) === "revenue_share") {
         const isTarget = d.program_id === programId;
         const autoEnrolled = d.auto_enrolled ?? d.enrolled ?? 0;
+        const prevLines = d.revenue_lines && d.revenue_lines.length ? d.revenue_lines : null;
         const adj = isTarget
-          ? { enrolled: input.enrolled, amount: input.amount }
-          : {
-              enrolled: d.adjusted === true ? d.enrolled ?? null : null,
-              amount: d.adjusted === true ? d.amount ?? null : null,
-            };
+          ? {
+              enrolled: input.enrolled,
+              amount: input.amount,
+              lines: input.lines === undefined ? prevLines : cleanRevenueLines(input.lines),
+            }
+          : prevLines
+            ? { enrolled: null, amount: null, lines: prevLines }
+            : {
+                enrolled: d.adjusted === true ? d.enrolled ?? null : null,
+                amount: d.adjusted === true ? d.amount ?? null : null,
+                lines: null,
+              };
         revenue.push({
           program_id: d.program_id ?? "",
           program_name: d.program_name,
@@ -880,7 +935,21 @@ export async function adjustSettlementItem(input: {
           share_rate: d.share_rate ?? 0,
           adjusted_enrolled: adj.enrolled,
           adjusted_amount: adj.amount,
+          tiers: d.tuition_tiers ?? null,
+          revenue_lines: adj.lines,
         });
+      } else if (detailMethod(d) === "per_session") {
+        // ST-6 회당 — 저장된 회기 수만큼 회당 강사료로 재현(회기 × rate = amount).
+        for (let k = 0; k < (d.sessions ?? 0); k++)
+          hourly.push({
+            program_id: d.program_id ?? d.program_name,
+            program_name: d.program_name,
+            hourly_rate: 0,
+            deduction_rate: d.deduction_rate ?? 0,
+            work_hours: (d.hours ?? 0) / Math.max(1, d.sessions ?? 1),
+            pay_type: "per_session",
+            session_fee: d.rate ?? 0,
+          });
       } else {
         // 시급제 — 저장된 금액을 재현하는 1건 입력(hours×rate = amount).
         hourly.push({
