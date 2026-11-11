@@ -23,7 +23,7 @@ const VALID_TABS: TabKey[] = [
 export default async function HrPage({
   searchParams,
 }: {
-  searchParams: Promise<{ tab?: string }>;
+  searchParams: Promise<{ tab?: string; driver?: string }>;
 }) {
   // 임시 비밀번호 사용자는 비번 변경 페이지로 강제 이동
   await enforcePasswordChange();
@@ -46,7 +46,7 @@ export default async function HrPage({
     t === "recruitment" ? canRecruitment : canRecords,
   );
 
-  const { tab } = await searchParams;
+  const { tab, driver } = await searchParams;
   const requested = VALID_TABS.includes(tab as TabKey)
     ? (tab as TabKey)
     : "records";
@@ -86,6 +86,7 @@ export default async function HrPage({
         allowedTabs={allowedTabs}
         today={kstTodayYmd()}
         canViewDutyRecord={await canViewOthersDutyRecord().catch(() => false)}
+        initialDriverId={driver ?? null}
       />
     </div>
   );

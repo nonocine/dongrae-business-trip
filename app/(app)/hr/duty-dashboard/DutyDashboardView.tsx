@@ -164,36 +164,6 @@ export default function DutyDashboardView({ data }: { data: DutyDashboard }) {
           )}
         </section>
 
-        <section className={cardCls}>
-          <h3 className="mb-2 text-sm font-bold text-ink">
-            재직자 연차·대휴 <span className="text-xs font-normal text-ink-muted">({data.people.length}명)</span>
-          </h3>
-          <div className="max-h-96 overflow-auto">
-            <table className="w-full border-collapse text-sm">
-              <thead className="sticky top-0 bg-card">
-                <tr className="border-b border-line text-xs text-navy">
-                  <th className="px-2 py-1.5 text-left font-semibold">이름</th>
-                  <th className="px-2 py-1.5 text-left font-semibold">부서</th>
-                  <th className="px-2 py-1.5 text-right font-semibold">연차 잔여</th>
-                  <th className="px-2 py-1.5 text-right font-semibold">올해 연가 사용</th>
-                  <th className="px-2 py-1.5 text-right font-semibold">대휴 잔여</th>
-                </tr>
-              </thead>
-              <tbody>
-                {data.people.map((p) => (
-                  <tr key={p.id} className="border-b border-line/60">
-                    <td className="px-2 py-1.5 text-ink">{p.name}</td>
-                    <td className="px-2 py-1.5 text-xs text-ink-muted">{p.department ?? "-"}</td>
-                    <td className="px-2 py-1.5 text-right font-mono">{fmt(p.annual)}</td>
-                    <td className="px-2 py-1.5 text-right font-mono">{fmt(p.annualUsed)}</td>
-                    <td className="px-2 py-1.5 text-right font-mono">{fmt(p.compensatory)}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-          <p className="mt-1 text-[11px] text-ink-hint">연가 사용은 ERP 사용 기록 기준 · 마지막 동기화 {when(data.syncedLeave)}</p>
-        </section>
       </div>
     </div>
   );

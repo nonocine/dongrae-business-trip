@@ -4,6 +4,8 @@ import { enforcePasswordChange } from "@/app/actions";
 import { dutyDashboardData, resolveDutyDashboardViewer } from "@/lib/erp/view";
 import ErpNote from "@/app/components/ErpNote";
 import DutyDashboardView from "@/app/(app)/hr/duty-dashboard/DutyDashboardView";
+import LeaveBalanceTable from "@/app/(app)/hr/duty-dashboard/LeaveBalanceTable";
+import { loadLeaveTable } from "@/lib/erp/leaveTable";
 
 export const dynamic = "force-dynamic";
 
@@ -12,6 +14,7 @@ export default async function DutyDashboardPage() {
   await enforcePasswordChange();
   if (!(await resolveDutyDashboardViewer())) redirect("/");
   const data = await dutyDashboardData();
+  const table = await loadLeaveTable(data);
   return (
     <div className="mx-auto w-full max-w-6xl px-4 py-6">
       <div className="mb-2 flex items-center justify-between">
@@ -21,7 +24,10 @@ export default async function DutyDashboardPage() {
         </Link>
       </div>
       <ErpNote syncedAt={data.syncedDuties} className="mb-3" />
-      <DutyDashboardView data={data} />
+      <div className="space-y-4">
+        <LeaveBalanceTable data={table} />
+        <DutyDashboardView data={data} />
+      </div>
     </div>
   );
 }

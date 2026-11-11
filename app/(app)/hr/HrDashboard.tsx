@@ -34,12 +34,15 @@ export default function HrDashboard({
   allowedTabs,
   today,
   canViewDutyRecord = false,
+  initialDriverId = null,
 }: {
   drivers: Driver[];
   profiles: EmployeeProfile[];
   recruitmentPostings: RecruitmentPostingAdmin[];
   // 직원 카드의 '복무 기록'(ERP) — 관장(M0)·hr 직무만. 서버(getDutyRecord)도 같은 기준으로 다시 확인.
   canViewDutyRecord?: boolean;
+  // ?driver=<id> — 복무·연차 대시보드에서 이름을 눌러 들어오면 그 직원 카드를 바로 엽니다.
+  initialDriverId?: string | null;
   // KST 오늘 "YYYY-MM-DD" — 현재 소속(발효된 발령) 판정 기준. 서버에서 계산.
   today: string;
   initialTab?: TabKey;
@@ -66,6 +69,7 @@ export default function HrDashboard({
           canGrantPersonnel={canGrantPersonnel}
           today={today}
           canViewDutyRecord={canViewDutyRecord}
+          initialDriverId={initialDriverId}
         />
       )}
       {/* 계약서·증명서 탭은 "곧 제공될 예정입니다" 자리표시자였습니다.
@@ -201,6 +205,7 @@ function RecordsTab({
   canGrantPersonnel,
   today,
   canViewDutyRecord,
+  initialDriverId,
 }: {
   drivers: Driver[];
   profiles: EmployeeProfile[];
@@ -208,8 +213,11 @@ function RecordsTab({
   canGrantPersonnel: boolean;
   today: string;
   canViewDutyRecord: boolean;
+  initialDriverId: string | null;
 }) {
-  const [selectedId, setSelectedId] = useState("");
+  const [selectedId, setSelectedId] = useState(
+    initialDriverId && drivers.some((d) => d.id === initialDriverId) ? initialDriverId : ""
+  );
   // 재직/퇴사 필터 — 기본은 재직만 노출(퇴사자는 분리). 기록은 삭제하지 않고 보존.
   const [statusFilter, setStatusFilter] = useState<"active" | "resigned">(
     "active"

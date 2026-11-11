@@ -153,7 +153,31 @@ function DashboardTab({ stats }: { stats: ActivityAdminStats }) {
       <RecentActivitiesCard stats={stats} />
       <BackupCard />
       <ErpCard />
+      <DutyDashboardCard />
     </div>
+  );
+}
+
+// 복무·연차 대시보드 바로가기 — /hr/duty-dashboard(관장·hr 직무).
+function DutyDashboardCard() {
+  return (
+    <Link
+      href="/hr/duty-dashboard"
+      className={`${cardCls} flex items-center justify-between gap-3 transition hover:-translate-y-0.5 hover:border-navy hover:shadow-md`}
+    >
+      <div>
+        <h3 className="flex items-center gap-1.5 text-sm font-semibold text-ink">
+          <span aria-hidden>📈</span>
+          복무·연차 대시보드
+        </h3>
+        <p className="mt-1 text-xs text-ink-muted">
+          직원별 연차·대휴 잔여(연말 소멸 위험 표시), 부재·출장·초과근무 현황 (ERP).
+        </p>
+      </div>
+      <span aria-hidden className="shrink-0 text-lg text-ink-hint">
+        →
+      </span>
+    </Link>
   );
 }
 
