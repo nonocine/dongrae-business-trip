@@ -34,6 +34,7 @@ import {
   type TaxType,
 } from "@/lib/instructorContract";
 import { btnPrimary, btnSecondary, noticeError, noticeSuccess, noticeWarning } from "@/lib/ui";
+import ContractLinkCopyButton from "@/app/(app)/hr/saems/contracts/ContractLinkCopyButton";
 
 const inCls =
   "block w-full rounded-md border border-line bg-card px-2.5 py-1.5 text-sm text-ink-body shadow-sm focus:border-navy focus:outline-none focus:ring-1 focus:ring-navy";
@@ -101,6 +102,7 @@ export default function ContractEditor({
   const [file, setFile] = useState<File | null>(null);
   const [err, setErr] = useState<string | null>(null);
   const [info, setInfo] = useState<string | null>(null);
+  const [sentInfo, setSentInfo] = useState<{ id: string; smsError: string | null } | null>(null);
   const [pending, start] = useTransition();
 
   useEffect(() => {
@@ -169,12 +171,18 @@ export default function ContractEditor({
       }
       const sent = await sendInstructorContract(saved.id);
       if (!sent.ok) return setErr(sent.message);
-      onDone(
-        sent.smsError
-          ? `발송 처리했지만 문자를 보내지 못했습니다(${sent.smsError}). 링크를 직접 전달하세요: ${sent.link}`
-          : `계약서를 보냈습니다. 강사에게 서명 요청 문자를 보냈습니다.`
-      );
+      // 바로 닫지 않고 발송 완료 안내창을 띄웁니다([링크 복사] 포함).
+      setSentInfo({ id: saved.id, smsError: sent.smsError });
     });
+  }
+
+  function closeAfterSend() {
+    if (!sentInfo) return;
+    onDone(
+      sentInfo.smsError
+        ? `발송 처리했지만 문자를 보내지 못했습니다(${sentInfo.smsError}). [링크 복사]로 직접 전달하세요.`
+        : "계약서를 보냈습니다. 강사에게 서명 요청 문자를 보냈습니다."
+    );
   }
 
   function uploadPaper() {
@@ -205,7 +213,7 @@ export default function ContractEditor({
               </span>
             )}
           </h3>
-          <button type="button" onClick={onClose} className="text-sm text-ink-muted hover:underline">
+          <button type="button" onClick={sentInfo ? closeAfterSend : onClose} className="text-sm text-ink-muted hover:underline">
             닫기
           </button>
         </div>
@@ -213,11 +221,36 @@ export default function ContractEditor({
         {loadErr && <p className={noticeError}>{loadErr}</p>}
         {!ctx && !loadErr && <p className="py-8 text-center text-sm text-ink-hint">불러오는 중…</p>}
 
-        {ctx && readOnly && (
-          <ReadOnlyView ctx={ctx} />
+        {/* 발송 완료 안내창 */}
+        {ctx && sentInfo && (
+          <div className="space-y-3">
+            <p className={sentInfo.smsError ? noticeWarning : noticeSuccess}>
+              {sentInfo.smsError
+                ? `발송 처리했지만 서명 요청 문자를 보내지 못했습니다(${sentInfo.smsError}). 아래 [링크 복사]로 강사에게 직접 전달하세요.`
+                : `${ctx.instructor.name} 강사에게 서명 요청 문자를 보냈습니다. 카톡 등으로 따로 알리려면 [링크 복사]를 쓰세요.`}
+            </p>
+            <div className="flex flex-wrap gap-2">
+              <ContractLinkCopyButton contractId={sentInfo.id} saemBase={ctx.saemBase} className={btnPrimary} />
+              <button type="button" className={btnSecondary} onClick={closeAfterSend}>
+                확인
+              </button>
+            </div>
+          </div>
         )}
 
-        {ctx && !readOnly && (
+        {ctx && !sentInfo && readOnly && (
+          <>
+            {ctx.existing?.status === "sent" && (
+              <div className="mb-3 flex flex-wrap items-center gap-2">
+                <ContractLinkCopyButton contractId={ctx.existing.id} saemBase={ctx.saemBase} />
+                <span className="text-[11px] text-ink-hint">강사 본인이 동래샘들에 로그인해야 열립니다.</span>
+              </div>
+            )}
+            <ReadOnlyView ctx={ctx} />
+          </>
+        )}
+
+        {ctx && !sentInfo && !readOnly && (
           <>
             {!ctx.existing && (
               <div className="mb-3 flex flex-wrap gap-4 text-sm">

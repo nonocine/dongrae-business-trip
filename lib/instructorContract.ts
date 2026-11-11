@@ -29,6 +29,15 @@ export const INSTRUCTOR_CONTRACT_SMS_PROGRAM = "instructor_contract";
 // 저장 위치 — hr-documents 버킷.
 export const INSTRUCTOR_CONTRACT_DIR = "instructor-contracts";
 
+// 동래샘들 계약서 화면 주소 — 강사 본인 로그인 뒤에만 열리므로 비밀값을 넣지 않습니다.
+export function instructorContractLink(saemBase: string, contractId: string): string {
+  return `${saemBase.replace(/\/+$/, "")}/contracts/${contractId}`;
+}
+// 직원 [링크 복사] 문구.
+export function instructorContractLinkMessage(link: string): string {
+  return `동래샘들에 로그인한 뒤 계약서를 확인하고 서명해 주세요. ${link}`;
+}
+
 export function instructorContractPdfPath(instructorId: string, contractNo: string): string {
   return `${INSTRUCTOR_CONTRACT_DIR}/${instructorId}/${contractNo}.pdf`;
 }

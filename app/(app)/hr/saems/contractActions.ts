@@ -25,6 +25,7 @@ import {
   INSTRUCTOR_CONTRACT_SMS_PROGRAM,
   INSTRUCTOR_CONTRACT_SMS_SENDER,
   fillBody,
+  instructorContractLink,
   instructorContractPdfPath,
   missingFields,
   normalizeContractPayType,
@@ -56,7 +57,21 @@ const fail = (e: unknown, fb = "오류가 발생했습니다."): Fail => ({
 
 // 동래샘들 계약서 화면 주소 — 동래샘들 쪽에 /contracts/[id] 페이지가 있어야 합니다.
 function contractLink(id: string): string {
-  return `${saemAppUrl()}/contracts/${id}`;
+  return instructorContractLink(saemAppUrl(), id);
+}
+
+// [링크 복사] 기록 — 복사는 화면에서 하고(클릭 직후라야 클립보드가 허용됨) 기록만 서버에 남깁니다.
+export async function logInstructorContractLinkCopied(id: string): Promise<{ ok: true } | Fail> {
+  try {
+    const access = await requireSaemAccess();
+    const cur = await loadContract(id);
+    if (!cur) return { ok: false, message: "계약서를 찾을 수 없습니다." };
+    if (cur.status !== "sent") return { ok: false, message: "서명 대기 중인 계약서만 링크를 복사할 수 있습니다." };
+    await writeLog(id, "link_copied", access);
+    return { ok: true };
+  } catch (e) {
+    return fail(e);
+  }
 }
 
 async function writeLog(
@@ -205,6 +220,7 @@ export type ContractTemplateOption = {
 };
 export type ContractContext = {
   today: string;
+  saemBase: string; // 동래샘들 주소 — [링크 복사]용
   isM0: boolean;
   instructor: {
     id: string;
@@ -340,6 +356,7 @@ export async function getContractContext(input: {
     return {
       ok: true,
       today: kstTodayYmd(),
+      saemBase: saemAppUrl(),
       isM0: access.isM0,
       instructor: {
         id: i.id,

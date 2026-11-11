@@ -12,6 +12,7 @@ import {
   type ContractListFilter,
 } from "@/app/(app)/hr/saems/contractActions";
 import ContractEditor from "@/app/(app)/hr/saems/contracts/ContractEditor";
+import ContractLinkCopyButton from "@/app/(app)/hr/saems/contracts/ContractLinkCopyButton";
 import {
   INSTRUCTOR_CONTRACT_STATUS_LABEL,
   SIGNING_METHOD_LABEL,
@@ -59,6 +60,7 @@ const ACTION_LABEL: Record<string, string> = {
   employer_sealed: "관장 직인 날인",
   file_viewed: "파일 열람",
   file_downloaded: "파일 다운로드",
+  link_copied: "링크 복사",
   viewed: "강사 열람",
   signed: "강사 서명",
 };
@@ -78,10 +80,12 @@ export default function ContractsManager({
   projects,
   initialRows,
   isM0,
+  saemBase,
 }: {
   projects: SaemProject[];
   initialRows: InstructorContractRow[];
   isM0: boolean;
+  saemBase: string; // 동래샘들 주소 — [링크 복사]용
 }) {
   const [rows, setRows] = useState(initialRows);
   const [projectId, setProjectId] = useState("");
@@ -247,6 +251,7 @@ export default function ContractsManager({
                             {r.status === "draft" ? "이어 쓰기" : "내용"}
                           </button>
                         )}
+                        {r.status === "sent" && <ContractLinkCopyButton contractId={r.id} saemBase={saemBase} />}
                         {r.status === "sent" && (
                           <button
                             type="button"

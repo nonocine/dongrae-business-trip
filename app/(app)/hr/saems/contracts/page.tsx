@@ -1,5 +1,6 @@
 import { redirect } from "next/navigation";
 import { resolveSaemAccess } from "@/lib/saemAccess";
+import { saemAppUrl } from "@/lib/saem";
 import { listProjects } from "@/app/(app)/hr/saems/programActions";
 import { listInstructorContracts } from "@/app/(app)/hr/saems/contractActions";
 import ContractsManager from "@/app/(app)/hr/saems/contracts/ContractsManager";
@@ -12,5 +13,5 @@ export default async function ContractsPage() {
   const access = await resolveSaemAccess();
   if (!access) redirect("/hr/saems/instructors");
   const [projects, rows] = await Promise.all([listProjects(), listInstructorContracts({})]);
-  return <ContractsManager projects={projects} initialRows={rows} isM0={access.isM0} />;
+  return <ContractsManager projects={projects} initialRows={rows} isM0={access.isM0} saemBase={saemAppUrl()} />;
 }
