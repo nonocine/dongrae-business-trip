@@ -62,14 +62,30 @@ export type ErpApiStatus = {
   rows: number; // 표의 현재 행 수(사라진 건 제외)
 };
 
+export type ErpAccountInfo = {
+  id: string;
+  name: string | null;
+  department: string | null;
+  employeeNo: number | null;
+  employed: boolean;
+  firstDuty: string | null; // 그 계정 복무 첫 날(YYYY-MM-DD)
+  lastDuty: string | null; // 마지막 날
+};
 export type ErpLinkRow = {
   profileId: string;
   driverName: string;
-  erpEmployeeId: string | null;
+  erpEmployeeId: string | null; // 현재 계정
   erpName: string | null;
   erpDepartment: string | null;
+  // 직원 1명 = ERP 계정 여러 개(팀 이동 발령) — 현재 + 이전 계정 정보.
+  current: ErpAccountInfo | null;
+  priors: ErpAccountInfo[];
   // 연결 필요 사유 — 같은 이름 재직자가 여럿이면 ambiguous, 없으면 none.
   reason: "ambiguous" | "none" | null;
+  // 동기화로 새로 생긴, 아직 누구에게도 연결 안 된 같은 이름의 ERP 계정.
+  newAccounts: ErpAccountInfo[];
+  // 자동 제안(저장은 관장이 눌러야) — 같은 이름 계정 2개 이상·복무 날짜가 겹치지 않음 → 팀 이동으로 보임.
+  suggestion: { currentId: string; priorIds: string[]; reason: string } | null;
 };
 
 export type ErpCandidate = { employeeId: string; name: string; department: string | null; jobTitle: string | null };
@@ -123,20 +139,23 @@ export async function getErpStatus(): Promise<ErpStatusData> {
     .order("started_at", { ascending: false })
     .limit(10);
 
-  // 직원 연결 현황 — 활성 직원의 인사카드(employee_profiles) 기준.
-  const { data: profs } = await supabaseAdmin.from("employee_profiles").select("id, driver_id, erp_employee_id");
-  const profRows = ((profs ?? []) as { id: string; driver_id: string | null; erp_employee_id: string | null }[]).filter(
-    (p) => p.driver_id
-  );
+  // 직원 연결 현황 — 활성 직원의 인사카드(employee_profiles) 기준. 현재 + 이전 계정.
+  const { data: profs } = await supabaseAdmin
+    .from("employee_profiles")
+    .select("id, driver_id, erp_employee_id, erp_prior_employee_ids");
+  const profRows = (
+    (profs ?? []) as { id: string; driver_id: string | null; erp_employee_id: string | null; erp_prior_employee_ids: string[] | null }[]
+  ).filter((p) => p.driver_id);
   const { data: drv } = profRows.length
     ? await supabaseAdmin.from("drivers").select("id, name, is_active").in("id", profRows.map((p) => p.driver_id!))
     : { data: [] };
   const drvMap = new Map(((drv ?? []) as { id: string; name: string; is_active: boolean | null }[]).map((d) => [d.id, d]));
   const { data: emps } = await supabaseAdmin
     .from("erp_employees")
-    .select("employee_id, name, department_name, job_title, is_employed, deleted");
+    .select("employee_id, employee_no, name, department_name, job_title, is_employed, deleted");
   const empRows = (emps ?? []) as {
     employee_id: string;
+    employee_no: number | null;
     name: string | null;
     department_name: string | null;
     job_title: string | null;
@@ -145,21 +164,88 @@ export async function getErpStatus(): Promise<ErpStatusData> {
   }[];
   const empMap = new Map(empRows.map((e) => [e.employee_id, e]));
   const employed = empRows.filter((e) => e.is_employed === true && e.deleted !== true);
-  const takenSet = new Set(profRows.map((p) => p.erp_employee_id).filter(Boolean) as string[]);
+  const priorsOf = (p: { erp_prior_employee_ids: string[] | null }) =>
+    Array.isArray(p.erp_prior_employee_ids) ? p.erp_prior_employee_ids.filter(Boolean) : [];
+  const takenSet = new Set(profRows.flatMap((p) => [...(p.erp_employee_id ? [p.erp_employee_id] : []), ...priorsOf(p)]));
+
+  // 계정별 복무 날짜 범위(첫 날~마지막 날) — 팀 이동 판단용.
+  const span = new Map<string, { first: string; last: string }>();
+  for (let from = 0; ; from += 1000) {
+    const { data: ds } = await supabaseAdmin
+      .from("erp_duties")
+      .select("employee_ids, start_at, end_at")
+      .is("removed_at", null)
+      .order("duty_id")
+      .range(from, from + 999);
+    for (const d of (ds ?? []) as { employee_ids: string[]; start_at: string | null; end_at: string | null }[]) {
+      if (!d.start_at) continue;
+      const s0 = d.start_at.slice(0, 10);
+      const e0 = (d.end_at ?? d.start_at).slice(0, 10);
+      for (const id of d.employee_ids) {
+        const cur = span.get(id);
+        span.set(id, cur ? { first: s0 < cur.first ? s0 : cur.first, last: e0 > cur.last ? e0 : cur.last } : { first: s0, last: e0 });
+      }
+    }
+    if (!ds || ds.length < 1000) break;
+  }
+  const info = (id: string): ErpAccountInfo => {
+    const e = empMap.get(id);
+    return {
+      id,
+      name: e?.name ?? null,
+      department: e?.department_name ?? null,
+      employeeNo: e?.employee_no ?? null,
+      employed: e?.is_employed === true && e?.deleted !== true,
+      firstDuty: span.get(id)?.first ?? null,
+      lastDuty: span.get(id)?.last ?? null,
+    };
+  };
 
   const links: ErpLinkRow[] = profRows
-    .filter((p) => p.erp_employee_id || drvMap.get(p.driver_id!)?.is_active !== false)
+    .filter((p) => p.erp_employee_id || priorsOf(p).length || drvMap.get(p.driver_id!)?.is_active !== false)
     .map((p): ErpLinkRow => {
       const d = drvMap.get(p.driver_id!);
+      const mine = new Set([...(p.erp_employee_id ? [p.erp_employee_id] : []), ...priorsOf(p)]);
       const e = p.erp_employee_id ? empMap.get(p.erp_employee_id) : undefined;
-      const sameName = employed.filter((x) => normName(x.name) === normName(d?.name));
+      const sameNameEmployed = employed.filter((x) => normName(x.name) === normName(d?.name));
+      // 같은 이름의 ERP 계정(삭제 제외) — 이 직원 것이거나 아직 아무에게도 연결 안 된 것만.
+      const sameName = empRows.filter(
+        (x) => x.deleted !== true && normName(x.name) === normName(d?.name) && (mine.has(x.employee_id) || !takenSet.has(x.employee_id))
+      );
+      const newAccounts = mine.size
+        ? sameNameEmployed.filter((x) => !takenSet.has(x.employee_id)).map((x) => info(x.employee_id))
+        : [];
+      // 제안 — 2개 이상이고 복무 날짜가 서로 겹치지 않으면 팀 이동으로 봅니다.
+      let suggestion: ErpLinkRow["suggestion"] = null;
+      if (sameName.length >= 2) {
+        const accts = sameName.map((x) => info(x.employee_id));
+        const withSpan = accts.filter((a) => a.firstDuty && a.lastDuty).sort((a, b) => a.firstDuty!.localeCompare(b.firstDuty!));
+        const overlap = withSpan.some((a, i) => i > 0 && a.firstDuty! <= withSpan[i - 1].lastDuty!);
+        if (!overlap) {
+          const pick = [...accts].sort(
+            (a, b) => (b.lastDuty ?? "").localeCompare(a.lastDuty ?? "") || (b.employeeNo ?? 0) - (a.employeeNo ?? 0)
+          )[0];
+          const priorIds = accts.filter((a) => a.id !== pick.id).map((a) => a.id).sort();
+          const same = p.erp_employee_id === pick.id && [...priorsOf(p)].sort().join(",") === priorIds.join(",");
+          if (!same)
+            suggestion = {
+              currentId: pick.id,
+              priorIds,
+              reason: pick.lastDuty ? "최근 복무가 있는 계정을 현재 계정으로" : "employee_no 가 큰 계정을 현재 계정으로",
+            };
+        }
+      }
       return {
         profileId: p.id,
         driverName: d?.name ?? "(이름 없음)",
         erpEmployeeId: p.erp_employee_id,
         erpName: e?.name ?? null,
         erpDepartment: e?.department_name ?? null,
-        reason: p.erp_employee_id ? null : sameName.length > 1 ? "ambiguous" : "none",
+        current: p.erp_employee_id ? info(p.erp_employee_id) : null,
+        priors: priorsOf(p).map(info),
+        reason: mine.size ? null : sameNameEmployed.length > 1 ? "ambiguous" : "none",
+        newAccounts,
+        suggestion,
       };
     })
     .sort((a, b) => Number(!!a.erpEmployeeId) - Number(!!b.erpEmployeeId) || a.driverName.localeCompare(b.driverName, "ko"));
@@ -336,4 +422,106 @@ export async function compareErpRentals(start: string, end: string): Promise<Ren
     different: different.sort(byDate),
     erpSyncedAt: (syncedRun.data as { finished_at?: string } | null)?.finished_at ?? null,
   };
+}
+
+// =====================================================================
+// 직원 1명 = ERP 계정 여러 개 — 이전 계정 추가·빼기, 현재 계정 바꾸기, 제안 묶기. 관장·master 만(gate).
+//   한 ERP 계정은 한 직원에게만(현재든 이전이든). 자동 적용은 없습니다.
+// =====================================================================
+type LinkResult = { ok: true } | { ok: false; message: string };
+
+async function loadLink(profileId: string): Promise<{ current: string | null; priors: string[] } | null> {
+  const { data } = await supabaseAdmin
+    .from("employee_profiles")
+    .select("erp_employee_id, erp_prior_employee_ids")
+    .eq("id", profileId)
+    .maybeSingle();
+  if (!data) return null;
+  const d = data as { erp_employee_id: string | null; erp_prior_employee_ids: string[] | null };
+  return { current: d.erp_employee_id, priors: Array.isArray(d.erp_prior_employee_ids) ? d.erp_prior_employee_ids.filter(Boolean) : [] };
+}
+
+// 다른 직원이 이미 쓰는 계정인지.
+async function usedByOther(profileId: string, ids: string[]): Promise<string | null> {
+  const { data } = await supabaseAdmin.from("employee_profiles").select("id, erp_employee_id, erp_prior_employee_ids").neq("id", profileId);
+  for (const p of (data ?? []) as { erp_employee_id: string | null; erp_prior_employee_ids: string[] | null }[]) {
+    const all = [...(p.erp_employee_id ? [p.erp_employee_id] : []), ...(Array.isArray(p.erp_prior_employee_ids) ? p.erp_prior_employee_ids : [])];
+    const hit = ids.find((x) => all.includes(x));
+    if (hit) return hit;
+  }
+  return null;
+}
+
+async function erpExists(ids: string[]): Promise<boolean> {
+  if (!ids.length) return true;
+  const { data } = await supabaseAdmin.from("erp_employees").select("employee_id").in("employee_id", ids);
+  return ((data ?? []) as unknown[]).length === new Set(ids).size;
+}
+
+async function saveLink(profileId: string, current: string | null, priors: string[]): Promise<LinkResult> {
+  const cleanPriors = [...new Set(priors.filter((x) => x && x !== current))];
+  const { error } = await supabaseAdmin
+    .from("employee_profiles")
+    .update({ erp_employee_id: current, erp_prior_employee_ids: cleanPriors })
+    .eq("id", profileId);
+  if (error?.code === "23505") return { ok: false, message: "이미 다른 직원의 현재 계정입니다." };
+  if (error) throw new Error(error.message);
+  revalidatePath("/admin/erp");
+  return { ok: true };
+}
+
+export async function addPriorErpAccount(profileId: string, erpId: string): Promise<LinkResult> {
+  try {
+    await gate();
+    const cur = await loadLink(profileId);
+    if (!cur) return { ok: false, message: "직원을 찾을 수 없습니다." };
+    if (!erpId || erpId === cur.current || cur.priors.includes(erpId)) return { ok: false, message: "이미 이 직원의 계정입니다." };
+    if (!(await erpExists([erpId]))) return { ok: false, message: "ERP 계정을 찾을 수 없습니다. 동기화 뒤 다시 시도하세요." };
+    const other = await usedByOther(profileId, [erpId]);
+    if (other) return { ok: false, message: "다른 직원에게 연결된 ERP 계정입니다." };
+    return await saveLink(profileId, cur.current, [...cur.priors, erpId]);
+  } catch (e) {
+    return { ok: false, message: e instanceof Error ? e.message : "저장하지 못했습니다." };
+  }
+}
+
+export async function removePriorErpAccount(profileId: string, erpId: string): Promise<LinkResult> {
+  try {
+    await gate();
+    const cur = await loadLink(profileId);
+    if (!cur) return { ok: false, message: "직원을 찾을 수 없습니다." };
+    if (!cur.priors.includes(erpId)) return { ok: false, message: "이전 계정 목록에 없습니다." };
+    return await saveLink(profileId, cur.current, cur.priors.filter((x) => x !== erpId));
+  } catch (e) {
+    return { ok: false, message: e instanceof Error ? e.message : "저장하지 못했습니다." };
+  }
+}
+
+// [현재 계정으로 바꾸기] — 이전 계정 하나를 현재로, 원래 현재는 이전으로(교체).
+export async function promoteErpAccount(profileId: string, erpId: string): Promise<LinkResult> {
+  try {
+    await gate();
+    const cur = await loadLink(profileId);
+    if (!cur) return { ok: false, message: "직원을 찾을 수 없습니다." };
+    if (!cur.priors.includes(erpId)) return { ok: false, message: "이전 계정 목록에 없는 계정입니다." };
+    const priors = [...cur.priors.filter((x) => x !== erpId), ...(cur.current ? [cur.current] : [])];
+    return await saveLink(profileId, erpId, priors);
+  } catch (e) {
+    return { ok: false, message: e instanceof Error ? e.message : "저장하지 못했습니다." };
+  }
+}
+
+// 제안 [묶기] — 관장이 눌러야 저장. 현재 계정 + 이전 계정들.
+export async function applyErpMerge(profileId: string, currentId: string, priorIds: string[]): Promise<LinkResult> {
+  try {
+    await gate();
+    const all = [...new Set([currentId, ...priorIds].filter(Boolean))];
+    if (!currentId || all.length < 2) return { ok: false, message: "묶을 계정이 2개 이상이어야 합니다." };
+    if (!(await erpExists(all))) return { ok: false, message: "ERP 계정을 찾을 수 없습니다. 동기화 뒤 다시 시도하세요." };
+    const other = await usedByOther(profileId, all);
+    if (other) return { ok: false, message: `다른 직원에게 연결된 ERP 계정이 있습니다(${other}).` };
+    return await saveLink(profileId, currentId, priorIds);
+  } catch (e) {
+    return { ok: false, message: e instanceof Error ? e.message : "저장하지 못했습니다." };
+  }
 }

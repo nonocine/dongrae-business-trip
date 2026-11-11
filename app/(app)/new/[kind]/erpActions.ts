@@ -14,9 +14,10 @@ export async function getMyErpFieldDuties(date: string): Promise<{
 }> {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(date ?? "")) return { linked: false, items: [], syncedAt: null };
   const viewer = await resolveErpViewer();
-  if (!viewer?.erpEmployeeId) return { linked: false, items: [], syncedAt: null };
+  // 현재+이전 ERP 계정 모두(팀 이동 발령 전 계정의 출장·외근도).
+  if (!viewer?.erpIds.length) return { linked: false, items: [], syncedAt: null };
   const [duties, syncedAt] = await Promise.all([
-    loadDutiesOverlapping(date, date, { employeeId: viewer.erpEmployeeId }),
+    loadDutiesOverlapping(date, date, { employeeIds: viewer.erpIds }),
     erpLastSyncedAt("duties"),
   ]);
   const items: ErpFieldSuggestion[] = duties

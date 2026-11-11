@@ -235,6 +235,14 @@ export default function LeavePayoutManager({
                         <span className="font-mono">{fmtDays(l.unused_days)}</span>
                       )}
                       <p className="text-[10px] text-ink-hint">{l.unused_source === "manual" ? "직접 입력" : "ERP"}</p>
+                      {(snap.prior_remaining ?? 0) > 0 && (
+                        <p
+                          className="mt-0.5 inline-block rounded bg-yellow-100 px-1 text-[10px] font-semibold text-yellow-900"
+                          title="ERP 발령 이관 확인 필요"
+                        >
+                          이전 계정 잔여 {fmtDays(snap.prior_remaining ?? 0)}일
+                        </p>
+                      )}
                       {snap.planned_days > 0 && (
                         <p className="text-[10px] text-warning">
                           예정 사용 {fmtDays(snap.planned_days)}일{snap.planned_deducted ? "(차감됨)" : ""}

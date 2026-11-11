@@ -45,7 +45,7 @@ export default async function MyHrPage() {
   if (!my) redirect("/");
   // ERP 연차·대휴 — 본인 것만(세션의 erp_employee_id). 실패해도 다른 탭은 그립니다.
   const erpLeave = await resolveErpViewer()
-    .then((v) => myErpLeave(v?.erpEmployeeId ?? null))
+    .then((v) => myErpLeave(v ? { current: v.erpEmployeeId, all: v.erpIds } : null))
     .catch(() => null);
   // 연차수당 — leave_payout_staff_visible='true' 이고 확정된 산정표에 본인 줄이 있을 때만(지금은 꺼짐 → null).
   const myPayout = erpLeave ? await myLeavePayout(my.driver.id, erpLeave.year).catch(() => null) : null;

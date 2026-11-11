@@ -14,6 +14,7 @@ import { supabaseAdmin } from "@/lib/supabaseAdmin";
 import { dutyDashboardData, employedErpEmployees, type DutyDashboard } from "@/lib/erp/view";
 import { kstTodayYmd } from "@/lib/erp/duty";
 import { isFirstYear } from "@/lib/leavePromotion";
+import { loadErpDirectory, priorRemainingByKey } from "@/lib/erp/identity";
 
 export type LeaveTableRow = {
   erpEmployeeId: string;
@@ -27,6 +28,7 @@ export type LeaveTableRow = {
   remaining: number | null;
   compensatory: number | null;
   syncedAt: string | null;
+  priorRemaining: number; // 이전 ERP 계정에 남은 연차 잔여(경고만, 합산 안 함)
 };
 export type LeaveTableUnlinked = { driverId: string; name: string; rank: string | null; joinDate: string | null };
 export type LeaveTable = { year: number; rows: LeaveTableRow[]; unlinked: LeaveTableUnlinked[] };
@@ -42,9 +44,10 @@ export async function loadLeaveTable(dashIn?: DutyDashboard): Promise<LeaveTable
     supabaseAdmin
       .from("erp_leave_balances")
       .select("employee_id, annual_remaining_days, compensatory_remaining_days, annual_allocation_override_days, synced_at"),
-    supabaseAdmin.from("employee_profiles").select("driver_id, join_date, erp_employee_id, employment_status"),
+    supabaseAdmin.from("employee_profiles").select("driver_id, join_date, erp_employee_id, erp_prior_employee_ids, employment_status"),
     supabaseAdmin.from("drivers").select("id, name, rank, is_active"),
   ]);
+  const priorRem = await priorRemainingByKey(await loadErpDirectory());
   const balBy = new Map(((bal ?? []) as Record<string, unknown>[]).map((b) => [String(b.employee_id), b]));
   const usedBy = new Map(dash.people.map((p) => [p.id, p.annualUsed]));
   const drvBy = new Map(((drivers ?? []) as { id: string; name: string; rank: string | null; is_active: boolean | null }[]).map((d) => [d.id, d]));
@@ -68,12 +71,13 @@ export async function loadLeaveTable(dashIn?: DutyDashboard): Promise<LeaveTable
       remaining: num(b?.annual_remaining_days),
       compensatory: num(b?.compensatory_remaining_days),
       syncedAt: (b?.synced_at as string | null) ?? null,
+      priorRemaining: priorRem.get(id) ?? 0,
     };
   });
 
-  // ERP 미연결 — 활성·재직 직원인데 erp_employee_id 가 없음.
+  // ERP 미연결 — 활성·재직 직원인데 현재·이전 ERP 계정이 하나도 없음.
   const unlinked: LeaveTableUnlinked[] = ((profs ?? []) as Record<string, unknown>[])
-    .filter((p) => !p.erp_employee_id && p.employment_status !== "resigned")
+    .filter((p) => !p.erp_employee_id && !(Array.isArray(p.erp_prior_employee_ids) && p.erp_prior_employee_ids.length) && p.employment_status !== "resigned")
     .map((p) => drvBy.get(String(p.driver_id)))
     .filter((d): d is { id: string; name: string; rank: string | null; is_active: boolean | null } => !!d && d.is_active !== false)
     .map((d) => {

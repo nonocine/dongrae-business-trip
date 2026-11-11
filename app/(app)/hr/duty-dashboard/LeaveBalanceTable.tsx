@@ -105,7 +105,17 @@ export default function LeaveBalanceTable({ data }: { data: LeaveTable }) {
                 <td className="px-2 py-1.5 text-xs text-ink-muted">{r.joinDate ?? "-"}</td>
                 <td className="px-2 py-1.5 text-right font-mono">{fmt(r.allocation)}</td>
                 <td className="px-2 py-1.5 text-right font-mono">{fmt(r.used)}</td>
-                <td className={`px-2 py-1.5 text-right font-mono ${remainTone(r.remaining)}`}>{fmt(r.remaining)}</td>
+                <td className={`px-2 py-1.5 text-right font-mono ${remainTone(r.remaining)}`}>
+                  {fmt(r.remaining)}
+                  {r.priorRemaining > 0 && (
+                    <span
+                      className="ml-1 rounded bg-yellow-100 px-1 font-sans text-[10px] font-semibold text-yellow-900"
+                      title="ERP 발령 이관 확인 필요"
+                    >
+                      이전 계정 잔여 {fmt(r.priorRemaining)}일
+                    </span>
+                  )}
+                </td>
                 <td className="px-2 py-1.5 text-right font-mono">{fmt(r.compensatory)}</td>
                 <td className="px-2 py-1.5 text-xs text-ink-hint">{when(r.syncedAt)}</td>
               </tr>

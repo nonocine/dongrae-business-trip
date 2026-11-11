@@ -16,6 +16,7 @@ import { resolvePersonnelViewer } from "@/lib/personnelAccess";
 import { annualLeaveDatesByEmployee, erpLastSyncedAt, leaveBalancesOf, resolveErpViewer, type ErpViewer } from "@/lib/erp/view";
 import { kstTodayYmd } from "@/lib/erp/duty";
 import { getFirstYearPolicy, type FirstYearPolicy } from "@/lib/leaveSettings";
+import { getErpIdsForEmployee } from "@/lib/erp/ids";
 import {
   REPLY_DAYS,
   addDays,
@@ -142,7 +143,7 @@ export async function loadPromotionBoard(year: number): Promise<PromotionBoard> 
       supabaseAdmin.from("drivers").select("id, name, rank, is_active"),
       supabaseAdmin
         .from("employee_profiles")
-        .select("id, driver_id, employment_status, join_date, appointments, erp_employee_id"),
+        .select("id, driver_id, employment_status, join_date, appointments, erp_employee_id, erp_prior_employee_ids"),
       supabaseAdmin.from(PROMO_TABLE).select("*").eq("year", year),
       supabaseAdmin.from("leave_plan_requests").select("id, employee_id, submitted_at, total_days, plan").eq("year", year),
       erpLastSyncedAt("leaveBalances"),
@@ -197,8 +198,9 @@ export async function loadPromotionBoard(year: number): Promise<PromotionBoard> 
         : !sentDate && !plan?.submittedAt
           ? "waiting"
           : stepState({ done: !!plan?.submittedAt, due: planDue, today });
-      // 계획 대비 실제 — 이미 지난 계획일 중 ERP 연가가 없는 날.
-      const used = erpId ? leaveDates.get(erpId) : undefined;
+      // 계획 대비 실제 — 이미 지난 계획일 중 ERP 연가가 없는 날. 연가는 현재+이전 계정 합산(대표 key).
+      const personKey = getErpIdsForEmployee(p as never)[0] ?? null;
+      const used = personKey ? leaveDates.get(personKey) : undefined;
       const missedDates = (plan?.entries ?? [])
         .map((e) => e.date)
         .filter((d) => d < today && !(used?.has(d) ?? false));
@@ -219,7 +221,7 @@ export async function loadPromotionBoard(year: number): Promise<PromotionBoard> 
         joinDate,
         track,
         schedule,
-        erpLinked: !!erpId,
+        erpLinked: !!personKey,
         unusedErp,
         needed,
         stage1: s1,

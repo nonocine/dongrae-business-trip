@@ -494,9 +494,12 @@ export async function autoLinkEmployees(): Promise<ErpLinkSummary> {
   const out: ErpLinkSummary = { linked: 0, ambiguous: 0, notFound: 0 };
   const { data: profs } = await supabaseAdmin
     .from("employee_profiles")
-    .select("id, driver_id, erp_employee_id")
+    .select("id, driver_id, erp_employee_id, erp_prior_employee_ids")
     .is("erp_employee_id", null);
-  const targets = ((profs ?? []) as { id: string; driver_id: string | null }[]).filter((p) => p.driver_id);
+  // 현재·이전 계정이 모두 빈 사람만(이전 계정만 있는 사람은 관리 화면에서 직접 정리).
+  const targets = ((profs ?? []) as { id: string; driver_id: string | null; erp_prior_employee_ids: string[] | null }[]).filter(
+    (p) => p.driver_id && !(Array.isArray(p.erp_prior_employee_ids) && p.erp_prior_employee_ids.length)
+  );
   if (!targets.length) return out;
   const { data: drv } = await supabaseAdmin
     .from("drivers")
@@ -511,8 +514,14 @@ export async function autoLinkEmployees(): Promise<ErpLinkSummary> {
     .eq("is_employed", true)
     .or("deleted.is.null,deleted.eq.false");
   // 이미 다른 사람에게 연결된 ERP 계정은 후보에서 뺍니다(유니크).
-  const { data: taken } = await supabaseAdmin.from("employee_profiles").select("erp_employee_id").not("erp_employee_id", "is", null);
-  const takenSet = new Set(((taken ?? []) as { erp_employee_id: string }[]).map((t) => t.erp_employee_id));
+  // 이미 누군가의 현재·이전 계정이면 후보에서 뺍니다.
+  const { data: taken } = await supabaseAdmin.from("employee_profiles").select("erp_employee_id, erp_prior_employee_ids");
+  const takenSet = new Set(
+    ((taken ?? []) as { erp_employee_id: string | null; erp_prior_employee_ids: string[] | null }[]).flatMap((t) => [
+      ...(t.erp_employee_id ? [t.erp_employee_id] : []),
+      ...(Array.isArray(t.erp_prior_employee_ids) ? t.erp_prior_employee_ids : []),
+    ])
+  );
   const byName = new Map<string, string[]>();
   for (const e of (emps ?? []) as { employee_id: string; name: string | null }[]) {
     const k = normName(e.name);

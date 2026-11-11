@@ -5,8 +5,13 @@
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import {
+  addPriorErpAccount,
+  applyErpMerge,
   linkErpEmployee,
+  promoteErpAccount,
+  removePriorErpAccount,
   syncErpNow,
+  type ErpAccountInfo,
   type ErpLinkRow,
   type ErpStatusData,
 } from "@/app/(app)/admin/erp/actions";
@@ -51,7 +56,9 @@ export default function ErpStatusBoard({ data }: { data: ErpStatusData }) {
   const router = useRouter();
   const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
   const [pending, start] = useTransition();
-  const linked = data.links.filter((l) => l.erpEmployeeId).length;
+  const linked = data.links.filter((l) => l.erpEmployeeId || l.priors.length).length;
+  const newCount = data.links.filter((l) => l.newAccounts.length > 0).length;
+  const suggestCount = data.links.filter((l) => l.suggestion).length;
   const need = data.links.length - linked;
 
   function syncNow() {
@@ -165,9 +172,13 @@ export default function ErpStatusBoard({ data }: { data: ErpStatusData }) {
           <span className="ml-2 text-xs font-normal text-ink-muted">
             연결됨 {linked} · 연결 필요 {need}
           </span>
+          {newCount > 0 && <span className={`ml-2 ${badgeDanger}`}>새 계정 감지 {newCount}</span>}
+          {suggestCount > 0 && <span className={`ml-1 ${badgeWarning}`}>묶기 제안 {suggestCount}</span>}
         </h3>
         <p className="mb-2 text-xs text-ink-hint">
           동기화 때마다, 아직 연결 안 된 직원은 재직 중 ERP 직원과 이름이 정확히 1명 일치하면 자동 연결합니다. 이미 연결된 값은 바꾸지 않습니다.
+          팀 이동 발령으로 ERP 가 새 계정을 만들면 [이전 계정 추가]로 묶습니다 — 복무 기록은 현재+이전 계정 합산, 연차·대휴 잔여는 현재 계정 값만 씁니다.
+          묶기 제안은 자동 저장하지 않습니다.
         </p>
         <ul className="space-y-1">
           {data.links.map((l) => (
@@ -179,6 +190,12 @@ export default function ErpStatusBoard({ data }: { data: ErpStatusData }) {
   );
 }
 
+function acctLabel(a: ErpAccountInfo): string {
+  const parts = [a.id, a.department, a.employeeNo != null ? `No.${a.employeeNo}` : null].filter(Boolean);
+  const span = a.firstDuty ? `복무 ${a.firstDuty.slice(2).replaceAll("-", ".")}~${(a.lastDuty ?? "").slice(2).replaceAll("-", ".")}` : "복무 없음";
+  return `${parts.join(" · ")} (${span}${a.employed ? "" : " · 퇴직"})`;
+}
+
 function LinkLine({
   l,
   candidates,
@@ -188,76 +205,129 @@ function LinkLine({
   candidates: ErpStatusData["candidates"];
   onDone: () => void;
 }) {
-  const [open, setOpen] = useState(false);
+  const [open, setOpen] = useState<"link" | "prior" | null>(null);
   const [pick, setPick] = useState("");
   const [err, setErr] = useState<string | null>(null);
   const [pending, start] = useTransition();
+  const smBtn = "rounded border border-line px-2 py-0.5 text-xs hover:bg-surface disabled:opacity-50";
+  const act = (fn: () => Promise<{ ok: true } | { ok: false; message: string }>, confirmText?: string) => {
+    if (confirmText && !confirm(confirmText)) return;
+    start(async () => {
+      setErr(null);
+      const r = await fn();
+      if (!r.ok) return setErr(r.message);
+      setOpen(null);
+      setPick("");
+      onDone();
+    });
+  };
+  const linkedAny = !!l.erpEmployeeId || l.priors.length > 0;
+  const picker = (onPick: () => void, label: string) => (
+    <span className="flex flex-wrap items-center gap-1">
+      <select value={pick} onChange={(e) => setPick(e.target.value)} className="rounded-md border border-line bg-card px-2 py-1 text-xs" aria-label="ERP 계정">
+        <option value="">ERP 계정 선택</option>
+        {candidates.map((c) => (
+          <option key={c.employeeId} value={c.employeeId}>
+            {c.name} · {c.employeeId}
+            {c.department ? ` · ${c.department}` : ""}
+            {c.jobTitle ? ` · ${c.jobTitle}` : ""}
+          </option>
+        ))}
+      </select>
+      <button type="button" disabled={!pick || pending} className="rounded bg-navy px-2 py-1 text-xs font-semibold text-white disabled:opacity-50" onClick={onPick}>
+        {label}
+      </button>
+      <button type="button" className="text-xs text-ink-muted hover:underline" onClick={() => setOpen(null)}>
+        취소
+      </button>
+    </span>
+  );
+
   return (
-    <li className="flex flex-wrap items-center gap-2 border-b border-line/50 py-1.5 text-sm">
-      <span className="w-28 font-medium text-ink">{l.driverName}</span>
-      {l.erpEmployeeId ? (
-        <>
-          <span className={badgeSuccess}>연결됨</span>
-          <span className="text-xs text-ink-muted">
-            ERP: {l.erpName ?? "(ERP 표에 없음)"}
-            {l.erpDepartment ? ` · ${l.erpDepartment}` : ""}
+    <li className="border-b border-line/50 py-2 text-sm">
+      <div className="flex flex-wrap items-center gap-2">
+        <span className="w-28 font-medium text-ink">{l.driverName}</span>
+        {linkedAny ? <span className={badgeSuccess}>연결됨</span> : <span className={badgeWarning}>연결 필요</span>}
+        {l.newAccounts.length > 0 && (
+          <span className={badgeDanger} title="동기화로 새로 생긴 같은 이름의 ERP 계정 — 팀 이동 발령인지 확인하세요">
+            새 계정 감지 {l.newAccounts.map((a) => a.id).join(", ")}
           </span>
-        </>
-      ) : (
-        <>
-          <span className={badgeWarning}>연결 필요</span>
-          <span className="text-xs text-ink-hint">
-            {l.reason === "ambiguous" ? "같은 이름 재직자가 여럿" : "같은 이름 재직자 없음"}
-          </span>
-          {!open ? (
-            <button
-              type="button"
-              className="ml-auto rounded border border-line px-2 py-0.5 text-xs hover:bg-surface"
-              onClick={() => setOpen(true)}
-            >
+        )}
+        {!linkedAny && (
+          <span className="text-xs text-ink-hint">{l.reason === "ambiguous" ? "같은 이름 재직자가 여럿" : "같은 이름 재직자 없음"}</span>
+        )}
+        <span className="ml-auto flex flex-wrap gap-1">
+          {!l.erpEmployeeId && open !== "link" && (
+            <button type="button" className={smBtn} onClick={() => setOpen("link")}>
               ERP 계정 고르기
             </button>
-          ) : (
-            <span className="ml-auto flex flex-wrap items-center gap-1">
-              <select
-                value={pick}
-                onChange={(e) => setPick(e.target.value)}
-                className="rounded-md border border-line bg-card px-2 py-1 text-xs"
-                aria-label="ERP 계정"
-              >
-                <option value="">ERP 계정 선택</option>
-                {candidates.map((c) => (
-                  <option key={c.employeeId} value={c.employeeId}>
-                    {c.name}
-                    {c.department ? ` · ${c.department}` : ""}
-                    {c.jobTitle ? ` · ${c.jobTitle}` : ""}
-                  </option>
-                ))}
-              </select>
+          )}
+          {linkedAny && open !== "prior" && (
+            <button type="button" className={smBtn} onClick={() => setOpen("prior")}>
+              이전 계정 추가
+            </button>
+          )}
+        </span>
+      </div>
+
+      {(l.current || l.priors.length > 0) && (
+        <ul className="mt-1 space-y-0.5 pl-2 text-xs">
+          {l.current && (
+            <li className="text-ink-body">
+              <span className="mr-1 rounded bg-navy-soft px-1 text-[10px] font-semibold text-navy">현재</span>
+              {acctLabel(l.current)}
+            </li>
+          )}
+          {l.priors.map((a) => (
+            <li key={a.id} className="flex flex-wrap items-center gap-1 text-ink-muted">
+              <span className="rounded bg-surface px-1 text-[10px] font-semibold">이전</span>
+              {acctLabel(a)}
               <button
                 type="button"
-                disabled={!pick || pending}
-                className="rounded bg-navy px-2 py-1 text-xs font-semibold text-white disabled:opacity-50"
-                onClick={() =>
-                  start(async () => {
-                    setErr(null);
-                    const r = await linkErpEmployee(l.profileId, pick);
-                    if (!r.ok) return setErr(r.message);
-                    setOpen(false);
-                    onDone();
-                  })
-                }
+                className="ml-1 text-[11px] text-navy hover:underline disabled:opacity-50"
+                disabled={pending}
+                onClick={() => act(() => promoteErpAccount(l.profileId, a.id), `${a.id} 를 현재 계정으로 바꿀까요? (지금 현재 계정은 이전 계정으로 옮깁니다)`)}
               >
-                연결
+                현재 계정으로 바꾸기
               </button>
-              <button type="button" className="text-xs text-ink-muted hover:underline" onClick={() => setOpen(false)}>
-                취소
+              <button
+                type="button"
+                className="text-[11px] text-stamp hover:underline disabled:opacity-50"
+                disabled={pending}
+                onClick={() => act(() => removePriorErpAccount(l.profileId, a.id), `이전 계정 ${a.id} 를 뺄까요?`)}
+              >
+                빼기
               </button>
-            </span>
-          )}
-          {err && <span className="w-full text-xs text-stamp">{err}</span>}
-        </>
+            </li>
+          ))}
+        </ul>
       )}
+
+      {l.suggestion && (
+        <div className="mt-1 flex flex-wrap items-center gap-2 rounded-md border border-warning/50 bg-warning-soft/60 px-2 py-1 text-xs">
+          <span className="font-semibold text-warning">팀 이동으로 보임 — 묶기</span>
+          <span className="text-ink-body">
+            현재 {l.suggestion.currentId} · 이전 {l.suggestion.priorIds.join(", ")} ({l.suggestion.reason}, 복무 날짜 겹치지 않음)
+          </span>
+          <button
+            type="button"
+            className="ml-auto rounded bg-navy px-2 py-0.5 font-semibold text-white disabled:opacity-50"
+            disabled={pending}
+            onClick={() =>
+              act(
+                () => applyErpMerge(l.profileId, l.suggestion!.currentId, l.suggestion!.priorIds),
+                `${l.driverName}: 현재 ${l.suggestion!.currentId}, 이전 ${l.suggestion!.priorIds.join(", ")} 로 묶을까요?`
+              )
+            }
+          >
+            묶기
+          </button>
+        </div>
+      )}
+
+      {open === "link" && <div className="mt-1">{picker(() => act(() => linkErpEmployee(l.profileId, pick)), "연결")}</div>}
+      {open === "prior" && <div className="mt-1">{picker(() => act(() => addPriorErpAccount(l.profileId, pick)), "이전 계정으로 추가")}</div>}
+      {err && <p className="mt-1 text-xs text-stamp">{err}</p>}
     </li>
   );
 }

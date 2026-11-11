@@ -4,7 +4,9 @@ import "server-only";
 // ERP 복제 데이터 읽기(3단계 직원 편의 기능) — erp_* 표만 읽습니다(ERP 호출·쓰기 없음).
 //   * removed_at 칸이 있는 표는 removed_at is null 만.
 //   * 회계(erp_transactions·erp_expenditures)는 여기서 읽지 않습니다.
-//   * 직원 이름은 erp_duties.employee_ids → erp_employees.name(재직자만).
+//   * 직원 이름은 erp_duties.employee_ids → lib/erp/identity(ERP 계정 → 직원 역방향 조회, 재직자만).
+//     직원 1명이 ERP 계정 여러 개(현재+이전 — 팀 이동 발령)일 수 있어 복무는 모든 계정 합산,
+//     연차·대휴 잔여는 현재 계정 값만 씁니다.
 // =====================================================================
 
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
@@ -29,29 +31,23 @@ import {
   addDaysYmd,
 } from "@/lib/erp/duty";
 import { listRolesForDriver } from "@/lib/employeeRolesServer";
+import { erpIdsOfDriver, loadErpDirectory } from "@/lib/erp/identity";
 
 // --- 보는 사람 -------------------------------------------------------------
 export type ErpViewer = {
   driverId: string | null;
   name: string;
   isM0: boolean;
-  erpEmployeeId: string | null;
+  erpEmployeeId: string | null; // 현재 계정(잔여 조회용)
+  erpIds: string[]; // 현재 + 이전 계정(복무 합산용)
 };
 
 export async function resolveErpViewer(): Promise<ErpViewer | null> {
   const g = await getGoogleSession();
   const ctx = await resolveAuthContext(g, g ? null : await getSession());
   if (!ctx) return null;
-  let erpEmployeeId: string | null = null;
-  if (ctx.driverId) {
-    const { data } = await supabaseAdmin
-      .from("employee_profiles")
-      .select("erp_employee_id")
-      .eq("driver_id", ctx.driverId)
-      .maybeSingle();
-    erpEmployeeId = (data as { erp_employee_id?: string | null } | null)?.erp_employee_id ?? null;
-  }
-  return { driverId: ctx.driverId, name: ctx.name, isM0: ctxIsM0(ctx), erpEmployeeId };
+  const ids = await erpIdsOfDriver(ctx.driverId);
+  return { driverId: ctx.driverId, name: ctx.name, isM0: ctxIsM0(ctx), erpEmployeeId: ids.current, erpIds: ids.all };
 }
 
 // --- 마지막 동기화(해당 API 의 최근 성공 finished_at) -----------------------------
@@ -65,18 +61,6 @@ export async function erpLastSyncedAt(api: string): Promise<string | null> {
     .limit(1)
     .maybeSingle();
   return (data as { finished_at?: string | null } | null)?.finished_at ?? null;
-}
-
-// 재직 중 ERP 직원 이름.
-export async function employedErpNames(): Promise<Map<string, string>> {
-  const { data } = await supabaseAdmin
-    .from("erp_employees")
-    .select("employee_id, name, is_employed, deleted")
-    .eq("is_employed", true);
-  const m = new Map<string, string>();
-  for (const e of (data ?? []) as { employee_id: string; name: string | null; deleted: boolean | null }[])
-    if (e.deleted !== true && e.name) m.set(e.employee_id, e.name);
-  return m;
 }
 
 // --- 복무 ---------------------------------------------------------------
@@ -95,7 +79,7 @@ export type ErpDutyRow = {
 export async function loadDutiesOverlapping(
   start: string,
   end: string,
-  opts: { employeeId?: string } = {}
+  opts: { employeeIds?: string[] } = {}
 ): Promise<ErpDutyRow[]> {
   const lo = kstDayStartUtc(start);
   const hi = kstDayEndUtc(end);
@@ -108,7 +92,11 @@ export async function loadDutiesOverlapping(
     .or(`end_at.gte."${lo}",end_at.is.null`)
     .order("start_at", { ascending: true })
     .limit(2000);
-  if (opts.employeeId) q = q.contains("employee_ids", [opts.employeeId]);
+  // 직원 1명의 계정 여러 개 — 하나라도 들어 있으면.
+  if (opts.employeeIds) {
+    if (!opts.employeeIds.length) return [];
+    q = q.overlaps("employee_ids", opts.employeeIds);
+  }
   const { data, error } = await q;
   if (error) throw new Error(error.message);
   return ((data ?? []) as ErpDutyRow[]).filter((d) => d.end_at != null || (d.start_at ?? "") >= lo);
@@ -125,15 +113,15 @@ export type DutyBoardItem = {
 export type DutyBoardDay = { date: string; items: DutyBoardItem[] };
 
 export async function dutyBoard(start: string, end: string, isM0: boolean): Promise<DutyBoardDay[]> {
-  const [duties, names] = await Promise.all([loadDutiesOverlapping(start, end), employedErpNames()]);
+  const [duties, dir] = await Promise.all([loadDutiesOverlapping(start, end), loadErpDirectory()]);
   return eachDay(start, end).map((date) => {
     const items: DutyBoardItem[] = [];
     for (const d of duties) {
       if (!dutyCoversDay(d.start_at, d.end_at, date)) continue;
       const type = dutyDisplayType(d.type_name, d.declared_amount, isM0);
       if (!type) continue;
-      const who = d.employee_ids.map((id) => names.get(id)).filter((n): n is string => !!n);
-      if (!who.length) continue; // 재직자만
+      const who = dir.resolve(d.employee_ids).map((p) => p.name);
+      if (!who.length) continue; // 재직자만(같은 사람 한 번)
       items.push({
         dutyId: d.duty_id,
         names: who,
@@ -151,11 +139,11 @@ export async function dutyBoard(start: string, end: string, isM0: boolean): Prom
 // 오늘 부재 인원(재직자, 휴근·초과·야근 제외 유형) — 홈 카드.
 export async function countAbsentToday(): Promise<number> {
   const today = kstTodayYmd();
-  const [duties, names] = await Promise.all([loadDutiesOverlapping(today, today), employedErpNames()]);
+  const [duties, dir] = await Promise.all([loadDutiesOverlapping(today, today), loadErpDirectory()]);
   const who = new Set<string>();
   for (const d of duties) {
     if (!isAbsenceType(d.type_name) || !dutyCoversDay(d.start_at, d.end_at, today)) continue;
-    for (const id of d.employee_ids) if (names.has(id)) who.add(id);
+    for (const p of dir.resolve(d.employee_ids)) who.add(p.key);
   }
   return who.size;
 }
@@ -187,20 +175,10 @@ export async function leaveBalancesOf(employeeIds: string[]): Promise<Map<string
 // =====================================================================
 export type ErpPerson = { name: string; department: string | null };
 
+// 재직자(직원 1명 = 한 줄). key = 현재 계정 id(연결 안 된 ERP 계정은 그 계정 id) — 잔여 조회 키와 같음.
 export async function employedErpEmployees(): Promise<Map<string, ErpPerson>> {
-  const { data } = await supabaseAdmin
-    .from("erp_employees")
-    .select("employee_id, name, department_name, deleted")
-    .eq("is_employed", true);
-  const m = new Map<string, ErpPerson>();
-  for (const e of (data ?? []) as {
-    employee_id: string;
-    name: string | null;
-    department_name: string | null;
-    deleted: boolean | null;
-  }[])
-    if (e.deleted !== true && e.name) m.set(e.employee_id, { name: e.name, department: e.department_name });
-  return m;
+  const dir = await loadErpDirectory();
+  return new Map(dir.people.map((p) => [p.key, { name: p.name, department: p.department }]));
 }
 
 export type CalendarDuty = {
@@ -232,13 +210,14 @@ function toCalendarDuty(d: ErpDutyRow, type: string, people: ErpPerson[]): Calen
 }
 
 export async function dutyCalendarItems(start: string, end: string, isM0: boolean): Promise<CalendarDuty[]> {
-  const [duties, people] = await Promise.all([loadDutiesOverlapping(start, end), employedErpEmployees()]);
+  const [duties, dir] = await Promise.all([loadDutiesOverlapping(start, end), loadErpDirectory()]);
   const out: CalendarDuty[] = [];
   for (const d of duties) {
     if (!d.start_at) continue;
     const type = dutyDisplayType(d.type_name, d.declared_amount, isM0);
     if (!type) continue;
-    const who = d.employee_ids.map((id) => people.get(id)).filter((p): p is ErpPerson => !!p);
+    // 같은 사람의 여러 계정은 한 번만.
+    const who: ErpPerson[] = dir.resolve(d.employee_ids).map((p) => ({ name: p.name, department: p.department }));
     if (!who.length) continue; // 재직자만
     out.push(toCalendarDuty(d, type, who));
   }
@@ -246,8 +225,13 @@ export async function dutyCalendarItems(start: string, end: string, isM0: boolea
 }
 
 // 올해 연가 사용(일) — ERP 사용 기록(진행·완료) 기준, 시작일의 달로 묶음.
-async function annualUsedByMonth(year: number, employeeId?: string): Promise<Map<string, number[]>> {
-  const duties = await loadDutiesOverlapping(`${year}-01-01`, `${year}-12-31`, employeeId ? { employeeId } : {});
+//   직원(대표 key)별 — 현재+이전 계정 합산. employeeIds 를 주면 그 계정들의 합을 key "self" 로.
+async function annualUsedByMonth(year: number, employeeIds?: string[]): Promise<Map<string, number[]>> {
+  const [duties, dir] = await Promise.all([
+    loadDutiesOverlapping(`${year}-01-01`, `${year}-12-31`, employeeIds ? { employeeIds } : {}),
+    employeeIds ? Promise.resolve(null) : loadErpDirectory(),
+  ]);
+  const mine = new Set(employeeIds ?? []);
   const m = new Map<string, number[]>();
   for (const d of duties) {
     if ((d.type_name ?? "").trim() !== "연가" || !d.start_at) continue;
@@ -255,11 +239,19 @@ async function annualUsedByMonth(year: number, employeeId?: string): Promise<Map
     if (ymd.slice(0, 4) !== String(year)) continue;
     const month = Number(ymd.slice(5, 7)) - 1;
     const amt = d.declared_amount == null ? 1 : Number(d.declared_amount);
+    const keys = new Set<string>();
     for (const id of d.employee_ids) {
-      if (employeeId && id !== employeeId) continue;
-      const arr = m.get(id) ?? Array<number>(12).fill(0);
+      if (employeeIds) {
+        if (mine.has(id)) keys.add("self");
+      } else {
+        const k = dir!.keyOf(id);
+        if (k) keys.add(k);
+      }
+    }
+    for (const k of keys) {
+      const arr = m.get(k) ?? Array<number>(12).fill(0);
       arr[month] += amt;
-      m.set(id, arr);
+      m.set(k, arr);
     }
   }
   return m;
@@ -278,12 +270,15 @@ export type MyErpLeave = {
   syncedDuties: string | null;
 };
 
-export async function myErpLeave(erpEmployeeId: string | null): Promise<MyErpLeave> {
+// ids: 현재 계정(잔여) + 모든 계정(복무 합산). 예전처럼 문자열 하나만 주면 그 계정만.
+export async function myErpLeave(ids: string | null | { current: string | null; all: string[] }): Promise<MyErpLeave> {
+  const erpEmployeeId = typeof ids === "string" || ids == null ? ids : ids.current;
+  const allIds = typeof ids === "string" ? [ids] : ids == null ? [] : ids.all;
   const today = kstTodayYmd();
   const year = Number(today.slice(0, 4));
   const [syncedLeave, syncedDuties] = await Promise.all([erpLastSyncedAt("leaveBalances"), erpLastSyncedAt("duties")]);
   const base: MyErpLeave = {
-    linked: !!erpEmployeeId,
+    linked: allIds.length > 0,
     year,
     annualRemaining: null,
     compensatoryRemaining: null,
@@ -294,15 +289,15 @@ export async function myErpLeave(erpEmployeeId: string | null): Promise<MyErpLea
     syncedLeave,
     syncedDuties,
   };
-  if (!erpEmployeeId) return base;
+  if (!allIds.length) return base;
   const mr = monthRange(today);
   const [bal, used, duties] = await Promise.all([
-    leaveBalancesOf([erpEmployeeId]),
-    annualUsedByMonth(year, erpEmployeeId),
-    loadDutiesOverlapping(mr.start, mr.end, { employeeId: erpEmployeeId }),
+    erpEmployeeId ? leaveBalancesOf([erpEmployeeId]) : Promise.resolve(new Map<string, LeaveBalance>()),
+    annualUsedByMonth(year, allIds),
+    loadDutiesOverlapping(mr.start, mr.end, { employeeIds: allIds }),
   ]);
-  const b = bal.get(erpEmployeeId);
-  const monthly = used.get(erpEmployeeId) ?? Array<number>(12).fill(0);
+  const b = erpEmployeeId ? bal.get(erpEmployeeId) : undefined; // 잔여는 현재 계정만
+  const monthly = used.get("self") ?? Array<number>(12).fill(0);
   return {
     ...base,
     annualRemaining: b?.annual ?? null,
@@ -344,15 +339,16 @@ export async function dutyDashboardData(): Promise<DutyDashboard> {
   const today = kstTodayYmd();
   const year = Number(today.slice(0, 4));
   const month = today.slice(0, 7);
-  const [duties, people, todayAbsent, syncedLeave, syncedDuties, used] = await Promise.all([
+  const [duties, dir, todayAbsent, syncedLeave, syncedDuties, used] = await Promise.all([
     loadDutiesOverlapping(`${year}-01-01`, `${year}-12-31`),
-    employedErpEmployees(),
+    loadErpDirectory(),
     countAbsentToday(),
     erpLastSyncedAt("leaveBalances"),
     erpLastSyncedAt("duties"),
     annualUsedByMonth(year),
   ]);
-  const bal = await leaveBalancesOf([...people.keys()]);
+  const people = new Map(dir.people.map((p) => [p.key, { name: p.name, department: p.department }]));
+  const bal = await leaveBalancesOf([...people.keys()]); // key = 현재 계정 — 잔여는 현재 계정만
   const mr = monthRange(today);
 
   let monthTrips = 0;
@@ -375,10 +371,9 @@ export async function dutyDashboardData(): Promise<DutyDashboard> {
       const h = Number(d.declared_amount ?? 0) || 0;
       const inMonth = s.slice(0, 7) === month;
       if (inMonth) monthOvertimeHours += h;
-      for (const id of d.employee_ids) {
-        if (!people.has(id)) continue;
-        otYear.set(id, (otYear.get(id) ?? 0) + h);
-        if (inMonth) otMonth.set(id, (otMonth.get(id) ?? 0) + h);
+      for (const p of dir.resolve(d.employee_ids)) {
+        otYear.set(p.key, (otYear.get(p.key) ?? 0) + h);
+        if (inMonth) otMonth.set(p.key, (otMonth.get(p.key) ?? 0) + h);
       }
     }
   }
@@ -463,12 +458,14 @@ function recordKind(type: string): DutyRecordKind | null {
   return null;
 }
 
-export async function dutyRecordOf(erpEmployeeId: string | null, year: number): Promise<DutyRecord> {
+// erpIds: 그 직원의 모든 ERP 계정(현재+이전) — 합산.
+export async function dutyRecordOf(erpIds: string[] | string | null, year: number): Promise<DutyRecord> {
+  const ids = erpIds == null ? [] : typeof erpIds === "string" ? [erpIds] : erpIds;
   const empty = () => ({ rows: [] as DutyRecordRow[], days: 0, hours: 0 });
   const groups: DutyRecord["groups"] = { annual: empty(), comp: empty(), publicSick: empty(), field: empty() };
   const syncedAt = await erpLastSyncedAt("duties");
-  if (!erpEmployeeId) return { year, linked: false, groups, syncedAt };
-  const duties = await loadDutiesOverlapping(`${year}-01-01`, `${year}-12-31`, { employeeId: erpEmployeeId });
+  if (!ids.length) return { year, linked: false, groups, syncedAt };
+  const duties = await loadDutiesOverlapping(`${year}-01-01`, `${year}-12-31`, { employeeIds: ids });
   const { data: units } = await supabaseAdmin
     .from("erp_duties")
     .select("duty_id, amount_unit")
@@ -514,8 +511,9 @@ export async function dutyRecordOf(erpEmployeeId: string | null, year: number): 
 }
 
 // 연가 사용 날짜(그 해) — 연차 촉진의 '계획 대비 실제' 대조용. 여러 날이면 하루씩 펼칩니다.
+//   key = 직원 대표 key(현재 계정 id) — 이전 계정의 연가도 합산합니다.
 export async function annualLeaveDatesByEmployee(year: number): Promise<Map<string, Map<string, number>>> {
-  const duties = await loadDutiesOverlapping(`${year}-01-01`, `${year}-12-31`);
+  const [duties, dir] = await Promise.all([loadDutiesOverlapping(`${year}-01-01`, `${year}-12-31`), loadErpDirectory()]);
   const out = new Map<string, Map<string, number>>();
   for (const d of duties) {
     if ((d.type_name ?? "").trim() !== "연가" || !d.start_at) continue;
@@ -525,10 +523,10 @@ export async function annualLeaveDatesByEmployee(year: number): Promise<Map<stri
     const amt = d.declared_amount == null ? null : Number(d.declared_amount);
     for (let day = s; day <= e; day = addDaysYmd(day, 1)) {
       const v = s === e && amt != null && amt > 0 ? amt : 1;
-      for (const id of d.employee_ids) {
-        const m = out.get(id) ?? new Map<string, number>();
+      for (const p of dir.resolve(d.employee_ids)) {
+        const m = out.get(p.key) ?? new Map<string, number>();
         m.set(day, (m.get(day) ?? 0) + v);
-        out.set(id, m);
+        out.set(p.key, m);
       }
     }
   }

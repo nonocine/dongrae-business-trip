@@ -22,6 +22,7 @@ import { erpLastSyncedAt, leaveBalancesOf, loadDutiesOverlapping, resolveErpView
 import { kstTodayYmd, kstYmdOf } from "@/lib/erp/duty";
 import { isFirstYear, noticeCompleted } from "@/lib/leavePromotion";
 import { isPayoutStaffVisible } from "@/lib/leaveSettings";
+import { getErpIdsForEmployee, priorErpIds } from "@/lib/erp/ids";
 import {
   PROMOTED_EXCLUDE_REASON,
   calcPayout,
@@ -57,7 +58,9 @@ export type CalcSnapshot = {
   basis_date: string; // 산정 기준일(만든 날)
   erp_synced_at: string | null;
   erp_remaining: number | null;
-  planned_days: number; // 12/31 까지 결재 진행 중 연가(예정 사용) — 자동 차감하지 않음
+  planned_days: number; // 12/31 까지 결재 진행 중 연가(예정 사용, 현재+이전 계정 합산) — 자동 차감하지 않음
+  // 이전 ERP 계정(팀 이동 발령)에 남은 연차 잔여 — 경고 표시만, 자동 합산하지 않음("ERP 발령 이관 확인 필요").
+  prior_remaining?: number;
   planned_deducted: boolean;
   contract: { id: string; contract_date: string | null; segment: string | null } | null;
   items: WageItemValue[];
@@ -121,7 +124,9 @@ export async function planPayoutLines(year: number, basisIn?: unknown): Promise<
   const today = kstTodayYmd();
   const [{ data: drivers }, { data: profs }, { data: notices }, { data: contracts }, synced] = await Promise.all([
     supabaseAdmin.from("drivers").select("id, name, is_active"),
-    supabaseAdmin.from("employee_profiles").select("id, driver_id, employment_status, join_date, appointments, erp_employee_id"),
+    supabaseAdmin
+      .from("employee_profiles")
+      .select("id, driver_id, employment_status, join_date, appointments, erp_employee_id, erp_prior_employee_ids"),
     supabaseAdmin
       .from("leave_promotion_notices")
       .select("employee_id, stage, delivery_method, signed_receipt_path, erp_document_id")
@@ -138,8 +143,13 @@ export async function planPayoutLines(year: number, basisIn?: unknown): Promise<
     const d = drv.get(String(p.driver_id));
     return d && d.is_active !== false && p.employment_status !== "resigned";
   });
+  // 잔여는 현재 계정 값만. 이전 계정 잔여는 따로 읽어 경고로만 씁니다.
   const erpIds = people.map((p) => p.erp_employee_id).filter((v): v is string => typeof v === "string" && !!v);
-  const bal = await leaveBalancesOf(erpIds);
+  const priorIds = people.flatMap((p) => priorErpIds(p as never));
+  const [bal, priorBal] = await Promise.all([leaveBalancesOf(erpIds), leaveBalancesOf(priorIds)]);
+  // ERP 계정 → 직원(profile id) — 예정 사용은 현재+이전 계정 합산.
+  const ownerOf = new Map<string, string>();
+  for (const p of people) for (const id of getErpIdsForEmployee(p as never)) ownerOf.set(id, String(p.id));
 
   // 12/31 까지 결재 진행 중인 연가(예정 사용) — 오늘~연말, 진행(1)만.
   const planned = new Map<string, number>();
@@ -150,7 +160,8 @@ export async function planPayoutLines(year: number, basisIn?: unknown): Promise<
       const s = kstYmdOf(d.start_at);
       if (s < today || s > `${year}-12-31`) continue;
       const amt = d.declared_amount == null ? 1 : Number(d.declared_amount);
-      for (const id of d.employee_ids) planned.set(id, (planned.get(id) ?? 0) + amt);
+      const owners = new Set(d.employee_ids.map((id) => ownerOf.get(id)).filter((v): v is string => !!v));
+      for (const o of owners) planned.set(o, (planned.get(o) ?? 0) + amt);
     }
   }
 
@@ -199,7 +210,8 @@ export async function planPayoutLines(year: number, basisIn?: unknown): Promise<
       basis_date: today,
       erp_synced_at: synced,
       erp_remaining: remaining,
-      planned_days: erpId ? planned.get(erpId) ?? 0 : 0,
+      planned_days: planned.get(profileId) ?? 0,
+      prior_remaining: priorErpIds(p as never).reduce((a, id) => a + Math.max(0, priorBal.get(id)?.annual ?? 0), 0),
       planned_deducted: false,
       contract: contract ? { id: String(contract.id), contract_date: (contract.contract_date as string | null) ?? null, segment } : null,
       items,
