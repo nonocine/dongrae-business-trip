@@ -13,6 +13,7 @@ import {
 import ContractEditor from "@/app/(app)/hr/saems/contracts/ContractEditor";
 import { STATUS_BADGE } from "@/app/(app)/hr/saems/contracts/ContractsManager";
 import LinkProgramDialog, { programLabel } from "@/app/(app)/hr/saems/contracts/LinkProgramDialog";
+import ContractLinkCopyButton from "@/app/(app)/hr/saems/contracts/ContractLinkCopyButton";
 import {
   INSTRUCTOR_CONTRACT_STATUS_LABEL,
   SIGNING_METHOD_LABEL,
@@ -22,7 +23,7 @@ import { badgeDanger, badgeWarning, cardCls, noticeError, noticeSuccess } from "
 
 const smBtn = "rounded border border-line px-2 py-0.5 text-xs hover:bg-surface";
 
-type Overview = { programs: InstructorProgramContracts[]; unlinked: InstructorContractRow[] };
+type Overview = { programs: InstructorProgramContracts[]; unlinked: InstructorContractRow[]; saemBase: string };
 
 export default function InstructorContractsSection({ instructorId }: { instructorId: string }) {
   const [data, setData] = useState<Overview | null>(null);
@@ -41,7 +42,8 @@ export default function InstructorContractsSection({ instructorId }: { instructo
     };
   }, [instructorId]);
 
-  const noContract = data?.programs.filter((p) => !p.hasActive).length ?? 0;
+  // 지난 학기 강좌는 계약이 없어도 '계약서 없음'으로 세지 않습니다.
+  const noContract = data?.programs.filter((p) => !p.hasActive && !p.program.termEnded).length ?? 0;
   const unsigned = data?.programs.filter((p) => p.contracts.some((c) => c.status === "sent")).length ?? 0;
 
   return (
@@ -73,7 +75,8 @@ export default function InstructorContractsSection({ instructorId }: { instructo
               <div className="flex flex-wrap items-center gap-2 text-sm">
                 <span className="font-semibold text-ink">{programLabel(p)}</span>
                 {p.termPeriod && <span className="text-xs text-ink-hint">{p.termPeriod}</span>}
-                {!hasActive && (
+                {p.termEnded && <span className="text-[11px] text-ink-hint">지난 학기</span>}
+                {!hasActive && !p.termEnded && (
                   <>
                     <span className={badgeDanger}>계약서 없음</span>
                     <button
@@ -89,7 +92,7 @@ export default function InstructorContractsSection({ instructorId }: { instructo
               {contracts.length > 0 && (
                 <ul className="mt-1 space-y-1">
                   {contracts.map((c) => (
-                    <ContractLine key={c.id} c={c} onOpen={() => setEditing({ contractId: c.id })} />
+                    <ContractLine key={c.id} c={c} saemBase={data.saemBase} onOpen={() => setEditing({ contractId: c.id })} />
                   ))}
                 </ul>
               )}
@@ -106,7 +109,7 @@ export default function InstructorContractsSection({ instructorId }: { instructo
                 )}
               </div>
               <ul className="mt-1">
-                <ContractLine c={c} onOpen={() => setEditing({ contractId: c.id })} />
+                <ContractLine c={c} saemBase={data.saemBase} onOpen={() => setEditing({ contractId: c.id })} />
               </ul>
             </li>
           ))}
@@ -150,7 +153,7 @@ export default function InstructorContractsSection({ instructorId }: { instructo
 }
 
 // 한 줄: 계약번호 · 학기 · 계약기간 · 방식 · 상태 · [내용]
-function ContractLine({ c, onOpen }: { c: InstructorContractRow; onOpen: () => void }) {
+function ContractLine({ c, saemBase, onOpen }: { c: InstructorContractRow; saemBase: string; onOpen: () => void }) {
   return (
     <li className={`flex flex-wrap items-center gap-2 text-xs ${c.status === "void" ? "opacity-60" : ""}`}>
       <span className="font-mono text-ink-muted">{c.contract_no}</span>
@@ -160,7 +163,12 @@ function ContractLine({ c, onOpen }: { c: InstructorContractRow; onOpen: () => v
       <span className={STATUS_BADGE[c.status]} title={c.void_reason ? `사유: ${c.void_reason}` : undefined}>
         {INSTRUCTOR_CONTRACT_STATUS_LABEL[c.status]}
       </span>
-      <button type="button" className={`${smBtn} ml-auto`} onClick={onOpen}>
+      {c.status === "sent" && (
+        <span className="ml-auto">
+          <ContractLinkCopyButton contractId={c.id} saemBase={saemBase} />
+        </span>
+      )}
+      <button type="button" className={`${smBtn} ${c.status === "sent" ? "" : "ml-auto"}`} onClick={onOpen}>
         {c.status === "draft" ? "이어 쓰기" : "내용"}
       </button>
     </li>

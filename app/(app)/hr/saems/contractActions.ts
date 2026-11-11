@@ -236,6 +236,8 @@ export type ProgramRef = {
   projectName: string | null;
   termName: string | null;
   termPeriod: string; // 학기 기간(한국어 날짜)
+  // 지난 학기(종료일 < 오늘, 서울 기준) — '계약서 없음' 집계·[계약서 만들기]에서 뺍니다.
+  termEnded: boolean;
   instructorId: string;
   instructorName: string;
 };
@@ -268,6 +270,7 @@ async function hirePrograms(filter: { projectId?: string; termId?: string; instr
   const iIds = [...new Set(rows.map((p) => p.instructor_id))];
   const { data: ins } = await supabaseAdmin.from("saem_instructors").select("id, name").in("id", iIds);
   const iMap = new Map(((ins ?? []) as { id: string; name: string }[]).map((i) => [i.id, i.name]));
+  const today = kstTodayYmd();
   return rows
     .map((p) => {
       const t = tMap.get(p.term_id);
@@ -280,6 +283,7 @@ async function hirePrograms(filter: { projectId?: string; termId?: string; instr
           t && (t.start_date || t.end_date) ? `${koreanDate(t.start_date) || "?"} ~ ${koreanDate(t.end_date) || "?"}` : "",
         instructorId: p.instructor_id,
         instructorName: iMap.get(p.instructor_id) ?? "",
+        termEnded: !!t?.end_date && t.end_date < today,
         _start: t?.start_date ?? "",
       };
     })
@@ -312,7 +316,8 @@ export async function getContractSummary(filter: { projectId?: string; termId?: 
   await requireSaemAccess();
   const progs = await hirePrograms(filter);
   const pairs = await activePairs(progs.map((p) => p.programId));
-  const noContract = progs.filter((p) => !pairs.has(`${p.instructorId}:${p.programId}`));
+  // 지난 학기 강좌는 이제 계약할 일이 없으므로 '계약서 없음'에서 뺍니다.
+  const noContract = progs.filter((p) => !p.termEnded && !pairs.has(`${p.instructorId}:${p.programId}`));
 
   let q = supabaseAdmin.from(T_CON).select("id, program_id").eq("status", "sent");
   if (filter.projectId) q = q.eq("project_id", filter.projectId);
@@ -332,6 +337,7 @@ export type InstructorProgramContracts = {
 export async function getInstructorContractOverview(instructorId: string): Promise<{
   programs: InstructorProgramContracts[];
   unlinked: InstructorContractRow[];
+  saemBase: string; // [링크 복사]용
 }> {
   await requireSaemAccess();
   const [progs, rows] = await Promise.all([
@@ -361,6 +367,7 @@ export async function getInstructorContractOverview(instructorId: string): Promi
         projectName: c.project_name,
         termName: c.term_name,
         termPeriod: "",
+        termEnded: false,
         instructorId,
         instructorName: c.instructor_name,
       },
@@ -368,7 +375,7 @@ export async function getInstructorContractOverview(instructorId: string): Promi
       hasActive: contracts.some((x) => x.status !== "void"),
     });
   }
-  return { programs, unlinked: rows.filter((r) => !r.program_id) };
+  return { programs, unlinked: rows.filter((r) => !r.program_id), saemBase: saemAppUrl() };
 }
 
 // [강좌 연결] 후보 — 그 강사가 맡은 강좌(채용함) + 이미 유효 계약이 있는지.
