@@ -26,6 +26,7 @@ import { applyRetention, retentionIsLive, retentionNote } from "@/lib/backupRete
 //    — 키를 settings 등 테이블에 넣지 마세요.
 // ⑤ 2026-10 관장 지시 — 동래방카(bk_*) 3개, 파일 백업 진행 기록 2개
 // ⑥ 2026-10 관장 지시 — 동래방카 콘텐츠(공지·알림장·급식·연간일정) 5개
+// ⑦ 2026-11 백업 점검(관장 지시) — 연차정산·재무·강사계약·ERP 사본 20개
 // 백업하지 않는 public 테이블은 아래 BACKUP_EXCLUDED 에 이유와 함께 적습니다.
 //   둘 다에 없는 테이블이 생기면 백업 Cron 이 관장에게 DM(lib/backupCoverage).
 export const BACKUP_TABLES: readonly string[] = [
@@ -133,6 +134,30 @@ export const BACKUP_TABLES: readonly string[] = [
   // --- 파일 백업(lib/fileBackupEngine) 진행 기록 ---
   "file_backup_items", // ⑤ 원본 파일 ↔ Drive 파일
   "file_backup_folders", // ⑤ 원본 폴더 ↔ Drive 폴더
+  // --- 연차 사용촉진·미사용 수당 정산 ---
+  "leave_promotion_notices", // ⑦ 연차 사용촉진 통지
+  "leave_payout_runs", // ⑦ 연차수당 정산 회차
+  "leave_payout_lines", // ⑦ 연차수당 정산 직원별 줄
+  // --- 재무(예산·거래 검토) ---
+  "finance_budget_versions", // ⑦
+  "finance_budget_lines", // ⑦
+  "finance_tx_reviews", // ⑦
+  // --- 강사 계약 ---
+  "instructor_contract_templates", // ⑦
+  "instructor_contracts", // ⑦ 주민번호는 마스킹 사본(rrn_mask_snapshot)만
+  "instructor_contract_logs", // ⑦
+  "instructor_contract_programs", // ⑦
+  // --- ERP 동기화 사본(ERP 장애·해지 대비 보관) ---
+  "erp_sync_runs", // ⑦
+  "erp_employees", // ⑦
+  "erp_duties", // ⑦
+  "erp_leave_balances", // ⑦
+  "erp_schedules", // ⑦
+  "erp_rentals", // ⑦
+  "erp_documents", // ⑦
+  "erp_code_snapshots", // ⑦
+  "erp_expenditures", // ⑦ 계좌는 끝 4자리만
+  "erp_transactions", // ⑦ 계좌는 별칭·끝 4자리만
 ];
 
 // --- 백업 제외 목록 ---------------------------------------------------
