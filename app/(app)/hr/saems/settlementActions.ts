@@ -5,7 +5,7 @@ import { supabaseAdmin } from "@/lib/supabaseAdmin";
 import { requireSaemAccess } from "@/lib/saemAccess";
 // 주민번호 복호화 — getPayrollLedgerData(서버 전용)에서만 씁니다.
 import { decryptSecret } from "@/lib/credentialCrypto";
-import { bankAccountsForExport } from "@/lib/sensitiveServer";
+import { bankAccountsForExport, logInstructorRrnExport } from "@/lib/sensitiveServer";
 import { accountMaskDisplay } from "@/lib/sensitiveMask";
 import {
   calcInstructorSettlement,
@@ -1182,10 +1182,16 @@ export async function getPayrollLedgerData(
     );
 
   // 주민번호 — 강사 단위로 한 번만 복호화합니다. 실패는 이 강사만 빈칸.
-  //   ⚠️ 평문은 여기서 만들어 buildLedgerRows 로 넘기고 끝입니다(로그 없음).
+  //   ⚠️ 평문은 여기서 만들어 buildLedgerRows 로 넘기고 끝입니다(콘솔 로그 없음).
+  //   복호화 전에 열람 기록 1건(field='resident_number', export:ledger) — 기록에
+  //   실패하면 복호화하지 않고 주민번호 칸을 비워 내보냅니다.
+  const hasEnc = sorted.some((item) => !!item.info?.rrnEnc);
+  const rrnLogged = hasEnc
+    ? await logInstructorRrnExport(sorted.map((item) => item.instructorId), "ledger")
+    : false;
   const instructors: LedgerInstructorInput[] = sorted.map((item) => {
     let rrn = "";
-    const enc = item.info?.rrnEnc ?? null;
+    const enc = rrnLogged ? item.info?.rrnEnc ?? null : null;
     if (enc) {
       try {
         rrn = hyphenateRrn(decryptSecret(enc));

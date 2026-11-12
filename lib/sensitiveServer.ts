@@ -193,3 +193,19 @@ export function normalizeRrnPurpose(purpose: string): string | null {
   if (m && m[1].trim()) return `기타: ${m[1].trim().slice(0, 200)}`;
   return null;
 }
+
+// 강사 주민번호 전체(rrn_enc)를 복호화해 넣는 엑셀 — 내보내기 1회당 열람 기록 1건
+//   (field='resident_number', target_id='export:<파일종류>'). 기록에 실패하면 false —
+//   호출부는 주민번호를 복호화하지 않고 빈칸으로 내보냅니다(기록 없는 열람 금지).
+//   권한은 각 출력 화면의 원래 게이트를 그대로 따릅니다(여기서 더 좁히지 않음).
+export async function logInstructorRrnExport(ids: string[], kind: string): Promise<boolean> {
+  const actor = await resolveSensitiveActor();
+  if (!actor) return false;
+  return logSensitiveAccess({
+    actor,
+    targetTable: "saem_instructors",
+    targetId: `export:${kind}`,
+    field: "resident_number",
+    purpose: `엑셀 내보내기(${kind}) ${[...new Set(ids)].length}명`,
+  });
+}
