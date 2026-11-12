@@ -36,7 +36,10 @@ export default function HrDashboard({
   canViewDutyRecord = false,
   initialDriverId = null,
   recordsViewOnly = false,
+  canRevealRrn = false,
 }: {
+  // 인사기록카드 [주민번호 보기] — M0·hr 직무만.
+  canRevealRrn?: boolean;
   drivers: Driver[];
   profiles: EmployeeProfile[];
   recruitmentPostings: RecruitmentPostingAdmin[];
@@ -72,6 +75,7 @@ export default function HrDashboard({
           canGrantPersonnel={canGrantPersonnel}
           today={today}
           canViewDutyRecord={canViewDutyRecord}
+          canRevealRrn={canRevealRrn}
           initialDriverId={initialDriverId}
           viewOnly={recordsViewOnly}
         />
@@ -211,7 +215,9 @@ function RecordsTab({
   canViewDutyRecord,
   initialDriverId,
   viewOnly,
+  canRevealRrn,
 }: {
+  canRevealRrn: boolean;
   drivers: Driver[];
   profiles: EmployeeProfile[];
   canManageAuth: boolean;
@@ -330,6 +336,7 @@ function RecordsTab({
               profile={selectedProfile}
               canManageAuth={canManageAuth}
               canGrantPersonnel={canGrantPersonnel}
+              canRevealRrn={canRevealRrn}
               knownDepartments={knownDepartments}
               today={today}
               onDeleted={() => setSelectedId("")}

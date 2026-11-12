@@ -83,7 +83,10 @@ export type SaemInstructor = {
   phone: string | null;
   email: string | null;
   bank_name: string | null;
-  bank_account: string | null;
+  // 계좌번호 뒤 4자리만("1234") — 화면 표기는 accountMaskDisplay → "****1234".
+  //   ⚠️ 전체 계좌번호(bank_account·bank_account_enc)는 이 타입에 넣지 않습니다
+  //   (2026-11 관장 지시). 지급대장·엑셀·복사는 서버 lib/sensitiveServer 로만.
+  bank_account_last4: string | null;
   account_holder: string | null;
   password_set_at: string | null;
   must_change_password: boolean;
@@ -189,7 +192,7 @@ export function toInstructor(r: Record<string, unknown>): SaemInstructor {
     phone: s(r.phone),
     email: s(r.email),
     bank_name: s(r.bank_name),
-    bank_account: s(r.bank_account),
+    bank_account_last4: s(r.bank_account_last4),
     account_holder: s(r.account_holder),
     password_set_at: s(r.password_set_at),
     must_change_password: r.must_change_password === true,

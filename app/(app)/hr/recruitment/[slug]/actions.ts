@@ -644,6 +644,8 @@ export async function convertApplicantToEmployee(
       driver_id: newDriverId,
       name_chinese: (applicant.name_hanja as string | null) ?? null,
       resident_number: null,
+      resident_number_enc: null,
+      resident_number_mask: null,
       gender: applicantGender ? genderMap[applicantGender] ?? null : null,
       birth_date: (applicant.birth_date as string | null) ?? null,
       address: (applicant.address as string | null) ?? null,

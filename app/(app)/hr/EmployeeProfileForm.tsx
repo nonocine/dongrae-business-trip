@@ -1,6 +1,7 @@
 "use client";
 
 import CardAwardsTab from "@/app/(app)/hr/CardAwardsTab";
+import RrnReveal from "@/app/(app)/hr/RrnReveal";
 import DisciplineSummaryPanel from "@/app/(app)/hr/discipline/DisciplineSummaryPanel";
 import { useCallback, useEffect, useMemo, useState, useTransition } from "react";
 import {
@@ -94,7 +95,10 @@ export default function EmployeeProfileForm({
   today,
   onDeleted,
   viewOnly = false,
+  canRevealRrn = false,
 }: {
+  // [주민번호 보기] — M0·hr 직무만(서버 revealEmployeeRrn 이 다시 확인).
+  canRevealRrn?: boolean;
   // hr 직무 열람 전용 — 모든 칸 읽기 전용, 저장·삭제·첨부서류·사진·발령 처리 숨김(서버도 records 만 허용).
   viewOnly?: boolean;
   knownDepartments?: string[];
@@ -190,7 +194,8 @@ export default function EmployeeProfileForm({
     getEmployeeDocumentUrl(driver.id, fileId, download);
 
   // 주민번호는 제어 입력 — 입력 즉시 생년월일·성별을 재계산합니다.
-  const [rrn, setRrn] = useState(profile?.resident_number ?? "");
+  //   화면에는 앞 7자리만 보이고, 칸은 '바꿀 때만' 새 13자리를 입력합니다(빈칸 = 그대로).
+  const [rrn, setRrn] = useState("");
   const parsed = useMemo(() => parseResidentNumber(rrn), [rrn]);
   const rrnFilled = rrn.trim().length > 0;
 
@@ -388,13 +393,23 @@ export default function EmployeeProfileForm({
 
               <div>
                 <label className={labelCls}>주민등록번호</label>
+                <RrnReveal
+                  driverId={driver.id}
+                  mask={profile?.resident_number_mask ?? null}
+                  canReveal={canRevealRrn}
+                />
                 <input
                   name="resident_number"
                   type="text"
                   value={rrn}
                   onChange={(e) => setRrn(e.target.value)}
-                  placeholder="000000-0000000"
+                  placeholder={
+                    profile?.resident_number_mask
+                      ? "바꿀 때만 13자리 입력"
+                      : "000000-0000000"
+                  }
                   readOnly={locked}
+                  autoComplete="off"
                   className={`${fieldCls} font-mono`}
                 />
                 {rrnFilled &&
@@ -413,7 +428,7 @@ export default function EmployeeProfileForm({
                   ))}
                 <p className="mt-1 text-[11px] text-ink-hint">
                   생년월일·성별은 주민등록번호에서 자동 계산됩니다. 외국인 등은
-                  비워두세요.
+                  비워두세요. 비워 두면 등록된 번호가 그대로 유지됩니다.
                 </p>
               </div>
 

@@ -5,7 +5,7 @@ import { getSession } from "@/app/actions";
 import {
   supabase,
   normalizeEmployeeProfile,
-  parseResidentNumber,
+  EMPLOYEE_PROFILE_COLUMNS,
   parseEducationInput,
   parseFamilyInput,
   parseLicenseInput,
@@ -19,9 +19,9 @@ import {
   type Driver,
   type EmployeeRank,
   type EmployeeProfile,
-  type GenderType,
 } from "@/lib/supabase";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
+import { residentNumberPatch } from "@/lib/sensitiveServer";
 import { decodeDataUrl } from "@/lib/recruitmentApplicantDocData";
 import { type EmployeeDocFiles } from "@/lib/employeeDocs";
 import {
@@ -67,7 +67,8 @@ export async function getMyProfile(): Promise<{
 
   const { data, error } = await supabaseAdmin
     .from("employee_profiles")
-    .select("*")
+    // 본인 카드도 주민번호는 앞 7자리만 내려보냅니다(전체 번호는 새로 입력만).
+    .select(EMPLOYEE_PROFILE_COLUMNS)
     .eq("driver_id", driver.id)
     .maybeSingle();
   if (error) throw new Error(error.message);
@@ -75,7 +76,7 @@ export async function getMyProfile(): Promise<{
   return {
     driver,
     profile: data
-      ? normalizeEmployeeProfile(data as Record<string, unknown>)
+      ? normalizeEmployeeProfile(data as unknown as Record<string, unknown>)
       : null,
   };
 }
@@ -104,18 +105,9 @@ export async function saveMyProfile(formData: FormData) {
     return s.length > 0 ? s : null;
   };
 
-  // 주민등록번호에서 생년월일·성별 자동 계산 (Phase A 헬퍼 재사용).
-  const resident_number = str("resident_number");
-  let birth_date: string | null = null;
-  let gender: GenderType | null = null;
-  if (resident_number) {
-    const parsed = parseResidentNumber(resident_number);
-    if (!parsed) {
-      throw new Error("주민등록번호 형식이 올바르지 않습니다.");
-    }
-    birth_date = parsed.birthDate;
-    gender = parsed.gender;
-  }
+  // 주민등록번호 — 새로 입력했을 때만(13자리) 암호화해 저장하고 생년월일·성별을 다시 계산.
+  //   비어 있으면 기존 값을 그대로 둡니다. 기존 번호를 복호화해 보여 주지 않습니다.
+  const rrnPatch = residentNumberPatch(str("resident_number"));
 
   // 재직 중이면 퇴사일을 null 로 강제 저장.
   const employed = formData.get("employed") === "on";
@@ -133,9 +125,7 @@ export async function saveMyProfile(formData: FormData) {
   const row = {
     driver_id,
     name_chinese: str("name_chinese"),
-    resident_number,
-    gender,
-    birth_date,
+    ...rrnPatch,
     address: str("address"),
     email: str("email"),
     phone: str("phone"),

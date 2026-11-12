@@ -7,7 +7,7 @@ import {
   supabase,
   HR_ADMIN_RANKS,
   normalizeEmployeeProfile,
-  parseResidentNumber,
+  EMPLOYEE_PROFILE_COLUMNS,
   parseEducationInput,
   parseFamilyInput,
   parseLicenseInput,
@@ -21,7 +21,6 @@ import {
   type EmployeeProfile,
   type EmploymentContract,
   type CertificateIssued,
-  type GenderType,
 } from "@/lib/supabase";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
 import {
@@ -45,6 +44,14 @@ import { resolvePersonnelViewer } from "@/lib/personnelAccess";
 import { PERSONNEL_ROLE_KEY } from "@/lib/personnel";
 import { mergeAdminAppointments } from "@/lib/appointments";
 import { withAppointmentIds } from "@/lib/appointmentsServer";
+import {
+  canRevealRrn,
+  logSensitiveAccess,
+  normalizeRrnPurpose,
+  readEmployeeRrnFull,
+  residentNumberPatch,
+  resolveSensitiveActor,
+} from "@/lib/sensitiveServer";
 
 // =====================================================================
 // HR 영역 접근 게이트
@@ -262,10 +269,11 @@ export async function listDriversForHrProfile(): Promise<Driver[]> {
 // 전체 인사기록카드 목록 (직원명은 drivers 목록으로 매칭).
 export async function listEmployeeProfiles(): Promise<EmployeeProfile[]> {
   await requireHrRecordsView();
-  const { data, error } = await supabaseAdmin.from("employee_profiles").select("*");
+  // select("*") 금지 — 주민번호 전체·암호문을 클라이언트로 보내지 않습니다.
+  const { data, error } = await supabaseAdmin.from("employee_profiles").select(EMPLOYEE_PROFILE_COLUMNS);
   if (error) throw new Error(error.message);
   return (data ?? []).map((row) =>
-    normalizeEmployeeProfile(row as Record<string, unknown>)
+    normalizeEmployeeProfile(row as unknown as Record<string, unknown>)
   );
 }
 
@@ -277,12 +285,44 @@ export async function getEmployeeProfile(
   if (!driverId) return null;
   const { data, error } = await supabaseAdmin
     .from("employee_profiles")
-    .select("*")
+    .select(EMPLOYEE_PROFILE_COLUMNS)
     .eq("driver_id", driverId)
     .maybeSingle();
   if (error) throw new Error(error.message);
   if (!data) return null;
-  return normalizeEmployeeProfile(data as Record<string, unknown>);
+  return normalizeEmployeeProfile(data as unknown as Record<string, unknown>);
+}
+
+// [주민번호 보기] 버튼을 보여 줄지 — M0·hr 직무만(실제 차단은 revealEmployeeRrn).
+export async function canRevealEmployeeRrn(): Promise<boolean> {
+  return canRevealRrn(await resolveSensitiveActor());
+}
+
+// 주민번호 전체 보기 — M0·hr 직무만. 누를 때마다 sensitive_access_logs 1건.
+//   목적 필수(4대보험/원천징수/증명서/"기타: 내용"). 기록에 실패하면 값을 내주지 않습니다.
+//   화면은 30초 뒤 다시 가립니다(EmployeeProfileForm).
+export async function revealEmployeeRrn(
+  driverId: string,
+  purpose: string
+): Promise<{ ok: true; rrn: string } | { ok: false; message: string }> {
+  const actor = await resolveSensitiveActor();
+  if (!actor || !canRevealRrn(actor)) {
+    return { ok: false, message: "주민번호 전체 보기는 관장·부장 또는 인사(hr) 직무만 할 수 있습니다." };
+  }
+  const p = normalizeRrnPurpose(purpose);
+  if (!p) return { ok: false, message: "열람 목적을 선택하세요(기타는 내용 입력)." };
+  if (!driverId) return { ok: false, message: "직원을 선택하세요." };
+  const rrn = await readEmployeeRrnFull(driverId);
+  if (!rrn) return { ok: false, message: "등록된 주민번호가 없습니다." };
+  const logged = await logSensitiveAccess({
+    actor,
+    targetTable: "employee_profiles",
+    targetId: driverId,
+    field: "resident_number",
+    purpose: p,
+  });
+  if (!logged) return { ok: false, message: "열람 기록을 남기지 못해 표시하지 않습니다. 잠시 뒤 다시 시도하세요." };
+  return { ok: true, rrn };
 }
 
 // 인사기록카드 저장 — driver_id 기준 upsert (있으면 update, 없으면 insert).
@@ -310,19 +350,10 @@ export async function saveEmployeeProfile(formData: FormData) {
     return s.length > 0 ? s : null;
   };
 
-  // 주민등록번호에서 생년월일·성별 자동 계산.
-  // 비어있으면(외국인 등) birth_date·gender 모두 null 저장.
-  const resident_number = str("resident_number");
-  let birth_date: string | null = null;
-  let gender: GenderType | null = null;
-  if (resident_number) {
-    const parsed = parseResidentNumber(resident_number);
-    if (!parsed) {
-      throw new Error("주민등록번호 형식이 올바르지 않습니다.");
-    }
-    birth_date = parsed.birthDate;
-    gender = parsed.gender;
-  }
+  // 주민등록번호 — 화면에는 앞 7자리만 보이고, 칸은 '새로 입력할 때만' 채웁니다.
+  //   비어 있으면 기존 번호·생년월일·성별을 그대로 둡니다(2026-11, 암호화 전환).
+  //   새 13자리가 오면 암호문·앞 7자리·(전환 기간) 평문을 함께 쓰고 생년월일·성별을 다시 계산.
+  const rrnPatch = residentNumberPatch(str("resident_number"));
 
   // 재직 중이면 퇴사일을 null 로 강제 저장.
   const employed = formData.get("employed") === "on";
@@ -347,9 +378,7 @@ export async function saveEmployeeProfile(formData: FormData) {
   const row = {
     driver_id,
     name_chinese: str("name_chinese"),
-    resident_number,
-    gender,
-    birth_date,
+    ...rrnPatch,
     address: str("address"),
     email: str("email"),
     phone: str("phone"),

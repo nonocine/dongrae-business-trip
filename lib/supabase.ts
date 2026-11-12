@@ -582,7 +582,10 @@ export type EmployeeProfile = {
   id: string;
   driver_id: string;
   name_chinese: string | null;
-  resident_number: string | null;
+  // 주민번호 앞 7자리("900101-1")만. 전체 번호(resident_number·resident_number_enc)는
+  //   이 타입에 넣지 않습니다 — 이 타입은 클라이언트로 내려갑니다(2026-11 관장 지시).
+  //   전체 번호는 서버의 lib/sensitiveServer 로만(M0·hr, 열람 기록).
+  resident_number_mask: string | null;
   gender: GenderType | null;
   birth_date: string | null;
   address: string | null;
@@ -700,6 +703,12 @@ function toJsonbArray<T extends Record<string, unknown>>(v: unknown): T[] {
   return [];
 }
 
+// 인사기록카드 조회 칸 — select("*") 대신 이것만 읽습니다(주민번호 전체·암호문 제외).
+export const EMPLOYEE_PROFILE_COLUMNS =
+  "id, driver_id, name_chinese, resident_number_mask, gender, birth_date, address, email, phone, photo_url, " +
+  "join_date, leave_date, employment_status, resignation_date, education, family, licenses, career, trainings, " +
+  "appointments, military_service, auth_level, is_locked, locked_at, locked_by, created_at, updated_at";
+
 export function normalizeEmployeeProfile(
   raw: Record<string, unknown>
 ): EmployeeProfile {
@@ -707,7 +716,7 @@ export function normalizeEmployeeProfile(
     id: String(raw.id ?? ""),
     driver_id: String(raw.driver_id ?? ""),
     name_chinese: (raw.name_chinese as string | null) ?? null,
-    resident_number: (raw.resident_number as string | null) ?? null,
+    resident_number_mask: (raw.resident_number_mask as string | null) ?? null,
     gender: (raw.gender as GenderType | null) ?? null,
     birth_date: (raw.birth_date as string | null) ?? null,
     address: (raw.address as string | null) ?? null,

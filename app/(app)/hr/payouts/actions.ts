@@ -17,6 +17,14 @@
 
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
 import { requireSalaryAccess } from "@/lib/salaryAccess";
+import { accountMaskDisplay } from "@/lib/sensitiveMask";
+import {
+  bankAccountsForExport,
+  canRevealBankAccount,
+  logSensitiveAccess,
+  readInstructorAccountsFull,
+  resolveSensitiveActor,
+} from "@/lib/sensitiveServer";
 import { kstTodayYmd } from "@/lib/trainings";
 import {
   payoutBlockers,
@@ -74,7 +82,7 @@ async function loadAllRows(): Promise<PayoutRow[]> {
       .from(INSTR)
       // rrn_enc 는 값을 쓰지 않고 '있는지' 만 봅니다 — 복호화하지 않습니다.
       .select(
-        "id, name, bank_name, bank_account, account_holder, rrn_mask, rrn_enc"
+        "id, name, bank_name, bank_account_last4, account_holder, rrn_mask, rrn_enc"
       )
       .in("id", insIds),
   ]);
@@ -100,7 +108,9 @@ async function loadAllRows(): Promise<PayoutRow[]> {
     const person = insById.get(String(it.instructor_id));
     const status = statusOf(sett.status);
     const bankName = (person?.bank_name as string | null) ?? null;
-    const bankAccount = (person?.bank_account as string | null) ?? null;
+    // 계좌는 가림값("****1234")만. 엑셀은 getPayoutRowsFor 가, 복사 버튼은
+    //   revealInstructorAccount 가 권한 확인·열람 기록 뒤 서버에서 전체를 읽습니다.
+    const bankAccount = accountMaskDisplay(person?.bank_account_last4 as string | null);
     const accountHolder = (person?.account_holder as string | null) ?? null;
     const rrnMask = (person?.rrn_mask as string | null) ?? null;
     const hasRrn = Boolean(
@@ -195,5 +205,33 @@ export async function getPayoutData(): Promise<PayoutData> {
 //   재검증한 뒤 이 함수를 부릅니다(요청마다 다시 읽습니다).
 export async function getPayoutRowsFor(f: PayoutFilters): Promise<PayoutRow[]> {
   await requireSalaryAccess();
-  return filterPayoutRows(await loadAllRows(), f);
+  const rows = filterPayoutRows(await loadAllRows(), f);
+  // 엑셀 — 계좌 전체(권한 확인 + 열람 기록 1건, export:payout). 권한이 없으면 가림값 그대로.
+  const full = await bankAccountsForExport(rows.map((r) => r.instructorId), "payout");
+  if (!full) return rows;
+  return rows.map((r) => ({ ...r, bankAccount: full.get(r.instructorId) ?? r.bankAccount }));
+}
+
+// [복사] 버튼 — 강사 한 명의 계좌 전체. 지출표 화면 권한(M0·회계) + 계좌 열람 권한
+//   (M0·hr·saem·accounting) 둘 다 필요. 누를 때마다 열람 기록 1건.
+export async function revealInstructorAccount(
+  instructorId: string
+): Promise<{ ok: true; account: string } | { ok: false; message: string }> {
+  await requireSalaryAccess();
+  const actor = await resolveSensitiveActor();
+  if (!actor || !canRevealBankAccount(actor)) {
+    return { ok: false, message: "계좌번호 전체를 볼 권한이 없습니다." };
+  }
+  if (!instructorId) return { ok: false, message: "대상이 없습니다." };
+  const account = (await readInstructorAccountsFull([instructorId])).get(instructorId) ?? null;
+  if (!account) return { ok: false, message: "등록된 계좌번호가 없습니다." };
+  const logged = await logSensitiveAccess({
+    actor,
+    targetTable: "saem_instructors",
+    targetId: instructorId,
+    field: "bank_account",
+    purpose: "계좌 복사(강사비 지출표)",
+  });
+  if (!logged) return { ok: false, message: "열람 기록을 남기지 못해 복사하지 않습니다." };
+  return { ok: true, account };
 }

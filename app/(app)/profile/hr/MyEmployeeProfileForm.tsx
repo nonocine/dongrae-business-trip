@@ -1,5 +1,7 @@
 "use client";
 
+import { rrnMaskDisplay } from "@/lib/sensitiveMask";
+
 import CardAwardsTab from "@/app/(app)/hr/CardAwardsTab";
 import { useCallback, useEffect, useMemo, useRef, useState, useTransition } from "react";
 import {
@@ -93,7 +95,8 @@ export default function MyEmployeeProfileForm({
   const [pending, startTransition] = useTransition();
 
   // 주민번호는 제어 입력 — 입력 즉시 생년월일·성별을 재계산합니다.
-  const [rrn, setRrn] = useState(profile?.resident_number ?? "");
+  //   화면에는 앞 7자리만 보이고, 칸은 '바꿀 때만' 새 13자리를 입력합니다(빈칸 = 그대로).
+  const [rrn, setRrn] = useState("");
   const parsed = useMemo(() => parseResidentNumber(rrn), [rrn]);
   const rrnFilled = rrn.trim().length > 0;
 
@@ -511,13 +514,23 @@ export default function MyEmployeeProfileForm({
 
               <div>
                 <label className={labelCls}>주민등록번호</label>
+                <p className="mb-1 font-mono text-sm text-ink">
+                  {profile?.resident_number_mask
+                    ? rrnMaskDisplay(profile.resident_number_mask)
+                    : "등록된 번호 없음"}
+                </p>
                 <input
                   name="resident_number"
                   type="text"
                   value={rrn}
                   onChange={(e) => setRrn(e.target.value)}
-                  placeholder="000000-0000000"
+                  placeholder={
+                    profile?.resident_number_mask
+                      ? "바꿀 때만 13자리 입력"
+                      : "000000-0000000"
+                  }
                   readOnly={locked}
+                  autoComplete="off"
                   className={`${fieldCls} font-mono`}
                 />
                 {rrnFilled &&
@@ -536,7 +549,7 @@ export default function MyEmployeeProfileForm({
                   ))}
                 <p className="mt-1 text-[11px] text-ink-hint">
                   생년월일·성별은 주민등록번호에서 자동 계산됩니다. 외국인 등은
-                  비워두세요.
+                  비워두세요. 비워 두면 등록된 번호가 그대로 유지됩니다.
                 </p>
               </div>
 

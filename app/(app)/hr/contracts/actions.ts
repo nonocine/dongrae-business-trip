@@ -70,7 +70,7 @@ export async function listContractEmployees(): Promise<ContractEmployee[]> {
     supabaseAdmin.from("drivers").select("id, name").order("name"),
     supabaseAdmin
       .from("employee_profiles")
-      .select("driver_id, join_date, employment_status, appointments, resident_number, address"),
+      .select("driver_id, join_date, employment_status, appointments, resident_number_mask, address"),
   ]);
   const pByD = new Map<string, Record<string, unknown>>();
   for (const p of profs ?? []) pByD.set(String((p as Record<string, unknown>).driver_id), p as Record<string, unknown>);
@@ -89,7 +89,7 @@ export async function listContractEmployees(): Promise<ContractEmployee[]> {
       position: current?.title ?? null,
       hasAssignment: current !== null,
       // 주민번호·주소 값은 내려보내지 않습니다 — 있는지 여부만.
-      hasRrn: String(p.resident_number ?? "").replace(/\D/g, "").length === 13,
+      hasRrn: !!String(p.resident_number_mask ?? "").trim(),
       hasAddress: !!String(p.address ?? "").trim(),
     });
   }

@@ -3,6 +3,7 @@
 //   * 가드 없음(라우트가 requireSaemAccess 후 호출). saem_* 만.
 // =====================================================================
 
+import { accountMaskDisplay } from "@/lib/sensitiveMask";
 import ExcelJS from "exceljs";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
 import { SAEM_DOC_SLOTS } from "@/lib/saem";
@@ -116,7 +117,8 @@ export async function loadInstructorExportRows(): Promise<InstructorExportRow[]>
       phoneLast4: phone.slice(-4),
       email: String(r.email ?? ""),
       bankName: String(r.bank_name ?? ""),
-      bankAccount: String(r.bank_account ?? ""),
+      // 강사 명단 엑셀은 뒤 4자리만(2026-11 관장 지시) — 전체 번호는 지급 서류에서만.
+      bankAccount: accountMaskDisplay(r.bank_account_last4 as string | null) ?? "",
       accountHolder: String(r.account_holder ?? ""),
       statusLabel: r.status === "inactive" ? "비활성" : "활성",
       joinState: !passwordSet ? "미가입" : mustChange ? "임시비번" : "가입완료",

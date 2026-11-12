@@ -153,6 +153,7 @@ function DashboardTab({ stats }: { stats: ActivityAdminStats }) {
       <RecentActivitiesCard stats={stats} />
       <BackupCard />
       <ErpCard />
+      <SensitiveCard />
       <DutyDashboardCard />
     </div>
   );
@@ -195,6 +196,29 @@ function ErpCard() {
         </h3>
         <p className="mt-1 text-xs text-ink-muted">
           ERP(직원·휴가·일정·대관·문서·회계) 자동 동기화 상태, 직원 연결, 지금 동기화.
+        </p>
+      </div>
+      <span aria-hidden className="shrink-0 text-lg text-ink-hint">
+        →
+      </span>
+    </Link>
+  );
+}
+
+// 민감정보 열람 기록·암호화 채우기 바로가기 — /admin/sensitive(M0 전용).
+function SensitiveCard() {
+  return (
+    <Link
+      href="/admin/sensitive"
+      className={`${cardCls} flex items-center justify-between gap-3 transition hover:-translate-y-0.5 hover:border-navy hover:shadow-md`}
+    >
+      <div>
+        <h3 className="flex items-center gap-1.5 text-sm font-semibold text-ink">
+          <span aria-hidden>🔒</span>
+          민감정보 열람 기록
+        </h3>
+        <p className="mt-1 text-xs text-ink-muted">
+          직원 주민번호 보기·강사 계좌 복사·계좌 포함 엑셀 내보내기 기록, 암호화 채우기.
         </p>
       </div>
       <span aria-hidden className="shrink-0 text-lg text-ink-hint">

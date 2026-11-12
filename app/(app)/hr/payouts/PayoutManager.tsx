@@ -15,7 +15,7 @@
 // =====================================================================
 
 import { useMemo, useState } from "react";
-import type { PayoutData } from "@/app/(app)/hr/payouts/actions";
+import { revealInstructorAccount, type PayoutData } from "@/app/(app)/hr/payouts/actions";
 import {
   filterPayoutRows,
   groupByPerson,
@@ -50,38 +50,49 @@ const td = "px-2 py-2 align-middle text-sm text-ink-body";
 const tdR = `${td} text-right font-mono whitespace-nowrap`;
 
 // 계좌번호 복사 — 이체할 때 손으로 옮겨 적다 틀리는 일을 막습니다.
+//   화면에는 뒤 4자리만 있으므로, 누르면 서버에서 권한 확인·열람 기록 뒤 전체 번호를
+//   받아 바로 클립보드에 넣습니다(화면·상태에 남기지 않음).
 //   clipboard API 가 막힌 환경(구형 브라우저·http)에서는 조용히 넘어갑니다.
-function CopyButton({ text, label }: { text: string; label: string }) {
-  const [done, setDone] = useState(false);
-  if (!text) return null;
+function CopyAccountButton({ instructorId }: { instructorId: string }) {
+  const [state, setState] = useState<"idle" | "busy" | "done" | "fail">("idle");
+  const [msg, setMsg] = useState<string | null>(null);
   return (
     <button
       type="button"
-      title={`${label} 복사`}
-      onClick={(e) => {
+      title={msg ?? "계좌번호 복사(열람 기록이 남습니다)"}
+      disabled={state === "busy"}
+      onClick={async (e) => {
         e.stopPropagation();
-        navigator.clipboard
-          ?.writeText(text)
-          .then(() => {
-            setDone(true);
-            setTimeout(() => setDone(false), 1200);
-          })
-          .catch(() => {});
+        setState("busy");
+        setMsg(null);
+        try {
+          const res = await revealInstructorAccount(instructorId);
+          if (!res.ok) {
+            setMsg(res.message);
+            setState("fail");
+            return;
+          }
+          await navigator.clipboard?.writeText(res.account);
+          setState("done");
+        } catch {
+          setState("fail");
+        }
+        setTimeout(() => setState("idle"), 1500);
       }}
-      className="ml-1 rounded border border-line px-1.5 py-0.5 text-[10px] text-ink-muted hover:bg-surface"
+      className="ml-1 rounded border border-line px-1.5 py-0.5 text-[10px] text-ink-muted hover:bg-surface disabled:opacity-50"
     >
-      {done ? "복사됨" : "복사"}
+      {state === "done" ? "복사됨" : state === "busy" ? "…" : state === "fail" ? "실패" : "복사"}
     </button>
   );
 }
 
-function Account({ row }: { row: { bankAccount: string | null } }) {
+function Account({ row }: { row: { bankAccount: string | null; instructorId: string } }) {
   if (!row.bankAccount)
     return <span className={badgeDanger}>계좌 미등록</span>;
   return (
     <span className="inline-flex items-center">
       <span className="font-mono text-xs">{row.bankAccount}</span>
-      <CopyButton text={row.bankAccount} label="계좌번호" />
+      <CopyAccountButton instructorId={row.instructorId} />
     </span>
   );
 }

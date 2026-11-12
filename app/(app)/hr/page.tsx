@@ -5,6 +5,7 @@ import {
   listDriversForHrProfile,
   listEmployeeProfiles,
   listRecruitmentPostings,
+  canRevealEmployeeRrn,
 } from "@/app/(app)/hr/actions";
 import { enforcePasswordChange } from "@/app/actions";
 import { kstTodayYmd } from "@/lib/trainings";
@@ -90,6 +91,7 @@ export default async function HrPage({
         canViewDutyRecord={await canViewOthersDutyRecord().catch(() => false)}
         initialDriverId={driver ?? null}
         recordsViewOnly={!canRecords}
+        canRevealRrn={canRecordsView && (await canRevealEmployeeRrn().catch(() => false))}
       />
     </div>
   );

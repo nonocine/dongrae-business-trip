@@ -13,6 +13,7 @@
 // =====================================================================
 
 import { getSession, getGoogleSession } from "@/app/actions";
+import { rrnMaskDisplay } from "@/lib/sensitiveMask";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
 import { HR_DOCUMENTS_BUCKET } from "@/lib/supabase";
 import { isM0Grant } from "@/lib/authLevels";
@@ -29,12 +30,10 @@ import {
   contractPdfFilename,
   contractPdfPath,
   fmtDot,
-  hyphenRrn,
   contractDateOptions,
   isPngDataUrl,
   isYmd,
   kstYmd,
-  maskRrn,
   workflowFields,
   type ContractBlock,
   type ContractKind,
@@ -177,16 +176,17 @@ export async function dropClauseSnapshot(kind: ContractKind, id: string): Promis
 }
 
 // --- 당사자 -------------------------------------------------------------
-// full=true 는 PDF 전용(주민번호 전체). 화면에는 언제나 full=false(가림).
-export async function loadParty(driverId: string, full: boolean): Promise<ContractParty> {
+// 주민번호는 화면·PDF 모두 앞 7자리(900101-1******)만 — 2026-11 관장 지시.
+//   전체 번호는 인사기록카드 [주민번호 보기](M0·hr, 열람 기록)로만 봅니다.
+export async function loadParty(driverId: string): Promise<ContractParty> {
   const [{ data: drv }, { data: prof }] = await Promise.all([
     supabaseAdmin.from("drivers").select("name").eq("id", driverId).maybeSingle(),
-    supabaseAdmin.from("employee_profiles").select("resident_number, address").eq("driver_id", driverId).maybeSingle(),
+    supabaseAdmin.from("employee_profiles").select("resident_number_mask, address").eq("driver_id", driverId).maybeSingle(),
   ]);
-  const p = (prof ?? {}) as { resident_number?: string | null; address?: string | null };
+  const p = (prof ?? {}) as { resident_number_mask?: string | null; address?: string | null };
   return {
     name: String((drv as { name?: string } | null)?.name ?? ""),
-    rrn: full ? hyphenRrn(p.resident_number) : maskRrn(p.resident_number),
+    rrn: rrnMaskDisplay(p.resident_number_mask),
     address: (p.address ?? "").trim(),
   };
 }
@@ -203,14 +203,13 @@ export function listColumns(kind: ContractKind): string {
 
 export async function blocksFor(
   kind: ContractKind,
-  raw: Record<string, unknown>,
-  full: boolean
+  raw: Record<string, unknown>
 ): Promise<ContractBlock[]> {
   const w = workflowFields(raw);
   const clausesRaw = await readClausesRawFor(kind, w.id, w.status);
   if (kind === "employment") {
     const row = toContract(raw, "");
-    const party = await loadParty(row.driver_id, full);
+    const party = await loadParty(row.driver_id);
     return buildContractBlocks({
       terms: row,
       party,
@@ -465,7 +464,7 @@ async function loadEmployerImage(kind: ContractKind, driverId: string, id: strin
 
 // 확정본 PDF — 양쪽 서명 이미지 + 지금 행의 계약일.
 export async function renderFinalPdf(kind: ContractKind, raw: Record<string, unknown>, signer: EmployerImage): Promise<Uint8Array> {
-  const blocks = await blocksFor(kind, raw, true);
+  const blocks = await blocksFor(kind, raw);
   return buildContractPdf(blocks, {
     employee: decodeDataUrl(typeof raw.employee_signature === "string" ? raw.employee_signature : null),
     employer: signer.bytes,
@@ -500,7 +499,7 @@ export async function syncCardAttachment(raw: Record<string, unknown>, bytes: Ui
 }
 
 export async function adminBlocks(kind: ContractKind, id: string): Promise<ContractBlock[]> {
-  return blocksFor(kind, await loadRow(kind, id), false);
+  return blocksFor(kind, await loadRow(kind, id));
 }
 
 export async function sendContractCore(kind: ContractKind, id: string): Promise<Result<{ dmFailed: string | null }>> {
@@ -709,7 +708,7 @@ async function storedPdf(raw: Record<string, unknown>): Promise<Uint8Array> {
 }
 
 async function renderPreviewPdf(kind: ContractKind, raw: Record<string, unknown>): Promise<Uint8Array> {
-  const blocks = await blocksFor(kind, raw, true);
+  const blocks = await blocksFor(kind, raw);
   return buildContractPdf(blocks, {
     employee: decodeDataUrl(typeof raw.employee_signature === "string" ? raw.employee_signature : null),
     employer: null,
@@ -749,9 +748,9 @@ export async function listMineCore(kind: ContractKind, me: { id: string; name: s
       const s = toSummary(kind, r, me.name);
       return {
         ...s,
-        // 주민번호는 가린 값(full=false). 전체 번호는 PDF 에만 들어갑니다.
+        // 주민번호는 화면·PDF 모두 앞 7자리만(loadParty).
         //   종이 체결분은 다시 그리지 않습니다 — 화면이 원본 스캔 PDF 를 받아 보여줍니다.
-        blocks: s.paper ? [] : await blocksFor(kind, r, false),
+        blocks: s.paper ? [] : await blocksFor(kind, r),
       };
     })
   );

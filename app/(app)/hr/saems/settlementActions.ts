@@ -5,6 +5,8 @@ import { supabaseAdmin } from "@/lib/supabaseAdmin";
 import { requireSaemAccess } from "@/lib/saemAccess";
 // 주민번호 복호화 — getPayrollLedgerData(서버 전용)에서만 씁니다.
 import { decryptSecret } from "@/lib/credentialCrypto";
+import { bankAccountsForExport } from "@/lib/sensitiveServer";
+import { accountMaskDisplay } from "@/lib/sensitiveMask";
 import {
   calcInstructorSettlement,
   cleanRevenueLines,
@@ -621,6 +623,8 @@ export type SettlementDetailItem = {
   instructorName: string;
   phone: string | null;
   bank_name: string | null;
+  // 계좌번호 — 기본은 가림값("****1234"). 전체 번호는 지급조서 엑셀 라우트가
+  //   권한 확인·열람 기록 뒤 서버에서만 바꿔 넣습니다(클라이언트로 가지 않음).
   bank_account: string | null;
   account_holder: string | null;
   // 주민번호 앞 7자리("861030-1") 또는 null. 화면 경고용.
@@ -672,7 +676,7 @@ export async function getSettlement(
       instructorName: info?.name ?? "(이름 없음)",
       phone: info?.phone ?? null,
       bank_name: info?.bank_name ?? null,
-      bank_account: info?.bank_account ?? null,
+      bank_account: accountMaskDisplay(info?.bank_account_last4),
       account_holder: info?.account_holder ?? null,
       rrnMask: info?.rrnMask ?? null,
       detail: it.detail,
@@ -718,7 +722,8 @@ type InstructorInfo = {
   name: string;
   phone: string | null;
   bank_name: string | null;
-  bank_account: string | null;
+  // 뒤 4자리만. 전체 번호는 lib/sensitiveServer(권한·기록)로만 읽습니다.
+  bank_account_last4: string | null;
   account_holder: string | null;
   // 마스크는 화면까지, 암호문은 지급대장 생성(서버)에서만 씁니다.
   rrnMask: string | null;
@@ -732,7 +737,7 @@ async function loadInstructorInfo(
   const { data } = await supabaseAdmin
     .from(INSTR)
     .select(
-      "id, name, phone, bank_name, bank_account, account_holder, rrn_enc, rrn_mask"
+      "id, name, phone, bank_name, bank_account_last4, account_holder, rrn_enc, rrn_mask"
     )
     .in("id", uniq);
   return new Map(
@@ -744,7 +749,7 @@ async function loadInstructorInfo(
           name: String(x.name ?? ""),
           phone: (x.phone as string | null) ?? null,
           bank_name: (x.bank_name as string | null) ?? null,
-          bank_account: (x.bank_account as string | null) ?? null,
+          bank_account_last4: (x.bank_account_last4 as string | null) ?? null,
           account_holder: (x.account_holder as string | null) ?? null,
           rrnMask: (x.rrn_mask as string | null) ?? null,
           // ⚠️ getSettlement 은 이 값을 items 에 담지 않습니다(클라이언트 전송
@@ -1135,6 +1140,12 @@ export async function getPayrollLedgerData(
   const insMap = await loadInstructorInfo(
     rawItems.map((it) => String(it.instructor_id))
   );
+  // 계좌 전체 — 권한(M0·hr·saem·accounting) 확인 + 열람 기록 1건. 권한이 없으면
+  //   null 이고 아래에서 뒤 4자리로 채웁니다.
+  const fullAccounts = await bankAccountsForExport(
+    rawItems.map((it) => String(it.instructor_id)),
+    "ledger"
+  );
 
   // 과목 — 항목에 담긴 program_id 를 모아 한 번에 읽습니다.
   const programIds = [
@@ -1187,7 +1198,10 @@ export async function getPayrollLedgerData(
       name: item.info?.name ?? "(이름 없음)",
       rrn,
       bankName: item.info?.bank_name ?? "",
-      bankAccount: item.info?.bank_account ?? "",
+      bankAccount:
+        fullAccounts?.get(item.instructorId) ??
+        accountMaskDisplay(item.info?.bank_account_last4) ??
+        "",
       gross: item.gross,
       detail: item.detail,
     };

@@ -12,6 +12,7 @@ import {
 } from "@/lib/supabase";
 import { requireSaemAccess, requireSaemView } from "@/lib/saemAccess";
 import { encryptSecret } from "@/lib/credentialCrypto";
+import { bankAccountColumnsForSave } from "@/lib/sensitiveServer";
 import {
   normalizePhone,
   saemAppUrl,
@@ -68,7 +69,7 @@ function maskInstructor<T extends SaemInstructor>(row: T, canManage: boolean): T
   return {
     ...row,
     bank_name: null,
-    bank_account: null,
+    bank_account_last4: null,
     account_holder: null,
     rrnMask: null,
     address: null,
@@ -166,6 +167,7 @@ export type InstructorInput = {
   phone: string;
   email?: string;
   bank_name?: string;
+  // 새 계좌번호(바꿀 때만). 빈칸·생략 = 기존 값 유지.
   bank_account?: string;
   account_holder?: string;
   memo?: string;
@@ -208,7 +210,8 @@ export async function createInstructor(
         phone: phone || null,
         email: clean(input.email),
         bank_name: clean(input.bank_name),
-        bank_account: clean(input.bank_account),
+        // 계좌번호 — 암호문·뒤 4자리·(전환 기간) 평문을 함께 씁니다.
+        ...(clean(input.bank_account) ? bankAccountColumnsForSave(clean(input.bank_account)!) : {}),
         account_holder: clean(input.account_holder),
         memo: clean(input.memo),
         status: "active",
@@ -264,9 +267,11 @@ export async function updateInstructor(
       phone: phone || null,
       email: clean(input.email),
       bank_name: clean(input.bank_name),
-      bank_account: clean(input.bank_account),
       account_holder: clean(input.account_holder),
       memo: clean(input.memo),
+      // 계좌번호 — 새로 입력했을 때만 바꿉니다(빈칸 = 그대로). 화면은 뒤 4자리만 받아
+      //   기존 번호를 모르므로, 빈칸으로 덮어쓰면 안 됩니다.
+      ...(clean(input.bank_account) ? bankAccountColumnsForSave(clean(input.bank_account)!) : {}),
     };
     // 주소(강사 계약서 을 주소란) — 보낸 값이 있을 때만, 바뀌었을 때만 갱신 시각을 찍습니다.
     if (input.address !== undefined) {

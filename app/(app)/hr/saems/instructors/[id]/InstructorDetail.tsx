@@ -1,5 +1,7 @@
 "use client";
 
+import { accountMaskDisplay } from "@/lib/sensitiveMask";
+
 import { useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import {
@@ -75,7 +77,8 @@ export default function InstructorDetail({
     phone: instructor.phone ?? "",
     email: instructor.email ?? "",
     bank_name: instructor.bank_name ?? "",
-    bank_account: instructor.bank_account ?? "",
+    // 새 계좌번호(바꿀 때만). 기존 번호는 뒤 4자리만 알고 있어 빈칸으로 시작합니다.
+    bank_account: "",
     account_holder: instructor.account_holder ?? "",
     memo: instructor.memo ?? "",
     address: instructor.address ?? "",
@@ -97,6 +100,7 @@ export default function InstructorDetail({
         return;
       }
       setMsg({ ok: true, text: "저장했습니다." });
+      patch({ bank_account: "" });
       router.refresh();
     });
   }
@@ -149,7 +153,17 @@ export default function InstructorDetail({
             <input value={f.bank_name} onChange={(e) => patch({ bank_name: e.target.value })} className={inCls} />
           </Field>
           <Field label="계좌번호">
-            <input value={f.bank_account} onChange={(e) => patch({ bank_account: e.target.value })} className={inCls} />
+            <input
+              value={f.bank_account}
+              onChange={(e) => patch({ bank_account: e.target.value })}
+              placeholder={
+                instructor.bank_account_last4
+                  ? `${accountMaskDisplay(instructor.bank_account_last4)} — 바꿀 때만 입력`
+                  : "계좌번호"
+              }
+              autoComplete="off"
+              className={inCls}
+            />
           </Field>
           <Field label="예금주">
             <input value={f.account_holder} onChange={(e) => patch({ account_holder: e.target.value })} className={inCls} />
