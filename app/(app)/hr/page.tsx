@@ -24,7 +24,7 @@ const VALID_TABS: TabKey[] = [
 export default async function HrPage({
   searchParams,
 }: {
-  searchParams: Promise<{ tab?: string; driver?: string }>;
+  searchParams: Promise<{ tab?: string; driver?: string; section?: string }>;
 }) {
   // 임시 비밀번호 사용자는 비번 변경 페이지로 강제 이동
   await enforcePasswordChange();
@@ -49,7 +49,7 @@ export default async function HrPage({
     t === "recruitment" ? canRecruitment : t === "records" ? canRecordsView : canRecords,
   );
 
-  const { tab, driver } = await searchParams;
+  const { tab, driver, section } = await searchParams;
   const requested = VALID_TABS.includes(tab as TabKey)
     ? (tab as TabKey)
     : "records";
@@ -90,6 +90,8 @@ export default async function HrPage({
         today={kstTodayYmd()}
         canViewDutyRecord={await canViewOthersDutyRecord().catch(() => false)}
         initialDriverId={driver ?? null}
+        // ?section=appointment — '확인할 일'(인사발령 정정 요청)에서 오면 그 직원 카드의 인사발령 탭을 바로 엽니다.
+        initialProfileSection={section ?? null}
         recordsViewOnly={!canRecords}
         canRevealRrn={canRecordsView && (await canRevealEmployeeRrn().catch(() => false))}
       />

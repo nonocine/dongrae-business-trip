@@ -6,7 +6,8 @@ import { listAnnouncements } from "@/app/(app)/announcements/actions";
 import { getMyJudgeAssignments } from "@/app/(app)/hr/recruitment/[slug]/actions";
 import { getMyCredentialSummary } from "@/app/(app)/hr/credentials/actions";
 // 메뉴 권한·배지는 좌측 사이드바와 같은 계산을 씁니다(요청당 1회).
-import { getShellData } from "@/app/(app)/shellData";
+import { getMyPendingTasks, getShellData } from "@/app/(app)/shellData";
+import PendingTasksCard from "@/app/components/PendingTasksCard";
 import { dueLabel } from "@/lib/trainings";
 import {
   MENU_GROUP_LABEL,
@@ -232,6 +233,7 @@ export default async function EmployeeDashboard({
     judgeAssignments,
     leavePlanNotice,
     absentToday,
+    pendingTasks,
   ] = await Promise.all([
     getShellData(),
     getMyProfile(),
@@ -241,6 +243,8 @@ export default async function EmployeeDashboard({
     getMyLeavePlanNotice(),
     // ERP 복무 — 오늘 부재 인원(재직자, 휴근·초과·야근 제외). 실패해도 대시보드는 그립니다.
     countAbsentToday().catch(() => null),
+    // 확인할 일 — 대상자(M0·hr 직무)가 아니면 빈 목록(lib/pendingTasks).
+    getMyPendingTasks(),
   ]);
 
   // 공용 비밀번호 — 내가 열람 가능한 건수만(항목 이름·비번은 받지 않습니다).
@@ -305,6 +309,9 @@ export default async function EmployeeDashboard({
 
   return (
     <div className="space-y-4">
+      {/* 확인할 일 — 맨 위(공지사항보다 위). 대상자에게만, 0건이면 숨김. */}
+      <PendingTasksCard tasks={pendingTasks} />
+
       {/* 인사말 헤더 */}
       <section className={cardCls}>
         <div className="flex flex-wrap items-center gap-2">

@@ -35,6 +35,7 @@ export default function HrDashboard({
   today,
   canViewDutyRecord = false,
   initialDriverId = null,
+  initialProfileSection = null,
   recordsViewOnly = false,
   canRevealRrn = false,
 }: {
@@ -47,6 +48,8 @@ export default function HrDashboard({
   canViewDutyRecord?: boolean;
   // ?driver=<id> — 복무·연차 대시보드에서 이름을 눌러 들어오면 그 직원 카드를 바로 엽니다.
   initialDriverId?: string | null;
+  // ?section=<인사기록카드 탭 키> — initialDriverId 카드를 그 탭으로 엽니다(예: appointment).
+  initialProfileSection?: string | null;
   // hr 직무(인사 파일 열람 없음) — 직원 카드 열람만(저장·삭제·첨부·사진·발령 처리 없음).
   recordsViewOnly?: boolean;
   // KST 오늘 "YYYY-MM-DD" — 현재 소속(발효된 발령) 판정 기준. 서버에서 계산.
@@ -77,6 +80,7 @@ export default function HrDashboard({
           canViewDutyRecord={canViewDutyRecord}
           canRevealRrn={canRevealRrn}
           initialDriverId={initialDriverId}
+          initialProfileSection={initialProfileSection}
           viewOnly={recordsViewOnly}
         />
       )}
@@ -214,9 +218,11 @@ function RecordsTab({
   today,
   canViewDutyRecord,
   initialDriverId,
+  initialProfileSection,
   viewOnly,
   canRevealRrn,
 }: {
+  initialProfileSection: string | null;
   canRevealRrn: boolean;
   drivers: Driver[];
   profiles: EmployeeProfile[];
@@ -340,6 +346,8 @@ function RecordsTab({
               knownDepartments={knownDepartments}
               today={today}
               onDeleted={() => setSelectedId("")}
+              // 주소로 지정한 직원 카드를 처음 열 때만 그 탭으로(다른 직원을 고르면 기본 탭).
+              initialTab={selectedDriver.id === initialDriverId ? initialProfileSection : null}
             />
           ) : null}
           {/* 복무 기록(ERP) — 관장·hr 직무만. 본인 카드와 같은 화면. */}

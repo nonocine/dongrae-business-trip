@@ -1,6 +1,7 @@
 import Link from "next/link";
 import type { ReactNode } from "react";
 import type { AdminDashboardData } from "@/app/(app)/admin/dashboardData";
+import { pendingTaskTotal, type PendingTask } from "@/lib/pendingTasks";
 
 // =====================================================================
 // 관리자 대시보드 구역 카드(서버 컴포넌트, 표시 전용).
@@ -58,11 +59,10 @@ function NumberCard({
 }
 
 // ① 오늘 -------------------------------------------------------------------
-export function TodaySection({ d }: { d: AdminDashboardData }) {
+// 결재 대기 = lib/pendingTasks 의 '내가 처리할 일' 합계 — 메인 '확인할 일' 카드·헤더 배지와 같은 숫자.
+export function TodaySection({ d, tasks }: { d: AdminDashboardData; tasks: PendingTask[] }) {
   const absent = d.absent;
-  const a = d.approvals;
-  const parts = [a.cert, a.seal, a.instructorSeal];
-  const total = parts.every((n) => n == null) ? null : parts.reduce<number>((s, n) => s + (n ?? 0), 0);
+  const total = pendingTaskTotal(tasks);
   return (
     <Section title="오늘">
       <CardGrid cols={2}>
@@ -85,15 +85,20 @@ export function TodaySection({ d }: { d: AdminDashboardData }) {
           }
         />
         <NumberCard
-          href={a.cert ? "/hr/certificates" : a.seal ? "/seal-register" : "/hr/saems/contracts"}
-          label="결재 대기 (내가 결재할 것)"
+          href={tasks[0]?.href ?? "/"}
+          label="결재 대기·확인할 일 (내가 처리할 것)"
           value={total}
           tone="warning"
           sub={
             total ? (
-              <span className="text-ink-muted">
-                증명서 승인 {a.cert ?? "—"} · 직인 결재 {a.seal ?? "—"} · 강사 계약 날인 {a.instructorSeal ?? "—"}
-              </span>
+              <ul className="space-y-0.5 text-ink-muted">
+                {tasks.map((t, i) => (
+                  <li key={i}>
+                    {t.label} {t.count}
+                    {t.kind === "appointment" ? ` · ${t.names.join(", ")}` : ""}
+                  </li>
+                ))}
+              </ul>
             ) : null
           }
         />
@@ -103,13 +108,15 @@ export function TodaySection({ d }: { d: AdminDashboardData }) {
 }
 
 // ② 기한 알림(연차 사용촉진 카드는 페이지가 PromotionAlerts 를 끼워 넣습니다) ------------
-export function DeadlineCards({ d }: { d: AdminDashboardData }) {
+export function DeadlineCards({ d, tasks }: { d: AdminDashboardData; tasks: PendingTask[] }) {
   const ic = d.instructorContracts;
+  // 직인 결재 대기 — '내 차례' 기준(본인 신청 제외)이라 pendingTasks 에서 가져옵니다.
+  const seal = tasks.filter((t) => t.kind === "seal").reduce((n, t) => n + t.count, 0);
   return (
     <CardGrid cols={3}>
       <NumberCard href="/hr/saems/contracts" label="강사 계약서 — 강사 서명 대기" value={ic ? ic.waitingInstructor : null} />
       <NumberCard href="/hr/saems/contracts" label="강사 계약서 — 관장 날인 대기" value={ic ? ic.waitingSeal : null} tone="warning" />
-      <NumberCard href="/seal-register" label="직인 결재 대기" value={d.approvals.seal} tone="warning" />
+      <NumberCard href="/seal-register" label="직인 결재 대기" value={seal} tone="warning" />
     </CardGrid>
   );
 }

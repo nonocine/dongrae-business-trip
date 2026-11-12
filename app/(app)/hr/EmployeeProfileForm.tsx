@@ -41,6 +41,7 @@ import {
 } from "@/lib/supabase";
 import {
   ProfileTabs,
+  PROFILE_TABS,
   EducationTab,
   FamilyTab,
   LicenseTab,
@@ -96,7 +97,10 @@ export default function EmployeeProfileForm({
   onDeleted,
   viewOnly = false,
   canRevealRrn = false,
+  initialTab = null,
 }: {
+  // 처음 열 탭(PROFILE_TABS 의 key, 예: "appointment"). 모르는 값이면 기본정보.
+  initialTab?: string | null;
   // [주민번호 보기] — M0·hr 직무만(서버 revealEmployeeRrn 이 다시 확인).
   canRevealRrn?: boolean;
   // hr 직무 열람 전용 — 모든 칸 읽기 전용, 저장·삭제·첨부서류·사진·발령 처리 숨김(서버도 records 만 허용).
@@ -114,7 +118,9 @@ export default function EmployeeProfileForm({
   const cardLocked = profile?.is_locked === true;
   const locked = cardLocked || viewOnly;
 
-  const [tab, setTab] = useState<ProfileTabKey>("basic");
+  const [tab, setTab] = useState<ProfileTabKey>(() =>
+    PROFILE_TABS.some((t) => t.key === initialTab) ? (initialTab as ProfileTabKey) : "basic"
+  );
   const [error, setError] = useState<string | null>(null);
   const [ok, setOk] = useState<string | null>(null);
   const [pending, startTransition] = useTransition();

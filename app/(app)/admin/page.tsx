@@ -11,6 +11,7 @@ import {
   TodaySection,
 } from "@/app/(app)/admin/AdminSections";
 import { loadAdminDashboardData } from "@/app/(app)/admin/dashboardData";
+import { getMyPendingTasks } from "@/app/(app)/shellData";
 import { enforcePasswordChange, isManagerAdmin, listDrivers } from "@/app/actions";
 
 export const dynamic = "force-dynamic";
@@ -27,10 +28,12 @@ export default async function AdminPage() {
     redirect("/");
   }
 
-  const [employees, data] = await Promise.all([
+  const [employees, data, tasks] = await Promise.all([
     // 직원 계정 관리는 비활성 직원도 함께(퇴사자 보기 토글).
     listDrivers({ includeInactive: true }),
     loadAdminDashboardData(),
+    // 결재 대기 — 메인 '확인할 일'·헤더 배지와 같은 함수(lib/pendingTasks).
+    getMyPendingTasks(),
   ]);
   // 렌더 시각 기준(빨간 점 판정) — 서버 컴포넌트라 요청마다 한 번.
   // eslint-disable-next-line react-hooks/purity
@@ -45,12 +48,12 @@ export default async function AdminPage() {
         </Link>
       </div>
 
-      <TodaySection d={data} />
+      <TodaySection d={data} tasks={tasks} />
 
       <Section title="기한 알림">
         <div className="space-y-3">
           <PromotionAlerts />
-          <DeadlineCards d={data} />
+          <DeadlineCards d={data} tasks={tasks} />
         </div>
       </Section>
 

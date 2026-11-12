@@ -30,7 +30,8 @@ import {
   countPendingSealRequests,
   resolveSealRegisterAccess,
 } from "@/lib/sealRegisterServer";
-import { hasPersonnelAccess } from "@/lib/personnelAccess";
+import { hasPersonnelAccess, resolvePersonnelViewer } from "@/lib/personnelAccess";
+import { pendingTasksFor, type PendingTask } from "@/lib/pendingTasks";
 import { smsSendAllowed } from "@/lib/sms/access";
 import type { MenuContext } from "@/lib/menu";
 
@@ -98,4 +99,27 @@ export const getShellData = cache(async (): Promise<ShellData> => {
     authLevel,
     myTrainingSummary,
   };
+});
+
+// =====================================================================
+// 확인할 일(lib/pendingTasks) — 지금 로그인한 사람 기준. 메인 카드·헤더 배지·관리자
+//   대시보드가 같은 요청 안에서 부르므로 cache() 로 한 번만 셉니다.
+//   M0 판정은 메뉴와 같은 값(getShellData), 직급·직무·인사 파일 열람은 resolvePersonnelViewer.
+//   대상자(M0 또는 hr 직무)가 아니면 빈 목록. 실패해도 화면은 그립니다(빈 목록).
+// =====================================================================
+export const getMyPendingTasks = cache(async (): Promise<PendingTask[]> => {
+  try {
+    const [shell, viewer] = await Promise.all([getShellData(), resolvePersonnelViewer()]);
+    if (!viewer) return [];
+    return await pendingTasksFor({
+      driverId: viewer.driverId,
+      name: viewer.name,
+      rank: viewer.rank,
+      isM0: shell.ctx.isM0,
+      roles: viewer.roles,
+      isPersonnel: viewer.isPersonnel,
+    });
+  } catch {
+    return [];
+  }
 });

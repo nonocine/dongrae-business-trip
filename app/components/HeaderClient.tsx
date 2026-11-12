@@ -17,7 +17,10 @@ export default function HeaderClient({
   name,
   canAccessAdmin,
   tree,
+  pendingCount = 0,
 }: {
+  // 확인할 일 건수(lib/pendingTasks) — 0 이면 배지 없음. 누르면 메인(맨 위 카드)으로.
+  pendingCount?: number;
   kind: SessionKind;
   name: string | null;
   canAccessAdmin: boolean;
@@ -107,6 +110,16 @@ export default function HeaderClient({
         <div className="ml-auto flex items-center gap-2">
           {loggedIn && (
             <>
+              {pendingCount > 0 && (
+                <Link
+                  href="/"
+                  aria-label={`확인할 일 ${pendingCount}건`}
+                  title={`확인할 일 ${pendingCount}건`}
+                  className="inline-flex h-5 min-w-5 items-center justify-center rounded-full bg-stamp px-1.5 text-[11px] font-bold text-white"
+                >
+                  {pendingCount > 99 ? "99+" : pendingCount}
+                </Link>
+              )}
               {/* 모바일: 이름만 */}
               <span className="inline-flex items-center gap-1 rounded-full bg-surface px-3 py-1 text-xs font-medium text-ink-body md:hidden">
                 {isAdmin ? "👑 관리자" : `👤 ${displayName}`}

@@ -1,6 +1,7 @@
 import { getSession, isManagerAdmin } from "@/app/actions";
 import HeaderClient from "@/app/components/HeaderClient";
-import { getShellData } from "@/app/(app)/shellData";
+import { getMyPendingTasks, getShellData } from "@/app/(app)/shellData";
+import { pendingTaskTotal } from "@/lib/pendingTasks";
 import { buildMenuTree, type MenuTree } from "@/lib/menuTree";
 
 export default async function Header() {
@@ -22,9 +23,12 @@ export default async function Header() {
   //     넘깁니다. getShellData 는 cache() 라 레이아웃이 이미 불렀으면 다시
   //     돌지 않습니다(한 요청에 한 번).
   let tree: MenuTree | null = null;
+  // 확인할 일 건수 — 프로필 옆 빨간 숫자 배지(대상자 아니면 0 → 안 그림).
+  let pendingCount = 0;
   if (session) {
-    const { ctx, badges } = await getShellData();
+    const [{ ctx, badges }, tasks] = await Promise.all([getShellData(), getMyPendingTasks()]);
     tree = buildMenuTree(ctx, badges);
+    pendingCount = pendingTaskTotal(tasks);
   }
 
   return (
@@ -33,6 +37,7 @@ export default async function Header() {
       name={session?.name ?? null}
       canAccessAdmin={canAccessAdmin}
       tree={tree}
+      pendingCount={pendingCount}
     />
   );
 }

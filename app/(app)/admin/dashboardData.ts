@@ -9,12 +9,9 @@ import "server-only";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
 import { absentTodayList, leaveBalancesOf } from "@/lib/erp/view";
 import { loadErpDirectory } from "@/lib/erp/identity";
-import { countPendingSealRequests, resolveSealRegisterAccess } from "@/lib/sealRegisterServer";
-import { getPendingCertRequestCount } from "@/app/(app)/hr/certificates/actions";
 
 export type AdminDashboardData = {
   absent: { name: string; type: string }[] | null;
-  approvals: { cert: number | null; seal: number | null; instructorSeal: number | null };
   instructorContracts: { waitingInstructor: number; waitingSeal: number } | null;
   leave5: { count: number; total: number } | null;
   system: {
@@ -125,10 +122,10 @@ async function sensitive7d() {
 }
 
 export async function loadAdminDashboardData(): Promise<AdminDashboardData> {
-  const [absent, cert, seal, ic, leave5, erp, backup, sms, sens] = await Promise.all([
+  // 결재 대기(증명서·직인·강사 계약 날인 등)는 여기서 세지 않습니다 — 페이지가
+  //   lib/pendingTasks(메인 '확인할 일'·헤더 배지와 같은 함수)로 받아 그립니다.
+  const [absent, ic, leave5, erp, backup, sms, sens] = await Promise.all([
     safe(absentTodayList()),
-    safe(getPendingCertRequestCount()),
-    safe(resolveSealRegisterAccess().then(countPendingSealRequests)),
     safe(instructorContractCounts()),
     safe(leaveOver5()),
     safe(erpStatus()),
@@ -138,7 +135,6 @@ export async function loadAdminDashboardData(): Promise<AdminDashboardData> {
   ]);
   return {
     absent,
-    approvals: { cert, seal, instructorSeal: ic?.waitingSeal ?? null },
     instructorContracts: ic,
     leave5,
     system: { erp, backup, sms7d: sms, sensitive7d: sens },
