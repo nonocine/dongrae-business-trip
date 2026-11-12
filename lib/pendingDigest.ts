@@ -24,7 +24,7 @@ export const APP_BASE_URL = "https://dongrae-business-trip.vercel.app";
 export const PENDING_DIGEST_SLACK_IDS: Record<string, string> = {
   허일수: "U0ADUPN08Q3", // 관장
   김혜지: "U0BMRE13PSR",
-  노미현: "", // TODO: 노미현 부장 슬랙 사용자 ID — 관장이 채움
+  노미현: "U0B7MMKN30A", // 부장
 };
 
 export function formatPendingDigest(name: string, tasks: PendingTask[]): string {
