@@ -13,12 +13,14 @@
 // =====================================================================
 
 import {
+  MENU_GROUPS,
   MENU_ITEMS,
   canSeeMenuItem,
   menuItemsFor,
   roleMenuGroupsFor,
   type MenuContext,
 } from "../lib/menu";
+import { buildMenuTree } from "../lib/menuTree";
 
 function assert(cond: boolean, message: string) {
   if (!cond) throw new Error(message);
@@ -166,24 +168,60 @@ assert(
 assert(cardOnly.length === 0, `메인 카드 전용 항목이 생겼습니다: ${cardOnly.join(",")}`);
 for (const [isM0, roles] of [[true, []], [false, ["hr"]], [false, []]] as const) {
   const c = { ...ctx(isM0, [...roles]), hasMyTrainings: true };
-  for (const g of ["common", "admin"] as const) {
+  for (const g of ["my", "common", "admin"] as const) {
     const a = menuItemsFor(g, c, "sidebar").map((i) => i.key).join(",");
     const b = menuItemsFor(g, c, "card").map((i) => i.key).join(",");
-    assert(a === b, `${g}: 사이드바와 메인 카드의 항목·순서가 다릅니다.\n  ${a}\n  ${b}`);
+    assert(a === b, `${g}: 사이드바와 메인 카드의 항목·순서가 다릅니다.
+  ${a}
+  ${b}`);
   }
 }
 
-// --- 8) 내 의무교육 — 교육이 있을 때만, 거래처관리 바로 다음 -------------------
-const withT = { ...ctx(false, []), hasMyTrainings: true };
-const commonKeys = menuItemsFor("common", withT, "sidebar").map((i) => i.key);
+// --- 8) 내 정보 그룹(2026-11) — 공통 바로 위, 전 직원, 나 자신에 관한 것 ----------
 assert(
-  commonKeys[commonKeys.indexOf("common-partners") + 1] === "common-my-trainings",
-  "내 의무교육은 거래처관리 바로 다음이어야 합니다.",
+  MENU_GROUPS.indexOf("my") === MENU_GROUPS.indexOf("common") - 1,
+  "'내 정보' 그룹은 공통 바로 위여야 합니다.",
 );
-assert(!sees(ctx(false, []), "common-my-trainings"), "교육 정보가 없으면(undefined) 내 의무교육을 숨겨야 합니다.");
+const withT = { ...ctx(false, []), hasMyTrainings: true };
+const myKeys = menuItemsFor("my", withT, "sidebar").map((i) => i.key);
 assert(
-  !sees({ ...ctx(false, []), hasMyTrainings: false }, "common-my-trainings"),
+  JSON.stringify(myKeys) === JSON.stringify(["my-profile", "my-contracts", "my-certificates", "my-trainings"]),
+  `내 정보 항목이 예상과 다릅니다: ${myKeys.join(",")}`,
+);
+// 옮긴 항목은 공통에 남지 않습니다 — 공통에는 /profile/hr 링크가 없어야 합니다.
+const commonHrefs = menuItemsFor("common", withT, "sidebar").map((i) => i.href);
+assert(
+  !commonHrefs.some((h) => h.startsWith("/profile/")),
+  `공통에 '나 자신' 항목이 남았습니다: ${commonHrefs.filter((h) => h.startsWith("/profile/")).join(",")}`,
+);
+// 주소는 바꾸지 않았습니다 — 인사기록카드 탭 해시 그대로.
+const hrefOf = (k: string) => MENU_ITEMS.find((i) => i.key === k)?.href;
+assert(hrefOf("my-profile") === "/profile/hr", "내 인사기록카드 주소가 바뀌었습니다.");
+assert(hrefOf("my-contracts") === "/profile/hr#contracts", "내 계약서 주소가 바뀌었습니다.");
+assert(hrefOf("my-certificates") === "/profile/hr#my-certificates", "증명서 발급 주소가 바뀌었습니다.");
+assert(hrefOf("my-trainings") === "/profile/hr#my-trainings", "내 의무교육 주소가 바뀌었습니다.");
+// 내 의무교육 — 교육이 있을 때만.
+assert(!sees(ctx(false, []), "my-trainings"), "교육 정보가 없으면(undefined) 내 의무교육을 숨겨야 합니다.");
+assert(
+  !sees({ ...ctx(false, []), hasMyTrainings: false }, "my-trainings"),
   "올해 교육이 없으면 내 의무교육을 숨겨야 합니다.",
+);
+// 직무 없는 일반 직원도 내 정보가 보입니다.
+assert(menuItemsFor("my", ctx(false, []), "card").length > 0, "내 정보는 누구에게나 있어야 합니다.");
+
+// --- 9) 이전 기능(활동일지·활동 작성) — 관장(managerAdmin)에게만 ------------------
+for (const key of ["legacy-activities", "legacy-new"]) {
+  assert(sees({ ...ctx(true, []), isManagerAdmin: true }, key), `${key}: 관장에게는 보여야 합니다.`);
+  assert(!sees(ctx(true, [], true), key), `${key}: 관장이 아닌 M0(부장)에게는 숨깁니다.`);
+  assert(!sees(ctx(false, ["hr", "facility"]), key), `${key}: 직원 메뉴에서는 숨깁니다.`);
+}
+const staffTree = buildMenuTree(ctx(false, ["facility"]), {});
+assert(staffTree.legacy.length === 0, "직원의 메뉴 트리에는 '이전 기능' 이 없어야 합니다.");
+const bossTree = buildMenuTree({ ...ctx(true, [], true), isManagerAdmin: true }, {});
+assert(bossTree.legacy.length === 2, "관장의 메뉴 트리에는 '이전 기능' 2개가 있어야 합니다.");
+assert(
+  bossTree.groups[0]?.group === "my" && bossTree.groups[1]?.group === "common",
+  `사이드바 그룹 순서가 예상과 다릅니다: ${bossTree.groups.map((g) => g.group).join(",")}`,
 );
 
 console.log(`✓ isM0 || 직무 항목 ${M0_OR_ROLE.length}개 — 직무 없는 M0 도 보임`);
@@ -191,5 +229,6 @@ console.log("✓ 직무 전용 항목은 M0 의 담당 업무에 끼어들지 �
 console.log("✓ 직무 없는 일반 직원 — 공통만, 담당 업무·관리자 영역 없음");
 console.log(`✓ key 중복 없음(${keys.length}개) · 경로 누락 없음`);
 console.log("✓ 사이드바·메인 카드 — 차이는 표시 여부(활동일지 계열 사이드바 전용)뿐");
-console.log("✓ 내 의무교육 — 교육 있을 때만, 거래처관리 다음");
+console.log("✓ 내 정보 — 공통 바로 위, 4개 항목, 주소 그대로, 공통에 /profile 링크 없음");
+console.log("✓ 이전 기능 — 관장에게만, 직원 메뉴에서 숨김");
 console.log("\n메뉴 노출 조건 검증 통과");

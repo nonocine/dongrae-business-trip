@@ -148,6 +148,26 @@ export async function countAbsentToday(): Promise<number> {
   return who.size;
 }
 
+// 오늘 부재 직원 목록(관리자 대시보드) — countAbsentToday 와 같은 기준, 이름·유형(관장 기준 원래 유형).
+//   한 사람이 여러 건이면 유형을 '·' 로 묶습니다.
+export async function absentTodayList(): Promise<{ name: string; type: string }[]> {
+  const today = kstTodayYmd();
+  const [duties, dir] = await Promise.all([loadDutiesOverlapping(today, today), loadErpDirectory()]);
+  const byKey = new Map<string, { name: string; types: Set<string> }>();
+  for (const d of duties) {
+    if (!isAbsenceType(d.type_name) || !dutyCoversDay(d.start_at, d.end_at, today)) continue;
+    const type = dutyDisplayType(d.type_name, d.declared_amount, true) ?? (d.type_name ?? "").trim();
+    for (const p of dir.resolve(d.employee_ids)) {
+      const cur = byKey.get(p.key) ?? { name: p.name, types: new Set<string>() };
+      if (type) cur.types.add(type);
+      byKey.set(p.key, cur);
+    }
+  }
+  return [...byKey.values()]
+    .map((v) => ({ name: v.name, type: [...v.types].join("·") }))
+    .sort((a, b) => a.name.localeCompare(b.name, "ko"));
+}
+
 // --- 휴가 잔여 ---------------------------------------------------------------
 export type LeaveBalance = { annual: number | null; compensatory: number | null };
 

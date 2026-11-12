@@ -41,7 +41,8 @@
 //     사이드바(PC)·폰 드로어·메인 카드 셋 다 이 배열만 읽습니다. 화면마다
 //     일부러 다르게 보여야 하는 항목은 정의를 나누지 않고 항목의
 //     sidebar / card 값(기본 true)으로 표현합니다.
-//       · 활동일지·활동 작성(legacy) — 사이드바 맨 아래 '이전 기능' 에만(card:false).
+//       · 활동일지·활동 작성(legacy) — 사이드바 맨 아래 '이전 기능' 에만(card:false),
+//         관장에게만·접힘 기본(2026-11).
 //       · 메인(MENU_HOME) — 사이드바·드로어 맨 위에만. 그룹 밖 항목이라 배열이
 //         아니라 아래 상수로 둡니다(대시보드는 자기 자신이라 카드가 없습니다).
 //     예전에는 '내 의무교육' 을 대시보드가 화면에서 직접 끼워 넣어 사이드바에
@@ -50,7 +51,8 @@
 
 // 메뉴 그룹 — 현재 대시보드의 구획을 그대로 옮긴 것입니다.
 export const MENU_GROUPS = [
-  "common", // 공통 — 전 직원
+  "my", // 내 정보 — 전 직원, 나 자신에 관한 것(2026-11 공통에서 분리)
+  "common", // 공통 — 전 직원, 업무 도구
   "facility", // 담당 업무 › 시설관리
   "accounting", // 담당 업무 › 회계
   "hr", // 담당 업무 › 인사
@@ -58,11 +60,12 @@ export const MENU_GROUPS = [
   "recruitment", // 담당 업무 › 채용
   "bangka", // 담당 업무 › 방과후아카데미
   "admin", // 관리자 영역 — M0
-  "legacy", // 활동일지 계열 — 5단계에서 하단으로 내립니다
+  "legacy", // 활동일지 계열 — 사이드바 맨 아래 '이전 기능'(접힘 기본, 관장만)
 ] as const;
 export type MenuGroup = (typeof MENU_GROUPS)[number];
 
 export const MENU_GROUP_LABEL: Record<MenuGroup, string> = {
+  my: "내 정보",
   common: "공통",
   facility: "시설관리",
   accounting: "회계",
@@ -152,6 +155,50 @@ const mailDesc = (n: number | undefined): string =>
     : "센터 대표 메일 확인·담당 지정 (미처리 없음)";
 
 export const MENU_ITEMS: MenuItem[] = [
+  // ---------- 내 정보 — 전 직원, 나 자신에 관한 것 ----------
+  //   2026-11 관장 지시로 공통에서 분리했습니다(주소는 그대로). 공통에는 업무 도구만 남깁니다.
+  //   모두 /profile/hr 의 탭으로 들어갑니다 — 탭 해시(#contracts·#my-certificates·#my-trainings·
+  //   #duty-record 등)는 MyHrTabs 의 HASH_TO_TAB 이 그대로 받습니다.
+  {
+    key: "my-profile",
+    group: "my",
+    label: "내 인사기록카드",
+    href: "/profile/hr",
+    icon: "🗂",
+    desc: "내 인사정보·증명사진·첨부서류 입력/수정",
+    show: { kind: "everyone" },
+  },
+  {
+    key: "my-contracts",
+    group: "my",
+    label: "내 계약서",
+    href: "/profile/hr#contracts",
+    icon: "📝",
+    desc: "근로·연봉계약서 열람·서명·내려받기 (본인 것만)",
+    show: { kind: "everyone" },
+  },
+  {
+    key: "my-certificates",
+    group: "my",
+    label: "증명서 발급",
+    href: "/profile/hr#my-certificates",
+    icon: "🧾",
+    desc: "재직증명서 즉시 발급 · 발급 이력",
+    show: { kind: "everyone" },
+  },
+  // 내 의무교육 — 올해 배정된 교육이 있을 때만(when).
+  //   카드 문구(완료 수·미이수·가장 임박)는 대시보드가 descOverrides 로 덮습니다.
+  {
+    key: "my-trainings",
+    group: "my",
+    label: "내 의무교육",
+    href: "/profile/hr#my-trainings",
+    icon: "🎓",
+    desc: "올해 법정 의무교육 이수 현황",
+    show: { kind: "everyone" },
+    when: "myTrainings",
+  },
+
   // ---------- 공통 — 전 직원 ----------
   {
     key: "common-mail",
@@ -194,15 +241,6 @@ export const MENU_ITEMS: MenuItem[] = [
     desc: "외부 강사·프로그램·근무일지 조회 (편성·정산은 담당자)",
     show: { kind: "everyone" },
   },
-  {
-    key: "common-profile",
-    group: "common",
-    label: "내 인사기록카드",
-    href: "/profile/hr",
-    icon: "🗂",
-    desc: "내 인사정보·증명사진·첨부서류 입력/수정",
-    show: { kind: "everyone" },
-  },
   // ERP 연동(2026-11) — ERP 복제 데이터(erp_*) 조회 전용. 로그인한 직원 모두.
   //   현황판(월간 달력)은 직원에게 휴가 유형을 '휴가'로 묶어 보이고, 관장(M0)에게만 원래 유형을 보입니다(화면이 판정).
   //   '내 연차·대휴'는 공통 메뉴에서 빼고 내 인사기록카드의 '연차·대휴' 탭(/profile/hr#erp-leave)으로 옮겼습니다.
@@ -239,19 +277,6 @@ export const MENU_ITEMS: MenuItem[] = [
     desc: "분야별 거래처·담당자 주소록 (인수인계용)",
     show: { kind: "everyone" },
   },
-  // 내 의무교육 — 올해 배정된 교육이 있을 때만(when). 예전에는 대시보드가 이
-  //   자리(거래처관리 다음)에 직접 끼워 넣어 사이드바에는 없었습니다.
-  //   카드 문구(완료 수·미이수·가장 임박)는 대시보드가 descOverrides 로 덮습니다.
-  {
-    key: "common-my-trainings",
-    group: "common",
-    label: "내 의무교육",
-    href: "/profile/hr#my-trainings",
-    icon: "🎓",
-    desc: "올해 법정 의무교육 이수 현황",
-    show: { kind: "everyone" },
-    when: "myTrainings",
-  },
   // 기관 대장 — 업무협약·수상(노미현 부장 요청). 조회·등록·수정은 전 직원,
   //   삭제는 등록자 본인 또는 관장·부장·인사 담당자(lib/orgRecordsServer).
   {
@@ -261,15 +286,6 @@ export const MENU_ITEMS: MenuItem[] = [
     href: "/hr/org-records",
     icon: "🏆",
     desc: "업무협약 체결 현황·수상 현황 기록과 양식 출력",
-    show: { kind: "everyone" },
-  },
-  {
-    key: "common-my-certificates",
-    group: "common",
-    label: "증명서 발급",
-    href: "/profile/hr#my-certificates",
-    icon: "🧾",
-    desc: "재직증명서 즉시 발급 · 발급 이력",
     show: { kind: "everyone" },
   },
   // 직인사용대장 — 노미현 부장 요청(2026-10-27). 신청은 전 직원, 결재·전체 대장은 관장·부장(화면이 drivers.rank 로 판정).
@@ -305,15 +321,6 @@ export const MENU_ITEMS: MenuItem[] = [
     href: "/press-news",
     icon: "📰",
     desc: "우리 센터 기사 목록·홍보 실적 연결 현황 (조회)",
-    show: { kind: "everyone" },
-  },
-  {
-    key: "common-my-contracts",
-    group: "common",
-    label: "내 계약서",
-    href: "/profile/hr#contracts",
-    icon: "📝",
-    desc: "근로·연봉계약서 열람·서명·내려받기 (본인 것만)",
     show: { kind: "everyone" },
   },
   // 공용 비밀번호 — 전 직원에게 보이되, 목록은 본인이 열람 가능한 항목만
@@ -745,6 +752,8 @@ export const MENU_ITEMS: MenuItem[] = [
   // ---------- 레거시 — 활동일지 계열 ----------
   //   사이드바·드로어 맨 아래 '이전 기능' 에만 그립니다. 메인 카드로는 예전부터
   //   없었습니다(card:false 로 명시).
+  //   2026-11 관장 지시: 관장(managerAdmin — 구글 관장·master)에게만, 접힌 상태가 기본.
+  //   직원 메뉴에서는 숨기지만 주소(/activities·/new)와 화면·데이터는 그대로입니다.
   {
     key: "legacy-activities",
     group: "legacy",
@@ -752,7 +761,7 @@ export const MENU_ITEMS: MenuItem[] = [
     href: "/activities",
     icon: "📒",
     desc: "외근·출장·교육 활동 기록 조회",
-    show: { kind: "everyone" },
+    show: { kind: "managerAdmin" },
     card: false,
     legacy: true,
   },
@@ -763,7 +772,7 @@ export const MENU_ITEMS: MenuItem[] = [
     href: "/new",
     icon: "✍️",
     desc: "외근·출장·교육 활동 새로 쓰기",
-    show: { kind: "everyone" },
+    show: { kind: "managerAdmin" },
     card: false,
     legacy: true,
   },

@@ -88,22 +88,35 @@ export default function Sidebar({ tree }: { tree: MenuTree }) {
           );
         })}
 
-        {/* 이전 기능 — 레거시(활동일지 계열)를 맨 아래로 내립니다.
-            지우는 것이 아니라 자리만 옮긴 것이라 눌러서 그대로 들어갑니다. */}
-        {tree.legacy.length > 0 && (
-          <div className="mt-2 border-t border-line pt-2">
-            <p className="px-2.5 pb-1 text-[11px] font-semibold text-ink-hint">
-              이전 기능
-            </p>
-            <ul className="space-y-0.5">
-              {tree.legacy.map((it) => (
-                <li key={it.key}>
-                  <NavRow item={it} active={it.key === active.key} muted />
-                </li>
-              ))}
-            </ul>
-          </div>
-        )}
+        {/* 이전 기능 — 레거시(활동일지 계열). 관장에게만 내려오고(lib/menu.ts),
+            접힌 상태가 기본입니다. 지금 그 화면에 있으면 펼쳐 둡니다. */}
+        {tree.legacy.length > 0 && (() => {
+          const open = toggled.__legacy__ ?? active.group === "__extra__";
+          return (
+            <div className="mt-2 border-t border-line pt-2">
+              <button
+                type="button"
+                aria-expanded={open}
+                onClick={() => setToggled((p) => ({ ...p, __legacy__: !open }))}
+                className="flex w-full items-center justify-between rounded-lg px-2.5 pb-1 text-left text-[11px] font-semibold text-ink-hint hover:bg-surface focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-navy"
+              >
+                이전 기능
+                <span aria-hidden className={`text-[10px] transition-transform ${open ? "rotate-90" : ""}`}>
+                  ▶
+                </span>
+              </button>
+              {open && (
+                <ul className="space-y-0.5">
+                  {tree.legacy.map((it) => (
+                    <li key={it.key}>
+                      <NavRow item={it} active={it.key === active.key} muted />
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
+          );
+        })()}
       </nav>
     </aside>
   );

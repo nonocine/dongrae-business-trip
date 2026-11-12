@@ -11,7 +11,11 @@ import { setEmployeeSession } from "./helpers";
 //   대상은 운영 DB 의 실제 직원이라 이름을 환경변수로 받습니다(없으면 skip).
 //     E2E_HR_M0     : M0(관장·부장)      → 관리자 영역까지
 //     E2E_HR_RECORDS: hr 직무만          → 관리자 영역 없음
-//     E2E_HR_NONE   : 직무 없는 일반 직원 → 공통 + 이전 기능만
+//     E2E_HR_NONE   : 직무 없는 일반 직원 → 내 정보 + 공통만
+//
+//   ★ 2026-11 — '이전 기능'(활동일지·활동 작성)은 관장(구글 관장·master = isManagerAdmin)
+//     에게만, 접힘 기본. 이 스펙은 직원 쿠키(비번 세션)로 들어가므로 관장 판정이 거짓 →
+//     어느 권한으로 들어가도 '이전 기능' 이 보이지 않아야 합니다. 주소(/activities)는 그대로 열립니다.
 // =====================================================================
 
 const M0 = process.env.E2E_HR_M0 || process.env.E2E_HR_NAME || "";
@@ -67,7 +71,6 @@ test.describe("업무 메뉴", () => {
       ["/hr/partners", /거래처관리/],
       ["/business-results", /사업실적/],
       ["/profile/hr", /내 인사기록카드/],
-      ["/activities", /활동일지/], // 레거시(이전 기능 구역)도 잡혀야 합니다
     ];
 
     for (const [path, want] of cases) {
@@ -84,7 +87,7 @@ test.describe("업무 메뉴", () => {
     await ctx.close();
   });
 
-  test("레거시는 '이전 기능' 으로 맨 아래에 있고 여전히 들어가진다", async ({
+  test("'이전 기능' 은 직원 세션 메뉴에 없고, 주소는 그대로 열린다", async ({
     browser,
     baseURL,
   }) => {
@@ -94,19 +97,24 @@ test.describe("업무 메뉴", () => {
     await open(page, "/mail");
 
     const aside = page.locator(SIDEBAR);
-    await expect(aside.getByText("이전 기능")).toBeVisible();
+    await expect(aside.getByText("이전 기능")).toHaveCount(0);
+    await expect(aside.getByRole("link", { name: /활동일지/ })).toHaveCount(0);
 
-    // 사이드바의 마지막 링크 두 개가 레거시여야 합니다(맨 아래).
-    const labels = await aside.locator("a").allTextContents();
-    expect(labels.slice(-2).map((t) => t.trim())).toEqual([
-      "📒활동일지",
-      "✍️활동 작성",
-    ]);
+    // 메뉴에서만 숨겼습니다 — 주소로는 그대로 들어갑니다.
+    await open(page, "/activities");
+    await expect(page).toHaveURL(/\/activities$/);
+    await ctx.close();
+  });
 
-    // 지운 것이 아니라 내린 것 — 눌러서 그대로 들어갑니다.
-    await aside.getByRole("link", { name: /활동일지/ }).click();
-    await page.waitForURL("**/activities");
-    await expect(aside.locator("[aria-current='page']")).toHaveText(/활동일지/);
+  test("'내 정보' 그룹이 공통 바로 위에 있다", async ({ browser, baseURL }) => {
+    const ctx = await browser.newContext({ viewport: { width: 1280, height: 900 } });
+    await setEmployeeSession(ctx, baseURL!, M0);
+    const page = await ctx.newPage();
+    await open(page, "/");
+    const groups = (
+      await page.locator(`${SIDEBAR} button[aria-expanded]`).allTextContents()
+    ).map((g) => g.replace("▶", "").trim());
+    expect(groups.indexOf("내 정보")).toBe(groups.indexOf("공통") - 1);
     await ctx.close();
   });
 
@@ -187,8 +195,8 @@ test.describe("업무 메뉴", () => {
     await expect(drawer.locator("[aria-current='page']")).toHaveText(
       /공용 메일함/,
     );
-    // 레거시는 '이전 기능' 으로 맨 아래.
-    await expect(drawer.getByText("이전 기능")).toBeVisible();
+    // '이전 기능' 은 관장에게만 — 직원 세션 드로어에는 없습니다.
+    await expect(drawer.getByText("이전 기능")).toHaveCount(0);
 
     // 항목을 누르면 이동하고 드로어가 닫힙니다.
     await drawer.getByRole("link", { name: /동아리관리/ }).click();
@@ -245,13 +253,14 @@ test.describe("업무 메뉴", () => {
 
     if (NO_ROLE) {
       const n = await read(NO_ROLE);
+      expect(n.groups).toContain("내 정보");
       expect(n.groups).toContain("공통");
       expect(n.groups).not.toContain("관리자 영역");
       expect(n.groups).not.toContain("인사");
       expect(n.groups).not.toContain("시설관리");
       expect(n.sidebar.join(" ")).not.toContain("직원 인사관리");
-      // 레거시는 직무와 무관하게 누구나 — 맨 아래에 남아 있어야 합니다.
-      expect(n.sidebar.join(" ")).toContain("활동일지");
+      // '이전 기능' 은 관장에게만 — 직원 메뉴에서는 숨깁니다.
+      expect(n.sidebar.join(" ")).not.toContain("활동일지");
       expect(n.drawer.slice(0, n.sidebar.length)).toEqual(n.sidebar);
     }
   });

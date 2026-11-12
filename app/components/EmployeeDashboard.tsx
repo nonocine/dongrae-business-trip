@@ -258,6 +258,7 @@ export default async function EmployeeDashboard({
   //   메뉴 '정의' 는 menu.ts 가, '데이터' 는 getShellData 가 담당합니다.
   const menuCtx: MenuContext = shell.ctx;
   //   card:false 인 항목(활동일지 계열)은 여기서 빠집니다.
+  const myItems = menuItemsFor("my", menuCtx, "card");
   const commonItems = menuItemsFor("common", menuCtx, "card");
   const roleGroups = roleMenuGroupsFor(menuCtx, "card");
   const adminItems = menuItemsFor("admin", menuCtx, "card");
@@ -275,7 +276,7 @@ export default async function EmployeeDashboard({
   //   lib/menu.ts(when: "myTrainings")가 사이드바와 같은 조건으로 정합니다.
   const trainingSummary = shell.myTrainingSummary;
   if (trainingSummary && trainingSummary.total > 0) {
-    descOverrides["common-my-trainings"] =
+    descOverrides["my-trainings"] =
       trainingSummary.notMet === 0
         ? "올해 교육 모두 완료 ✓"
         : `${trainingSummary.done}/${trainingSummary.total} 완료 · 미이수 ${trainingSummary.notMet}건${
@@ -449,11 +450,11 @@ export default async function EmployeeDashboard({
         )}
       </section>
 
-      {/* 공통 영역 — 전 직원 동일. 카드 목록은 lib/menu.ts(group="common"). */}
+      {/* 내 정보 — 전 직원, 나 자신에 관한 것. 카드 목록은 lib/menu.ts(group="my"). */}
       <section className={cardCls}>
-        <SectionHeading>{MENU_GROUP_LABEL.common}</SectionHeading>
+        <SectionHeading>{MENU_GROUP_LABEL.my}</SectionHeading>
         <MenuGrid
-          items={commonItems}
+          items={myItems}
           badges={badges}
           descOverrides={descOverrides}
         >
@@ -472,6 +473,16 @@ export default async function EmployeeDashboard({
             />
           )}
         </MenuGrid>
+      </section>
+
+      {/* 공통 영역 — 전 직원 동일, 업무 도구. 카드 목록은 lib/menu.ts(group="common"). */}
+      <section className={cardCls}>
+        <SectionHeading>{MENU_GROUP_LABEL.common}</SectionHeading>
+        <MenuGrid
+          items={commonItems}
+          badges={badges}
+          descOverrides={descOverrides}
+        />
       </section>
 
       {/* 담당 업무 — 가진 직무가 있을 때만. 그룹·순서는 lib/menu.ts 가 정합니다. */}

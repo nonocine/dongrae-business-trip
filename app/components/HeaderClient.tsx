@@ -26,6 +26,8 @@ export default function HeaderClient({
 }) {
   const [mobileOpen, setMobileOpen] = useState(false);
   const [userMenuOpen, setUserMenuOpen] = useState(false);
+  // 드로어의 '이전 기능' 접힘 — 기본은 접힘(지금 그 화면이면 펼침). null = 사용자가 아직 안 건드림.
+  const [legacyToggled, setLegacyToggled] = useState<boolean | null>(null);
   const pathname = usePathname() ?? "/";
   const search = useSearchParams();
 
@@ -38,6 +40,7 @@ export default function HeaderClient({
   const drawerActive = tree
     ? findActive(tree.groups, tree.legacy, pathname, search)
     : { key: "", group: "" };
+  const legacyOpen = legacyToggled ?? drawerActive.group === "__extra__";
 
   // ★ 데스크톱 가로 네비(메인·활동일지·활동 작성·HR 관리·관리자)는 제거했습니다.
   //   좌측 사이드바가 그 역할을 전부 하므로 중복이었고, 무엇보다 게이트가
@@ -230,14 +233,22 @@ export default function HeaderClient({
                 </div>
               ))}
 
-              {/* 이전 기능 — 레거시를 맨 아래 별도 구역으로. 지우는 것이 아니라
-                  자리만 내린 것이라 눌러서 그대로 들어갑니다. */}
+              {/* 이전 기능 — 레거시(활동일지 계열). 관장에게만 내려오고(lib/menu.ts),
+                  접힌 상태가 기본입니다(PC 사이드바와 같은 규칙). */}
               {tree && tree.legacy.length > 0 && (
                 <div className="mt-2 border-t border-line pt-2">
-                  <p className="px-3 pb-0.5 text-[11px] font-semibold text-ink-hint">
+                  <button
+                    type="button"
+                    aria-expanded={legacyOpen}
+                    onClick={() => setLegacyToggled(!legacyOpen)}
+                    className="flex w-full items-center justify-between px-3 pb-0.5 text-left text-[11px] font-semibold text-ink-hint"
+                  >
                     이전 기능
-                  </p>
-                  {tree.legacy.map((it) => (
+                    <span aria-hidden className={`text-[10px] transition-transform ${legacyOpen ? "rotate-90" : ""}`}>
+                      ▶
+                    </span>
+                  </button>
+                  {legacyOpen && tree.legacy.map((it) => (
                     <DrawerRow
                       key={it.key}
                       item={it}
