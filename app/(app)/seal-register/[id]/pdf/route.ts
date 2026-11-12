@@ -1,7 +1,7 @@
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
 import { loadOrgSeal } from "@/lib/orgSeal";
 import { buildSealCertPdf, type SealCertPage } from "@/lib/sealCertPdf";
-import { certDateLabel, normalizeItemValues } from "@/lib/sealRegister";
+import { certDateLabel, normalizeItemValues, isRecordOnlyDocType } from "@/lib/sealRegister";
 import { canViewRequest, resolveSealRegisterAccess } from "@/lib/sealRegisterServer";
 import { kstTodayYmd } from "@/lib/trainings";
 
@@ -43,9 +43,9 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
   if (!r || !canViewRequest(a, (r.requester_driver_id as string | null) ?? null))
     return new Response("신청을 찾을 수 없습니다.", { status: 404 });
 
-  // 기록 전용(강사 채용 계약서)은 증서 출력 대상이 아닙니다 — 실제 문서는 계약서 PDF.
-  if (r.doc_type === "instructor_contract")
-    return new Response("강사 계약서 날인 기록은 증서로 출력하지 않습니다. 강사 계약서 화면에서 계약서 PDF 를 여세요.", { status: 400 });
+  // 기록 전용(강사·근로·연봉 계약서)은 증서 출력 대상이 아닙니다 — 실제 문서는 계약서 PDF.
+  if (isRecordOnlyDocType(String(r.doc_type ?? "")))
+    return new Response("계약서 날인 기록은 증서로 출력하지 않습니다. 해당 계약서 화면에서 계약서 PDF 를 여세요.", { status: 400 });
 
   const wanted = new URL(request.url).searchParams.get("ids");
   const pick = wanted ? new Set(wanted.split(",").filter((x) => UUID.test(x))) : null;

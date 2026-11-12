@@ -10,6 +10,7 @@ import {
   voidContractCore,
   deleteDraftCore,
   employerSignCore,
+  type SealRegisterOutcome,
   adminPdfCore,
   bulkPreviewPdfCore,
   bytesToDataUrl,
@@ -173,7 +174,7 @@ export async function employerSignContract(
   kind: ContractKind,
   id: string,
   input: EmployerSignInput
-): Promise<Result<{ dmFailed: string | null }>> {
+): Promise<Result<{ dmFailed: string | null; sealRegister: SealRegisterOutcome | null }>> {
   try {
     const me = await requireContractPersonnel();
     if (!me.isM0) return { ok: false, message: "센터장 서명은 관장·부장만 할 수 있습니다." };

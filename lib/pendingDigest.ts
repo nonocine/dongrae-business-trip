@@ -36,6 +36,15 @@ export function formatPendingDigest(name: string, tasks: PendingTask[]): string 
   return [`🔔 ${name} 님, 오늘 확인할 일 ${total}건`, ...lines, `<${APP_BASE_URL}/|동업자씨 열기>`].join("\n");
 }
 
+// 연차 사용촉진 '기한 경과' 는 화요일(KST) DM 에만 — 월요일은 휴관(2026-11 관장 지시).
+//   'D-3 이내'(임박)는 평일 매일. 메인 카드·헤더 배지는 이 규칙과 무관하게 매일 전부 보입니다.
+export function kstWeekday(at: Date = new Date()): number {
+  return new Date(at.getTime() + 9 * 3600 * 1000).getUTCDay(); // 0=일 … 2=화
+}
+export function digestTasksFor(tasks: PendingTask[], weekday: number): PendingTask[] {
+  return weekday === 2 ? tasks : tasks.filter((t) => t.kind !== "leavePromotionOverdue");
+}
+
 export type PendingDigestResult = {
   sent: string[];
   skipped: { name: string; reason: string }[];
@@ -43,14 +52,15 @@ export type PendingDigestResult = {
 };
 
 // dryRun 이면 보내지 않고 누구에게 무엇이 갈지만 돌려줍니다.
-export async function runPendingDigest(opts: { dryRun?: boolean } = {}): Promise<
+export async function runPendingDigest(opts: { dryRun?: boolean; now?: Date } = {}): Promise<
   PendingDigestResult & { preview: { name: string; total: number; text: string }[] }
 > {
   const [people, src] = await Promise.all([listPendingTaskTargets(), loadPendingTaskSource()]);
   const out: PendingDigestResult = { sent: [], skipped: [], failed: [] };
   const preview: { name: string; total: number; text: string }[] = [];
+  const weekday = kstWeekday(opts.now);
   for (const p of people) {
-    const tasks = tasksFromSource(p, src);
+    const tasks = digestTasksFor(tasksFromSource(p, src), weekday);
     const total = pendingTaskTotal(tasks);
     if (total === 0) {
       out.skipped.push({ name: p.name, reason: "할 일 0건" });

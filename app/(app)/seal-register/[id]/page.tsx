@@ -2,7 +2,7 @@ import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
 import { enforcePasswordChange } from "@/app/actions";
 import { getSealRequestDetail, resolveSealRegisterAccess } from "@/lib/sealRegisterServer";
-import { SEAL_STATUS_LABEL, certDateLabel, sealDocTypeLabel, isRecordOnlyDocType } from "@/lib/sealRegister";
+import { SEAL_STATUS_LABEL, certDateLabel, sealDocTypeLabel, isRecordOnlyDocType, SEAL_RECORD_ONLY_TYPES } from "@/lib/sealRegister";
 import { linkCls, noticeWarning, panelToneCls, sectionTitleCls } from "@/lib/ui";
 import { SealStatusBadge } from "@/app/(app)/seal-register/parts";
 import { CertPreview } from "@/app/(app)/seal-register/SealRequestForm";
@@ -61,9 +61,9 @@ export default async function SealRequestPage({ params }: { params: Promise<{ id
 
       {recordOnly && (
         <p className={noticeWarning}>
-          강사 계약서 [직인 날인] 때 자동으로 남은 기록입니다(신청·결재 단계 없음). 계약서 PDF 는{" "}
-          <Link href="/hr/saems/contracts" className="underline">
-            강사 계약서 화면
+          {sealDocTypeLabel(d.docType)}에 기관 직인을 찍을 때 자동으로 남은 기록입니다(신청·결재 단계 없음). 계약서 PDF 는{" "}
+          <Link href={SEAL_RECORD_ONLY_TYPES.find((t) => t.key === d.docType)?.href ?? "/"} className="underline">
+            {sealDocTypeLabel(d.docType)} 화면
           </Link>
           에서 엽니다.
         </p>

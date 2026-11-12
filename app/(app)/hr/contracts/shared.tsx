@@ -664,6 +664,11 @@ function EmployerSignDialog({
       }
       onDone(
         `${contract.employee_name} 님 ${CONTRACT_KINDS[kind].label} 체결 완료 — PDF 를 확정했습니다.` +
+          (res.sealRegister
+            ? res.sealRegister.ok
+              ? ` 직인사용대장 ${res.sealRegister.issueLabel}.`
+              : ` (직인사용대장 기록 실패 — ${res.sealRegister.message})`
+            : "") +
           (res.dmFailed ? ` (슬랙 알림 실패 — ${res.dmFailed})` : "")
       );
     });

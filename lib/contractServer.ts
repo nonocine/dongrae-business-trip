@@ -600,12 +600,64 @@ export type EmployerSignInput =
   | { mode: "saved" }
   | { mode: "drawn"; dataUrl: string; save: boolean };
 
+// =====================================================================
+// 직인사용대장 자동 기록 — 센터장 서명을 '기관 직인'으로 했을 때만(2026-11 관장 지시).
+//   저장된 서명·직접 그린 서명은 직인을 쓰지 않으므로 남기지 않습니다.
+//   DB 함수 seal_record_contract(문서 종류 employment_contract / salary_contract) — 신청·결재 없이
+//   '발급(날인 완료)' 1건, 발급번호는 기존 seal_number_counters 이어서. 성공하면 계약서의
+//   seal_request_id 로 연결합니다. 대장 기록이 실패해도 체결(PDF 확정)은 되돌리지 않습니다.
+// =====================================================================
+export type SealRegisterOutcome = { ok: true; issueLabel: string } | { ok: false; message: string };
+
+async function recordContractSealRegister(
+  kind: ContractKind,
+  id: string,
+  raw: Record<string, unknown>,
+  driverId: string,
+  me: ContractAdmin,
+  sealedAt: string
+): Promise<SealRegisterOutcome> {
+  try {
+    if (!me.driverId) return { ok: false, message: "서명자 직원 정보가 없어 직인사용대장에 남기지 못했습니다." };
+    const label = CONTRACT_KINDS[kind].label;
+    const employee = (await namesById([driverId])).get(driverId) || "(직원)";
+    const start = String((kind === "employment" ? raw.contract_start : raw.period_start) ?? "");
+    const end = String((kind === "employment" ? raw.contract_end : raw.period_end) ?? "");
+    const items = [
+      ...(kind === "salary" && raw.year != null ? [{ label: "연도", value: String(raw.year) }] : []),
+      { label: "계약기간", value: `${start || "-"} ~ ${end || (kind === "employment" ? "정함 없음" : "-")}` },
+      { label: "서명자", value: `${me.name}(기관 직인)` },
+    ];
+    const { data, error } = await supabaseAdmin.rpc("seal_record_contract", {
+      p_doc_type: kind === "employment" ? "employment_contract" : "salary_contract",
+      p_sealer_driver_id: me.driverId,
+      p_sealer_name: me.name,
+      p_title: label,
+      p_recipient_name: employee.slice(0, 100),
+      p_items: items,
+      p_body: `${employee} ${label} 센터장 서명(기관 직인)`.slice(0, 1000),
+      p_sealed_at: sealedAt,
+    });
+    if (error) return { ok: false, message: error.message };
+    const row = (Array.isArray(data) ? data[0] : data) as { request_id?: string; issue_label?: string } | null;
+    if (!row?.request_id) return { ok: false, message: "직인사용대장 기록 결과가 비었습니다." };
+    const { error: linkErr } = await supabaseAdmin
+      .from(CONTRACT_KINDS[kind].table)
+      .update({ seal_request_id: row.request_id })
+      .eq("id", id);
+    if (linkErr) return { ok: false, message: `대장에는 남겼지만(${row.issue_label ?? ""}) 계약서 연결 실패: ${linkErr.message}` };
+    return { ok: true, issueLabel: String(row.issue_label ?? "") };
+  } catch (e) {
+    return { ok: false, message: e instanceof Error ? e.message : "직인사용대장 기록 실패" };
+  }
+}
+
 export async function employerSignCore(
   kind: ContractKind,
   id: string,
   input: EmployerSignInput,
   me: ContractAdmin
-): Promise<Result<{ dmFailed: string | null }>> {
+): Promise<Result<{ dmFailed: string | null; sealRegister: SealRegisterOutcome | null }>> {
   const table = CONTRACT_KINDS[kind].table;
   const raw = await loadRow(kind, id, ", employee_signature");
   const w = workflowFields(raw);
@@ -673,11 +725,15 @@ export async function employerSignCore(
   // 전자 근로계약서 → 인사기록카드 자동 첨부(노미현 부장 요청). 연봉계약서는 칸이 없어 붙이지 않습니다.
   if (kind === "employment") await syncCardAttachment(raw, bytes);
 
+  // 기관 직인으로 서명했을 때만 직인사용대장에 1건(저장 서명·직접 서명은 남기지 않음).
+  const sealRegister = input.mode === "seal" ? await recordContractSealRegister(kind, id, raw, w.driver_id, me, now) : null;
+  if (sealRegister && !sealRegister.ok) console.warn(`[contract] 직인사용대장 기록 실패(${kind} ${id}): ${sealRegister.message}`);
+
   const dmFailed = await dmEmployee(
     w.driver_id,
     `✅ ${CONTRACT_KINDS[kind].label} 체결이 끝났습니다. 마이페이지에서 계약서를 내려받아 보관해주세요.${myContractsLink("내 계약서 열기")}`
   );
-  return { ok: true, dmFailed };
+  return { ok: true, dmFailed, sealRegister };
 }
 
 // 확정본(저장된 PDF) 또는, 확정 전이면 현재 내용의 미리보기.

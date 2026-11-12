@@ -20,9 +20,12 @@ export const SEAL_DOC_TYPES: { key: SealDocType; label: string }[] = [
 // 기록 전용 종류 — 신청·결재 없이 다른 기능이 '날인 완료' 로 바로 남기는 대장 줄(DB 함수
 //   seal_record_instructor_contract). 신청 화면에는 나오지 않고, 증서 PDF 로 출력하지 않습니다
 //   (실제 문서는 그 기능의 PDF — 강사 계약서는 강사 계약서 화면).
-export type SealRecordOnlyType = "instructor_contract";
-export const SEAL_RECORD_ONLY_TYPES: { key: SealRecordOnlyType; label: string }[] = [
-  { key: "instructor_contract", label: "강사 채용 계약서" },
+//   근로·연봉계약서는 센터장 서명을 '기관 직인'으로 했을 때만 남습니다(DB 함수 seal_record_contract).
+export type SealRecordOnlyType = "instructor_contract" | "employment_contract" | "salary_contract";
+export const SEAL_RECORD_ONLY_TYPES: { key: SealRecordOnlyType; label: string; href: string }[] = [
+  { key: "instructor_contract", label: "강사 채용 계약서", href: "/hr/saems/contracts" },
+  { key: "employment_contract", label: "근로계약서", href: "/hr/contracts" },
+  { key: "salary_contract", label: "연봉계약서", href: "/hr/contracts?tab=salary" },
 ];
 export type SealAnyDocType = SealDocType | SealRecordOnlyType;
 export function isRecordOnlyDocType(t: string): t is SealRecordOnlyType {
