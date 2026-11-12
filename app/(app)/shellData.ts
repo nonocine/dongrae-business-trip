@@ -116,6 +116,8 @@ export const getMyPendingTasks = cache(async (): Promise<PendingTask[]> => {
       name: viewer.name,
       rank: viewer.rank,
       isM0: shell.ctx.isM0,
+      // 관장 — 직급 관장 또는 관리자 대시보드와 같은 판정(isManagerAdmin).
+      isDirector: viewer.rank === "관장" || shell.ctx.isManagerAdmin === true,
       roles: viewer.roles,
       isPersonnel: viewer.isPersonnel,
     });
