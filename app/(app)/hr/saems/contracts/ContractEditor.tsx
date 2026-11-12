@@ -322,7 +322,11 @@ export default function ContractEditor({
                 start(async () => {
                   const r = await sealInstructorContract(id);
                   if (!r.ok) return setErr(r.message);
-                  onDone("직인을 날인하고 PDF 를 만들었습니다.");
+                  onDone(
+                    r.sealRegister.ok
+                      ? `직인을 날인하고 PDF 를 만들었습니다. 직인사용대장 ${r.sealRegister.issueLabel}`
+                      : `직인을 날인하고 PDF 를 만들었습니다. 다만 직인사용대장 기록 실패 — ${r.sealRegister.message}`
+                  );
                 });
               }}
             >

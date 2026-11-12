@@ -2,7 +2,7 @@ import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
 import { enforcePasswordChange } from "@/app/actions";
 import { getSealRequestDetail, resolveSealRegisterAccess } from "@/lib/sealRegisterServer";
-import { SEAL_STATUS_LABEL, certDateLabel, sealDocTypeLabel } from "@/lib/sealRegister";
+import { SEAL_STATUS_LABEL, certDateLabel, sealDocTypeLabel, isRecordOnlyDocType } from "@/lib/sealRegister";
 import { linkCls, noticeWarning, panelToneCls, sectionTitleCls } from "@/lib/ui";
 import { SealStatusBadge } from "@/app/(app)/seal-register/parts";
 import { CertPreview } from "@/app/(app)/seal-register/SealRequestForm";
@@ -26,7 +26,17 @@ export default async function SealRequestPage({ params }: { params: Promise<{ id
   const editable = ["draft", "rejected", "withdrawn"].includes(d.status);
   const issued = d.status === "issued";
   const liveCount = d.recipients.filter((r) => r.issueSeq != null && !r.canceledAt).length;
-  const pdfHref = issued ? (liveCount ? `/seal-register/${d.id}/pdf` : null) : d.recipients.length ? `/seal-register/${d.id}/pdf` : null;
+  // 기록 전용(강사 채용 계약서 직인 날인)은 증서가 아니라 출력하지 않습니다 — 실제 문서는 계약서 PDF.
+  const recordOnly = isRecordOnlyDocType(d.docType);
+  const pdfHref = recordOnly
+    ? null
+    : issued
+      ? liveCount
+        ? `/seal-register/${d.id}/pdf`
+        : null
+      : d.recipients.length
+        ? `/seal-register/${d.id}/pdf`
+        : null;
   const printedBefore = d.prints.length > 0;
 
   return (
@@ -49,6 +59,15 @@ export default async function SealRequestPage({ params }: { params: Promise<{ id
         </Link>
       </div>
 
+      {recordOnly && (
+        <p className={noticeWarning}>
+          강사 계약서 [직인 날인] 때 자동으로 남은 기록입니다(신청·결재 단계 없음). 계약서 PDF 는{" "}
+          <Link href="/hr/saems/contracts" className="underline">
+            강사 계약서 화면
+          </Link>
+          에서 엽니다.
+        </p>
+      )}
       {d.status === "rejected" && d.lastRejectReason && (
         <p className={noticeWarning}>
           반려 사유: <span className="break-all">{d.lastRejectReason}</span>

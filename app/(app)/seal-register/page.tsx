@@ -10,7 +10,7 @@ import {
   listSealYears,
   resolveSealRegisterAccess,
 } from "@/lib/sealRegisterServer";
-import { SEAL_DOC_TYPES, certDateLabel, normalizeDocType, sealDocTypeLabel } from "@/lib/sealRegister";
+import { SEAL_DOC_TYPES, SEAL_RECORD_ONLY_TYPES, certDateLabel, normalizeAnyDocType, sealDocTypeLabel } from "@/lib/sealRegister";
 import { kstTodayYmd } from "@/lib/trainings";
 import { btnPrimary, btnSecondary, inputCls, labelCls, linkCls, tableHeadCls, tableRowCls } from "@/lib/ui";
 import { SealRequestList, tap } from "@/app/(app)/seal-register/parts";
@@ -33,7 +33,7 @@ export default async function SealRegisterPage({
   const thisYear = Number(kstTodayYmd().slice(0, 4));
   const tab: Tab = a.isApprover && (sp.tab === "pending" || sp.tab === "ledger") ? sp.tab : "mine";
   const year = Number.isInteger(Number(sp.year)) && Number(sp.year) >= 2000 ? Number(sp.year) : thisYear;
-  const docType = normalizeDocType(sp.type);
+  const docType = normalizeAnyDocType(sp.type);
 
   const [mine, pending] = await Promise.all([
     tab === "mine" ? listMySealRequests(a) : Promise.resolve([]),
@@ -101,7 +101,7 @@ export default async function SealRegisterPage({
               <span className={labelCls}>종류</span>
               <select name="type" defaultValue={docType ?? ""} className={`${inputCls} h-11 text-base sm:h-auto sm:text-sm`}>
                 <option value="">전체</option>
-                {SEAL_DOC_TYPES.map((d) => (
+                {[...SEAL_DOC_TYPES, ...SEAL_RECORD_ONLY_TYPES].map((d) => (
                   <option key={d.key} value={d.key}>
                     {d.label}
                   </option>

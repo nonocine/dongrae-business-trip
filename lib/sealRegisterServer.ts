@@ -11,7 +11,7 @@
 import { getSession } from "@/app/actions";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
 import {
-  normalizeDocType,
+  normalizeAnyDocType,
   normalizeItemDefs,
   normalizeItemValues,
   sealIssueLabel,
@@ -103,7 +103,7 @@ async function summarize(rows: Raw[]): Promise<SealRequestSummary[]> {
     const recs = byReq.get(str(r.id)) ?? [];
     return {
       id: str(r.id),
-      docType: normalizeDocType(r.doc_type) ?? "custom",
+      docType: normalizeAnyDocType(r.doc_type) ?? "custom",
       title: str(r.title),
       certDate: str(r.cert_date).slice(0, 10),
       status: statusOf(r.status),
@@ -176,7 +176,7 @@ export async function listSealLedger(
       issueYear: year,
       issueSeq: seq,
       issueLabel: str(snap.issueLabel) || sealIssueLabel(year, seq),
-      docType: normalizeDocType(req?.doc_type) ?? "custom",
+      docType: normalizeAnyDocType(req?.doc_type) ?? "custom",
       title: str(snap.title) || str(req?.title),
       name: str(r.recipient_name),
       certDate: str(snap.certDate || req?.cert_date).slice(0, 10),

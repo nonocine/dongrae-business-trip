@@ -17,8 +17,24 @@ export const SEAL_DOC_TYPES: { key: SealDocType; label: string }[] = [
   { key: "appointment", label: "위촉장" },
   { key: "custom", label: "기타(직접 입력)" },
 ];
+// 기록 전용 종류 — 신청·결재 없이 다른 기능이 '날인 완료' 로 바로 남기는 대장 줄(DB 함수
+//   seal_record_instructor_contract). 신청 화면에는 나오지 않고, 증서 PDF 로 출력하지 않습니다
+//   (실제 문서는 그 기능의 PDF — 강사 계약서는 강사 계약서 화면).
+export type SealRecordOnlyType = "instructor_contract";
+export const SEAL_RECORD_ONLY_TYPES: { key: SealRecordOnlyType; label: string }[] = [
+  { key: "instructor_contract", label: "강사 채용 계약서" },
+];
+export type SealAnyDocType = SealDocType | SealRecordOnlyType;
+export function isRecordOnlyDocType(t: string): t is SealRecordOnlyType {
+  return SEAL_RECORD_ONLY_TYPES.some((d) => d.key === t);
+}
+// 대장·상세 표시용 — 신청 종류 + 기록 전용 종류.
+export function normalizeAnyDocType(v: unknown): SealAnyDocType | null {
+  return normalizeDocType(v) ?? (typeof v === "string" && isRecordOnlyDocType(v) ? v : null);
+}
+
 export function sealDocTypeLabel(t: string): string {
-  return SEAL_DOC_TYPES.find((d) => d.key === t)?.label ?? t;
+  return SEAL_DOC_TYPES.find((d) => d.key === t)?.label ?? SEAL_RECORD_ONLY_TYPES.find((d) => d.key === t)?.label ?? t;
 }
 export function normalizeDocType(v: unknown): SealDocType | null {
   return SEAL_DOC_TYPES.some((d) => d.key === v) ? (v as SealDocType) : null;
@@ -240,7 +256,7 @@ export type SealPrintLogView = { printedAt: string; printedBy: string; count: nu
 
 export type SealRequestSummary = {
   id: string;
-  docType: SealDocType;
+  docType: SealAnyDocType;
   title: string;
   certDate: string;
   status: SealStatus;
@@ -269,7 +285,7 @@ export type SealLedgerRow = {
   issueYear: number;
   issueSeq: number;
   issueLabel: string;
-  docType: SealDocType;
+  docType: SealAnyDocType;
   title: string;
   name: string;
   certDate: string;

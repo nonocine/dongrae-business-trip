@@ -36,12 +36,16 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
 
   const { data: req } = await supabaseAdmin
     .from("seal_requests")
-    .select("id, requester_driver_id, title, cert_date, status")
+    .select("id, requester_driver_id, title, cert_date, status, doc_type")
     .eq("id", id)
     .maybeSingle();
   const r = req as Raw | null;
   if (!r || !canViewRequest(a, (r.requester_driver_id as string | null) ?? null))
     return new Response("신청을 찾을 수 없습니다.", { status: 404 });
+
+  // 기록 전용(강사 채용 계약서)은 증서 출력 대상이 아닙니다 — 실제 문서는 계약서 PDF.
+  if (r.doc_type === "instructor_contract")
+    return new Response("강사 계약서 날인 기록은 증서로 출력하지 않습니다. 강사 계약서 화면에서 계약서 PDF 를 여세요.", { status: 400 });
 
   const wanted = new URL(request.url).searchParams.get("ids");
   const pick = wanted ? new Set(wanted.split(",").filter((x) => UUID.test(x))) : null;

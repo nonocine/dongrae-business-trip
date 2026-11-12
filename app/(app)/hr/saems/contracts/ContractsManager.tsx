@@ -43,6 +43,8 @@ const selCls =
 const thCls = "px-2 py-2 text-left text-xs font-semibold text-navy whitespace-nowrap";
 const tdCls = "px-2 py-2 align-middle text-sm text-ink-body whitespace-nowrap";
 const smBtn = "rounded border border-line px-2 py-1 text-xs text-ink-body hover:bg-surface disabled:opacity-50";
+// '직인 대기' — 관장·부장에게는 눈에 띄게(빨간 바탕).
+const sealWaitBadge = "inline-flex items-center rounded-full bg-stamp px-2 py-0.5 text-xs font-bold text-white shadow-sm";
 
 export const STATUS_BADGE: Record<InstructorContractStatus, string> = {
   draft: badgeNeutral,
@@ -62,6 +64,8 @@ const ACTION_LABEL: Record<string, string> = {
   voided: "무효 처리",
   paper_uploaded: "종이 계약서 업로드",
   employer_sealed: "관장 직인 날인",
+  seal_register_recorded: "직인사용대장 기록",
+  seal_register_failed: "직인사용대장 기록 실패",
   file_viewed: "파일 열람",
   file_downloaded: "파일 다운로드",
   link_copied: "링크 복사",
@@ -181,7 +185,15 @@ export default function ContractsManager({
       }
       const failed = r.results.filter((x) => !x.ok);
       const done = r.results.length - failed.length;
-      setBulkFailed(failed.map((x) => ({ label: labelOf.get(x.id) ?? x.id, message: x.message ?? "실패" })));
+      // 날인은 됐지만 직인사용대장 기록이 실패한 건도 함께 알립니다.
+      const regFailed = r.results.filter((x) => x.ok && x.registerMessage);
+      setBulkFailed([
+        ...failed.map((x) => ({ label: labelOf.get(x.id) ?? x.id, message: x.message ?? "실패" })),
+        ...regFailed.map((x) => ({
+          label: labelOf.get(x.id) ?? x.id,
+          message: `날인은 됐지만 직인사용대장 기록 실패 — ${x.registerMessage}`,
+        })),
+      ]);
       setMsg(
         failed.length
           ? { ok: false, text: `${done}건 날인, ${failed.length}건 실패 — 아래 목록을 확인하세요.` }
@@ -329,6 +341,7 @@ export default function ContractsManager({
           <p className="py-8 text-center text-sm text-ink-hint">계약서가 없습니다.</p>
         ) : (
           <div className="overflow-x-auto">
+            {/* 넓으면 가로 스크롤 — 오른쪽 '관리' 칸은 고정(잘리지 않게). */}
             <table className="w-full min-w-[920px] border-collapse">
               <thead>
                 <tr className="border-b border-line">
@@ -341,12 +354,23 @@ export default function ContractsManager({
                   <th className={thCls}>방식</th>
                   <th className={thCls}>발송</th>
                   <th className={thCls}>강사 서명</th>
-                  <th className={`${thCls} text-right`}>관리</th>
+                  <th className={`${thCls} sticky right-0 bg-card text-right`}>관리</th>
                 </tr>
               </thead>
               <tbody>
                 {rows.map((r) => (
-                  <tr key={r.id} className="border-b border-line/60">
+                  <tr
+                    key={r.id}
+                    // 줄 아무 곳이나 누르면 계약서 창(전자) / 파일(종이). 줄 안 버튼·링크는 각자 동작.
+                    onClick={(e) => {
+                      if ((e.target as HTMLElement).closest("button, a, input, select, label")) return;
+                      if (r.signing_method === "electronic") setEditing({ contractId: r.id });
+                      else if (r.has_pdf || r.has_paper) openFile(r.id, false);
+                    }}
+                    className={`group cursor-pointer border-b border-line/60 hover:bg-surface ${
+                      isM0 && r.status === "instructor_signed" ? "bg-stamp-soft/40" : ""
+                    }`}
+                  >
                     <td className={`${tdCls} font-medium text-ink`}>
                       {r.programs.length > 0 ? (
                         <>
@@ -392,7 +416,10 @@ export default function ContractsManager({
                     <td className={`${tdCls} text-xs`}>{r.period || "-"}</td>
                     <td className={`${tdCls} font-mono text-xs`}>{r.contract_no}</td>
                     <td className={tdCls}>
-                      <span className={STATUS_BADGE[r.status]} title={r.void_reason ? `사유: ${r.void_reason}` : undefined}>
+                      <span
+                        className={isM0 && r.status === "instructor_signed" ? sealWaitBadge : STATUS_BADGE[r.status]}
+                        title={r.void_reason ? `사유: ${r.void_reason}` : undefined}
+                      >
                         {INSTRUCTOR_CONTRACT_STATUS_LABEL[r.status]}
                       </span>
                       {r.status === "sent" && r.first_viewed_at && (
@@ -403,8 +430,8 @@ export default function ContractsManager({
                     <td className={tdCls}>{SIGNING_METHOD_LABEL[r.signing_method]}</td>
                     <td className={`${tdCls} text-xs`}>{kst(r.sent_at)}</td>
                     <td className={`${tdCls} text-xs`}>{kst(r.instructor_signed_at)}</td>
-                    <td className={`${tdCls} text-right`}>
-                      <div className="flex flex-wrap items-center justify-end gap-1">
+                    <td className={`${tdCls} sticky right-0 bg-card text-right group-hover:bg-surface`}>
+                      <div className="flex flex-nowrap items-center justify-end gap-1">
                         {r.signing_method === "electronic" && (
                           <button type="button" className={smBtn} onClick={() => setEditing({ contractId: r.id })}>
                             {r.status === "draft" ? "이어 쓰기" : "내용"}
@@ -428,7 +455,17 @@ export default function ContractsManager({
                             disabled={pending}
                             onClick={() => {
                               if (!confirm(`${r.instructor_name} 강사 계약서에 기관 직인을 날인하고 PDF 로 확정할까요?`)) return;
-                              run(() => sealInstructorContract(r.id), "직인을 날인하고 PDF 를 만들었습니다.");
+                              setMsg(null);
+                              start(async () => {
+                                const res = await sealInstructorContract(r.id);
+                                if (!res.ok) return setMsg({ ok: false, text: res.message });
+                                setMsg(
+                                  res.sealRegister.ok
+                                    ? { ok: true, text: `직인을 날인하고 PDF 를 만들었습니다. 직인사용대장 ${res.sealRegister.issueLabel}` }
+                                    : { ok: false, text: `직인 날인·PDF 는 완료. 직인사용대장 기록 실패 — ${res.sealRegister.message}` }
+                                );
+                                await reload();
+                              });
                             }}
                           >
                             직인 날인

@@ -1178,12 +1178,63 @@ export async function uploadPaperInstructorContract(formData: FormData): Promise
 }
 
 // =====================================================================
-// 관장 직인 날인 → PDF 확정
-//   직인사용대장(seal_requests)과는 연결하지 않습니다 — 그 대장은 증서(수상확인증·수료증 등)
-//   발급 전용 구조(doc_type 고정 목록·결재(approvals)·발급번호·snapshot 으로 증서 PDF 재출력)라
-//   계약서를 넣으면 증서 번호가 하나 소비되고 재출력 시 엉뚱한 증서 양식이 나옵니다.
+// 관장 직인 날인 → PDF 확정 → 직인사용대장 자동 기록
+//   2026-11 관장 지시로 직인사용대장에 1건 남깁니다(문서 종류 '강사 채용 계약서', 기록 전용).
+//     · DB 함수 seal_record_instructor_contract — 신청·결재 단계 없이 '날인 완료'(issued)로 들어가고
+//       발급번호는 기존 seal_number_counters 를 이어 씁니다. 증서 PDF 로는 출력하지 않습니다
+//       (lib/sealRegister isRecordOnlyDocType — 실제 문서는 이 계약서 PDF).
+//     · 대장 기록이 실패해도 날인(계약 확정)은 되돌리지 않습니다 — 계약서 기록에
+//       seal_register_failed 를 남기고, 성공하면 instructor_contracts.seal_request_id 로 연결합니다.
 // =====================================================================
-export async function sealInstructorContract(id: string): Promise<{ ok: true } | Fail> {
+
+// 직인사용대장 1건 — 강사 이름·계약번호·강좌명·날인자·날인 일시. 성공하면 발급번호 문자열.
+async function recordSealRegister(
+  id: string,
+  cur: Record<string, unknown>,
+  access: SaemAccess,
+  sealedAt: string
+): Promise<{ ok: true; issueLabel: string } | { ok: false; message: string }> {
+  try {
+    if (!access.driverId) return { ok: false, message: "날인자 직원 정보가 없어 직인사용대장에 남기지 못했습니다." };
+    const progIds = (await contractProgramIds([id])).get(id) ?? [];
+    const rep = strOrNull(cur.program_id);
+    const allIds = rep ? [rep, ...progIds.filter((x) => x !== rep)] : progIds;
+    let programs = "";
+    if (allIds.length) {
+      const { data } = await supabaseAdmin.from("saem_programs").select("id, name").in("id", allIds);
+      const nameOf = new Map(((data ?? []) as { id: string; name: string }[]).map((r) => [r.id, r.name]));
+      programs = allIds.map((x) => nameOf.get(x)).filter(Boolean).join(", ");
+    }
+    const contractNo = str(cur.contract_no);
+    const instructor = str(cur.instructor_name_snapshot) || "(강사)";
+    const items = [
+      { label: "계약번호", value: contractNo },
+      { label: "강좌", value: (programs || "-").slice(0, 200) },
+      { label: "날인자", value: access.name },
+    ];
+    const { data, error } = await supabaseAdmin.rpc("seal_record_instructor_contract", {
+      p_sealer_driver_id: access.driverId,
+      p_sealer_name: access.name,
+      p_title: "강사 채용 계약서",
+      p_recipient_name: instructor.slice(0, 100),
+      p_items: items,
+      p_body: `${contractNo} 강사 채용 계약서 기관 직인 날인 (${instructor}${programs ? ` · ${programs}` : ""})`.slice(0, 1000),
+      p_sealed_at: sealedAt,
+    });
+    if (error) return { ok: false, message: error.message };
+    const row = (Array.isArray(data) ? data[0] : data) as { request_id?: string; issue_label?: string } | null;
+    if (!row?.request_id) return { ok: false, message: "직인사용대장 기록 결과가 비었습니다." };
+    const { error: linkErr } = await supabaseAdmin.from(T_CON).update({ seal_request_id: row.request_id }).eq("id", id);
+    if (linkErr) return { ok: false, message: `대장에는 남겼지만 계약서 연결 실패: ${linkErr.message}` };
+    return { ok: true, issueLabel: str(row.issue_label) };
+  } catch (e) {
+    return { ok: false, message: e instanceof Error ? e.message : "직인사용대장 기록 실패" };
+  }
+}
+// sealRegister — 직인사용대장 결과(기록 실패여도 날인은 성공: ok:true + sealRegister.ok:false).
+export async function sealInstructorContract(
+  id: string
+): Promise<{ ok: true; sealRegister: { ok: true; issueLabel: string } | { ok: false; message: string } } | Fail> {
   try {
     const access = await requireSaemAccess({ onlyM0: true });
     const cur = await loadContract(id);
@@ -1228,8 +1279,12 @@ export async function sealInstructorContract(id: string): Promise<{ ok: true } |
     if (error) throw new Error(error.message);
     if (!count) return { ok: false, message: "이미 다른 곳에서 처리되었습니다. 새로고침해 주세요." };
     await writeLog(id, "employer_sealed", access, { pdf_path: path });
+    const reg = await recordSealRegister(id, cur, access, now);
+    if (reg.ok) await writeLog(id, "seal_register_recorded", access, { issue_label: reg.issueLabel });
+    else await writeLog(id, "seal_register_failed", access, { message: reg.message });
     revalidateAll(str(cur.instructor_id));
-    return { ok: true };
+    revalidatePath("/seal-register");
+    return { ok: true, sealRegister: reg };
   } catch (e) {
     return fail(e, "날인하지 못했습니다.");
   }
@@ -1238,7 +1293,8 @@ export async function sealInstructorContract(id: string): Promise<{ ok: true } |
 // 모두 날인 — 날인 대기 화면의 [모두 날인(n건)]. 건마다 위 단건 날인을 그대로 부릅니다:
 //   권한 확인(requireSaemAccess onlyM0)·상태 확인·PDF·instructor_contract_logs 기록이 단건과 똑같습니다.
 //   한 건이 실패해도 나머지는 계속하고, 건별 결과를 돌려줍니다(차례로 — 동시 PDF 생성·업로드를 피함).
-export type BulkSealResult = { id: string; ok: boolean; message: string | null };
+// registerMessage — 날인은 됐지만 직인사용대장 기록이 실패한 경우의 사유.
+export type BulkSealResult = { id: string; ok: boolean; message: string | null; registerMessage: string | null };
 export async function sealInstructorContractsBulk(
   ids: string[]
 ): Promise<{ ok: true; results: BulkSealResult[] } | Fail> {
@@ -1249,7 +1305,12 @@ export async function sealInstructorContractsBulk(
     const results: BulkSealResult[] = [];
     for (const id of uniq) {
       const r = await sealInstructorContract(id);
-      results.push({ id, ok: r.ok, message: r.ok ? null : r.message });
+      results.push({
+        id,
+        ok: r.ok,
+        message: r.ok ? null : r.message,
+        registerMessage: r.ok && !r.sealRegister.ok ? r.sealRegister.message : null,
+      });
     }
     return { ok: true, results };
   } catch (e) {

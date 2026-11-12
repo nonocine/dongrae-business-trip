@@ -2,7 +2,7 @@ import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
 import { enforcePasswordChange } from "@/app/actions";
 import { getSealRequestDetail, resolveSealRegisterAccess } from "@/lib/sealRegisterServer";
-import { recipientValuesFrom } from "@/lib/sealRegister";
+import { isRecordOnlyDocType, recipientValuesFrom } from "@/lib/sealRegister";
 import { kstTodayYmd } from "@/lib/trainings";
 import SealRequestForm from "@/app/(app)/seal-register/SealRequestForm";
 
@@ -17,6 +17,9 @@ export default async function EditSealRequestPage({ params }: { params: Promise<
   const d = await getSealRequestDetail(a, id);
   if (!d || d.requesterDriverId !== a.driverId) notFound();
   if (!["draft", "rejected", "withdrawn"].includes(d.status)) redirect(`/seal-register/${id}`);
+  // 기록 전용(강사 계약서 날인 등)은 신청서가 아니라 고칠 수 없습니다.
+  const docType = d.docType;
+  if (isRecordOnlyDocType(docType)) redirect(`/seal-register/${id}`);
 
   return (
     <div className="mx-auto w-full max-w-4xl px-4 py-6">
@@ -33,7 +36,7 @@ export default async function EditSealRequestPage({ params }: { params: Promise<
         today={kstTodayYmd()}
         initial={{
           id: d.id,
-          docType: d.docType,
+          docType,
           title: d.title,
           certDate: d.certDate,
           purpose: d.purpose ?? "",
