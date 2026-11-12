@@ -20,9 +20,9 @@
 // =====================================================================
 
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
-import { sendSlack, sendSlackDMDetailed } from "@/lib/slack";
+import { sendSlack } from "@/lib/slack";
 import { driveAuth } from "@/lib/backupEngine";
-import { directorEmail } from "@/lib/backupCoverage";
+import { notifyDirector } from "@/lib/backupCoverage";
 
 export const FILE_BACKUP_ROOT = "동업자씨 파일 백업";
 // 백업할 버킷. exclude 에 맞는 경로는 원본 목록에서 뺍니다(백업도, '원본에서 사라짐' 표시도 안 함).
@@ -226,7 +226,7 @@ class FolderCache {
 async function notifyFailure(text: string): Promise<void> {
   await sendSlack("SLACK_WEBHOOK_ADMIN", text);
   try {
-    await sendSlackDMDetailed(await directorEmail(), text);
+    await notifyDirector(text);
   } catch {
     /* 알림 격리 */
   }

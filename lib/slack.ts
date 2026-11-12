@@ -118,6 +118,29 @@ export async function sendSlackDMDetailed(
   }
 }
 
+// 슬랙 사용자 ID(U…)로 바로 DM — 이메일 매칭(users.lookupByEmail)을 거치지 않습니다.
+//   인사기록카드 이메일과 슬랙 계정 이메일이 다른 사람(예: 관장)에게 확실히 보내기 위함.
+//   절대 throw 하지 않습니다.
+export async function sendSlackDMToUser(
+  userId: string,
+  text: string
+): Promise<{ ok: boolean; reason: string | null }> {
+  const token = process.env.SLACK_BOT_TOKEN;
+  if (!token) {
+    console.warn(`[slack] DM 불가 — SLACK_BOT_TOKEN 미설정 (대상 ${userId})`);
+    return { ok: false, reason: "SLACK_BOT_TOKEN 미설정" };
+  }
+  try {
+    const res = await postMessage(token, userId, text);
+    if (!res.ok) console.warn(`[slack] DM 발송 실패 (${userId}) — ${res.reason}`);
+    return res;
+  } catch (e) {
+    const reason = e instanceof Error ? e.message : "알 수 없는 오류";
+    console.warn(`[slack] DM 실패 (${userId}) — ${reason}`);
+    return { ok: false, reason };
+  }
+}
+
 // 슬랙 API 오류코드 → 사람이 읽을 수 있는 원인.
 //   ★ 원인을 로그·화면에 남기기 위해 추가했습니다. 예전에는 실패를 boolean
 //     으로만 돌려줘서 "왜" 안 갔는지 알 수 없었습니다(스코프 부족인지,

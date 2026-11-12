@@ -10,8 +10,7 @@
 //   * 서버 전용 모듈. 읽기만 하고 DB 에 쓰지 않습니다.
 // =====================================================================
 
-import { supabaseAdmin } from "@/lib/supabaseAdmin";
-import { sendSlackDMDetailed } from "@/lib/slack";
+import { sendSlackDMToUser } from "@/lib/slack";
 import { BACKUP_EXCLUDED, BACKUP_TABLES } from "@/lib/backupEngine";
 
 export type BackupCoverage = {
@@ -65,24 +64,14 @@ export function coverageMessage(c: BackupCoverage): string | null {
   return lines.join("\n");
 }
 
-// 관장(drivers.rank='관장', 재직) 의 인사기록카드 email. 파일 백업 실패 알림도 씁니다.
-export async function directorEmail(): Promise<string | null> {
-  const { data: drv } = await supabaseAdmin
-    .from("drivers")
-    .select("id")
-    .eq("rank", "관장")
-    .eq("is_active", true)
-    .limit(1)
-    .maybeSingle();
-  const id = (drv as { id?: string } | null)?.id;
-  if (!id) return null;
-  const { data: prof } = await supabaseAdmin
-    .from("employee_profiles")
-    .select("email")
-    .eq("driver_id", id)
-    .maybeSingle();
-  const email = (prof as { email?: string | null } | null)?.email ?? null;
-  return email && email.trim() ? email.trim() : null;
+// 관장 슬랙 사용자 ID — 백업 목록 점검·파일 백업 실패 알림을 받습니다.
+//   2026-11 점검: 예전에는 인사기록카드 email 로 슬랙 사용자를 찾았는데, 그 주소가
+//   슬랙 계정 이메일과 달라(users_not_found) 2026-10 부터 DM 이 한 번도 가지 않았습니다.
+//   그래서 사용자 ID 로 바로 보냅니다. 바꿀 때는 환경변수 DIRECTOR_SLACK_USER_ID.
+export const DIRECTOR_SLACK_USER_ID = process.env.DIRECTOR_SLACK_USER_ID?.trim() || "U0ADUPN08Q3";
+
+export async function notifyDirector(text: string): Promise<{ ok: boolean; reason: string | null }> {
+  return sendSlackDMToUser(DIRECTOR_SLACK_USER_ID, text);
 }
 
 export type CoverageRun = BackupCoverage & {
@@ -97,6 +86,6 @@ export async function runBackupCoverageCheck(opts: { dryRun: boolean }): Promise
   const message = coverageMessage(c);
   if (!message) return { ...c, message, dm: "skipped", dmReason: null };
   if (opts.dryRun) return { ...c, message, dm: "dry-run", dmReason: null };
-  const res = await sendSlackDMDetailed(await directorEmail(), message);
+  const res = await notifyDirector(message);
   return { ...c, message, dm: res.ok ? "sent" : "failed", dmReason: res.reason };
 }

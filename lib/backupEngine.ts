@@ -27,6 +27,8 @@ import { applyRetention, retentionIsLive, retentionNote } from "@/lib/backupRete
 // ⑤ 2026-10 관장 지시 — 동래방카(bk_*) 3개, 파일 백업 진행 기록 2개
 // ⑥ 2026-10 관장 지시 — 동래방카 콘텐츠(공지·알림장·급식·연간일정) 5개
 // ⑦ 2026-11 백업 점검(관장 지시) — 연차정산·재무·강사계약·ERP 사본 20개
+// ⑧ 2026-11 백업 점검 후속(관장 지시) — 직접 입력 데이터 23개
+// 개인정보 칸은 아래 BACKUP_MASKED_COLUMNS 에서 가립니다.
 // 백업하지 않는 public 테이블은 아래 BACKUP_EXCLUDED 에 이유와 함께 적습니다.
 //   둘 다에 없는 테이블이 생기면 백업 Cron 이 관장에게 DM(lib/backupCoverage).
 export const BACKUP_TABLES: readonly string[] = [
@@ -158,7 +160,111 @@ export const BACKUP_TABLES: readonly string[] = [
   "erp_code_snapshots", // ⑦
   "erp_expenditures", // ⑦ 계좌는 끝 4자리만
   "erp_transactions", // ⑦ 계좌는 별칭·끝 4자리만
+  // --- 결재·직인 대장 ---
+  "approvals", // ⑧ 결재
+  "seal_requests", // ⑧ 직인 사용 신청
+  "seal_recipients", // ⑧ 직인 발급 대상(발급번호)
+  "seal_number_counters", // ⑧ 연도별 발급번호 — 번호 연속성
+  // --- 동래방카 공결·모집·신청·방카톡·식단 ---
+  "bk_absences", // ⑧ 공결확인서
+  "bk_absence_files", // ⑧ 공결 증빙(파일은 파일 백업)
+  "bk_recruitments", // ⑧ 모집 공고
+  "bk_applications", // ⑧ 입소 신청서 — sensitive(알레르기 건강정보) 칸은 가림
+  "bk_application_files", // ⑧ 신청 서류
+  "bk_application_recommendations", // ⑧ 추천서(token_hash 는 해시)
+  "bk_talk_threads", // ⑧ 방카톡 대화방
+  "bk_talk_messages", // ⑧ 방카톡 메시지
+  "bk_talk_files", // ⑧ 방카톡 첨부
+  "bk_talk_settings", // ⑧ 방카톡 운영 시간
+  "bk_meal_weeks", // ⑧ 주간 식단 정보
+  // --- 동의·계약 변경 이력 ---
+  "consent_records", // ⑧ 개인정보 동의 기록(법적 증빙)
+  "contract_date_changes", // ⑧ 계약일 변경 이력(사유)
+  // --- 언론 ---
+  "press_articles", // ⑧ 보도 기사
+  "press_releases", // ⑧ 보도자료
+  "press_reporters", // ⑧ 기자 명단(수동 칸 포함)
+  // --- 문자 ---
+  "sms_contact_groups", // ⑧ 연락처 그룹
+  "sms_contact_group_members", // ⑧ 연락처 그룹 구성원
+  "sms_templates", // ⑧ 문자 서식
 ];
+
+// --- 칸 단위 가림 -------------------------------------------------------
+// 테이블은 백업하되 지정한 칸은 백업 zip 안에서 가림값으로 바꿉니다(DB 는 그대로).
+//   * rrn7  : 주민번호 → 앞 7자리만(900101-1******). 숫자 13자리가 아니면 전부 *.
+//   * last4 : 계좌번호 등 → 뒤 4자리만 남기고 숫자를 *.
+//   * drop  : 칸 값을 null 로.
+//   가림 목록은 zip 의 README.txt·manifest.json(masked_columns)에 기록됩니다.
+//   ※ 이 칸들은 백업으로 복구할 수 없습니다 — 원본은 DB 에만 있습니다.
+export type MaskRule = "rrn7" | "last4" | "drop";
+export const BACKUP_MASKED_COLUMNS: Readonly<
+  Record<string, Readonly<Record<string, { rule: MaskRule; why: string }>>>
+> = {
+  employee_profiles: {
+    resident_number: { rule: "rrn7", why: "직원 주민번호 — 앞 7자리만" },
+  },
+  saem_instructors: {
+    bank_account: { rule: "last4", why: "강사 계좌번호 — 뒤 4자리만" },
+  },
+  bk_applications: {
+    sensitive: { rule: "drop", why: "신청 학생 알레르기·건강정보(개인정보보호법 민감정보) — 보관기간 뒤 DB 에서 지워지므로 백업에 남기지 않음" },
+  },
+};
+
+const MASK_RULE_LABEL: Record<MaskRule, string> = {
+  rrn7: "앞 7자리만 남김",
+  last4: "뒤 4자리만 남김",
+  drop: "빈 값(null)으로 바꿈",
+};
+
+function maskValue(v: unknown, rule: MaskRule): unknown {
+  if (v == null || v === "") return v;
+  if (rule === "drop") return null;
+  const s = String(v);
+  if (rule === "rrn7") {
+    const d = s.replace(/[^0-9]/g, "");
+    return d.length === 13 ? `${d.slice(0, 6)}-${d[6]}******` : s.replace(/[0-9]/g, "*");
+  }
+  // last4 — 구분자(-) 모양은 두고 숫자만 가림
+  const total = (s.match(/[0-9]/g) ?? []).length;
+  let seen = 0;
+  return s.replace(/[0-9]/g, (c) => (++seen > total - 4 ? c : "*"));
+}
+
+function applyMask(table: string, rows: Record<string, unknown>[]): number {
+  const cols = BACKUP_MASKED_COLUMNS[table];
+  if (!cols) return 0;
+  let n = 0;
+  for (const row of rows) {
+    for (const [col, { rule }] of Object.entries(cols)) {
+      if (!(col in row) || row[col] == null || row[col] === "") continue;
+      row[col] = maskValue(row[col], rule);
+      n++;
+    }
+  }
+  return n;
+}
+
+function maskedColumnsList(): { table: string; column: string; rule: MaskRule; how: string; why: string }[] {
+  return Object.entries(BACKUP_MASKED_COLUMNS).flatMap(([table, cols]) =>
+    Object.entries(cols).map(([column, { rule, why }]) => ({ table, column, rule, how: MASK_RULE_LABEL[rule], why }))
+  );
+}
+
+function readmeText(now: Date): string {
+  return [
+    "동업자씨 데이터 백업",
+    `만든 시각: ${now.toISOString()}`,
+    "",
+    "tables/<테이블>.json — 테이블별 전체 행(JSON 배열). manifest.json — 테이블별 행 수·실패 사유.",
+    "",
+    "[가림 처리된 칸] 아래 칸은 개인정보 보호를 위해 백업에서 가렸습니다. 원본은 DB 에만 있고,",
+    "이 백업으로는 복구할 수 없습니다.",
+    ...maskedColumnsList().map((m) => `  - ${m.table}.${m.column}: ${m.how} — ${m.why}`),
+    "",
+  ].join("\n");
+}
 
 // --- 백업 제외 목록 ---------------------------------------------------
 // 운영 DB public 에 있지만 백업하지 않는 테이블 — 테이블마다 이유 한 줄.
@@ -173,6 +279,13 @@ export const BACKUP_EXCLUDED: Readonly<Record<string, string>> = {
   mail_messages_backup_20260901: "메일 정리 전 임시 사본(2026-09-01) — 원본은 mail_messages",
   // 다시 받을 수 있는 캐시
   rental_reservations: "대관 시스템에서 매일 다시 받는 사본(rental-sync Cron)",
+  // 실행·발송·접속 기록(로그) — 2026-11 점검
+  bk_application_access_logs: "방카 신청서 열람 접속 기록(로그)",
+  bk_application_otps: "방카 신청 휴대폰 인증번호(해시·수 분 뒤 만료) — 임시",
+  press_collect_runs: "언론 기사 자동 수집 실행 기록(로그)",
+  press_release_sends: "보도자료 기자별 발송 기록(로그) — 보도자료 본문은 press_releases 로 백업",
+  seal_print_logs: "직인 문서 인쇄 기록(로그)",
+  sms_send_logs: "문자 발송 기록(로그)",
   // 뷰(데이터 없음 — 원본 테이블이 백업됨). 점검은 PostgREST 목록을 쓰므로 뷰도 잡힙니다.
   bk_class_sessions: "뷰 — 동래방카 수업 회차(원본 saem_sessions·saem_programs 는 백업됨)",
   // 공용 인스턴스의 다른 앱(스탬프투어 등)·소유 불명 — 이 저장소 코드가 쓰지 않음
@@ -197,13 +310,15 @@ export const BACKUP_EXCLUDED: Readonly<Record<string, string>> = {
 const LOG_TABLE = "backup_logs";
 
 // Supabase 는 1회 응답 행 수에 상한이 있어 페이지네이션으로 전량을 읽습니다.
-const PAGE_SIZE = 1000;
+const DEFAULT_PAGE_SIZE = 1000;
 
 export type TableDump = {
   table: string;
   rows: number;
   // 읽기 실패(테이블 없음 등) 시 사유. 있으면 rows 는 0이고 JSON 도 만들지 않습니다.
   error?: string;
+  // 가림 처리(BACKUP_MASKED_COLUMNS)한 값 개수
+  masked?: number;
 };
 
 export type BackupSummary = {
@@ -236,9 +351,14 @@ export function backupFileName(now: Date): string {
 // 불안정해지지 않도록 사용 가능한 컬럼을 순서대로 시도합니다.
 const ORDER_CANDIDATES = ["id", "created_at", null] as const;
 
+// 행이 큰 테이블은 한 번에 적게 읽습니다. mail_messages 는 행당 평균 약 90KB(본문 HTML)라
+//   1000행씩 읽으면 DB statement timeout 으로 2026-10-31·11-07 백업에서 통째로 빠졌습니다.
+const PAGE_SIZE_BY_TABLE: Readonly<Record<string, number>> = { mail_messages: 100 };
+
 async function fetchAll(table: string): Promise<Record<string, unknown>[]> {
   let orderBy: string | null | undefined;
   const out: Record<string, unknown>[] = [];
+  const PAGE_SIZE = PAGE_SIZE_BY_TABLE[table] ?? DEFAULT_PAGE_SIZE;
 
   for (let from = 0; ; from += PAGE_SIZE) {
     let page: Record<string, unknown>[] | null = null;
@@ -543,6 +663,70 @@ export async function hasRunningBackup(): Promise<boolean> {
   return (data ?? []).length > 0;
 }
 
+// --- ZIP 만들기(업로드 없음) ---------------------------------------------
+// runBackup 과 드라이런이 함께 씁니다. DB 는 읽기만 합니다.
+export async function buildBackupZip(
+  now: Date,
+  triggeredBy: string
+): Promise<{ buf: Buffer; dumps: TableDump[]; totalRows: number; files: { path: string; bytes: number }[] }> {
+  const zip = new JSZip();
+  const dumps: TableDump[] = [];
+  const files: { path: string; bytes: number }[] = [];
+  let totalRows = 0;
+
+  for (const table of BACKUP_TABLES) {
+    try {
+      const rows = await fetchAll(table);
+      const masked = applyMask(table, rows);
+      const json = JSON.stringify(rows, null, 2);
+      zip.file(`tables/${table}.json`, json);
+      files.push({ path: `tables/${table}.json`, bytes: Buffer.byteLength(json) });
+      dumps.push(masked > 0 ? { table, rows: rows.length, masked } : { table, rows: rows.length });
+      totalRows += rows.length;
+    } catch (e) {
+      // 개별 테이블 실패는 격리 — 나머지는 정상 보관하고 manifest 에 기록.
+      const msg = e instanceof Error ? e.message : String(e);
+      console.warn(`[backup] ${table} 읽기 실패:`, msg);
+      dumps.push({ table, rows: 0, error: msg });
+    }
+  }
+
+  const manifest = {
+    generated_at: now.toISOString(),
+    triggered_by: triggeredBy,
+    table_count: dumps.filter((d) => !d.error).length,
+    total_rows: totalRows,
+    masked_columns: maskedColumnsList(),
+    tables: dumps,
+  };
+  const manifestJson = JSON.stringify(manifest, null, 2);
+  zip.file("manifest.json", manifestJson);
+  files.push({ path: "manifest.json", bytes: Buffer.byteLength(manifestJson) });
+  const readme = readmeText(now);
+  zip.file("README.txt", readme);
+  files.push({ path: "README.txt", bytes: Buffer.byteLength(readme) });
+
+  const buf = await zip.generateAsync({
+    type: "nodebuffer",
+    compression: "DEFLATE",
+    compressionOptions: { level: 6 },
+  });
+  return { buf, dumps, totalRows, files };
+}
+
+// --- 드라이런 -----------------------------------------------------------
+// 드라이브 업로드·backup_logs 기록·슬랙 없이 zip 을 만들어 내용 목록만 돌려줍니다.
+export async function dryRunBackup(): Promise<{
+  zipBytes: number;
+  totalRows: number;
+  files: { path: string; bytes: number }[];
+  dumps: TableDump[];
+  maskedColumns: ReturnType<typeof maskedColumnsList>;
+}> {
+  const { buf, dumps, totalRows, files } = await buildBackupZip(new Date(), "dry-run");
+  return { zipBytes: buf.length, totalRows, files, dumps, maskedColumns: maskedColumnsList() };
+}
+
 // --- 메인 -------------------------------------------------------------
 // triggeredBy: "cron" | "manual" | "수동(홍길동)" 등 자유 문자열.
 export async function runBackup(triggeredBy: string): Promise<BackupSummary> {
@@ -577,40 +761,9 @@ export async function runBackup(triggeredBy: string): Promise<BackupSummary> {
   };
 
   try {
-    // 2) 테이블별 덤프 → ZIP
-    const zip = new JSZip();
-    const dumps: TableDump[] = [];
-    let totalRows = 0;
-
-    for (const table of BACKUP_TABLES) {
-      try {
-        const rows = await fetchAll(table);
-        zip.file(`tables/${table}.json`, JSON.stringify(rows, null, 2));
-        dumps.push({ table, rows: rows.length });
-        totalRows += rows.length;
-      } catch (e) {
-        // 개별 테이블 실패는 격리 — 나머지는 정상 보관하고 manifest 에 기록.
-        const msg = e instanceof Error ? e.message : String(e);
-        console.warn(`[backup] ${table} 읽기 실패:`, msg);
-        dumps.push({ table, rows: 0, error: msg });
-      }
-    }
-
+    // 2) 테이블별 덤프(칸 가림 포함) → ZIP
+    const { buf, dumps, totalRows } = await buildBackupZip(now, triggeredBy);
     const okDumps = dumps.filter((d) => !d.error);
-    const manifest = {
-      generated_at: now.toISOString(),
-      triggered_by: triggeredBy,
-      table_count: okDumps.length,
-      total_rows: totalRows,
-      tables: dumps,
-    };
-    zip.file("manifest.json", JSON.stringify(manifest, null, 2));
-
-    const buf = await zip.generateAsync({
-      type: "nodebuffer",
-      compression: "DEFLATE",
-      compressionOptions: { level: 6 },
-    });
 
     // 3) 드라이브 업로드
     const { id: driveFileId } = await uploadToDrive(fileName, buf);
