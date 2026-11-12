@@ -20,7 +20,9 @@ export type AdminDashboardData = {
   system: {
     erp: { lastAt: string | null; failed24h: number } | null;
     backup: { status: string; startedAt: string; error: string | null } | null;
-    smsFailed7d: number | null;
+    // 최근 7일 문자 — failedSends: 통째로 실패(ok=false)한 발송 횟수(빨간 점),
+    //   partial: ok=true 인데 일부 번호 실패(failed_count>0) — 실패 번호 수·해당 발송 횟수(노란 점).
+    sms7d: { failedSends: number; partialNumbers: number; partialSends: number } | null;
     sensitive7d: number | null;
   };
 };
@@ -89,20 +91,27 @@ async function lastBackup() {
   return { status: r.status, startedAt: r.started_at, error: r.error_message };
 }
 
-// 최근 7일 문자 실패 건수 — 실패 건수 칸 합계. 통째로 실패(ok=false)했는데 칸이 비면 수신자 수로 셉니다.
-async function smsFailed7d() {
+// 최근 7일 문자 실패 — 통째 실패(ok=false) 발송 횟수와, 성공 발송 중 일부 번호 실패를 나눠 셉니다.
+async function sms7d() {
   const since = new Date(Date.now() - 7 * DAY).toISOString();
   const { data, error } = await supabaseAdmin
     .from("sms_send_logs")
     .select("ok, failed_count, recipient_count")
     .gte("created_at", since);
   if (error) throw new Error(error.message);
-  let n = 0;
-  for (const r of (data ?? []) as { ok: boolean | null; failed_count: number | null; recipient_count: number | null }[]) {
-    if (r.failed_count != null) n += Number(r.failed_count) || 0;
-    else if (r.ok === false) n += Number(r.recipient_count) || 1;
+  const out = { failedSends: 0, partialNumbers: 0, partialSends: 0 };
+  for (const r of (data ?? []) as { ok: boolean | null; failed_count: number | null }[]) {
+    if (r.ok === false) {
+      out.failedSends++;
+      continue;
+    }
+    const f = Number(r.failed_count) || 0;
+    if (f > 0) {
+      out.partialNumbers += f;
+      out.partialSends++;
+    }
   }
-  return n;
+  return out;
 }
 
 async function sensitive7d() {
@@ -124,7 +133,7 @@ export async function loadAdminDashboardData(): Promise<AdminDashboardData> {
     safe(leaveOver5()),
     safe(erpStatus()),
     safe(lastBackup()),
-    safe(smsFailed7d()),
+    safe(sms7d()),
     safe(sensitive7d()),
   ]);
   return {
@@ -132,6 +141,6 @@ export async function loadAdminDashboardData(): Promise<AdminDashboardData> {
     approvals: { cert, seal, instructorSeal: ic?.waitingSeal ?? null },
     instructorContracts: ic,
     leave5,
-    system: { erp, backup, smsFailed7d: sms, sensitive7d: sens },
+    system: { erp, backup, sms7d: sms, sensitive7d: sens },
   };
 }

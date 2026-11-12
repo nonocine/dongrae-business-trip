@@ -27,7 +27,8 @@ export default function SmsHistory({ logs }: { logs: SmsLogRow[] }) {
   }
 
   return (
-    <section className={stepBox}>
+    // id — 관리자 대시보드 문자 카드가 /sms#sms-history 로 바로 여기로 옵니다.
+    <section id="sms-history" className={`${stepBox} scroll-mt-4`}>
       <h3 className="text-base font-bold text-ink">발송 이력 (최근 50건)</h3>
       <p className="mb-3 mt-1 text-xs text-ink-muted">
         전 직원이 같은 이력을 봅니다. 본문 전체는 보낸 사람·관장·부장만, 다른 직원에게는 앞 20자만 보입니다.

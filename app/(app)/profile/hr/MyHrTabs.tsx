@@ -2,10 +2,13 @@
 
 import { useEffect, useState, type ReactNode } from "react";
 import Tabs, { type TabItem } from "@/app/components/Tabs";
+import { tabFromHash, type MyHrTabKey } from "@/lib/profileHrTabs";
+import { notifyHashChange } from "@/lib/useLocationHash";
 
 // 마이페이지(내 인사기록) 탭 껍데기 — 데이터는 서버에서 받아 children 으로 꽂습니다
 // (프레젠테이션 전용, 서버 액션·조회 로직과 무관).
-export type MyHrTabKey = "info" | "contracts" | "certs" | "trainings" | "erpLeave" | "leave" | "discipline";
+//   해시 ↔ 탭 표는 lib/profileHrTabs(사이드바 선택 표시와 공용).
+export type { MyHrTabKey };
 
 const TABS: TabItem<MyHrTabKey>[] = [
   { key: "info", label: "내 정보", icon: "user" },
@@ -17,39 +20,6 @@ const TABS: TabItem<MyHrTabKey>[] = [
   { key: "leave", label: "연차 사용계획서", icon: "calendarCheck" },
   { key: "discipline", label: "경위서", icon: "fileText" },
 ];
-
-// 해시 → 탭 키. 새 해시(#info/#certs/#trainings)와 함께, 기존 북마크·대시보드
-// 링크가 쓰던 섹션 앵커(#my-trainings/#my-certificates)도 같은 탭으로 매핑해
-// 하위 호환을 유지합니다.
-const HASH_TO_TAB: Record<string, MyHrTabKey> = {
-  info: "info",
-  profile: "info",
-  contracts: "contracts",
-  contract: "contracts",
-  "my-contracts": "contracts",
-  certs: "certs",
-  certificates: "certs",
-  "my-certificates": "certs",
-  trainings: "trainings",
-  "my-trainings": "trainings",
-  "erp-leave": "erpLeave",
-  "duty-record": "erpLeave",
-  duty: "erpLeave",
-  erpleave: "erpLeave",
-  annual: "erpLeave",
-  "my-leave": "erpLeave",
-  leave: "leave",
-  "leave-plan": "leave",
-  "my-leave-plan": "leave",
-  discipline: "discipline",
-  incident: "discipline",
-  award: "discipline",
-};
-
-function tabFromHash(hash: string): MyHrTabKey | null {
-  const key = hash.replace(/^#/, "").trim().toLowerCase();
-  return HASH_TO_TAB[key] ?? null;
-}
 
 export default function MyHrTabs({
   info,
@@ -78,7 +48,8 @@ export default function MyHrTabs({
       if (k) setTab(k);
     };
     sync();
-    // 같은 페이지에 머무는 중 해시 링크(대시보드 → #my-trainings)를 눌러도 전환.
+    // 같은 페이지에 머무는 중 해시 링크(사이드바 '내 정보' → #my-trainings 등)를 눌러도 전환.
+    //   사이드바·드로어는 lib/useLocationHash goToHash 로 옮기며 이 이벤트를 직접 쏩니다.
     window.addEventListener("hashchange", sync);
     return () => window.removeEventListener("hashchange", sync);
   }, []);
@@ -87,6 +58,8 @@ export default function MyHrTabs({
     setTab(key);
     // 새로고침해도 같은 탭이 열리도록 해시만 교체(스크롤 점프·히스토리 오염 없음).
     window.history.replaceState(null, "", `#${key}`);
+    // 사이드바·드로어의 선택 표시도 따라오게(replaceState 는 hashchange 를 쏘지 않습니다).
+    notifyHashChange();
   }
 
   const panels: Record<MyHrTabKey, ReactNode> = {

@@ -120,6 +120,10 @@ export type MenuVisibility =
 //   값은 MenuContext 로 들어오며, 모르면(undefined) 숨깁니다.
 export type MenuDataCondition = "myTrainings";
 
+// 공통 메뉴 소제목(2026-11) — 순서대로 그립니다.
+export const COMMON_SECTIONS = ["소통", "사업·프로그램", "대장·자료", "함께 보기"] as const;
+export type CommonSection = (typeof COMMON_SECTIONS)[number];
+
 export type MenuItem = {
   // 같은 경로가 여러 그룹에 있어(예: /mail 은 공통·관리자 양쪽) 경로로는
   //   가릴 수 없습니다. 키는 화면의 React key 로도 씁니다.
@@ -133,6 +137,9 @@ export type MenuItem = {
   show: MenuVisibility;
   // 데이터 조건 — 위 MenuDataCondition. 없으면 권한(show)만 봅니다.
   when?: MenuDataCondition;
+  // 그룹 안 소제목(지금은 공통만) — 사이드바·드로어가 바뀌는 자리에 작은 회색 제목을 그립니다.
+  //   값은 COMMON_SECTIONS 중 하나. 같은 소제목 항목은 배열에서 붙어 있어야 합니다(테스트가 확인).
+  section?: CommonSection;
   // 화면별 표시 여부. 생략하면 true(양쪽 다 표시).
   //   sidebar: PC 좌측 사이드바 + 폰 드로어(같은 트리)
   //   card   : 메인(대시보드) 카드
@@ -199,10 +206,15 @@ export const MENU_ITEMS: MenuItem[] = [
     when: "myTrainings",
   },
 
-  // ---------- 공통 — 전 직원 ----------
+  // ---------- 공통 — 전 직원, 업무 도구 ----------
+  //   2026-11 관장 지시: 소제목 4개(section)로 묶습니다 — 소통 / 사업·프로그램 / 대장·자료 / 함께 보기.
+  //   소제목은 접히지 않는 작은 회색 제목(사이드바·폰 드로어). 배열 순서가 곧 소제목 순서입니다.
+
+  // ··· 소통 ···
   {
     key: "common-mail",
     group: "common",
+    section: "소통",
     label: "공용 메일함",
     href: "/mail",
     icon: "📬",
@@ -211,8 +223,35 @@ export const MENU_ITEMS: MenuItem[] = [
     badgeDesc: mailDesc,
   },
   {
+    // 전 직원 공통 — SMS_SEND_EMAILS 에 있는 사람("*" 면 전원)만 보입니다 — 가드(lib/smsAccess)와 같은 판정.
+    key: "common-sms",
+    group: "common",
+    section: "소통",
+    label: "문자 발송",
+    href: "/sms",
+    icon: "✉️",
+    desc: "방과후 보호자·직접 입력 번호로 문자 보내기 · 발송 이력",
+    show: { kind: "smsSender" },
+  },
+  {
+    // 2026-11 관장 지시 — 관리자 영역 '보도자료 기자' 의 기사 목록을 공통으로 옮겼습니다.
+    //   조회 전용. 가드는 로그인만(app/(app)/press-news/data.ts loadPressNews).
+    //   기자 명단·확인 대기열·수집은 관리자 영역 /press(managerAdmin)에 그대로 둡니다.
+    key: "common-press-news",
+    group: "common",
+    section: "소통",
+    label: "언론보도",
+    href: "/press-news",
+    icon: "📰",
+    desc: "우리 센터 기사 목록·홍보 실적 연결 현황 (조회)",
+    show: { kind: "everyone" },
+  },
+
+  // ··· 사업·프로그램 ···
+  {
     key: "common-business-results",
     group: "common",
+    section: "사업·프로그램",
     label: "사업실적",
     href: "/business-results",
     icon: "📊",
@@ -222,6 +261,7 @@ export const MENU_ITEMS: MenuItem[] = [
   {
     key: "common-clubs",
     group: "common",
+    section: "사업·프로그램",
     label: "동아리관리",
     href: "/hr/clubs",
     icon: "🎸",
@@ -235,53 +275,21 @@ export const MENU_ITEMS: MenuItem[] = [
     //   saem 직무)에게만 갑니다. lib/saemAccess.ts 의 resolveSaemView 참고.
     key: "saem-instructors",
     group: "common",
+    section: "사업·프로그램",
     label: "강사·프로그램 관리",
     href: "/hr/saems/instructors",
     icon: "🧑‍🏫",
     desc: "외부 강사·프로그램·근무일지 조회 (편성·정산은 담당자)",
     show: { kind: "everyone" },
   },
-  // ERP 연동(2026-11) — ERP 복제 데이터(erp_*) 조회 전용. 로그인한 직원 모두.
-  //   현황판(월간 달력)은 직원에게 휴가 유형을 '휴가'로 묶어 보이고, 관장(M0)에게만 원래 유형을 보입니다(화면이 판정).
-  //   '내 연차·대휴'는 공통 메뉴에서 빼고 내 인사기록카드의 '연차·대휴' 탭(/profile/hr#erp-leave)으로 옮겼습니다.
-  {
-    key: "common-duty-board",
-    group: "common",
-    label: "복무 현황판",
-    href: "/duties",
-    icon: "🗓",
-    desc: "오늘·이번 주·다음 주 휴가·출장·외근 현황 (ERP)",
-    show: { kind: "everyone" },
-  },
 
-  // 명함첩·거래처 — 관장 결정으로 전 직원 열람(협업 자산)이 되어 관리자
-  //   영역에서 여기로 내렸습니다. 비공개(🔒) 항목만 관장·부장·인사 담당자에게
-  //   보이며, 그 필터는 서버에서 겁니다.
-  //   거래처관리는 시설관리 그룹에도 두었다가(8/17), 시설 직무가 없는 직원 눈에
-  //   진입점이 안 띈다는 관장 지적으로 8/25 부터 공통에만 둡니다.
-  {
-    key: "common-cards",
-    group: "common",
-    label: "명함첩",
-    href: "/hr/cards",
-    icon: "💳",
-    desc: "명함 촬영·AI 판독으로 거래처 연락처 보관",
-    show: { kind: "everyone" },
-  },
-  {
-    key: "common-partners",
-    group: "common",
-    label: "거래처관리",
-    href: "/hr/partners",
-    icon: "🤝",
-    desc: "분야별 거래처·담당자 주소록 (인수인계용)",
-    show: { kind: "everyone" },
-  },
+  // ··· 대장·자료 ···
   // 기관 대장 — 업무협약·수상(노미현 부장 요청). 조회·등록·수정은 전 직원,
   //   삭제는 등록자 본인 또는 관장·부장·인사 담당자(lib/orgRecordsServer).
   {
     key: "common-org-records",
     group: "common",
+    section: "대장·자료",
     label: "기관 대장",
     href: "/hr/org-records",
     icon: "🏆",
@@ -293,6 +301,7 @@ export const MENU_ITEMS: MenuItem[] = [
   {
     key: "common-seal-register",
     group: "common",
+    section: "대장·자료",
     label: "직인사용대장",
     href: "/seal-register",
     icon: "🔖",
@@ -302,25 +311,54 @@ export const MENU_ITEMS: MenuItem[] = [
       n && n > 0 ? `결재 대기 ${n}건 — 직인 증서 신청·결재·발급` : "직인 증서(수상확인증·수료증·표창장·상장·위촉장) 신청·결재·발급",
   },
   {
-    // 전 직원 공통 — SMS_SEND_EMAILS 에 있는 사람("*" 면 전원)만 보입니다 — 가드(lib/smsAccess)와 같은 판정.
-    key: "common-sms",
+    key: "common-partners",
     group: "common",
-    label: "문자 발송",
-    href: "/sms",
-    icon: "✉️",
-    desc: "방과후 보호자·직접 입력 번호로 문자 보내기 · 발송 이력",
-    show: { kind: "smsSender" },
+    section: "대장·자료",
+    label: "거래처관리",
+    href: "/hr/partners",
+    icon: "🤝",
+    desc: "분야별 거래처·담당자 주소록 (인수인계용)",
+    show: { kind: "everyone" },
   },
+  // 명함첩·거래처 — 관장 결정으로 전 직원 열람(협업 자산)이 되어 관리자
+  //   영역에서 여기로 내렸습니다. 비공개(🔒) 항목만 관장·부장·인사 담당자에게
+  //   보이며, 그 필터는 서버에서 겁니다.
+  //   거래처관리는 시설관리 그룹에도 두었다가(8/17), 시설 직무가 없는 직원 눈에
+  //   진입점이 안 띈다는 관장 지적으로 8/25 부터 공통에만 둡니다.
   {
-    // 2026-11 관장 지시 — 관리자 영역 '보도자료 기자' 의 기사 목록을 공통으로 옮겼습니다.
-    //   조회 전용. 가드는 로그인만(app/(app)/press-news/data.ts loadPressNews).
-    //   기자 명단·확인 대기열·수집은 관리자 영역 /press(managerAdmin)에 그대로 둡니다.
-    key: "common-press-news",
+    key: "common-cards",
     group: "common",
-    label: "언론보도",
-    href: "/press-news",
-    icon: "📰",
-    desc: "우리 센터 기사 목록·홍보 실적 연결 현황 (조회)",
+    section: "대장·자료",
+    label: "명함첩",
+    href: "/hr/cards",
+    icon: "💳",
+    desc: "명함 촬영·AI 판독으로 거래처 연락처 보관",
+    show: { kind: "everyone" },
+  },
+
+  // ··· 함께 보기 ···
+  // ERP 연동(2026-11) — ERP 복제 데이터(erp_*) 조회 전용. 로그인한 직원 모두.
+  //   현황판(월간 달력)은 직원에게 휴가 유형을 '휴가'로 묶어 보이고, 관장(M0)에게만 원래 유형을 보입니다(화면이 판정).
+  //   '내 연차·대휴'는 공통 메뉴에서 빼고 내 인사기록카드의 '연차·대휴' 탭(/profile/hr#erp-leave)으로 옮겼습니다.
+  {
+    key: "common-duty-board",
+    group: "common",
+    section: "함께 보기",
+    label: "복무 현황판",
+    href: "/duties",
+    icon: "🗓",
+    desc: "오늘·이번 주·다음 주 휴가·출장·외근 현황 (ERP)",
+    show: { kind: "everyone" },
+  },
+  // MU-5. 상조회는 직원 자치 조직 — 장부·회원·규정은 전 직원 열람.
+  {
+    key: "common-mutual",
+    group: "common",
+    section: "함께 보기",
+    label: "상조회 현황",
+    href: "/hr/mutual/ledger",
+    icon: "🤲",
+    desc: "회비 장부·회원 명단·규정 열람 (기입은 담당자)",
     show: { kind: "everyone" },
   },
   // 공용 비밀번호 — 전 직원에게 보이되, 목록은 본인이 열람 가능한 항목만
@@ -330,20 +368,11 @@ export const MENU_ITEMS: MenuItem[] = [
   {
     key: "common-credentials",
     group: "common",
+    section: "함께 보기",
     label: "비밀번호 관리",
     href: "/hr/credentials",
     icon: "🔐",
     desc: "앱·메일·구매·은행 계정 비밀번호 (암호화 보관)",
-    show: { kind: "everyone" },
-  },
-  // MU-5. 상조회는 직원 자치 조직 — 장부·회원·규정은 전 직원 열람.
-  {
-    key: "common-mutual",
-    group: "common",
-    label: "상조회 현황",
-    href: "/hr/mutual/ledger",
-    icon: "🤲",
-    desc: "회비 장부·회원 명단·규정 열람 (기입은 담당자)",
     show: { kind: "everyone" },
   },
 

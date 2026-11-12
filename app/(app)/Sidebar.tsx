@@ -5,6 +5,7 @@ import Link from "next/link";
 import { usePathname, useSearchParams } from "next/navigation";
 import { MENU_HOME, type MenuNavItem, type MenuTree } from "@/lib/menuTree";
 import { findActive } from "@/lib/menuActive";
+import { goToHash, useLocationHash } from "@/lib/useLocationHash";
 
 // =====================================================================
 // PC 좌측 고정 사이드바 — (app) 껍데기의 왼쪽 열.
@@ -26,7 +27,9 @@ export default function Sidebar({ tree }: { tree: MenuTree }) {
   //   접힌 채로 보였다가 펼쳐집니다.
   const [toggled, setToggled] = useState<Record<string, boolean>>({});
 
-  const active = findActive(tree.groups, tree.legacy, pathname, search);
+  // 해시까지 봅니다 — /profile/hr#contracts 면 '내 계약서' 가 켜집니다.
+  const hash = useLocationHash();
+  const active = findActive(tree.groups, tree.legacy, pathname, search, hash);
   // '메인' 은 트리 밖 항목이라 따로 판정합니다(경로가 정확히 "/" 일 때만).
   const homeActive = pathname === "/" && active.key === "";
 
@@ -77,9 +80,15 @@ export default function Sidebar({ tree }: { tree: MenuTree }) {
               </button>
               {open && (
                 <ul className="mt-0.5 space-y-0.5">
-                  {g.items.map((it) => (
+                  {g.items.map((it, i) => (
                     <li key={it.key}>
-                      <NavRow item={it} active={it.key === active.key} />
+                      {/* 소제목(공통) — 접히지 않는 작은 회색 제목. 값이 바뀌는 자리에만. */}
+                      {it.section && it.section !== g.items[i - 1]?.section && (
+                        <p className={`px-2.5 pb-0.5 text-[10px] font-semibold text-ink-hint ${i > 0 ? "pt-1.5" : "pt-0.5"}`}>
+                          {it.section}
+                        </p>
+                      )}
+                      <NavRow item={it} active={it.key === active.key} pathname={pathname} />
                     </li>
                   ))}
                 </ul>
@@ -109,7 +118,7 @@ export default function Sidebar({ tree }: { tree: MenuTree }) {
                 <ul className="space-y-0.5">
                   {tree.legacy.map((it) => (
                     <li key={it.key}>
-                      <NavRow item={it} active={it.key === active.key} muted />
+                      <NavRow item={it} active={it.key === active.key} muted pathname={pathname} />
                     </li>
                   ))}
                 </ul>
@@ -127,10 +136,12 @@ function NavRow({
   item,
   active,
   muted,
+  pathname,
 }: {
   item: MenuNavItem;
   active: boolean;
   muted?: boolean;
+  pathname: string;
 }) {
   const body = (
     <>
@@ -161,6 +172,10 @@ function NavRow({
   return (
     <Link
       href={item.href}
+      // 같은 페이지 해시 이동(/profile/hr#contracts ↔ #my-trainings)은 직접 옮겨 탭이 바뀌게.
+      onClick={(e) => {
+        if (goToHash(item.href, pathname)) e.preventDefault();
+      }}
       aria-current={active ? "page" : undefined}
       className={`flex items-center gap-2 rounded-lg px-2.5 py-1.5 text-sm transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-navy ${
         active

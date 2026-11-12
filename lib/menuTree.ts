@@ -36,6 +36,8 @@ export type MenuNavItem = {
   // 0 이거나 없으면 배지를 그리지 않습니다.
   badge?: number;
   pending?: boolean;
+  // 그룹 안 소제목(공통만) — 값이 바뀌는 자리에 작은 회색 제목을 그립니다.
+  section?: string;
 };
 
 export type MenuNavGroup = {
@@ -61,6 +63,7 @@ export function buildMenuTree(
     icon: string;
     pending?: true;
     badgeDesc?: unknown;
+    section?: string;
   }): MenuNavItem => ({
     key: i.key,
     label: i.label,
@@ -69,6 +72,7 @@ export function buildMenuTree(
     // 배지를 쓰겠다고 선언한 항목(badgeDesc 보유)만 숫자를 답니다.
     badge: i.badgeDesc ? badges[i.href] : undefined,
     pending: i.pending,
+    ...(i.section ? { section: i.section } : {}),
   });
 
   const legacy: MenuNavItem[] = [];

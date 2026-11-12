@@ -153,15 +153,28 @@ function fmtKst(iso: string | null): string {
 
 const HOUR = 3600 * 1000;
 
-function StatusRow({ href, label, text, bad }: { href: string; label: string; text: string; bad: boolean }) {
+// 점 색: bad(빨강) > warn(노랑) > 정상(옅은 회색).
+function StatusRow({
+  href,
+  label,
+  text,
+  bad,
+  warn = false,
+}: {
+  href: string;
+  label: string;
+  text: string;
+  bad: boolean;
+  warn?: boolean;
+}) {
   return (
     <Link
       href={href}
       className="flex items-center gap-2 rounded-lg border border-line bg-card px-3 py-2 text-xs transition hover:border-navy"
     >
       <span
-        aria-label={bad ? "문제 있음" : "정상"}
-        className={`h-2 w-2 shrink-0 rounded-full ${bad ? "bg-stamp" : "bg-ink-hint/40"}`}
+        aria-label={bad ? "문제 있음" : warn ? "확인 필요" : "정상"}
+        className={`h-2 w-2 shrink-0 rounded-full ${bad ? "bg-stamp" : warn ? "bg-warning" : "bg-ink-hint/40"}`}
       />
       <span className="shrink-0 font-semibold text-ink-body">{label}</span>
       <span className="min-w-0 flex-1 truncate text-right text-ink-muted">{text}</span>
@@ -170,7 +183,16 @@ function StatusRow({ href, label, text, bad }: { href: string; label: string; te
 }
 
 export function SystemSection({ d, now }: { d: AdminDashboardData; now: number }) {
-  const { erp, backup, smsFailed7d, sensitive7d } = d.system;
+  const { erp, backup, sms7d, sensitive7d } = d.system;
+  // 문자 — 빨간 점은 통째로 실패한 발송(ok=false)이 있을 때만, 일부 번호 실패만 있으면 노란 점.
+  const smsText = !sms7d
+    ? "확인 실패"
+    : [
+        sms7d.failedSends > 0 ? `발송 실패 ${sms7d.failedSends}회` : "",
+        sms7d.partialNumbers > 0 ? `일부 번호 실패 ${sms7d.partialNumbers}건(발송 ${sms7d.partialSends}회)` : "",
+      ]
+        .filter(Boolean)
+        .join(" · ") || "실패 없음";
   // ERP — 하루 3번(07·12·18시 KST) 자동 실행이라, 최근 실행이 26시간 넘게 없거나 24시간 안에 실패가 있으면 빨간 점.
   const erpBad = !erp || erp.failed24h > 0 || !erp.lastAt || now - new Date(erp.lastAt).getTime() > 26 * HOUR;
   // 주간 백업 — 최근 결과가 성공이 아니거나 8일 넘게 없으면 빨간 점.
@@ -192,10 +214,11 @@ export function SystemSection({ d, now }: { d: AdminDashboardData; now: number }
           bad={backupBad}
         />
         <StatusRow
-          href="/sms"
-          label="문자 발송 실패(7일)"
-          text={smsFailed7d == null ? "확인 실패" : `${smsFailed7d}건`}
-          bad={smsFailed7d == null || smsFailed7d > 0}
+          href="/sms#sms-history"
+          label="문자 발송(7일)"
+          text={smsText}
+          bad={!sms7d || sms7d.failedSends > 0}
+          warn={!!sms7d && sms7d.partialNumbers > 0}
         />
         <StatusRow
           href="/admin/sensitive"

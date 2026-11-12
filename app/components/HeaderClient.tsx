@@ -6,6 +6,7 @@ import { usePathname, useSearchParams } from "next/navigation";
 import { logoutCurrent } from "@/app/actions";
 import { MENU_HOME, type MenuTree } from "@/lib/menuTree";
 import { findActive } from "@/lib/menuActive";
+import { goToHash, useLocationHash } from "@/lib/useLocationHash";
 import AppBackButton from "@/app/components/AppBackButton";
 
 type SessionKind = "employee" | null;
@@ -36,9 +37,10 @@ export default function HeaderClient({
   const isAdmin = canAccessAdmin;
   const displayName = isAdmin ? "관리자" : name ?? "";
 
-  // 드로어의 현재 위치 — PC 사이드바와 같은 판정(lib/menuActive).
+  // 드로어의 현재 위치 — PC 사이드바와 같은 판정(lib/menuActive, 해시 포함).
+  const hash = useLocationHash();
   const drawerActive = tree
-    ? findActive(tree.groups, tree.legacy, pathname, search)
+    ? findActive(tree.groups, tree.legacy, pathname, search, hash)
     : { key: "", group: "" };
   const legacyOpen = legacyToggled ?? drawerActive.group === "__extra__";
 
@@ -222,13 +224,19 @@ export default function HeaderClient({
                   <p className="px-3 pb-0.5 text-[11px] font-bold tracking-wide text-navy">
                     {g.label}
                   </p>
-                  {g.items.map((it) => (
-                    <DrawerRow
-                      key={it.key}
-                      item={it}
-                      active={it.key === drawerActive.key}
-                      onGo={() => setMobileOpen(false)}
-                    />
+                  {g.items.map((it, i) => (
+                    <div key={it.key}>
+                      {/* 소제목(공통) — PC 사이드바와 같은 규칙. */}
+                      {it.section && it.section !== g.items[i - 1]?.section && (
+                        <p className="px-3 pb-0.5 pt-1 text-[10px] font-semibold text-ink-hint">{it.section}</p>
+                      )}
+                      <DrawerRow
+                        item={it}
+                        active={it.key === drawerActive.key}
+                        pathname={pathname}
+                        onGo={() => setMobileOpen(false)}
+                      />
+                    </div>
                   ))}
                 </div>
               ))}
@@ -312,11 +320,13 @@ function DrawerRow({
   active,
   muted,
   onGo,
+  pathname,
 }: {
   item: { label: string; href: string; icon: string; badge?: number; pending?: boolean };
   active: boolean;
   muted?: boolean;
   onGo: () => void;
+  pathname?: string;
 }) {
   const body = (
     <>
@@ -346,7 +356,11 @@ function DrawerRow({
   return (
     <Link
       href={item.href}
-      onClick={onGo}
+      onClick={(e) => {
+        // 같은 페이지 해시 이동은 직접 옮겨 탭이 바뀌게(lib/useLocationHash).
+        if (pathname && goToHash(item.href, pathname)) e.preventDefault();
+        onGo();
+      }}
       aria-current={active ? "page" : undefined}
       className={`flex items-center gap-2 rounded-md px-3 py-2.5 text-sm transition ${
         active

@@ -12,14 +12,32 @@
 // =====================================================================
 
 import type { MenuNavGroup, MenuNavItem } from "@/lib/menuTree";
+import { HASH_TO_TAB } from "@/lib/profileHrTabs";
+
+// 해시 비교용 — 같은 탭을 가리키는 별칭(#certs·#my-certificates)은 같은 값으로.
+function normHash(h: string): string {
+  const k = h.replace(/^#/, "").trim().toLowerCase();
+  return HASH_TO_TAB[k] ?? k;
+}
 
 export function matchScore(
   href: string,
   pathname: string,
   search: URLSearchParams,
+  hash = "",
 ): number {
-  // 앵커(/profile/hr#my-certificates)는 브라우저가 서버로 보내지 않으므로 뗍니다.
-  const [rawPath, rawQuery] = href.split("#")[0].split("?");
+  // 해시 링크(/profile/hr#my-certificates) — 같은 경로이고 지금 해시가 같은 탭을 가리킬 때만.
+  //   맞으면 해시 없는 같은 경로 항목(내 인사기록카드 = /profile/hr)보다 앞섭니다.
+  //   해시가 다르면 이 항목은 켜지지 않고, 해시 없는 항목이 경로 일치로 켜집니다.
+  //   (2026-11 — 예전에는 해시를 떼고 비교해 '내 정보' 항목 중 첫 줄만 늘 켜졌습니다.)
+  const hashIdx = href.indexOf("#");
+  if (hashIdx >= 0) {
+    const want = href.slice(hashIdx + 1);
+    const p = href.slice(0, hashIdx).split("?")[0] || "/";
+    if (pathname !== p) return 0;
+    return normHash(want) === normHash(hash) ? p.length + 1500 : 0;
+  }
+  const [rawPath, rawQuery] = href.split("?");
   const path = rawPath || "/";
   if (rawQuery) {
     if (pathname !== path) return 0;
@@ -46,6 +64,7 @@ export function findActive(
   extra: MenuNavItem[],
   pathname: string,
   search: URLSearchParams,
+  hash = "",
 ): { key: string; group: string } {
   let key = "";
   let group = "";
@@ -53,7 +72,7 @@ export function findActive(
   const scan = (items: MenuNavItem[], g: string) => {
     for (const it of items) {
       if (it.pending) continue;
-      const s = matchScore(it.href, pathname, search);
+      const s = matchScore(it.href, pathname, search, hash);
       if (s > best) {
         best = s;
         key = it.key;

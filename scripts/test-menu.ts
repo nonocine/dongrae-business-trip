@@ -13,6 +13,7 @@
 // =====================================================================
 
 import {
+  COMMON_SECTIONS,
   MENU_GROUPS,
   MENU_ITEMS,
   canSeeMenuItem,
@@ -21,6 +22,7 @@ import {
   type MenuContext,
 } from "../lib/menu";
 import { buildMenuTree } from "../lib/menuTree";
+import { findActive } from "../lib/menuActive";
 
 function assert(cond: boolean, message: string) {
   if (!cond) throw new Error(message);
@@ -224,6 +226,65 @@ assert(
   `사이드바 그룹 순서가 예상과 다릅니다: ${bossTree.groups.map((g) => g.group).join(",")}`,
 );
 
+// --- 10) 공통 소제목 4개(2026-11) — 순서·소속·연속 -----------------------------
+const EXPECT_SECTIONS: [string, string[]][] = [
+  ["소통", ["common-mail", "common-sms", "common-press-news"]],
+  ["사업·프로그램", ["common-business-results", "common-clubs", "saem-instructors"]],
+  ["대장·자료", ["common-org-records", "common-seal-register", "common-partners", "common-cards"]],
+  ["함께 보기", ["common-duty-board", "common-mutual", "common-credentials"]],
+];
+assert(
+  JSON.stringify([...COMMON_SECTIONS]) === JSON.stringify(EXPECT_SECTIONS.map(([s]) => s)),
+  `공통 소제목 순서가 예상과 다릅니다: ${COMMON_SECTIONS.join(",")}`,
+);
+const commonAll = MENU_ITEMS.filter((i) => i.group === "common");
+assert(commonAll.length === 13, `공통 항목 수가 13개가 아닙니다: ${commonAll.length}`);
+assert(
+  JSON.stringify(commonAll.map((i) => i.key)) === JSON.stringify(EXPECT_SECTIONS.flatMap(([, ks]) => ks)),
+  `공통 항목 순서가 소제목 순서와 다릅니다: ${commonAll.map((i) => i.key).join(",")}`,
+);
+for (const [sec, ks] of EXPECT_SECTIONS) {
+  for (const k of ks) {
+    assert(MENU_ITEMS.find((i) => i.key === k)?.section === sec, `${k}: 소제목이 '${sec}' 이 아닙니다.`);
+  }
+}
+assert(
+  MENU_ITEMS.filter((i) => i.group !== "common").every((i) => i.section == null),
+  "소제목은 공통에만 씁니다.",
+);
+// 권한 조건은 그대로 — 문자 발송만 smsSender, 나머지는 전 직원.
+assert(
+  commonAll.every((i) => (i.key === "common-sms" ? i.show.kind === "smsSender" : i.show.kind === "everyone")),
+  "공통 항목의 권한 조건이 바뀌었습니다.",
+);
+// 트리에도 소제목이 실려 내려갑니다(사이드바·드로어가 같은 값을 그림).
+const treeCommon = buildMenuTree({ ...ctx(false, []), canSendSms: true }, {}).groups.find((g) => g.group === "common");
+assert(
+  JSON.stringify([...new Set(treeCommon?.items.map((i) => i.section))]) === JSON.stringify([...COMMON_SECTIONS]),
+  "메뉴 트리의 공통 소제목이 예상과 다릅니다.",
+);
+
+// --- 11) 해시 선택 표시 — /profile/hr 안 탭 해시에 맞는 '내 정보' 항목 하나만 ----------
+{
+  const t = buildMenuTree(ctx(false, []), {});
+  const empty = new URLSearchParams();
+  const at = (hash: string) => findActive(t.groups, t.legacy, "/profile/hr", empty, hash).key;
+  assert(at("") === "my-profile", "해시 없으면 내 인사기록카드가 켜져야 합니다.");
+  assert(at("#contracts") === "my-contracts", "#contracts 면 내 계약서가 켜져야 합니다.");
+  assert(at("#my-certificates") === "my-certificates", "#my-certificates 면 증명서 발급이 켜져야 합니다.");
+  assert(at("#certs") === "my-certificates", "탭이 쓰는 #certs 도 증명서 발급으로 잡혀야 합니다.");
+  assert(at("#duty-record") === "my-profile", "#duty-record(복무 기록 탭)은 내 인사기록카드로 잡혀야 합니다.");
+  const tt = buildMenuTree({ ...ctx(false, []), hasMyTrainings: true }, {});
+  assert(
+    findActive(tt.groups, tt.legacy, "/profile/hr", empty, "#my-trainings").key === "my-trainings",
+    "#my-trainings 면 내 의무교육이 켜져야 합니다.",
+  );
+  assert(
+    findActive(tt.groups, tt.legacy, "/mail", empty, "#contracts").key === "common-mail",
+    "다른 경로에서는 해시가 선택에 끼어들면 안 됩니다.",
+  );
+}
+
 console.log(`✓ isM0 || 직무 항목 ${M0_OR_ROLE.length}개 — 직무 없는 M0 도 보임`);
 console.log("✓ 직무 전용 항목은 M0 의 담당 업무에 끼어들지 않음");
 console.log("✓ 직무 없는 일반 직원 — 공통만, 담당 업무·관리자 영역 없음");
@@ -231,4 +292,6 @@ console.log(`✓ key 중복 없음(${keys.length}개) · 경로 누락 없음`);
 console.log("✓ 사이드바·메인 카드 — 차이는 표시 여부(활동일지 계열 사이드바 전용)뿐");
 console.log("✓ 내 정보 — 공통 바로 위, 4개 항목, 주소 그대로, 공통에 /profile 링크 없음");
 console.log("✓ 이전 기능 — 관장에게만, 직원 메뉴에서 숨김");
+console.log("✓ 공통 소제목 4개 — 순서·소속·권한 그대로, 트리에 실림");
+console.log("✓ /profile/hr 해시별 선택 표시 — 탭에 맞는 '내 정보' 항목 하나");
 console.log("\n메뉴 노출 조건 검증 통과");
