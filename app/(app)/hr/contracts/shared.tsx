@@ -5,7 +5,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import ContractView from "@/app/components/ContractView";
 import ContractScanView from "@/app/components/ContractScanView";
-import InkSignaturePad, { SignaturePreview } from "@/app/components/InkSignaturePad";
+import { SignaturePreview } from "@/app/components/InkSignaturePad";
 import {
   bulkPreviewPdf,
   bulkSendContracts,
@@ -20,7 +20,7 @@ import {
   sendContract,
   voidContract,
 } from "@/app/(app)/hr/contracts/workflowActions";
-import type { ContractDateChange, EmployerSignInput } from "@/lib/contractServer";
+import type { ContractDateChange } from "@/lib/contractServer";
 import {
   CONTRACT_KINDS,
   contractDateOptions,
@@ -461,9 +461,9 @@ export function ContractList({
           kind={kind}
           contract={signTarget}
           onClose={() => setSignTarget(null)}
-          onDone={(text) => {
+          onDone={(text, warn) => {
             setSignTarget(null);
-            setMsg({ ok: true, text });
+            setMsg({ ok: !warn, text });
             router.refresh();
           }}
         />
@@ -610,8 +610,9 @@ function ContractDateDialog({
   );
 }
 
-// 센터장 서명 — 기관 직인(기본). 고용자는 '동래구청소년센터장' 직위라 관장 개인 도장은
-//   계약서에 쓰지 않습니다(2026-10 관장 지시). 개인 서명이 필요할 때를 위해 저장 서명·직접 서명은 남깁니다.
+// 센터장 서명 — 기관 직인 하나로 통일(2026-11 관장 지시). 고용자는 '동래구청소년센터장' 직위라
+//   개인 서명(저장 서명·직접 그리기)은 쓰지 않습니다. 서명할 때마다 직인사용대장에 1건 자동 기록되고,
+//   기록이 실패하면 빨간 안내로 알립니다(체결·PDF 는 그대로). 서명 권한(관장·부장)은 서버가 확인합니다.
 function EmployerSignDialog({
   kind,
   contract,
@@ -621,14 +622,11 @@ function EmployerSignDialog({
   kind: ContractKind;
   contract: ContractSummary;
   onClose: () => void;
-  onDone: (text: string) => void;
+  // warn — 체결은 됐지만 직인사용대장 기록이 실패한 경우(화면에 빨간 안내).
+  onDone: (text: string, warn?: boolean) => void;
 }) {
   const [seal, setSeal] = useState<string | null>(null);
-  const [mySig, setMySig] = useState<string | null>(null);
   const [loaded, setLoaded] = useState(false);
-  const [mode, setMode] = useState<"seal" | "saved" | "drawn">("seal");
-  const [drawn, setDrawn] = useState<string | null>(null);
-  const [save, setSave] = useState(true);
   const [err, setErr] = useState<string | null>(null);
   const [pending, start] = useTransition();
 
@@ -641,83 +639,54 @@ function EmployerSignDialog({
         return;
       }
       setSeal(res.seal);
-      setMySig(res.mySignature);
       setLoaded(true);
-      // 직인이 없으면 기본 선택을 옮기지 않습니다 — '먼저 등록하세요' 안내를 보게 합니다.
-      setMode("seal");
     });
     return () => {
       alive = false;
     };
   }, []);
 
-  const canConfirm = mode === "seal" ? !!seal : mode === "saved" ? !!mySig : !!drawn;
-
   function confirmSign() {
     setErr(null);
-    const input: EmployerSignInput = mode === "drawn" ? { mode: "drawn", dataUrl: drawn ?? "", save } : { mode };
     start(async () => {
-      const res = await employerSignContract(kind, contract.id, input);
+      const res = await employerSignContract(kind, contract.id, { mode: "seal" });
       if (!res.ok) {
         setErr(res.message);
         return;
       }
-      onDone(
-        `${contract.employee_name} 님 ${CONTRACT_KINDS[kind].label} 체결 완료 — PDF 를 확정했습니다.` +
-          (res.sealRegister
-            ? res.sealRegister.ok
-              ? ` 직인사용대장 ${res.sealRegister.issueLabel}.`
-              : ` (직인사용대장 기록 실패 — ${res.sealRegister.message})`
-            : "") +
-          (res.dmFailed ? ` (슬랙 알림 실패 — ${res.dmFailed})` : "")
-      );
+      const reg = res.sealRegister;
+      const head = `${contract.employee_name} 님 ${CONTRACT_KINDS[kind].label} 체결 완료 — PDF 를 확정했습니다.`;
+      const dm = res.dmFailed ? ` (슬랙 알림 실패 — ${res.dmFailed})` : "";
+      if (reg && reg.ok) onDone(`${head} 직인사용대장 ${reg.issueLabel}.${dm}`);
+      else
+        onDone(
+          `${head} ⚠ 직인사용대장 기록 실패 — ${reg ? reg.message : "결과 없음"}. 직인사용대장에 직접 남기거나 관리자에게 알려 주세요.${dm}`,
+          true
+        );
     });
   }
-
-  const opt = (m: typeof mode, text: string, enabled: boolean) => (
-    <label className={`flex items-center gap-2 text-sm ${enabled ? "text-ink-body" : "text-ink-hint"}`}>
-      <input type="radio" name="employer-sign" checked={mode === m} disabled={!enabled} onChange={() => setMode(m)} />
-      {text}
-    </label>
-  );
 
   return (
     <Modal title={`센터장 서명 — ${contract.employee_name}`} onClose={onClose}>
       <p className="text-xs text-ink-muted">
-        직원 서명이 끝난 {CONTRACT_KINDS[kind].label}입니다({kstYmd(contract.employee_signed_at)}). 서명하면 PDF 가
-        확정되어 직원 마이페이지에서 내려받을 수 있게 됩니다.
+        직원 서명이 끝난 {CONTRACT_KINDS[kind].label}입니다({kstYmd(contract.employee_signed_at)}). 기관 직인으로
+        서명하면 PDF 가 확정되어 직원 마이페이지에서 내려받을 수 있게 되고, 직인사용대장에 자동으로 기록됩니다.
       </p>
-      <div className="mt-3 space-y-2">
-        {opt("seal", seal || !loaded ? "기관 직인으로 서명" : "기관 직인으로 서명 (등록 안 됨)", !!seal)}
-        {opt("saved", mySig ? "내 저장 서명 사용" : "내 저장 서명 (없음)", !!mySig)}
-        {opt("drawn", "직접 그려 서명", true)}
-      </div>
       <div className="mt-3">
-        {mode === "seal" && seal && <SignaturePreview src={seal} alt="기관 직인" />}
-        {mode === "seal" && loaded && !seal && (
+        {seal && <SignaturePreview src={seal} alt="기관 직인" />}
+        {loaded && !seal && (
           <p className={noticeError}>
             기관 직인을 먼저 등록하세요.{" "}
             <Link href="/hr/seal" className="font-semibold underline">
               기관 직인 등록 →
-            </Link>{" "}
-            (지금 개인 서명으로 하려면 아래 다른 방식을 고르세요)
+            </Link>
           </p>
-        )}
-        {mode === "saved" && mySig && <SignaturePreview src={mySig} alt="내 저장 서명" />}
-        {mode === "drawn" && (
-          <>
-            <InkSignaturePad onChange={setDrawn} />
-            <label className="mt-2 flex items-center gap-2 text-xs text-ink-body">
-              <input type="checkbox" checked={save} onChange={(e) => setSave(e.target.checked)} />
-              이 서명을 내 서명으로 저장
-            </label>
-          </>
         )}
       </div>
       {err && <p className={`mt-3 ${noticeError}`}>{err}</p>}
       <div className="mt-4 flex gap-2">
-        <button type="button" className={`${btnPrimary} flex-1`} disabled={pending || !canConfirm} onClick={confirmSign}>
-          {pending ? "처리 중…" : "서명하고 PDF 확정"}
+        <button type="button" className={`${btnPrimary} flex-1`} disabled={pending || !seal} onClick={confirmSign}>
+          {pending ? "처리 중…" : "기관 직인으로 서명"}
         </button>
         <button type="button" className={btnSecondary} onClick={onClose} disabled={pending}>
           취소

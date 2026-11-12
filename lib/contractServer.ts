@@ -593,7 +593,7 @@ export async function readSavedSignature(driverId: string): Promise<string | nul
   return isPngDataUrl(raw) ? raw : null;
 }
 
-// 센터장 서명 방식 — 기관 직인(기본) / 서명하는 사람의 저장 서명 / 직접 그린 서명.
+// 센터장 서명 방식 — 2026-11 부터 기관 직인만 받습니다(saved·drawn 은 타입만 남고 서버가 거절).
 //   관장 개인 도장은 계약서에 쓰지 않습니다(고용자는 '동래구청소년센터장' 직위 — 2026-10 관장 지시).
 export type EmployerSignInput =
   | { mode: "seal" }
@@ -666,34 +666,19 @@ export async function employerSignCore(
   }
   if (w.employer_signed_at) return { ok: false, message: "이미 센터장 서명이 끝났습니다." };
 
-  let employerImage: Uint8Array | null = null;
-  if (input.mode === "seal") {
-    employerImage = await loadOrgSeal();
-    if (!employerImage) return { ok: false, message: "기관 직인이 등록되어 있지 않습니다. 기관 직인을 먼저 등록하세요(/hr/seal)." };
-  } else if (input.mode === "saved") {
-    const saved = me.driverId ? await readSavedSignature(me.driverId) : null;
-    if (!saved) return { ok: false, message: "저장된 서명이 없습니다. 직접 그려주세요." };
-    employerImage = decodeDataUrl(saved);
-  } else if (input.mode === "drawn") {
-    const checked = checkSignature(input.dataUrl);
-    if (!checked.ok) return { ok: false, message: checked.message };
-    employerImage = decodeDataUrl(checked.dataUrl);
-    if (input.save && me.driverId) {
-      await supabaseAdmin
-        .from("employee_profiles")
-        .update({ signature_data: checked.dataUrl, signature_updated_at: new Date().toISOString() })
-        .eq("driver_id", me.driverId);
-    }
-  } else {
-    // 예전 화면에 남아 있던 '관장 도장' 등, 더 이상 받지 않는 방식.
-    return { ok: false, message: "서명 방식을 다시 선택해주세요. (새로고침 후 다시 시도)" };
+  // 2026-11 관장 지시 — 센터장 서명은 기관 직인 하나로 통일. 저장 서명·직접 그린 서명은 받지 않습니다
+  //   (예전 화면이 남아 있어도 서버에서 막아 직인사용대장 기록이 빠지지 않게).
+  if (input.mode !== "seal") {
+    return { ok: false, message: "센터장 서명은 기관 직인으로만 합니다. 새로고침 후 [기관 직인으로 서명]을 눌러 주세요." };
   }
+  const employerImage = await loadOrgSeal();
+  if (!employerImage) return { ok: false, message: "기관 직인이 등록되어 있지 않습니다. 기관 직인을 먼저 등록하세요(/hr/seal)." };
 
   if (!employerImage) return { ok: false, message: "서명 이미지를 읽지 못했습니다. 다시 시도해주세요." };
   // 계약일이 비어 있으면 계약 시작일로 — 서명한 날짜가 계약일이 되면 안 됩니다(관장 원칙).
   //   이미 정해 두었으면 덮어쓰지 않습니다.
   const contractDate = w.contract_date ?? startDateOf(kind, raw);
-  const signer: EmployerImage = { bytes: employerImage, isSeal: input.mode === "seal" };
+  const signer: EmployerImage = { bytes: employerImage, isSeal: true };
   const bytes = await renderFinalPdf(kind, { ...raw, contract_date: contractDate }, signer);
   const path = contractPdfPath(kind, w.driver_id, w.id);
   const { error: upErr } = await supabaseAdmin.storage
@@ -725,8 +710,8 @@ export async function employerSignCore(
   // 전자 근로계약서 → 인사기록카드 자동 첨부(노미현 부장 요청). 연봉계약서는 칸이 없어 붙이지 않습니다.
   if (kind === "employment") await syncCardAttachment(raw, bytes);
 
-  // 기관 직인으로 서명했을 때만 직인사용대장에 1건(저장 서명·직접 서명은 남기지 않음).
-  const sealRegister = input.mode === "seal" ? await recordContractSealRegister(kind, id, raw, w.driver_id, me, now) : null;
+  // 서명할 때마다 직인사용대장에 1건(센터장 서명 = 기관 직인으로 통일).
+  const sealRegister = await recordContractSealRegister(kind, id, raw, w.driver_id, me, now);
   if (sealRegister && !sealRegister.ok) console.warn(`[contract] 직인사용대장 기록 실패(${kind} ${id}): ${sealRegister.message}`);
 
   const dmFailed = await dmEmployee(
