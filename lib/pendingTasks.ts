@@ -87,7 +87,7 @@ export type PendingTaskSource = {
   appointments: { driverId: string; name: string; count: number }[];
   certificates: string[];
   seals: { requesterDriverId: string | null; label: string }[];
-  instructorSeals: string[];
+  instructorSeals: { id: string; name: string; contractNo: string }[];
   // 센터장 서명 대기 계약서 — 직원 이름·주소용 키.
   employmentSign: { driverId: string; name: string }[];
   salarySign: { driverId: string; name: string; year: number | null }[];
@@ -153,7 +153,12 @@ export async function loadPendingTaskSource(): Promise<PendingTaskSource> {
     loadAppointmentsPending(),
     supabaseAdmin.from("certificate_requests").select("employee_name, cert_type").eq("status", "pending").order("requested_at"),
     supabaseAdmin.from("seal_requests").select("requester_driver_id, requester_name, title").eq("status", "pending").order("updated_at"),
-    supabaseAdmin.from("instructor_contracts").select("instructor_name_snapshot").eq("status", "instructor_signed").order("instructor_signed_at"),
+    supabaseAdmin
+      .from("instructor_contracts")
+      .select("id, contract_no, instructor_name_snapshot")
+      .eq("status", "instructor_signed")
+      .is("employer_signed_at", null)
+      .order("instructor_signed_at"),
     promotionAlerts(year).catch(() => null),
     loadEmployerSignPending("employment_contracts"),
     loadEmployerSignPending("salary_contracts"),
@@ -172,7 +177,11 @@ export async function loadPendingTaskSource(): Promise<PendingTaskSource> {
       requesterDriverId: r.requester_driver_id ? s(r.requester_driver_id) : null,
       label: [s(r.requester_name), s(r.title)].filter(Boolean).join(" · ") || "(신청)",
     })),
-    instructorSeals: ((ic.data ?? []) as Raw[]).map((r) => s(r.instructor_name_snapshot) || "(이름 없음)"),
+    instructorSeals: ((ic.data ?? []) as Raw[]).map((r) => ({
+      id: s(r.id),
+      name: s(r.instructor_name_snapshot) || "(이름 없음)",
+      contractNo: s(r.contract_no),
+    })),
     employmentSign: empSign.map((r) => ({ driverId: s(r.driver_id), name: nm(r.driver_id) })),
     salarySign: salSign.map((r) => ({ driverId: s(r.driver_id), name: nm(r.driver_id), year: r.year ?? null })),
     lectureCerts,
@@ -210,13 +219,16 @@ export function tasksFromSource(p: TaskPerson, src: PendingTaskSource): PendingT
     );
   }
   if (p.isDirector) {
-    push("instructorSeal", src.instructorSeals, "/hr/saems/contracts");
-    // 계약서 화면 — 한 건이면 그 직원으로 바로, 여러 건이면 목록(연봉은 해당 연도).
+    // 바로가기 규칙(아침 슬랙 DM 도 같은 href): 1건이면 그 계약서로 바로, 2건 이상이면 대기만 거른 목록.
+    const ic = src.instructorSeals;
+    push("instructorSeal", ic.map((x) => x.name), instructorSealHref(ic));
+    // 근로·연봉계약서 — 같은 패턴. 1건이면 그 직원 + 대기만(그 계약서 한 줄), 여러 건이면 대기만.
+    //   일괄 서명은 없습니다(법적 서명이라 건별로).
     const e = src.employmentSign;
     push(
       "employmentContractSign",
       e.map((x) => x.name),
-      contractsPath({ tab: "employment", driverId: e.length === 1 ? e[0].driverId : null }),
+      contractsPath({ tab: "employment", driverId: e.length === 1 ? e[0].driverId : null, filter: "sign_pending" }),
     );
     const sl = src.salarySign;
     const years = [...new Set(sl.map((x) => x.year).filter((y): y is number => y != null))];
@@ -227,6 +239,7 @@ export function tasksFromSource(p: TaskPerson, src: PendingTaskSource): PendingT
         tab: "salary",
         year: years.length === 1 ? years[0] : null,
         driverId: sl.length === 1 ? sl[0].driverId : null,
+        filter: "sign_pending",
       }),
     );
   }
@@ -236,6 +249,13 @@ export function tasksFromSource(p: TaskPerson, src: PendingTaskSource): PendingT
     push("leavePromotionSoon", src.promo.soon3, "/hr/leave-plans");
   }
   return out;
+}
+
+// 강사 계약서 관장 날인 바로가기 — 1건이면 그 계약서 창(맨 위 [직인 날인]), 여러 건이면 날인 대기 목록.
+export function instructorSealHref(list: { id: string }[]): string {
+  return list.length === 1
+    ? `/hr/saems/contracts?contract=${encodeURIComponent(list[0].id)}`
+    : "/hr/saems/contracts?filter=seal_pending";
 }
 
 export async function pendingTasksFor(p: TaskPerson): Promise<PendingTask[]> {

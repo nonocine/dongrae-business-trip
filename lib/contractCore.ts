@@ -317,13 +317,20 @@ export const clauseLines = (v: unknown, fb: string[]): string[] => {
 export type ContractFocus = { driverId: string; name: string };
 
 // 계약서 화면 주소 — 탭·연도·걸러 볼 직원. 인사기록카드 직원 행·슬랙 알림 링크도 이걸로 만듭니다.
-export function contractsPath(input: { tab?: "employment" | "salary"; year?: number | string | null; driverId?: string | null }): string {
+export function contractsPath(input: {
+  tab?: "employment" | "salary";
+  year?: number | string | null;
+  driverId?: string | null;
+  // "sign_pending" — 센터장 서명 대기만(app/(app)/hr/contracts/page.tsx).
+  filter?: "sign_pending" | null;
+}): string {
   const sp = new URLSearchParams();
   if (input.tab === "salary") {
     sp.set("tab", "salary");
     if (input.year) sp.set("year", String(input.year));
   }
   if (input.driverId) sp.set("driver", input.driverId);
+  if (input.filter) sp.set("filter", input.filter);
   const qs = sp.toString();
   return `/hr/contracts${qs ? `?${qs}` : ""}`;
 }

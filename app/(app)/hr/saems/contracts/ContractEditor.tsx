@@ -10,6 +10,7 @@ import { useEffect, useMemo, useState, useTransition } from "react";
 import {
   getContractContext,
   saveInstructorContractDraft,
+  sealInstructorContract,
   sendInstructorContract,
   uploadPaperInstructorContract,
   type ContractContext,
@@ -101,7 +102,10 @@ export default function ContractEditor({
   contractId,
   onClose,
   onDone,
+  canSeal = false,
 }: {
+  // 관장·부장(M0) — 강사 서명이 끝난 계약서면 창 맨 위에 [직인 날인](서버가 다시 확인).
+  canSeal?: boolean;
   instructorId?: string | null;
   programId?: string | null;
   contractId?: string | null;
@@ -302,6 +306,31 @@ export default function ContractEditor({
             닫기
           </button>
         </div>
+
+        {/* 날인 대기(강사 서명 완료) — 스크롤 없이 바로 누르도록 창 맨 위에 둡니다. */}
+        {canSeal && ctx?.existing?.status === "instructor_signed" && !sentInfo && (
+          <div className="sticky top-0 z-10 -mx-5 -mt-1 mb-3 flex flex-wrap items-center gap-2 border-y border-navy bg-navy-soft px-5 py-2.5">
+            <span className="text-sm font-semibold text-navy">강사 서명 완료 — 관장 직인 날인 대기</span>
+            <button
+              type="button"
+              className={`${btnPrimary} ml-auto`}
+              disabled={pending}
+              onClick={() => {
+                if (!ctx?.existing) return;
+                if (!confirm(`${ctx.instructor.name} 강사 계약서에 기관 직인을 날인하고 PDF 로 확정할까요?`)) return;
+                const id = ctx.existing.id;
+                start(async () => {
+                  const r = await sealInstructorContract(id);
+                  if (!r.ok) return setErr(r.message);
+                  onDone("직인을 날인하고 PDF 를 만들었습니다.");
+                });
+              }}
+            >
+              {pending ? "날인 중…" : "직인 날인"}
+            </button>
+          </div>
+        )}
+        {err && canSeal && ctx?.existing?.status === "instructor_signed" && <p className={`mb-3 ${noticeError}`}>{err}</p>}
 
         {loadErr && <p className={noticeError}>{loadErr}</p>}
         {notice && <p className={`mb-3 ${noticeWarning}`}>{notice}</p>}

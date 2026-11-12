@@ -115,7 +115,7 @@ export function DeadlineCards({ d, tasks }: { d: AdminDashboardData; tasks: Pend
   return (
     <CardGrid cols={3}>
       <NumberCard href="/hr/saems/contracts" label="강사 계약서 — 강사 서명 대기" value={ic ? ic.waitingInstructor : null} />
-      <NumberCard href="/hr/saems/contracts" label="강사 계약서 — 관장 날인 대기" value={ic ? ic.waitingSeal : null} tone="warning" />
+      <NumberCard href="/hr/saems/contracts?filter=seal_pending" label="강사 계약서 — 관장 날인 대기" value={ic ? ic.waitingSeal : null} tone="warning" />
       <NumberCard href="/seal-register" label="직인 결재 대기" value={seal} tone="warning" />
     </CardGrid>
   );

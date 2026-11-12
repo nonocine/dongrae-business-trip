@@ -10,6 +10,7 @@ import {
   openInstructorContractFile,
   resendInstructorContractSms,
   sealInstructorContract,
+  sealInstructorContractsBulk,
   voidInstructorContract,
   type ContractListFilter,
 } from "@/app/(app)/hr/saems/contractActions";
@@ -85,20 +86,30 @@ export default function ContractsManager({
   initialRows,
   isM0,
   saemBase,
+  initialStatus = "",
+  initialContractId = null,
 }: {
   projects: SaemProject[];
   initialRows: InstructorContractRow[];
   isM0: boolean;
   saemBase: string; // 동래샘들 주소 — [링크 복사]용
+  // ?filter=seal_pending → "instructor_signed"(날인 대기만). 서버가 이미 그 조건으로 목록을 내려줍니다.
+  initialStatus?: ContractListFilter["status"];
+  // ?contract=<id> → 그 계약서 창을 바로 엽니다.
+  initialContractId?: string | null;
 }) {
   const [rows, setRows] = useState(initialRows);
   const [projectId, setProjectId] = useState("");
   const [terms, setTerms] = useState<{ id: string; name: string }[]>([]);
   const [termId, setTermId] = useState("");
-  const [status, setStatus] = useState<ContractListFilter["status"]>("");
+  const [status, setStatus] = useState<ContractListFilter["status"]>(initialStatus);
   const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
+  // 모두 날인 결과 중 실패한 건(강사·계약번호·사유).
+  const [bulkFailed, setBulkFailed] = useState<{ label: string; message: string }[]>([]);
   // 계약서 창 — 기존 계약(contractId) 또는 계약 없는 강좌의 새 계약(programId+instructorId).
-  const [editing, setEditing] = useState<{ contractId?: string; programId?: string; instructorId?: string } | null>(null);
+  const [editing, setEditing] = useState<{ contractId?: string; programId?: string; instructorId?: string } | null>(
+    initialContractId ? { contractId: initialContractId } : null
+  );
   const [linking, setLinking] = useState<InstructorContractRow | null>(null);
   const [summary, setSummary] = useState<{ unsignedPrograms: number; noContract: ProgramRef[] } | null>(null);
   const [showNoContract, setShowNoContract] = useState(false);
@@ -148,6 +159,34 @@ export default function ContractsManager({
       const r = await fn();
       if (!r.ok) return setMsg({ ok: false, text: r.message ?? "실패했습니다." });
       setMsg({ ok: true, text: okText });
+      await reload();
+    });
+  }
+
+  // [모두 날인(n건)] — 지금 목록의 날인 대기 건 전부. 확인창에 강사·계약번호 목록을 보여 줍니다.
+  //   서버는 건마다 단건 날인을 그대로 불러 권한·기록이 단건과 같습니다.
+  const sealTargets = rows.filter((r) => r.status === "instructor_signed");
+  function sealAll() {
+    if (!sealTargets.length) return;
+    const list = sealTargets.map((r) => `· ${r.instructor_name} — ${r.contract_no}`).join("\n");
+    if (!confirm(`다음 ${sealTargets.length}건에 기관 직인을 날인하고 PDF 로 확정할까요?\n\n${list}`)) return;
+    const labelOf = new Map(sealTargets.map((r) => [r.id, `${r.instructor_name} (${r.contract_no})`]));
+    setMsg(null);
+    setBulkFailed([]);
+    start(async () => {
+      const r = await sealInstructorContractsBulk(sealTargets.map((x) => x.id));
+      if (!r.ok) {
+        setMsg({ ok: false, text: r.message });
+        return;
+      }
+      const failed = r.results.filter((x) => !x.ok);
+      const done = r.results.length - failed.length;
+      setBulkFailed(failed.map((x) => ({ label: labelOf.get(x.id) ?? x.id, message: x.message ?? "실패" })));
+      setMsg(
+        failed.length
+          ? { ok: false, text: `${done}건 날인, ${failed.length}건 실패 — 아래 목록을 확인하세요.` }
+          : { ok: true, text: `${done}건 모두 날인하고 PDF 를 만들었습니다.` }
+      );
       await reload();
     });
   }
@@ -265,6 +304,25 @@ export default function ContractsManager({
       </section>
 
       {msg && <p className={msg.ok ? noticeSuccess : noticeError}>{msg.text}</p>}
+      {bulkFailed.length > 0 && (
+        <ul className={`${noticeError} space-y-0.5`}>
+          {bulkFailed.map((f, i) => (
+            <li key={i}>
+              ✕ {f.label} — {f.message}
+            </li>
+          ))}
+        </ul>
+      )}
+
+      {/* 날인 대기 보기(상태 = 직인 대기)일 때 — 관장·부장에게 [모두 날인(n건)]. */}
+      {status === "instructor_signed" && isM0 && sealTargets.length > 0 && (
+        <section className="flex flex-wrap items-center gap-3 rounded-xl border border-navy bg-navy-soft px-4 py-3">
+          <span className="text-sm font-semibold text-navy">관장 날인 대기 {sealTargets.length}건</span>
+          <button type="button" className={`${btnPrimary} ml-auto`} disabled={pending} onClick={sealAll}>
+            {pending ? "날인 중…" : `모두 날인(${sealTargets.length}건)`}
+          </button>
+        </section>
+      )}
 
       <section className={cardCls}>
         {rows.length === 0 ? (
@@ -410,6 +468,7 @@ export default function ContractsManager({
 
       {editing && (
         <ContractEditor
+          canSeal={isM0}
           contractId={editing.contractId ?? null}
           programId={editing.programId ?? null}
           instructorId={editing.instructorId ?? null}

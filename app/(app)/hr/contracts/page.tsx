@@ -36,7 +36,7 @@ const TABS = [
 export default async function ContractsPage({
   searchParams,
 }: {
-  searchParams: Promise<{ tab?: string; year?: string; driver?: string }>;
+  searchParams: Promise<{ tab?: string; year?: string; driver?: string; filter?: string }>;
 }) {
   await enforcePasswordChange();
   const access = await resolveContractAdmin();
@@ -49,6 +49,9 @@ export default async function ContractsPage({
   const rawDriver = (params.driver ?? "").trim();
   const driverName = UUID.test(rawDriver) ? (await namesById([rawDriver])).get(rawDriver) : undefined;
   const focus: ContractFocus | null = driverName ? { driverId: rawDriver, name: driverName } : null;
+  // ?filter=sign_pending — 센터장 서명 대기(직원 서명 완료 + 센터장 서명 전)만('확인할 일'·아침 DM 바로가기).
+  //   일괄 서명은 없습니다(법적 서명이라 건별로 — 관장 지시).
+  const signPending = params.filter === "sign_pending";
 
   return (
     <div className="mx-auto w-full max-w-5xl px-4 py-6">
@@ -82,6 +85,16 @@ export default async function ContractsPage({
           </Link>
         </div>
       )}
+      {signPending && (
+        <div className="mb-5 flex flex-wrap items-center gap-2 rounded-lg border border-navy bg-navy-soft px-4 py-2.5 text-sm">
+          <span className="font-semibold text-navy">센터장 서명 대기만 보는 중</span>
+          <span className="text-xs text-ink-muted">각 계약서의 [센터장 서명]을 눌러 한 건씩 서명합니다.</span>
+          <span className="text-ink-hint">·</span>
+          <Link href={contractsHref(tab, year)} className={linkCls}>
+            전체 보기
+          </Link>
+        </div>
+      )}
       {rawDriver && !focus && (
         <p className={`mb-5 ${noticeWarning}`}>
           주소의 직원을 찾지 못해 전체 목록을 보여 줍니다.{" "}
@@ -94,9 +107,9 @@ export default async function ContractsPage({
       {!access.isPersonnel ? (
         <TemplatesOnly tab={tab} year={year} />
       ) : tab === "employment" ? (
-        <EmploymentTab isM0={access.isM0} focus={focus} />
+        <EmploymentTab isM0={access.isM0} focus={focus} signPending={signPending} />
       ) : (
-        <SalaryTab isM0={access.isM0} year={year} focus={focus} />
+        <SalaryTab isM0={access.isM0} year={year} focus={focus} signPending={signPending} />
       )}
     </div>
   );
@@ -128,7 +141,19 @@ async function TemplatesOnly({ tab, year }: { tab: "employment" | "salary"; year
   );
 }
 
-async function EmploymentTab({ isM0, focus }: { isM0: boolean; focus: ContractFocus | null }) {
+// 센터장 서명 대기 — 직원 서명 완료(signed) + 센터장 서명 전.
+const waitingEmployer = (c: { status: string; employer_signed_at: string | null }) =>
+  c.status === "signed" && !c.employer_signed_at;
+
+async function EmploymentTab({
+  isM0,
+  focus,
+  signPending,
+}: {
+  isM0: boolean;
+  focus: ContractFocus | null;
+  signPending: boolean;
+}) {
   const [contracts, employees, clauses] = await Promise.all([
     listSummaries("employment"),
     listContractEmployees(),
@@ -136,7 +161,9 @@ async function EmploymentTab({ isM0, focus }: { isM0: boolean; focus: ContractFo
   ]);
   return (
     <ContractsManager
-      contracts={focus ? contracts.filter((c) => c.driver_id === focus.driverId) : contracts}
+      contracts={contracts.filter(
+        (c) => (!focus || c.driver_id === focus.driverId) && (!signPending || waitingEmployer(c))
+      )}
       employees={employees}
       clauses={clauses}
       isM0={isM0}
@@ -145,12 +172,25 @@ async function EmploymentTab({ isM0, focus }: { isM0: boolean; focus: ContractFo
   );
 }
 
-async function SalaryTab({ isM0, year, focus }: { isM0: boolean; year: number; focus: ContractFocus | null }) {
-  const [workspace, contracts] = await Promise.all([getSalaryWorkspace(year), listSummaries("salary")]);
-  const mine = (id: string) => !focus || id === focus.driverId;
+async function SalaryTab({
+  isM0,
+  year,
+  focus,
+  signPending,
+}: {
+  isM0: boolean;
+  year: number;
+  focus: ContractFocus | null;
+  signPending: boolean;
+}) {
+  const [workspace, all] = await Promise.all([getSalaryWorkspace(year), listSummaries("salary")]);
+  const contracts = signPending ? all.filter(waitingEmployer) : all;
+  // 서명 대기만 볼 때는 대기 계약서가 있는 직원만 남깁니다(작성 대상 목록이 섞이지 않게).
+  const waitingDrivers = new Set(contracts.map((c) => c.driver_id));
+  const mine = (id: string) => (!focus || id === focus.driverId) && (!signPending || waitingDrivers.has(id));
   return (
     <SalaryContractsManager
-      key={`${year}:${focus?.driverId ?? ""}`}
+      key={`${year}:${focus?.driverId ?? ""}:${signPending ? "sign" : ""}`}
       workspace={{ ...workspace, employees: workspace.employees.filter((e) => mine(e.driverId)) }}
       contracts={contracts.filter((c) => c.year === String(year) && mine(c.driver_id))}
       isM0={isM0}

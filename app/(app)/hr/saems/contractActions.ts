@@ -1235,6 +1235,28 @@ export async function sealInstructorContract(id: string): Promise<{ ok: true } |
   }
 }
 
+// 모두 날인 — 날인 대기 화면의 [모두 날인(n건)]. 건마다 위 단건 날인을 그대로 부릅니다:
+//   권한 확인(requireSaemAccess onlyM0)·상태 확인·PDF·instructor_contract_logs 기록이 단건과 똑같습니다.
+//   한 건이 실패해도 나머지는 계속하고, 건별 결과를 돌려줍니다(차례로 — 동시 PDF 생성·업로드를 피함).
+export type BulkSealResult = { id: string; ok: boolean; message: string | null };
+export async function sealInstructorContractsBulk(
+  ids: string[]
+): Promise<{ ok: true; results: BulkSealResult[] } | Fail> {
+  try {
+    // 권한이 없으면 한 건도 시도하지 않고 바로 돌려줍니다(단건 날인과 같은 가드).
+    await requireSaemAccess({ onlyM0: true });
+    const uniq = [...new Set(ids.filter((x) => typeof x === "string" && x))].slice(0, 100);
+    const results: BulkSealResult[] = [];
+    for (const id of uniq) {
+      const r = await sealInstructorContract(id);
+      results.push({ id, ok: r.ok, message: r.ok ? null : r.message });
+    }
+    return { ok: true, results };
+  } catch (e) {
+    return fail(e, "일괄 날인하지 못했습니다.");
+  }
+}
+
 // =====================================================================
 // 파일 열기 — 5분 서명 URL + 열람·다운로드 기록
 // =====================================================================
