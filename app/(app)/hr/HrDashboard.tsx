@@ -21,6 +21,7 @@ import {
   type RuleTone,
 } from "@/lib/ui";
 import Tabs, { type TabItem } from "@/app/components/Tabs";
+import { useUrlTab } from "@/app/components/UrlTabs";
 
 export type TabKey = "records" | "contracts" | "certificates" | "recruitment";
 
@@ -34,8 +35,6 @@ export default function HrDashboard({
   allowedTabs,
   today,
   canViewDutyRecord = false,
-  initialDriverId = null,
-  initialProfileSection = null,
   recordsViewOnly = false,
   canRevealRrn = false,
 }: {
@@ -46,10 +45,8 @@ export default function HrDashboard({
   recruitmentPostings: RecruitmentPostingAdmin[];
   // 직원 카드의 '복무 기록'(ERP) — 관장(M0)·hr 직무만. 서버(getDutyRecord)도 같은 기준으로 다시 확인.
   canViewDutyRecord?: boolean;
-  // ?driver=<id> — 복무·연차 대시보드에서 이름을 눌러 들어오면 그 직원 카드를 바로 엽니다.
-  initialDriverId?: string | null;
-  // ?section=<인사기록카드 탭 키> — initialDriverId 카드를 그 탭으로 엽니다(예: appointment).
-  initialProfileSection?: string | null;
+  // ?driver=<id>(직원 카드)·&section=<카드 항목> 은 주소에서 직접 읽습니다(useUrlTab) —
+  //   복무·연차 대시보드 이름 링크, '확인할 일'의 인사발령 정정 요청 링크가 씁니다.
   // hr 직무(인사 파일 열람 없음) — 직원 카드 열람만(저장·삭제·첨부·사진·발령 처리 없음).
   recordsViewOnly?: boolean;
   // KST 오늘 "YYYY-MM-DD" — 현재 소속(발효된 발령) 판정 기준. 서버에서 계산.
@@ -63,7 +60,13 @@ export default function HrDashboard({
   //     이유는 서버가 애초에 조회하지 않기 때문입니다.
   allowedTabs: TabKey[];
 }) {
-  const [tab, setTab] = useState<TabKey>(initialTab);
+  // 상위 탭 = 주소 ?tab= (화면 탭 정리 2단계). 예전에는 처음 들어올 때만 ?tab= 을 읽고
+  //   그 뒤 탭을 눌러도 주소가 그대로라, 새로 고침하면 첫 탭으로 돌아갔습니다.
+  //   못 보는 탭을 주소로 불러도 볼 수 있는 첫 탭(서버의 initialTab 과 같은 규칙).
+  const { value: tab, select: setTab } = useUrlTab<TabKey>({
+    keys: allowedTabs,
+    defaultKey: allowedTabs.includes(initialTab) ? "records" : allowedTabs[0],
+  });
 
   return (
     <div className="space-y-6">
@@ -79,8 +82,6 @@ export default function HrDashboard({
           today={today}
           canViewDutyRecord={canViewDutyRecord}
           canRevealRrn={canRevealRrn}
-          initialDriverId={initialDriverId}
-          initialProfileSection={initialProfileSection}
           viewOnly={recordsViewOnly}
         />
       )}
@@ -217,12 +218,9 @@ function RecordsTab({
   canGrantPersonnel,
   today,
   canViewDutyRecord,
-  initialDriverId,
-  initialProfileSection,
   viewOnly,
   canRevealRrn,
 }: {
-  initialProfileSection: string | null;
   canRevealRrn: boolean;
   drivers: Driver[];
   profiles: EmployeeProfile[];
@@ -230,12 +228,26 @@ function RecordsTab({
   canGrantPersonnel: boolean;
   today: string;
   canViewDutyRecord: boolean;
-  initialDriverId: string | null;
   viewOnly: boolean;
 }) {
-  const [selectedId, setSelectedId] = useState(
-    initialDriverId && drivers.some((d) => d.id === initialDriverId) ? initialDriverId : ""
-  );
+  // 직원 선택 = 주소 &driver=<id>. 새로 고침·뒤로가기에도 보던 직원 카드가 남습니다.
+  //   직원을 바꾸면 카드 항목(&section=)은 지워 기본정보부터 엽니다.
+  const driverKeys = useMemo(() => ["", ...drivers.map((d) => d.id)], [drivers]);
+  const { value: selectedId, select: selectDriver } = useUrlTab<string>({
+    keys: driverKeys,
+    defaultKey: "",
+    param: "driver",
+  });
+  const setSelectedId = (id: string) => {
+    if (id === selectedId) return;
+    const q = new URLSearchParams(window.location.search);
+    if (q.has("section")) {
+      q.delete("section");
+      const qs = q.toString();
+      window.history.replaceState(null, "", `${window.location.pathname}${qs ? `?${qs}` : ""}`);
+    }
+    selectDriver(id);
+  };
   // 재직/퇴사 필터 — 기본은 재직만 노출(퇴사자는 분리). 기록은 삭제하지 않고 보존.
   const [statusFilter, setStatusFilter] = useState<"active" | "resigned">(
     "active"
@@ -346,8 +358,6 @@ function RecordsTab({
               knownDepartments={knownDepartments}
               today={today}
               onDeleted={() => setSelectedId("")}
-              // 주소로 지정한 직원 카드를 처음 열 때만 그 탭으로(다른 직원을 고르면 기본 탭).
-              initialTab={selectedDriver.id === initialDriverId ? initialProfileSection : null}
             />
           ) : null}
           {/* 복무 기록(ERP) — 관장·hr 직무만. 본인 카드와 같은 화면. */}

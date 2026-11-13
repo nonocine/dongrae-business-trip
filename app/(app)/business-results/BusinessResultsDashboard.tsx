@@ -37,6 +37,7 @@ import StaffTrainingTab from "./StaffTrainingTab";
 import ProgramResultForm, { type CarryOver } from "./ProgramResultForm";
 import { fmtKstDateTime } from "@/lib/datetime";
 import Tabs, { type TabItem } from "@/app/components/Tabs";
+import { useUrlTab } from "@/app/components/UrlTabs";
 
 type Tab =
   | "overview"
@@ -48,6 +49,8 @@ type Tab =
   | "report";
 // key 는 저장·집계와 무관한 화면 상태값이라 라벨만 바꿔도 안전하다.
 //   ("사업실적 입력" → "청소년 활동" 은 라벨 변경일 뿐 key 는 programs 그대로)
+type ProgramView = "input" | "list";
+const PROGRAM_VIEWS: readonly ProgramView[] = ["input", "list"];
 const tabs: TabItem<Tab>[] = [
   { key: "overview", label: "실적 현황", icon: "chart" },
   { key: "programs", label: "청소년 활동", icon: "sparkles" },
@@ -57,6 +60,7 @@ const tabs: TabItem<Tab>[] = [
   { key: "trainings", label: "종사자 교육", icon: "presentation" },
   { key: "report", label: "종합보고서", icon: "fileText" },
 ];
+const TAB_KEYS: readonly Tab[] = tabs.map((t) => t.key);
 // 홍보 채널(구분). 자동 수집(인스타그램="SNS", 블로그="블로그")도 여기 있는
 //   값만 씁니다 — 채널이 늘어도 새 구분값을 만들지 않습니다.
 //   * "카카오"는 카카오톡 채널 발송 건수를 담당자가 수기로 입력하는 칸입니다.
@@ -174,7 +178,18 @@ export default function BusinessResultsDashboard({
   currentUser: string;
 }) {
   const router = useRouter();
-  const [tab, setTab] = useState<Tab>("overview");
+  // 화면 탭(주소 ?tab=) — 새로 고침·링크·뒤로가기에도 보던 탭이 남게(화면 탭 정리 2단계).
+  const { value: tab, select: setTab } = useUrlTab<Tab>({
+    keys: TAB_KEYS,
+    defaultKey: "overview",
+  });
+  // 청소년 활동 탭 안 하위 탭(?sub=) — 입력 폼 아래로 그 달 실적 목록이 길게 붙어,
+  //   입력 / 목록 으로 나눴습니다. [수정]은 입력으로, 수정 저장·취소는 목록으로.
+  const { value: programView, select: setProgramView } = useUrlTab<ProgramView>({
+    keys: PROGRAM_VIEWS,
+    defaultKey: "input",
+    param: "sub",
+  });
   const [notice, setNotice] = useState<{ ok: boolean; text: string } | null>(
     null,
   );
@@ -313,9 +328,12 @@ export default function BusinessResultsDashboard({
     nextPeriod: string,
     nextMonth = month,
   ) {
-    router.push(
-      `/business-results?year=${nextYear}&period=${nextPeriod}&month=${nextMonth}`,
-    );
+    // 보던 화면 탭(?tab=·?sub=)은 그대로 — 기간을 바꿔도 실적 현황으로 튕기지 않게.
+    const q = new URLSearchParams(window.location.search);
+    q.set("year", String(nextYear));
+    q.set("period", nextPeriod);
+    q.set("month", String(nextMonth));
+    router.push(`/business-results?${q.toString()}`);
   }
   // 관리자이거나 본인이 작성한 건만 수정할 수 있습니다.
   //   (서버 액션에서도 같은 규칙으로 한 번 더 막습니다.)
@@ -952,8 +970,25 @@ export default function BusinessResultsDashboard({
       )}
       {tab === "programs" && (
         <div className="space-y-4">
+          <Tabs
+            variant="segment"
+            ariaLabel="청소년 활동 보기"
+            idPrefix="programs"
+            value={programView}
+            onChange={setProgramView}
+            items={[
+              { key: "input", label: editing ? "실적 수정" : "실적 입력" },
+              { key: "list", label: "목록", count: data.results.length },
+            ]}
+          />
           {/* 노랑: 입력 구역 */}
-          <section className={panelToneCls("yellow")}>
+          <section
+            role="tabpanel"
+            id="programs-panel-input"
+            aria-labelledby="programs-tab-input"
+            hidden={programView !== "input"}
+            className={panelToneCls("yellow")}
+          >
             <h2 className={sectionTitleCls("yellow")}>
               {editing ? "프로그램 실적 수정" : "프로그램 실적 입력"}
             </h2>
@@ -967,10 +1002,16 @@ export default function BusinessResultsDashboard({
               editing={editing}
               registry={data.registry}
               carryOver={editing ? null : carryOver}
-              onCancel={() => setEditing(null)}
+              onCancel={() => {
+                const wasEditing = !!editing;
+                setEditing(null);
+                if (wasEditing) setProgramView("list");
+              }}
               onSaved={(text) => {
+                const wasEditing = !!editing;
                 setEditing(null);
                 setNotice({ ok: true, text });
+                if (wasEditing) setProgramView("list");
               }}
               onSavedAndNext={(carry) => {
                 setEditing(null);
@@ -992,7 +1033,23 @@ export default function BusinessResultsDashboard({
                 />
               </div>
             )}
-            <div className="mt-6 space-y-2">
+          </section>
+          <section
+            role="tabpanel"
+            id="programs-panel-list"
+            aria-labelledby="programs-tab-list"
+            hidden={programView !== "list"}
+            className={panelToneCls("yellow")}
+          >
+            <h2 className={sectionTitleCls("yellow")}>
+              {periodNames[period] ?? `${month}월`} 실적 목록
+            </h2>
+            {data.results.length === 0 && (
+              <p className="py-6 text-center text-sm text-ink-hint">
+                이 기간에 입력된 실적이 없습니다.
+              </p>
+            )}
+            <div className="mt-3 space-y-2">
               {data.results.map((r) => (
                 <div
                   key={r.id}
@@ -1020,6 +1077,7 @@ export default function BusinessResultsDashboard({
                         className="rounded-lg border border-line px-3 py-1.5 text-xs font-bold text-navy hover:bg-navy-soft"
                         onClick={() => {
                           setEditing(r);
+                          setProgramView("input");
                           window.scrollTo({ top: 0, behavior: "smooth" });
                         }}
                       >
@@ -1076,7 +1134,7 @@ export default function BusinessResultsDashboard({
               ))}
             </div>
           </section>
-          {data.isAdmin && (
+          {data.isAdmin && programView === "list" && (
             <ProgramRegistryManager
               registry={data.registry}
               rentalLinks={data.rentalLinks ?? []}

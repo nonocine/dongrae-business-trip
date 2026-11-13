@@ -41,8 +41,10 @@ import {
   badgeSuccess,
 } from "@/lib/ui";
 import Tabs from "@/app/components/Tabs";
+import { useUrlTab } from "@/app/components/UrlTabs";
 
 type View = "source" | "person";
+const VIEW_KEYS: readonly View[] = ["source", "person"];
 
 const th = "px-2 py-2 text-left whitespace-nowrap";
 const thR = "px-2 py-2 text-right whitespace-nowrap";
@@ -157,7 +159,12 @@ function Totals({
 }
 
 export default function PayoutManager({ data }: { data: PayoutData }) {
-  const [view, setView] = useState<View>("source");
+  // 보기 = 주소 ?view= (화면 탭 정리 2단계) — 새로 고침해도 사람별 보기가 남게.
+  const { value: view, select: setView } = useUrlTab<View>({
+    keys: VIEW_KEYS,
+    defaultKey: "source",
+    param: "view",
+  });
   const [from, setFrom] = useState(data.defaultRange.from);
   const [to, setTo] = useState(data.defaultRange.to);
   const [projectId, setProjectId] = useState("");

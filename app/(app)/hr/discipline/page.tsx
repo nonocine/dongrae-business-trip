@@ -12,14 +12,14 @@ export const dynamic = "force-dynamic";
 export default async function DisciplinePage({
   searchParams,
 }: {
-  searchParams: Promise<{ driver?: string; tab?: string }>;
+  searchParams: Promise<{ driver?: string }>;
 }) {
   await enforcePasswordChange();
   const access = await resolveDisciplineAdmin();
   if (!access) redirect("/");
   const params = await searchParams;
   const [employees, board] = await Promise.all([listDisciplineEmployees(), getDisciplineBoard()]);
-  const tab = params.tab === "incidents" || params.tab === "committees" ? params.tab : "records";
+  // ?tab= 은 화면(DisciplineManager)이 주소에서 직접 읽습니다(useUrlTab).
 
   return (
     <div className="mx-auto w-full max-w-5xl px-4 py-6">
@@ -39,7 +39,6 @@ export default async function DisciplinePage({
         employees={employees}
         board={board}
         initialDriverId={employees.some((e) => e.driverId === params.driver) ? params.driver! : ""}
-        initialTab={tab}
       />
     </div>
   );

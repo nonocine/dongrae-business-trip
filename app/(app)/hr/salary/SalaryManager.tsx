@@ -43,6 +43,7 @@ import {
   noticeSuccess,
 } from "@/lib/ui";
 import Tabs, { type TabItem } from "@/app/components/Tabs";
+import { useUrlTab } from "@/app/components/UrlTabs";
 
 const inCls =
   "block w-full rounded-md border border-line bg-card px-2.5 py-1.5 text-sm text-ink-body shadow-sm placeholder:text-ink-hint focus:border-navy focus:outline-none focus:ring-1 focus:ring-navy";
@@ -72,7 +73,16 @@ export default function SalaryManager({
   // 인사 파일 열람 — 월별 급여·직원별 급여 설정(개인별 금액). 없으면 호봉표·기준값만.
   canViewPersonal: boolean;
 }) {
-  const [section, setSection] = useState<SectionKey>(canViewPersonal ? "monthly" : "grade");
+  // 섹션 탭 = 주소 ?tab= (화면 탭 정리 2단계). 개인별 금액 탭(월별·직원별)은 인사 파일
+  //   열람이 없으면 키에서 빠져, 주소로 불러도 호봉표가 열립니다.
+  const sectionKeys = useMemo<SectionKey[]>(
+    () => (canViewPersonal ? ["monthly", "grade", "config", "employee"] : ["grade", "config"]),
+    [canViewPersonal],
+  );
+  const { value: section, select: setSection } = useUrlTab<SectionKey>({
+    keys: sectionKeys,
+    defaultKey: canViewPersonal ? "monthly" : "grade",
+  });
   const [year, setYear] = useState<number>(initialYear);
   const [yearList, setYearList] = useState<number[]>(
     years.length > 0 ? years : [initialYear]

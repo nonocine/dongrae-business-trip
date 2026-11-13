@@ -1,5 +1,6 @@
 "use client";
 
+import { useUrlTab } from "@/app/components/UrlTabs";
 import CardAwardsTab from "@/app/(app)/hr/CardAwardsTab";
 import RrnReveal from "@/app/(app)/hr/RrnReveal";
 import DisciplineSummaryPanel from "@/app/(app)/hr/discipline/DisciplineSummaryPanel";
@@ -87,6 +88,8 @@ function formatDocDate(profile: EmployeeProfile | null): string {
   return d.slice(0, 10).replaceAll("-", ".");
 }
 
+const PROFILE_TAB_KEYS: readonly ProfileTabKey[] = PROFILE_TABS.map((t) => t.key);
+
 export default function EmployeeProfileForm({
   driver,
   profile,
@@ -97,10 +100,7 @@ export default function EmployeeProfileForm({
   onDeleted,
   viewOnly = false,
   canRevealRrn = false,
-  initialTab = null,
 }: {
-  // 처음 열 탭(PROFILE_TABS 의 key, 예: "appointment"). 모르는 값이면 기본정보.
-  initialTab?: string | null;
   // [주민번호 보기] — M0·hr 직무만(서버 revealEmployeeRrn 이 다시 확인).
   canRevealRrn?: boolean;
   // hr 직무 열람 전용 — 모든 칸 읽기 전용, 저장·삭제·첨부서류·사진·발령 처리 숨김(서버도 records 만 허용).
@@ -118,9 +118,14 @@ export default function EmployeeProfileForm({
   const cardLocked = profile?.is_locked === true;
   const locked = cardLocked || viewOnly;
 
-  const [tab, setTab] = useState<ProfileTabKey>(() =>
-    PROFILE_TABS.some((t) => t.key === initialTab) ? (initialTab as ProfileTabKey) : "basic"
-  );
+  // 카드 항목 탭 = 주소 &section= (화면 탭 정리 2단계). '확인할 일'의
+  //   /hr?tab=records&driver=…&section=appointment 가 그 탭으로 바로 엽니다.
+  //   직원을 바꾸면 HrDashboard 가 section 을 지웁니다(기본정보부터).
+  const { value: tab, select: setTab } = useUrlTab<ProfileTabKey>({
+    keys: PROFILE_TAB_KEYS,
+    defaultKey: "basic",
+    param: "section",
+  });
   const [error, setError] = useState<string | null>(null);
   const [ok, setOk] = useState<string | null>(null);
   const [pending, startTransition] = useTransition();

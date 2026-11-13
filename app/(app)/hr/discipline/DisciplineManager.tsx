@@ -1,5 +1,6 @@
 "use client";
 
+import { useUrlTab } from "@/app/components/UrlTabs";
 import { useEffect, useMemo, useState, useTransition, type ReactNode } from "react";
 import { useRouter } from "next/navigation";
 import {
@@ -115,18 +116,22 @@ function AttachLink({ table, id }: { table: "hr_awards" | "hr_disciplines" | "hr
   );
 }
 
+const DISCIPLINE_TAB_KEYS: readonly TabKey[] = ["records", "incidents", "committees"];
+
 export default function DisciplineManager({
   employees,
   board,
   initialDriverId,
-  initialTab,
 }: {
   employees: DisciplineEmployee[];
   board: DisciplineBoard;
   initialDriverId: string;
-  initialTab: TabKey;
 }) {
-  const [tab, setTab] = useState<TabKey>(initialTab);
+  // 탭 = 주소 ?tab= (화면 탭 정리 2단계) — 새로 고침·뒤로가기에도 보던 탭이 남습니다.
+  const { value: tab, select: setTab } = useUrlTab<TabKey>({
+    keys: DISCIPLINE_TAB_KEYS,
+    defaultKey: "records",
+  });
   const TABS: TabItem<TabKey>[] = [
     { key: "records", label: "상벌", icon: "trophy" },
     { key: "incidents", label: "경위서", icon: "fileText", count: board.incidents.length },

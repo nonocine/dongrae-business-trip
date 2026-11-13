@@ -1,5 +1,6 @@
 "use client";
 
+import { useUrlTab } from "@/app/components/UrlTabs";
 import { useMemo, useState, useTransition } from "react";
 import {
   listPartners,
@@ -66,6 +67,7 @@ const inCls =
 const lblCls = "block text-xs font-medium text-ink-muted";
 
 type CategoryTab = "전체" | PartnerCategory;
+const CATEGORY_TAB_KEYS: readonly CategoryTab[] = ["전체", ...PARTNER_CATEGORIES];
 
 type PartnerForm = {
   id: string | null;
@@ -143,7 +145,12 @@ export default function PartnersManager({
   const [partners, setPartners] =
     useState<PartnerWithContacts[]>(initialPartners);
   const [query, setQuery] = useState("");
-  const [tab, setTab] = useState<CategoryTab>("전체");
+  // 분야 탭 = 주소 ?field= (화면 탭 정리 2단계) — 인수인계 때 "시설만" 주소를 그대로 공유.
+  const { value: tab, select: setTab } = useUrlTab<CategoryTab>({
+    keys: CATEGORY_TAB_KEYS,
+    defaultKey: "전체",
+    param: "field",
+  });
   const [showEnded, setShowEnded] = useState(false); // 거래종료 포함 보기
   const [msg, setMsg] = useState<{ kind: "ok" | "err"; text: string } | null>(
     null,
