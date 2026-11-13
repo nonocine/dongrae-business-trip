@@ -38,7 +38,7 @@ import {
   type RentalFacilityFilter,
 } from "@/lib/rental";
 import { syncRentalsNow } from "./actions";
-import Tabs from "@/app/components/Tabs";
+import UrlTabs from "@/app/components/UrlTabs";
 
 // 표 스타일 — 운행기록·증명서 대장과 같은 값을 씁니다.
 const thCls =
@@ -154,6 +154,10 @@ export default function RentalReservationsView({
     q.set("status", next.status ?? status);
     const page = next.page ?? 1;
     if (page > 1) q.set("page", String(page));
+    // 보고 있던 화면 탭(?tab=)은 유지 — 요약 탭에서 월을 바꿨는데 목록으로
+    //   튕기지 않게.
+    const tab = new URLSearchParams(window.location.search).get("tab");
+    if (tab) q.set("tab", tab);
     startTransition(() => {
       router.push(`${BASE_PATH}?${q.toString()}`);
     });
@@ -202,59 +206,29 @@ export default function RentalReservationsView({
       ? `센터 ${n(pick(summary.center))} · 온나 ${n(pick(summary.onna))}`
       : undefined;
 
+  // 화면 탭(주소 ?tab=) — 목록이 기본, 요약은 따로.
+  //   예전에는 요약·월 선택·동기화·목록이 한 화면에 세로로 쌓여, 목록을 보려면
+  //   매번 요약 아래로 내려가야 했습니다(화면 탭 정리 1단계 시범 화면).
+  //   시설·월·동기화는 두 탭이 같이 쓰므로 탭 위 공통 줄에 둡니다.
   return (
     <div className="space-y-4">
-      {/* 1차 축 — 시설(센터 본관 / 사직동 온나) */}
-      <Tabs
-        variant="segment"
-        ariaLabel="시설"
-        value={facility}
-        onChange={(f) => goto({ facility: f })}
-        items={FACILITY_TABS.map((f) => ({ key: f, label: RENTAL_FACILITY_TAB_LABELS[f] }))}
-      />
-
       <section className={panelToneCls("blue")}>
-        {/* 요약 — 선택한 시설 탭 기준. 건수·이용인원은 확정 건만 셉니다. */}
-        <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
-          <SummaryTile
-            label={`${label} 확정 건수`}
-            value={n(sel.confirmed)}
-            unit="건"
-            split={split((s) => s.confirmed)}
-          />
-          <SummaryTile
-            label="이용인원 합계"
-            value={n(sel.personTotal)}
-            unit="명"
-            split={split((s) => s.personTotal)}
-            hint={
-              sel.personDisabled > 0
-                ? `장애인 ${n(sel.personDisabled)}명 포함`
-                : undefined
-            }
-          />
-          <SummaryTile
-            label="신청 중"
-            value={n(sel.pending)}
-            unit="건"
-            split={split((s) => s.pending)}
-          />
-          <SummaryTile
-            label="취소"
-            value={n(sel.cancelled)}
-            unit="건"
-            split={split((s) => s.cancelled)}
-          />
-        </div>
-        <p className="mt-2 text-[11px] text-ink-hint">
-          건수·이용인원 합계는 확정 건만 셉니다(신청 중·취소 제외).
-          {facility === "all"
-            ? " 시설 구분은 공간명 기준입니다 — '온나'로 시작하는 공간이 사직동 온나입니다."
-            : ` 지금은 ${RENTAL_FACILITY_LABELS[facility]} 만 보고 있습니다.`}
-        </p>
+        {/* 1차 축 — 시설(센터 본관 / 사직동 온나). 서버가 시설별로 다시 집계하므로
+            주소 ?facility= 를 바꿔 서버를 다시 부릅니다. */}
+        <UrlTabs
+          variant="segment"
+          ariaLabel="시설"
+          param="facility"
+          navigation="server"
+          defaultKey="all"
+          items={FACILITY_TABS.map((f) => ({
+            key: f,
+            label: RENTAL_FACILITY_TAB_LABELS[f],
+          }))}
+        />
 
         {/* 월 선택 + 동기화 */}
-        <div className="mt-4 flex flex-col gap-3 border-t border-line pt-3 sm:flex-row sm:items-end sm:justify-between">
+        <div className="mt-3 flex flex-col gap-3 border-t border-line pt-3 sm:flex-row sm:items-end sm:justify-between">
           <div>
             <label
               htmlFor="rental-month"
@@ -309,150 +283,229 @@ export default function RentalReservationsView({
         )}
       </section>
 
-      <section className={panelToneCls("green")}>
-        {/* 2차 필터 — 구분(셀렉트) · 상태(체크박스) */}
-        <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
-          <label className={labelCls}>
-            구분
-            <select
-              className={`${inputCls} min-w-32`}
-              value={type}
-              onChange={(e) =>
-                goto({ type: e.target.value as RentalTypeFilter })
-              }
-            >
-              {TYPE_OPTIONS.map((o) => (
-                <option key={o.value} value={o.value}>
-                  {o.label}
-                </option>
-              ))}
-            </select>
-          </label>
-          <label className="flex items-center gap-2 text-xs text-ink-body">
-            <input
-              type="checkbox"
-              checked={status === "all"}
-              onChange={(e) =>
-                goto({ status: e.target.checked ? "all" : "confirmed" })
-              }
-              className="h-4 w-4 rounded border-line text-navy focus:ring-navy"
-            />
-            신청 중·취소도 보기
-          </label>
-        </div>
-
-        <p className="mt-3 text-xs text-ink-muted">
-          {n(filtered)}건
-          {filtered > RENTAL_PAGE_SIZE && ` · ${page}/${totalPages}페이지`}
-          {status === "confirmed" && " (확정만)"}
-        </p>
-
-        {rows.length === 0 ? (
-          <p className="py-6 text-center text-sm text-ink-muted">
-            {month
-              ? `${label}에 ${status === "confirmed" ? "확정된 " : ""}대관예약이 없습니다.`
-              : "대관예약이 없습니다."}
-          </p>
-        ) : (
-          <div className="mt-2 overflow-x-auto">
-            <table className="w-full min-w-[980px] border-collapse">
-              <thead>
-                <tr className="border-b border-line">
-                  <th className={thCls}>대관일</th>
-                  <th className={thCls}>시간</th>
-                  {/* 시설 탭을 고른 뒤에는 그 열이 한 값으로 고정되니 숨깁니다. */}
-                  {facility === "all" && <th className={thCls}>시설</th>}
-                  <th className={thCls}>구분</th>
-                  <th className={thCls}>공간</th>
-                  <th className={thCls}>목적</th>
-                  <th className={thCls}>사업명</th>
-                  <th className={thCls}>신청자</th>
-                  <th className={thCls}>단체</th>
-                  <th className={`${thCls} text-right`}>인원</th>
-                  <th className={thCls}>상태</th>
-                </tr>
-              </thead>
-              <tbody>
-                {rows.map((r) => {
-                  // 취소 건은 줄 전체를 회색으로 눌러, 확정 건과 섞여 있어도
-                  //   실제 이용 건으로 잘못 읽지 않게 합니다.
-                  const dim = isCancelled(r);
-                  return (
-                    <tr
-                      key={r.reservation_no}
-                      className={`border-b border-line/60 ${
-                        dim ? "text-ink-hint opacity-60" : ""
-                      }`}
+      <UrlTabs
+        variant="segment"
+        ariaLabel="대관예약 보기"
+        idPrefix="rental"
+        defaultKey="list"
+        // 옛 주소 호환용 — 같은 화면 안 #summary/#list 링크도 해당 탭으로.
+        hashMap={{ summary: "summary", list: "list" }}
+        panelClassName="mt-3"
+        items={[
+          {
+            key: "list",
+            label: "예약 목록",
+            count: filtered,
+            render: () => (
+              <section id="list" className={panelToneCls("green")}>
+                {/* 2차 필터 — 구분(셀렉트) · 상태(체크박스) */}
+                <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
+                  <label className={labelCls}>
+                    구분
+                    <select
+                      className={`${inputCls} min-w-32`}
+                      value={type}
+                      onChange={(e) =>
+                        goto({ type: e.target.value as RentalTypeFilter })
+                      }
                     >
-                      <td className={tdCls}>
-                        {formatRentalDate(r.reservation_date)}
-                      </td>
-                      <td className={tdCls}>{formatTimeRange(r)}</td>
-                      {facility === "all" && (
-                        // 판정은 화면·요약이 공유하는 순수 함수 하나로만 합니다
-                        //   — 여기서 '온나' 접두사를 다시 보지 않습니다.
-                        <td className={tdCls}>
-                          {RENTAL_FACILITY_TAB_LABELS[rentalFacility(r)]}
-                        </td>
-                      )}
-                      <td className={tdCls}>
-                        {rentalTypeLabel(r.reservation_type)}
-                      </td>
-                      {/* 공간명과 세부교실의 중복을 걷어낸 한 줄 표기 */}
-                      <td className={`${tdCls} ${dim ? "" : "text-ink"}`}>
-                        <Clamp
-                          text={formatSpace(r, { onnaTab })}
-                          width="max-w-[15rem]"
-                        />
-                      </td>
-                      <td className={tdCls}>
-                        <Clamp text={r.purpose} width="max-w-[13rem]" />
-                      </td>
-                      <td className={tdCls}>
-                        <Clamp text={r.program_name} width="max-w-[11rem]" />
-                      </td>
-                      <td className={tdCls}>
-                        {r.applicant ? r.applicant : <Dash />}
-                      </td>
-                      <td className={tdCls}>
-                        <Clamp text={r.team_name} width="max-w-[9rem]" />
-                      </td>
-                      <td className={`${tdCls} text-right`}>
-                        {formatPersons(r)}
-                      </td>
-                      <td className={tdCls}>
-                        <StatusBadge row={r} />
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
-        )}
+                      {TYPE_OPTIONS.map((o) => (
+                        <option key={o.value} value={o.value}>
+                          {o.label}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <label className="flex items-center gap-2 text-xs text-ink-body">
+                    <input
+                      type="checkbox"
+                      checked={status === "all"}
+                      onChange={(e) =>
+                        goto({ status: e.target.checked ? "all" : "confirmed" })
+                      }
+                      className="h-4 w-4 rounded border-line text-navy focus:ring-navy"
+                    />
+                    신청 중·취소도 보기
+                  </label>
+                </div>
 
-        {totalPages > 1 && (
-          <div className="mt-3 flex items-center justify-center gap-2 border-t border-line pt-3">
-            <Button
-              variant="secondary"
-              onClick={() => goto({ page: page - 1 })}
-              disabled={page <= 1 || busy}
-            >
-              이전
-            </Button>
-            <span className="text-xs text-ink-muted">
-              {page} / {totalPages}
-            </span>
-            <Button
-              variant="secondary"
-              onClick={() => goto({ page: page + 1 })}
-              disabled={page >= totalPages || busy}
-            >
-              다음
-            </Button>
-          </div>
-        )}
-      </section>
+                <p className="mt-3 text-xs text-ink-muted">
+                  {n(filtered)}건
+                  {filtered > RENTAL_PAGE_SIZE &&
+                    ` · ${page}/${totalPages}페이지`}
+                  {status === "confirmed" && " (확정만)"}
+                </p>
+
+                {rows.length === 0 ? (
+                  <p className="py-6 text-center text-sm text-ink-muted">
+                    {month
+                      ? `${label}에 ${status === "confirmed" ? "확정된 " : ""}대관예약이 없습니다.`
+                      : "대관예약이 없습니다."}
+                  </p>
+                ) : (
+                  <div className="mt-2 overflow-x-auto">
+                    <table className="w-full min-w-[980px] border-collapse">
+                      <thead>
+                        <tr className="border-b border-line">
+                          <th className={thCls}>대관일</th>
+                          <th className={thCls}>시간</th>
+                          {/* 시설 탭을 고른 뒤에는 그 열이 한 값으로 고정되니 숨깁니다. */}
+                          {facility === "all" && (
+                            <th className={thCls}>시설</th>
+                          )}
+                          <th className={thCls}>구분</th>
+                          <th className={thCls}>공간</th>
+                          <th className={thCls}>목적</th>
+                          <th className={thCls}>사업명</th>
+                          <th className={thCls}>신청자</th>
+                          <th className={thCls}>단체</th>
+                          <th className={`${thCls} text-right`}>인원</th>
+                          <th className={thCls}>상태</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {rows.map((r) => {
+                          // 취소 건은 줄 전체를 회색으로 눌러, 확정 건과 섞여 있어도
+                          //   실제 이용 건으로 잘못 읽지 않게 합니다.
+                          const dim = isCancelled(r);
+                          return (
+                            <tr
+                              key={r.reservation_no}
+                              className={`border-b border-line/60 ${
+                                dim ? "text-ink-hint opacity-60" : ""
+                              }`}
+                            >
+                              <td className={tdCls}>
+                                {formatRentalDate(r.reservation_date)}
+                              </td>
+                              <td className={tdCls}>{formatTimeRange(r)}</td>
+                              {facility === "all" && (
+                                // 판정은 화면·요약이 공유하는 순수 함수 하나로만 합니다
+                                //   — 여기서 '온나' 접두사를 다시 보지 않습니다.
+                                <td className={tdCls}>
+                                  {
+                                    RENTAL_FACILITY_TAB_LABELS[
+                                      rentalFacility(r)
+                                    ]
+                                  }
+                                </td>
+                              )}
+                              <td className={tdCls}>
+                                {rentalTypeLabel(r.reservation_type)}
+                              </td>
+                              {/* 공간명과 세부교실의 중복을 걷어낸 한 줄 표기 */}
+                              <td
+                                className={`${tdCls} ${dim ? "" : "text-ink"}`}
+                              >
+                                <Clamp
+                                  text={formatSpace(r, { onnaTab })}
+                                  width="max-w-[15rem]"
+                                />
+                              </td>
+                              <td className={tdCls}>
+                                <Clamp text={r.purpose} width="max-w-[13rem]" />
+                              </td>
+                              <td className={tdCls}>
+                                <Clamp
+                                  text={r.program_name}
+                                  width="max-w-[11rem]"
+                                />
+                              </td>
+                              <td className={tdCls}>
+                                {r.applicant ? r.applicant : <Dash />}
+                              </td>
+                              <td className={tdCls}>
+                                <Clamp
+                                  text={r.team_name}
+                                  width="max-w-[9rem]"
+                                />
+                              </td>
+                              <td className={`${tdCls} text-right`}>
+                                {formatPersons(r)}
+                              </td>
+                              <td className={tdCls}>
+                                <StatusBadge row={r} />
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+
+                {totalPages > 1 && (
+                  <div className="mt-3 flex items-center justify-center gap-2 border-t border-line pt-3">
+                    <Button
+                      variant="secondary"
+                      onClick={() => goto({ page: page - 1 })}
+                      disabled={page <= 1 || busy}
+                    >
+                      이전
+                    </Button>
+                    <span className="text-xs text-ink-muted">
+                      {page} / {totalPages}
+                    </span>
+                    <Button
+                      variant="secondary"
+                      onClick={() => goto({ page: page + 1 })}
+                      disabled={page >= totalPages || busy}
+                    >
+                      다음
+                    </Button>
+                  </div>
+                )}
+              </section>
+            ),
+          },
+          {
+            key: "summary",
+            label: "월 요약",
+            render: () => (
+              <section id="summary" className={panelToneCls("green")}>
+                {/* 요약 — 선택한 시설 탭 기준. 건수·이용인원은 확정 건만 셉니다. */}
+                <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+                  <SummaryTile
+                    label={`${label} 확정 건수`}
+                    value={n(sel.confirmed)}
+                    unit="건"
+                    split={split((s) => s.confirmed)}
+                  />
+                  <SummaryTile
+                    label="이용인원 합계"
+                    value={n(sel.personTotal)}
+                    unit="명"
+                    split={split((s) => s.personTotal)}
+                    hint={
+                      sel.personDisabled > 0
+                        ? `장애인 ${n(sel.personDisabled)}명 포함`
+                        : undefined
+                    }
+                  />
+                  <SummaryTile
+                    label="신청 중"
+                    value={n(sel.pending)}
+                    unit="건"
+                    split={split((s) => s.pending)}
+                  />
+                  <SummaryTile
+                    label="취소"
+                    value={n(sel.cancelled)}
+                    unit="건"
+                    split={split((s) => s.cancelled)}
+                  />
+                </div>
+                <p className="mt-2 text-[11px] text-ink-hint">
+                  건수·이용인원 합계는 확정 건만 셉니다(신청 중·취소 제외).
+                  {facility === "all"
+                    ? " 시설 구분은 공간명 기준입니다 — '온나'로 시작하는 공간이 사직동 온나입니다."
+                    : ` 지금은 ${RENTAL_FACILITY_LABELS[facility]} 만 보고 있습니다.`}
+                </p>
+              </section>
+            ),
+          },
+        ]}
+      />
     </div>
   );
 }
