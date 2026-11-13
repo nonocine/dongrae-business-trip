@@ -1,6 +1,7 @@
 "use client";
 
-// /hr/leave-plans 상단 '설정'(접이식) — 첫해 월차 처리 방식. 관장(M0)만 바꿀 수 있습니다.
+// /hr/leave-plans '설정' 탭(?tab=settings) — 첫해 월차 처리 방식. 관장(M0)만 보고 바꿉니다.
+//   탭으로 옮기면서 처음부터 펼쳐 둡니다(화면 탭 정리 2단계).
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { setFirstYearPolicy } from "@/app/(app)/hr/leave-plans/promotionActions";
@@ -26,7 +27,7 @@ export default function LeavePolicySettings({ policy, canEdit }: { policy: Polic
   const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
   const [pending, start] = useTransition();
   return (
-    <details className="rounded-xl border border-line bg-card px-4 py-3">
+    <details open className="rounded-xl border border-line bg-card px-4 py-3">
       <summary className="cursor-pointer text-sm font-semibold text-ink">
         설정 <span className="ml-1 text-xs font-normal text-ink-muted">첫해 월차 처리 방식: {OPTIONS.find((o) => o.key === policy)?.label}</span>
       </summary>

@@ -56,6 +56,7 @@ import {
   noticeWarning,
 } from "@/lib/ui";
 import Tabs from "@/app/components/Tabs";
+import UrlTabs from "@/app/components/UrlTabs";
 import { formatBkPhone, normalizeBkPhone } from "@/lib/bangka";
 
 const inputCls =
@@ -91,7 +92,11 @@ export default function ClubDashboard({
 
   function moveMonth(delta: number) {
     const date = new Date(year, month - 1 + delta, 1);
-    router.push(`/hr/clubs?year=${date.getFullYear()}&month=${date.getMonth() + 1}`);
+    // 보던 화면 탭(?tab=)은 유지 — 동아리 탭에서 달을 옮겨도 현황으로 튕기지 않게.
+    const q = new URLSearchParams(window.location.search);
+    q.set("year", String(date.getFullYear()));
+    q.set("month", String(date.getMonth() + 1));
+    router.push(`/hr/clubs?${q.toString()}`);
   }
 
   function run(
@@ -150,205 +155,253 @@ export default function ClubDashboard({
         </p>
       )}
 
-      <section className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-        <Summary label="운영 동아리" value={`${data.clubs.length}개`} />
-        <Summary label="활동" value={`${totalSessions}회`} />
-        <Summary
-          label="참여 연인원"
-          value={`${attendance.toLocaleString("ko-KR")}명`}
-        />
-        <Summary label="보고 확정" value={`${confirmed}/${data.clubs.length}`} />
-      </section>
+      {/* 화면 탭(주소 ?tab=) — 예전에는 등록 폼·동아리샘 목록·제출 현황·동아리 카드가
+          한 화면에 세로로 쌓여 길었습니다(화면 탭 정리 2단계). 월 이동은 위 공통 줄. */}
+      <UrlTabs
+        ariaLabel="동아리관리"
+        idPrefix="club"
+        defaultKey="status"
+        panelClassName="mt-4 space-y-5"
+        items={[
+          {
+            key: "status",
+            label: `${month}월 제출 현황`,
+            render: () => (
+              <>
+                <section className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+                  <Summary label="운영 동아리" value={`${data.clubs.length}개`} />
+                  <Summary label="활동" value={`${totalSessions}회`} />
+                  <Summary
+                    label="참여 연인원"
+                    value={`${attendance.toLocaleString("ko-KR")}명`}
+                  />
+                  <Summary label="보고 확정" value={`${confirmed}/${data.clubs.length}`} />
+                </section>
 
-      <section className="grid grid-cols-1 gap-4 lg:grid-cols-2">
-        <TeacherForm
-          pending={pending}
-          instructors={data.instructors}
-          onCreate={(input) => {
-            setMessage(null);
-            start(async () => {
-              const result = await createClubTeacher(input);
-              if (!result.ok) {
-                setMessage({ ok: false, text: result.message });
-                return;
-              }
-              setMessage({
-                ok: true,
-                text: result.merged
-                  ? "기존 강사에게 동아리샘 역할을 추가했습니다. (겸직)"
-                  : result.inviteUrl
-                  ? `동아리샘을 등록했습니다. 초대 링크: ${result.inviteUrl}`
-                  : "동아리샘을 등록했습니다.",
-              });
-              router.refresh();
-            });
-          }}
-          onAddRole={(instructorId) =>
-            run(
-              () => addClubRoleToInstructor({ instructorId }),
-              "기존 강사에게 동아리샘 역할을 추가했습니다. (겸직)"
-            )
-          }
-        />
-        <ClubForm
-          year={year}
-          teachers={data.teachers}
-          pending={pending}
-          onSubmit={(input) => run(() => createClub(input), "동아리를 등록했습니다.")}
-        />
-      </section>
+                <section className={panelToneCls("blue")}>
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <div>
+                      <h2 className={sectionTitleCls("blue")}>{month}월 제출 현황</h2>
+                      <p className="mt-0.5 text-xs text-ink-muted">
+                        활동일지가 모두 제출된 동아리만 월간보고를 확정할 수 있습니다.
+                      </p>
+                    </div>
+                    <div className="flex flex-wrap gap-2">
+                      <a
+                        href={`/hr/clubs/report?year=${year}&month=${month}`}
+                        className={btnSecondary}
+                      >
+                        통합 결과보고 PDF
+                      </a>
+                      <a
+                        href={`/hr/clubs/report/word?year=${year}&month=${month}`}
+                        className={btnSecondary}
+                      >
+                        편집용 Word
+                      </a>
+                      <button
+                        type="button"
+                        disabled={pending || confirmed === 0}
+                        onClick={() =>
+                          run(
+                            () => syncClubBusinessResult({ year, month }),
+                            "확정된 동아리 자료를 사업실적에 반영했습니다."
+                          )
+                        }
+                        className={btnPrimary}
+                      >
+                        사업실적 반영
+                      </button>
+                    </div>
+                  </div>
 
-      <TeacherList
-        teachers={data.teachers}
-        pending={pending}
-        canPurge={canPurge}
-        onPurged={(text) => {
-          setMessage({ ok: true, text });
-          router.refresh();
-        }}
-        onRemove={(teacher) =>
-          run(
-            () => removeClubTeacher({ instructorId: teacher.id }),
-            teacher.alsoInstructor
-              ? `${teacher.name}님의 동아리샘 역할을 해제했습니다. (강사 자격은 유지)`
-              : `${teacher.name}님을 동아리샘에서 제거했습니다.`
-          )
-        }
-        onDeactivate={(teacher, reason) =>
-          run(
-            () =>
-              deactivateClubTeacherRole({ instructorId: teacher.id, reason }),
-            `${teacher.name}님의 동아리샘 역할을 중지했습니다. (로그인 계정과 다른 역할은 그대로)`
-          )
-        }
-        onReactivate={(teacher) =>
-          run(
-            () => reactivateClubTeacherRole({ instructorId: teacher.id }),
-            `${teacher.name}님의 동아리샘 역할을 다시 활성으로 바꿨습니다.`
-          )
-        }
-      />
-
-      <section className={panelToneCls("blue")}>
-        <div className="flex flex-wrap items-center justify-between gap-2">
-          <div>
-            <h2 className={sectionTitleCls("blue")}>{month}월 제출 현황</h2>
-            <p className="mt-0.5 text-xs text-ink-muted">
-              활동일지가 모두 제출된 동아리만 월간보고를 확정할 수 있습니다.
-            </p>
-          </div>
-          <div className="flex flex-wrap gap-2">
-            <a
-              href={`/hr/clubs/report?year=${year}&month=${month}`}
-              className={btnSecondary}
-            >
-              통합 결과보고 PDF
-            </a>
-            <a
-              href={`/hr/clubs/report/word?year=${year}&month=${month}`}
-              className={btnSecondary}
-            >
-              편집용 Word
-            </a>
-            <button
-              type="button"
-              disabled={pending || confirmed === 0}
-              onClick={() =>
-                run(
-                  () => syncClubBusinessResult({ year, month }),
-                  "확정된 동아리 자료를 사업실적에 반영했습니다."
-                )
-              }
-              className={btnPrimary}
-            >
-              사업실적 반영
-            </button>
-          </div>
-        </div>
-
-        {data.clubs.length === 0 ? (
-          <p className="py-10 text-center text-sm text-ink-hint">
-            등록된 동아리가 없습니다.
-          </p>
-        ) : (
-          <div className="mt-4">
-            {/* 한눈에 보는 제출 현황 — 계획서와 결과보고를 같은 자리에서.
-                예전에는 결과보고만 보여서 "누가 계획서를 안 냈는지" 를 알 수
-                없었습니다(김준호 선생님 요청). 계획서는 한 해 단위라 달을
-                옮겨도 같은 값이고, 결과보고는 그 달 기준입니다. */}
-            <div className="mb-4 overflow-x-auto rounded-lg border border-rule">
-              <table className="w-full min-w-[420px] border-collapse text-sm">
-                <thead>
-                  <tr className={`${tableHeadCls} bg-surface`}>
-                    <th className="px-3 py-2 font-medium">동아리</th>
-                    <th className="px-3 py-2 font-medium">동아리샘</th>
-                    <th className="px-3 py-2 text-center font-medium">
-                      계획서 ({year}년)
-                    </th>
-                    <th className="px-3 py-2 text-center font-medium">
-                      결과보고 ({month}월)
-                    </th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {data.clubs.map((club) => {
-                    const planOk = !!club.planSubmittedAt;
-                    const reportOk = club.reportStatus === "confirmed";
-                    return (
-                      <tr key={club.id} className={tableRowCls}>
-                        <td className="px-3 py-2 font-medium text-ink">
-                          {club.name}
-                        </td>
-                        <td className="px-3 py-2 text-xs text-ink-muted">
-                          {club.teacherName ?? "미지정"}
-                        </td>
-                        <td className="px-3 py-2 text-center">
-                          <Mark ok={planOk} />
-                        </td>
-                        <td className="px-3 py-2 text-center">
-                          <Mark ok={reportOk} />
-                        </td>
-                      </tr>
-                    );
-                  })}
-                  <tr className="bg-surface text-xs font-semibold text-ink-body">
-                    <td className="px-3 py-2" colSpan={2}>
-                      제출
-                    </td>
-                    <td className="px-3 py-2 text-center">
-                      {data.clubs.filter((c) => c.planSubmittedAt).length}/
-                      {data.clubs.length}
-                    </td>
-                    <td className="px-3 py-2 text-center">
-                      {confirmed}/{data.clubs.length}
-                    </td>
-                  </tr>
-                </tbody>
-              </table>
-            </div>
-
-            {data.clubs.length > 1 && (
-              <p className="mb-2 text-xs text-ink-muted">
-                동아리명을 눌러 펼치면 계획서·활동계획·예산·월간보고를 관리할 수
-                있습니다.
-              </p>
-            )}
-            <div className="space-y-3">
-              {data.clubs.map((club) => (
-                <ClubCard
-                  key={club.id}
-                  club={club}
+                  {data.clubs.length === 0 ? (
+                    <p className="py-10 text-center text-sm text-ink-hint">
+                      등록된 동아리가 없습니다.
+                    </p>
+                  ) : (
+                    <div className="mt-4">
+                      {/* 한눈에 보는 제출 현황 — 계획서와 결과보고를 같은 자리에서.
+                          예전에는 결과보고만 보여서 "누가 계획서를 안 냈는지" 를 알 수
+                          없었습니다(김준호 선생님 요청). 계획서는 한 해 단위라 달을
+                          옮겨도 같은 값이고, 결과보고는 그 달 기준입니다. */}
+                      <div className="mb-4 overflow-x-auto rounded-lg border border-rule">
+                        <table className="w-full min-w-[420px] border-collapse text-sm">
+                          <thead>
+                            <tr className={`${tableHeadCls} bg-surface`}>
+                              <th className="px-3 py-2 font-medium">동아리</th>
+                              <th className="px-3 py-2 font-medium">동아리샘</th>
+                              <th className="px-3 py-2 text-center font-medium">
+                                계획서 ({year}년)
+                              </th>
+                              <th className="px-3 py-2 text-center font-medium">
+                                결과보고 ({month}월)
+                              </th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {data.clubs.map((club) => {
+                              const planOk = !!club.planSubmittedAt;
+                              const reportOk = club.reportStatus === "confirmed";
+                              return (
+                                <tr key={club.id} className={tableRowCls}>
+                                  <td className="px-3 py-2 font-medium text-ink">
+                                    {club.name}
+                                  </td>
+                                  <td className="px-3 py-2 text-xs text-ink-muted">
+                                    {club.teacherName ?? "미지정"}
+                                  </td>
+                                  <td className="px-3 py-2 text-center">
+                                    <Mark ok={planOk} />
+                                  </td>
+                                  <td className="px-3 py-2 text-center">
+                                    <Mark ok={reportOk} />
+                                  </td>
+                                </tr>
+                              );
+                            })}
+                            <tr className="bg-surface text-xs font-semibold text-ink-body">
+                              <td className="px-3 py-2" colSpan={2}>
+                                제출
+                              </td>
+                              <td className="px-3 py-2 text-center">
+                                {data.clubs.filter((c) => c.planSubmittedAt).length}/
+                                {data.clubs.length}
+                              </td>
+                              <td className="px-3 py-2 text-center">
+                                {confirmed}/{data.clubs.length}
+                              </td>
+                            </tr>
+                          </tbody>
+                        </table>
+                      </div>
+                      <p className="text-xs text-ink-muted">
+                        계획서·활동일지·예산·월간보고는 &lsquo;동아리&rsquo; 탭에서
+                        동아리별로 관리합니다.
+                      </p>
+                    </div>
+                  )}
+                </section>
+              </>
+            ),
+          },
+          {
+            key: "clubs",
+            label: "동아리",
+            count: data.clubs.length,
+            render: () => (
+              <>
+                <ClubForm
                   year={year}
-                  month={month}
+                  teachers={data.teachers}
                   pending={pending}
-                  run={run}
-                  onPlanChanged={() => router.refresh()}
+                  onSubmit={(input) => run(() => createClub(input), "동아리를 등록했습니다.")}
                 />
-              ))}
-            </div>
-          </div>
-        )}
-      </section>
+                {data.clubs.length === 0 ? (
+                  <p className={`${panelCls} py-10 text-center text-sm text-ink-hint`}>
+                    등록된 동아리가 없습니다.
+                  </p>
+                ) : (
+                  <section className={panelToneCls("blue")}>
+                    <h2 className={sectionTitleCls("blue")}>
+                      동아리 ({year}년 {month}월)
+                    </h2>
+                    <div className="mt-3">
+                    {data.clubs.length > 1 && (
+                      <p className="mb-2 text-xs text-ink-muted">
+                        동아리명을 눌러 펼치면 계획서·활동계획·예산·월간보고를 관리할 수
+                        있습니다.
+                      </p>
+                    )}
+                    <div className="space-y-3">
+                      {data.clubs.map((club) => (
+                        <ClubCard
+                          key={club.id}
+                          club={club}
+                          year={year}
+                          month={month}
+                          pending={pending}
+                          run={run}
+                          onPlanChanged={() => router.refresh()}
+                        />
+                      ))}
+                    </div>
+                    </div>
+                  </section>
+                )}
+              </>
+            ),
+          },
+          {
+            key: "teachers",
+            label: "동아리샘",
+            count: data.teachers.length,
+            render: () => (
+              <>
+                <TeacherForm
+                  pending={pending}
+                  instructors={data.instructors}
+                  onCreate={(input) => {
+                    setMessage(null);
+                    start(async () => {
+                      const result = await createClubTeacher(input);
+                      if (!result.ok) {
+                        setMessage({ ok: false, text: result.message });
+                        return;
+                      }
+                      setMessage({
+                        ok: true,
+                        text: result.merged
+                          ? "기존 강사에게 동아리샘 역할을 추가했습니다. (겸직)"
+                          : result.inviteUrl
+                          ? `동아리샘을 등록했습니다. 초대 링크: ${result.inviteUrl}`
+                          : "동아리샘을 등록했습니다.",
+                      });
+                      router.refresh();
+                    });
+                  }}
+                  onAddRole={(instructorId) =>
+                    run(
+                      () => addClubRoleToInstructor({ instructorId }),
+                      "기존 강사에게 동아리샘 역할을 추가했습니다. (겸직)"
+                    )
+                  }
+                />
+                <TeacherList
+                  teachers={data.teachers}
+                  pending={pending}
+                  canPurge={canPurge}
+                  onPurged={(text) => {
+                    setMessage({ ok: true, text });
+                    router.refresh();
+                  }}
+                  onRemove={(teacher) =>
+                    run(
+                      () => removeClubTeacher({ instructorId: teacher.id }),
+                      teacher.alsoInstructor
+                        ? `${teacher.name}님의 동아리샘 역할을 해제했습니다. (강사 자격은 유지)`
+                        : `${teacher.name}님을 동아리샘에서 제거했습니다.`
+                    )
+                  }
+                  onDeactivate={(teacher, reason) =>
+                    run(
+                      () =>
+                        deactivateClubTeacherRole({ instructorId: teacher.id, reason }),
+                      `${teacher.name}님의 동아리샘 역할을 중지했습니다. (로그인 계정과 다른 역할은 그대로)`
+                    )
+                  }
+                  onReactivate={(teacher) =>
+                    run(
+                      () => reactivateClubTeacherRole({ instructorId: teacher.id }),
+                      `${teacher.name}님의 동아리샘 역할을 다시 활성으로 바꿨습니다.`
+                    )
+                  }
+                />
+              </>
+            ),
+          },
+        ]}
+      />
     </div>
   );
 }

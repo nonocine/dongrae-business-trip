@@ -39,7 +39,9 @@ import {
   noticeWarning,
 } from "@/lib/ui";
 import StepBox from "./StepBox";
-import TemplateBar from "./TemplateBar";
+import TemplateBar, { TemplateLibrary } from "./TemplateBar";
+import Tabs from "@/app/components/Tabs";
+import { useUrlTab } from "@/app/components/UrlTabs";
 import SmsHistory from "./SmsHistory";
 import { GroupDialog, GroupManager, type BusinessProgramOption } from "./AddressBook";
 import { PICKERS } from "./pickers";
@@ -56,6 +58,14 @@ import { chipCls, modalBackdrop, modalPanel, newUid, pickerBox, sourceCard } fro
 
 const won = new Intl.NumberFormat("ko-KR");
 
+type SmsTab = "send" | "history" | "library";
+const SMS_TAB_KEYS: readonly SmsTab[] = ["send", "history", "library"];
+const TAB_ITEMS: { key: SmsTab; label: string; count?: number }[] = [
+  { key: "send", label: "보내기" },
+  { key: "history", label: "발송 이력" },
+  { key: "library", label: "주소록·서식" },
+];
+
 export default function SmsSender({
   sources,
   channels,
@@ -71,6 +81,15 @@ export default function SmsSender({
   loadError: string | null;
   initialBody?: string; // ?body= 로 미리 채운 내용
 }) {
+  // 화면 탭 — 주소 ?tab=. 옛 #sms-history 링크는 이력 탭으로.
+  const { value: tab, select: selectTab } = useUrlTab<SmsTab>({
+    keys: SMS_TAB_KEYS,
+    defaultKey: "send",
+    hashMap: { "sms-history": "history" },
+  });
+  // 주소록·문구함은 처음 열 때 불러옵니다(보내기만 쓰는 사람은 조회하지 않게).
+  const [libraryOpened, setLibraryOpened] = useState(tab === "library");
+  if (tab === "library" && !libraryOpened) setLibraryOpened(true);
   const router = useRouter();
   const [notice, setNotice] = useState<{ kind: "ok" | "error"; text: string } | null>(null);
 
@@ -239,281 +258,312 @@ export default function SmsSender({
     <div className="space-y-5">
       {loadError && <p className={noticeError}>{loadError}</p>}
 
-      {/* 1. 받는 사람 고르기 */}
-      <StepBox
-        step={1}
-        title="받는 사람 고르기"
-        right={
-          <button type="button" className={btnSecondary} onClick={() => setManagingGroups(true)}>
-            주소록 관리
-          </button>
-        }
-      >
-        <div className="grid grid-cols-2 gap-2 md:grid-cols-4">
-          {sources.map((s) => (
-            <button
-              key={s.key}
-              type="button"
-              className={sourceCard(s.key === activeKey)}
-              aria-pressed={s.key === activeKey}
-              onClick={() => setActiveKey(s.key === activeKey ? null : s.key)}
-            >
-              <span className="text-xl" aria-hidden>
-                {s.icon}
-              </span>
-              <span className="text-sm font-bold text-ink">{s.label}</span>
-              <span className="text-xs text-ink-muted">{s.description}</span>
-            </button>
-          ))}
-        </div>
-        {active && Picker && (
-          <div className={`${pickerBox} mt-4`}>
-            <p className="mb-3 text-sm font-bold text-brand-blue-strong">
-              {active.icon} {active.label}
-            </p>
-            {/* key 로 출처가 바뀌면 선택기 상태를 새로 시작합니다. */}
-            <Picker key={active.key} meta={active} onAdd={(sel) => addBundle(active.key, sel)} />
-          </div>
-        )}
-      </StepBox>
+      {/* 화면 탭(주소 ?tab=) — 보내기 4단계 아래에 발송 이력이 붙어 길었습니다
+          (화면 탭 정리 2단계). 관리자 대시보드의 /sms#sms-history 는 이력 탭으로 엽니다.
+          문구함의 [쓰기]가 '보내기'로 되돌아와야 해서 UrlTabs 대신 훅을 직접 씁니다. */}
+      <Tabs
+        items={TAB_ITEMS.map((t) => (t.key === "history" ? { ...t, count: logs.length } : t))}
+        value={tab}
+        onChange={selectTab}
+        ariaLabel="문자 발송"
+        idPrefix="sms"
+      />
 
-      {/* 2. 담긴 명단 */}
-      <StepBox
-        step={2}
-        title="담긴 명단"
-        tone="soft"
-        right={
-          bundles.length > 0 && (
-            <>
-              <button type="button" className={btnSecondary} onClick={() => setExpanded((v) => !v)}>
-                {expanded ? "명단 접기" : "명단 펼쳐보기"}
-              </button>
+      <div role="tabpanel" id="sms-panel-send" aria-labelledby="sms-tab-send" hidden={tab !== "send"} className="space-y-5">
+        {/* 1. 받는 사람 고르기 */}
+        <StepBox
+          step={1}
+          title="받는 사람 고르기"
+          right={
+            <button type="button" className={btnSecondary} onClick={() => setManagingGroups(true)}>
+              주소록 관리
+            </button>
+          }
+        >
+          <div className="grid grid-cols-2 gap-2 md:grid-cols-4">
+            {sources.map((s) => (
               <button
+                key={s.key}
                 type="button"
-                className={btnSecondary}
-                disabled={!preview || total === 0}
-                onClick={() => setSavingGroup(true)}
+                className={sourceCard(s.key === activeKey)}
+                aria-pressed={s.key === activeKey}
+                onClick={() => setActiveKey(s.key === activeKey ? null : s.key)}
               >
-                이 묶음을 주소록에 저장
+                <span className="text-xl" aria-hidden>
+                  {s.icon}
+                </span>
+                <span className="text-sm font-bold text-ink">{s.label}</span>
+                <span className="text-xs text-ink-muted">{s.description}</span>
               </button>
-            </>
-          )
-        }
-      >
-        {bundles.length === 0 ? (
-          <p className="text-sm text-ink-muted">위에서 받는 사람을 골라 담으세요. 여러 출처를 함께 담을 수 있습니다.</p>
-        ) : (
-          <div className="space-y-3">
-            <div className="flex flex-wrap items-end gap-x-4 gap-y-1">
-              <p className="text-3xl font-bold text-ink">
-                {previewing && !preview ? "…" : won.format(total)}
-                <span className="ml-1 text-base font-semibold text-ink-body">명</span>
+            ))}
+          </div>
+          {active && Picker && (
+            <div className={`${pickerBox} mt-4`}>
+              <p className="mb-3 text-sm font-bold text-brand-blue-strong">
+                {active.icon} {active.label}
               </p>
-              {preview && (
-                <p className="pb-1 text-xs text-ink-muted">
-                  중복 {won.format(preview.duplicates)}건 자동 제외 · 번호 없음 {won.format(preview.noPhone)}건 제외
-                  {preview.restricted > 0 && (
-                    <span title="주소록에 든 사람 중 내가 쓸 권한이 없는 명단(예: 방과후 보호자)의 사람은 빠집니다.">
-                      {" "}· 권한 밖 {won.format(preview.restricted)}명 제외
-                    </span>
-                  )}
-                  {previewing && " · 다시 세는 중…"}
+              {/* key 로 출처가 바뀌면 선택기 상태를 새로 시작합니다. */}
+              <Picker key={active.key} meta={active} onAdd={(sel) => addBundle(active.key, sel)} />
+            </div>
+          )}
+        </StepBox>
+
+        {/* 2. 담긴 명단 */}
+        <StepBox
+          step={2}
+          title="담긴 명단"
+          tone="soft"
+          right={
+            bundles.length > 0 && (
+              <>
+                <button type="button" className={btnSecondary} onClick={() => setExpanded((v) => !v)}>
+                  {expanded ? "명단 접기" : "명단 펼쳐보기"}
+                </button>
+                <button
+                  type="button"
+                  className={btnSecondary}
+                  disabled={!preview || total === 0}
+                  onClick={() => setSavingGroup(true)}
+                >
+                  이 묶음을 주소록에 저장
+                </button>
+              </>
+            )
+          }
+        >
+          {bundles.length === 0 ? (
+            <p className="text-sm text-ink-muted">위에서 받는 사람을 골라 담으세요. 여러 출처를 함께 담을 수 있습니다.</p>
+          ) : (
+            <div className="space-y-3">
+              <div className="flex flex-wrap items-end gap-x-4 gap-y-1">
+                <p className="text-3xl font-bold text-ink">
+                  {previewing && !preview ? "…" : won.format(total)}
+                  <span className="ml-1 text-base font-semibold text-ink-body">명</span>
                 </p>
+                {preview && (
+                  <p className="pb-1 text-xs text-ink-muted">
+                    중복 {won.format(preview.duplicates)}건 자동 제외 · 번호 없음 {won.format(preview.noPhone)}건 제외
+                    {preview.restricted > 0 && (
+                      <span title="주소록에 든 사람 중 내가 쓸 권한이 없는 명단(예: 방과후 보호자)의 사람은 빠집니다.">
+                        {" "}· 권한 밖 {won.format(preview.restricted)}명 제외
+                      </span>
+                    )}
+                    {previewing && " · 다시 세는 중…"}
+                  </p>
+                )}
+              </div>
+              {previewError && <p className={noticeError}>{previewError}</p>}
+              {total > SMS_MAX_RECIPIENTS && (
+                <p className={noticeError}>한 번에 {won.format(SMS_MAX_RECIPIENTS)}명까지 보낼 수 있습니다.</p>
+              )}
+              <div className="flex flex-wrap gap-2">
+                {bundles.map((b) => {
+                  const chip = preview?.bundles.find((c) => c.uid === b.uid);
+                  const meta = sources.find((s) => s.key === b.source);
+                  return (
+                    <span key={b.uid} className={chipCls(chip?.color ?? meta?.color ?? "blue")}>
+                      {chip ? `${chip.label} · ${won.format(chip.count)}명` : `${meta?.label ?? b.source} · 계산 중`}
+                      <button
+                        type="button"
+                        aria-label="이 묶음 빼기"
+                        className="ml-0.5 rounded-full px-1 leading-none hover:bg-black/10"
+                        onClick={() => removeBundle(b.uid)}
+                      >
+                        ×
+                      </button>
+                    </span>
+                  );
+                })}
+              </div>
+              {expanded && preview && (
+                <div className="max-h-96 overflow-y-auto rounded-lg border border-rule bg-card">
+                  <table className="w-full text-sm">
+                    <thead className="sticky top-0 bg-surface">
+                      <tr className="border-b border-rule text-left text-xs text-ink-muted">
+                        <th className="px-2 py-2">이름</th>
+                        <th className="px-2 py-2">출처</th>
+                        <th className="px-2 py-2">상태</th>
+                        <th className="px-2 py-2" />
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {bundles.flatMap((b) =>
+                        (peopleByBundle.get(b.uid) ?? []).map((p) => (
+                          <tr key={`${b.uid}-${p.key}`} className="border-b border-rule/70 last:border-0">
+                            <td className={`px-2 py-1.5 ${p.hasPhone && !p.duplicate ? "" : "text-ink-hint"}`}>{p.name}</td>
+                            <td className="px-2 py-1.5 text-xs">{p.sourceLabel}</td>
+                            <td className="px-2 py-1.5 text-xs">
+                              {!p.hasPhone ? "번호 없음(제외)" : p.duplicate ? "중복(제외)" : "보냄"}
+                            </td>
+                            <td className="px-2 py-1.5 text-right">
+                              <button
+                                type="button"
+                                className="text-xs text-stamp hover:underline"
+                                onClick={() => excludePerson(b.uid, p.key)}
+                              >
+                                빼기
+                              </button>
+                            </td>
+                          </tr>
+                        )),
+                      )}
+                    </tbody>
+                  </table>
+                </div>
               )}
             </div>
-            {previewError && <p className={noticeError}>{previewError}</p>}
-            {total > SMS_MAX_RECIPIENTS && (
-              <p className={noticeError}>한 번에 {won.format(SMS_MAX_RECIPIENTS)}명까지 보낼 수 있습니다.</p>
-            )}
-            <div className="flex flex-wrap gap-2">
-              {bundles.map((b) => {
-                const chip = preview?.bundles.find((c) => c.uid === b.uid);
-                const meta = sources.find((s) => s.key === b.source);
-                return (
-                  <span key={b.uid} className={chipCls(chip?.color ?? meta?.color ?? "blue")}>
-                    {chip ? `${chip.label} · ${won.format(chip.count)}명` : `${meta?.label ?? b.source} · 계산 중`}
-                    <button
-                      type="button"
-                      aria-label="이 묶음 빼기"
-                      className="ml-0.5 rounded-full px-1 leading-none hover:bg-black/10"
-                      onClick={() => removeBundle(b.uid)}
-                    >
-                      ×
-                    </button>
-                  </span>
-                );
-              })}
-            </div>
-            {expanded && preview && (
-              <div className="max-h-96 overflow-y-auto rounded-lg border border-rule bg-card">
-                <table className="w-full text-sm">
-                  <thead className="sticky top-0 bg-surface">
-                    <tr className="border-b border-rule text-left text-xs text-ink-muted">
-                      <th className="px-2 py-2">이름</th>
-                      <th className="px-2 py-2">출처</th>
-                      <th className="px-2 py-2">상태</th>
-                      <th className="px-2 py-2" />
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {bundles.flatMap((b) =>
-                      (peopleByBundle.get(b.uid) ?? []).map((p) => (
-                        <tr key={`${b.uid}-${p.key}`} className="border-b border-rule/70 last:border-0">
-                          <td className={`px-2 py-1.5 ${p.hasPhone && !p.duplicate ? "" : "text-ink-hint"}`}>{p.name}</td>
-                          <td className="px-2 py-1.5 text-xs">{p.sourceLabel}</td>
-                          <td className="px-2 py-1.5 text-xs">
-                            {!p.hasPhone ? "번호 없음(제외)" : p.duplicate ? "중복(제외)" : "보냄"}
-                          </td>
-                          <td className="px-2 py-1.5 text-right">
-                            <button
-                              type="button"
-                              className="text-xs text-stamp hover:underline"
-                              onClick={() => excludePerson(b.uid, p.key)}
-                            >
-                              빼기
-                            </button>
-                          </td>
-                        </tr>
-                      )),
-                    )}
-                  </tbody>
-                </table>
-              </div>
-            )}
-          </div>
-        )}
-      </StepBox>
+          )}
+        </StepBox>
 
-      {/* 3. 내용 */}
-      <StepBox step={3} title="내용">
-        <TemplateBar body={body} onUse={setBody} />
-        <textarea
-          className={`${inputCls} h-40`}
-          value={body}
-          onChange={(e) => setBody(e.target.value)}
-          placeholder="보낼 내용을 쓰세요."
-        />
-        <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-2 text-sm text-ink-body">
-          <label className="flex items-center gap-1.5">
-            <input type="checkbox" checked={headerOn} onChange={(e) => setHeaderOn(e.target.checked)} />
-            머리말 “{SMS_HEADER}” 붙이기
-          </label>
-          <label className="flex items-center gap-1.5">
-            <input type="checkbox" checked={advertising} onChange={(e) => setAdvertising(e.target.checked)} />
-            광고성 문자
-          </label>
-          <span className="ml-auto flex items-center gap-2 text-xs text-ink-muted">
-            <span className={tooLong ? "font-semibold text-stamp" : ""}>
-              {won.format(bytes)} / {bytes > SMS_MAX_BYTES ? won.format(LMS_MAX_BYTES) : SMS_MAX_BYTES} 바이트
-            </span>
-            <span className={msgType === "LMS" ? badgeWarning : badgeNavy}>{msgType}</span>
-          </span>
-        </div>
-        {msgType === "LMS" && !tooLong && (
-          <p className="mt-1 text-xs text-ink-muted">90바이트를 넘어 장문(LMS)으로 보냅니다.</p>
-        )}
-        {tooLong && <p className={`${noticeError} mt-2`}>2,000바이트를 넘으면 보낼 수 없습니다.</p>}
-        {advertising && (
-          <p className={`${noticeWarning} mt-2`}>
-            광고성 문자: 맨 앞 “{SMS_AD_PREFIX}”와 맨 끝 “수신거부 {SMS_OPTOUT_NUMBER}”를 자동으로 붙입니다(바이트에 포함).
-            밤 9시~아침 8시에는 실제 발송이 막힙니다(발송 점검은 가능).
-          </p>
-        )}
-        {adHint && <p className={`${noticeWarning} mt-2`}>광고성 문자일 수 있어요. 광고성 문자 체크를 확인하세요.</p>}
-        {finalText && (headerOn || advertising) && (
-          <div className="mt-3">
-            <p className="text-xs font-medium text-ink-muted">실제로 나가는 문자</p>
-            <p className="mt-1 whitespace-pre-wrap rounded-lg bg-surface p-2 text-sm text-ink-body">{finalText}</p>
-          </div>
-        )}
-      </StepBox>
-
-      {/* 4. 발송 */}
-      <StepBox step={4} title="발송">
-        {/* 보내는 방법 — 등록된 수단이 2개 이상일 때만 보입니다(지금은 문자 하나라 숨김). */}
-        {channels.length > 1 && (
-          <fieldset className="mb-4">
-            <legend className={labelCls}>보내는 방법</legend>
-            <div className="mt-1 flex flex-wrap gap-2">
-              {channels.map((c) => (
-                <button
-                  key={c.key}
-                  type="button"
-                  aria-pressed={c.key === channel?.key}
-                  className={`${sourceCard(c.key === channel?.key)} w-auto flex-row items-center px-4 py-2`}
-                  onClick={() => setChannelKey(c.key)}
-                >
-                  <span aria-hidden>{c.icon}</span>
-                  <span className="text-sm font-semibold text-ink">{c.label}</span>
-                </button>
-              ))}
-            </div>
-            {adNotAllowed && (
-              <p className={`${noticeError} mt-2`}>“{channel?.label}”(으)로는 광고성 내용을 보낼 수 없습니다.</p>
-            )}
-          </fieldset>
-        )}
-        {sendersError && <p className={`${noticeError} mb-3`}>{sendersError}</p>}
-        {senders && !senders.enabled && (
-          <p className={`${noticeWarning} mb-3`}>문자 발송이 꺼져 있습니다(중계 서버 비활성). 담당자에게 문의하세요.</p>
-        )}
-        <div className="grid gap-3 sm:grid-cols-2">
-          <label className="block">
-            <span className={labelCls}>발신번호</span>
-            <select
-              className={inputCls}
-              value={sender}
-              onChange={(e) => setSender(e.target.value)}
-              disabled={!senders || senders.allowed.length === 0}
-            >
-              {!senders && <option value="">불러오는 중…</option>}
-              {senders?.allowed.map((a) => (
-                <option key={a.number} value={a.number}>
-                  {a.display}
-                </option>
-              ))}
-            </select>
-          </label>
-          <div className="flex items-end gap-2">
-            <label className="block flex-1">
-              <span className={labelCls}>내 번호</span>
-              <input
-                className={inputCls}
-                value={testNumber}
-                onChange={(e) => setTestNumber(e.target.value)}
-                placeholder="010-0000-0000"
-                inputMode="tel"
-              />
+        {/* 3. 내용 */}
+        <StepBox step={3} title="내용">
+          <TemplateBar body={body} onUse={setBody} />
+          <textarea
+            className={`${inputCls} h-40`}
+            value={body}
+            onChange={(e) => setBody(e.target.value)}
+            placeholder="보낼 내용을 쓰세요."
+          />
+          <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-2 text-sm text-ink-body">
+            <label className="flex items-center gap-1.5">
+              <input type="checkbox" checked={headerOn} onChange={(e) => setHeaderOn(e.target.checked)} />
+              머리말 “{SMS_HEADER}” 붙이기
             </label>
+            <label className="flex items-center gap-1.5">
+              <input type="checkbox" checked={advertising} onChange={(e) => setAdvertising(e.target.checked)} />
+              광고성 문자
+            </label>
+            <span className="ml-auto flex items-center gap-2 text-xs text-ink-muted">
+              <span className={tooLong ? "font-semibold text-stamp" : ""}>
+                {won.format(bytes)} / {bytes > SMS_MAX_BYTES ? won.format(LMS_MAX_BYTES) : SMS_MAX_BYTES} 바이트
+              </span>
+              <span className={msgType === "LMS" ? badgeWarning : badgeNavy}>{msgType}</span>
+            </span>
           </div>
-        </div>
-        <div className="mt-2 flex flex-wrap items-center justify-end gap-2">
-          <button type="button" className={btnSecondary} disabled={!testReady} onClick={() => send("check")}>
-            발송 점검
-          </button>
-          <button type="button" className={btnSecondary} disabled={!selfReady} onClick={() => setConfirmingSelf(true)}>
-            내 번호로 미리 받아보기
-          </button>
-        </div>
-        <ul className="mt-1 space-y-0.5 text-right text-xs text-ink-muted">
-          <li>[발송 점검] 실제로 문자가 가지 않는 점검입니다. 번호·내용 오류만 확인하며 포인트를 쓰지 않습니다.</li>
-          <li>[내 번호로 미리 받아보기] 위 내 번호 1곳으로만 실제 문자가 갑니다(담긴 명단과 무관, 비용 발생).</li>
-        </ul>
-        {adNightBlocked && <p className={`${noticeError} mt-3`}>광고성 문자는 밤 9시~아침 8시에 보낼 수 없습니다.</p>}
-        <div className="mt-4 flex justify-end">
-          <button
-            type="button"
-            className={`${btnPrimary} px-6 py-3 text-base`}
-            disabled={!realReady}
-            onClick={() => setConfirming(true)}
-          >
-            {won.format(total)}명에게 발송
-          </button>
-        </div>
-        {notice && <p className={`mt-3 ${notice.kind === "ok" ? noticeSuccess : noticeError}`}>{notice.text}</p>}
-      </StepBox>
+          {msgType === "LMS" && !tooLong && (
+            <p className="mt-1 text-xs text-ink-muted">90바이트를 넘어 장문(LMS)으로 보냅니다.</p>
+          )}
+          {tooLong && <p className={`${noticeError} mt-2`}>2,000바이트를 넘으면 보낼 수 없습니다.</p>}
+          {advertising && (
+            <p className={`${noticeWarning} mt-2`}>
+              광고성 문자: 맨 앞 “{SMS_AD_PREFIX}”와 맨 끝 “수신거부 {SMS_OPTOUT_NUMBER}”를 자동으로 붙입니다(바이트에 포함).
+              밤 9시~아침 8시에는 실제 발송이 막힙니다(발송 점검은 가능).
+            </p>
+          )}
+          {adHint && <p className={`${noticeWarning} mt-2`}>광고성 문자일 수 있어요. 광고성 문자 체크를 확인하세요.</p>}
+          {finalText && (headerOn || advertising) && (
+            <div className="mt-3">
+              <p className="text-xs font-medium text-ink-muted">실제로 나가는 문자</p>
+              <p className="mt-1 whitespace-pre-wrap rounded-lg bg-surface p-2 text-sm text-ink-body">{finalText}</p>
+            </div>
+          )}
+        </StepBox>
 
-      <SmsHistory logs={logs} />
+        {/* 4. 발송 */}
+        <StepBox step={4} title="발송">
+          {/* 보내는 방법 — 등록된 수단이 2개 이상일 때만 보입니다(지금은 문자 하나라 숨김). */}
+          {channels.length > 1 && (
+            <fieldset className="mb-4">
+              <legend className={labelCls}>보내는 방법</legend>
+              <div className="mt-1 flex flex-wrap gap-2">
+                {channels.map((c) => (
+                  <button
+                    key={c.key}
+                    type="button"
+                    aria-pressed={c.key === channel?.key}
+                    className={`${sourceCard(c.key === channel?.key)} w-auto flex-row items-center px-4 py-2`}
+                    onClick={() => setChannelKey(c.key)}
+                  >
+                    <span aria-hidden>{c.icon}</span>
+                    <span className="text-sm font-semibold text-ink">{c.label}</span>
+                  </button>
+                ))}
+              </div>
+              {adNotAllowed && (
+                <p className={`${noticeError} mt-2`}>“{channel?.label}”(으)로는 광고성 내용을 보낼 수 없습니다.</p>
+              )}
+            </fieldset>
+          )}
+          {sendersError && <p className={`${noticeError} mb-3`}>{sendersError}</p>}
+          {senders && !senders.enabled && (
+            <p className={`${noticeWarning} mb-3`}>문자 발송이 꺼져 있습니다(중계 서버 비활성). 담당자에게 문의하세요.</p>
+          )}
+          <div className="grid gap-3 sm:grid-cols-2">
+            <label className="block">
+              <span className={labelCls}>발신번호</span>
+              <select
+                className={inputCls}
+                value={sender}
+                onChange={(e) => setSender(e.target.value)}
+                disabled={!senders || senders.allowed.length === 0}
+              >
+                {!senders && <option value="">불러오는 중…</option>}
+                {senders?.allowed.map((a) => (
+                  <option key={a.number} value={a.number}>
+                    {a.display}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <div className="flex items-end gap-2">
+              <label className="block flex-1">
+                <span className={labelCls}>내 번호</span>
+                <input
+                  className={inputCls}
+                  value={testNumber}
+                  onChange={(e) => setTestNumber(e.target.value)}
+                  placeholder="010-0000-0000"
+                  inputMode="tel"
+                />
+              </label>
+            </div>
+          </div>
+          <div className="mt-2 flex flex-wrap items-center justify-end gap-2">
+            <button type="button" className={btnSecondary} disabled={!testReady} onClick={() => send("check")}>
+              발송 점검
+            </button>
+            <button type="button" className={btnSecondary} disabled={!selfReady} onClick={() => setConfirmingSelf(true)}>
+              내 번호로 미리 받아보기
+            </button>
+          </div>
+          <ul className="mt-1 space-y-0.5 text-right text-xs text-ink-muted">
+            <li>[발송 점검] 실제로 문자가 가지 않는 점검입니다. 번호·내용 오류만 확인하며 포인트를 쓰지 않습니다.</li>
+            <li>[내 번호로 미리 받아보기] 위 내 번호 1곳으로만 실제 문자가 갑니다(담긴 명단과 무관, 비용 발생).</li>
+          </ul>
+          {adNightBlocked && <p className={`${noticeError} mt-3`}>광고성 문자는 밤 9시~아침 8시에 보낼 수 없습니다.</p>}
+          <div className="mt-4 flex justify-end">
+            <button
+              type="button"
+              className={`${btnPrimary} px-6 py-3 text-base`}
+              disabled={!realReady}
+              onClick={() => setConfirming(true)}
+            >
+              {won.format(total)}명에게 발송
+            </button>
+          </div>
+          {notice && <p className={`mt-3 ${notice.kind === "ok" ? noticeSuccess : noticeError}`}>{notice.text}</p>}
+        </StepBox>
+      </div>
+
+      <div role="tabpanel" id="sms-panel-history" aria-labelledby="sms-tab-history" hidden={tab !== "history"}>
+        <SmsHistory logs={logs} />
+      </div>
+
+      <div role="tabpanel" id="sms-panel-library" aria-labelledby="sms-tab-library" hidden={tab !== "library"} className="space-y-5">
+        {libraryOpened && (
+          <>
+            {notice && <p className={notice.kind === "ok" ? noticeSuccess : noticeError}>{notice.text}</p>}
+            <GroupManager inline programs={programs} onChanged={(m) => setNotice({ kind: "ok", text: m })} />
+            <TemplateLibrary
+              onUse={(text) => {
+                if (body.trim() && !window.confirm("지금 본문을 이 문구로 바꿀까요?")) return;
+                setBody(text);
+                selectTab("send");
+              }}
+            />
+          </>
+        )}
+      </div>
 
       {/* 실제 발송 확인 */}
       {confirming && preview && (

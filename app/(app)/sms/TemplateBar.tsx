@@ -17,7 +17,7 @@ import {
   noticeError,
   noticeWarning,
 } from "@/lib/ui";
-import { modalBackdrop, modalPanel } from "./ui";
+import { modalBackdrop, modalPanel, stepBox } from "./ui";
 
 async function call(url: string, method: string, body?: unknown): Promise<string | null> {
   try {
@@ -145,18 +145,78 @@ export default function TemplateBar({
   );
 }
 
+// 문구함(서식) 관리 — '주소록·서식' 탭(?tab=library)에 창 없이 펼칩니다.
+//   [쓰기]를 누르면 본문에 넣고 '보내기' 탭으로 돌아갑니다(onUse).
+export function TemplateLibrary({ onUse }: { onUse: (text: string) => void }) {
+  const [templates, setTemplates] = useState<SmsTemplate[]>([]);
+  const [missing, setMissing] = useState(false);
+  const [editing, setEditing] = useState<SmsTemplate | "new" | null>(null);
+  const apply = useCallback((j: TemplatesResponse | null) => {
+    if (!j) return;
+    setTemplates(j.templates ?? []);
+    setMissing(j.missing === true);
+  }, []);
+  const load = useCallback(() => {
+    fetchTemplates().then(apply);
+  }, [apply]);
+  useEffect(() => {
+    let alive = true;
+    fetchTemplates().then((j) => {
+      if (alive) apply(j);
+    });
+    return () => {
+      alive = false;
+    };
+  }, [apply]);
+
+  return (
+    <>
+      {missing ? (
+        <p className={noticeWarning}>문구함 DB 표 적용 전입니다.</p>
+      ) : (
+        <TemplateList
+          inline
+          templates={templates}
+          onNew={() => setEditing("new")}
+          onUse={(t) => {
+            onUse(t.body);
+            void call(`/api/sms/templates/${t.id}/use`, "POST").then(load);
+          }}
+          onEdit={(t) => setEditing(t)}
+          onChanged={load}
+        />
+      )}
+      {editing && (
+        <TemplateForm
+          initial={editing === "new" ? null : editing}
+          body={editing === "new" ? "" : editing.body}
+          onClose={() => setEditing(null)}
+          onSaved={() => {
+            setEditing(null);
+            load();
+          }}
+        />
+      )}
+    </>
+  );
+}
+
 function TemplateList({
   templates,
   onClose,
   onUse,
   onEdit,
   onChanged,
+  onNew,
+  inline = false,
 }: {
   templates: SmsTemplate[];
-  onClose: () => void;
+  onClose?: () => void;
   onUse: (t: SmsTemplate) => void;
   onEdit: (t: SmsTemplate) => void;
   onChanged: () => void;
+  onNew?: () => void;
+  inline?: boolean;
 }) {
   const [q, setQ] = useState("");
   const [cat, setCat] = useState("all");
@@ -180,13 +240,20 @@ function TemplateList({
   }
 
   return (
-    <div className={modalBackdrop} role="dialog" aria-modal="true">
-      <div className={`${modalPanel} max-w-2xl`}>
+    <div className={inline ? "" : modalBackdrop} role={inline ? undefined : "dialog"} aria-modal={inline ? undefined : true}>
+      <div className={inline ? stepBox : `${modalPanel} max-w-2xl`}>
         <div className="flex items-center gap-2">
-          <h3 className="text-lg font-bold text-ink">문구함</h3>
-          <button type="button" className={`${btnSecondary} ml-auto`} onClick={onClose}>
-            닫기
-          </button>
+          <h3 className="text-lg font-bold text-ink">문구함(서식)</h3>
+          {onNew && (
+            <button type="button" className={`${btnPrimary} ml-auto`} onClick={onNew}>
+              새 문구
+            </button>
+          )}
+          {onClose && (
+            <button type="button" className={`${btnSecondary} ${onNew ? "" : "ml-auto"}`} onClick={onClose}>
+              닫기
+            </button>
+          )}
         </div>
         <div className="mt-3 flex flex-wrap gap-2">
           <input className={`${inputCls} max-w-xs`} value={q} onChange={(e) => setQ(e.target.value)} placeholder="검색" />

@@ -59,6 +59,9 @@ export type UrlTabItem<K extends string = string> = Omit<TabItem<K>, "href"> & {
   hidden?: boolean;
   // 패널 내용. 처음 열 때 한 번 호출합니다. 없으면 탭 줄만(패널은 바깥에서).
   render?: () => ReactNode;
+  // 서버 컴포넌트(page.tsx)에서 바로 쓸 때 — 함수는 서버→클라이언트로 못 넘기므로
+  //   미리 그린 내용을 줍니다. render 와 같이 처음 열 때 붙이고 그 뒤로 유지합니다.
+  content?: ReactNode;
 };
 
 type Options<K extends string> = {
@@ -227,7 +230,7 @@ export default function UrlTabs<K extends string>({
   if (!opened.has(value)) setOpened(new Set(opened).add(value));
 
   if (visible.length === 0) return null;
-  const hasPanels = visible.some((t) => t.render);
+  const hasPanels = visible.some((t) => t.render || t.content !== undefined);
   const tabItems: TabItem<K>[] = visible.map((t) => ({
     key: t.key,
     label: t.label,
@@ -257,7 +260,7 @@ export default function UrlTabs<K extends string>({
       {between}
       {hasPanels &&
         visible.map((t) => {
-          if (!t.render) return null;
+          if (!t.render && t.content === undefined) return null;
           const on = t.key === value;
           if (!on && (!keepMounted || !opened.has(t.key))) return null;
           return (
@@ -273,7 +276,7 @@ export default function UrlTabs<K extends string>({
               hidden={!on}
               className={panelClassName}
             >
-              {t.render()}
+              {t.render ? t.render() : t.content}
             </div>
           );
         })}

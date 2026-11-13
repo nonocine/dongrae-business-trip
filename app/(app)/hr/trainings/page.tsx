@@ -41,7 +41,7 @@ export default async function TrainingsPage() {
           </h2>
           <p className="mt-1 text-xs text-ink-muted">
             교육 목록을 등록하면 직원이 각자 마이페이지에서 수료증을 올려
-            이수합니다. 현황은 아래 현황판에 자동 집계됩니다.
+            이수합니다. 현황은 &lsquo;이수 현황판&rsquo; 탭에 자동 집계됩니다.
           </p>
         </div>
         <Link href="/" className="text-sm text-ink-muted hover:underline">

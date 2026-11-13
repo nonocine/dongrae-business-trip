@@ -17,7 +17,8 @@ const CLUB = process.env.E2E_CLUB || "";
 const MARK = "e2e-계획서-검증";
 
 async function openClub(page: Page, club: string) {
-  await page.goto("/hr/clubs", { waitUntil: "domcontentloaded" });
+  // 동아리 카드는 '동아리' 탭(?tab=clubs)에 있습니다(화면 탭 정리 2단계).
+  await page.goto("/hr/clubs?tab=clubs", { waitUntil: "domcontentloaded" });
   await page.waitForTimeout(2000);
   // 동아리 카드 펼치기 (이름이 들어간 토글 버튼).
   const card = page.getByRole("button", { name: new RegExp(club) }).first();

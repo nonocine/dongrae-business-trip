@@ -13,12 +13,14 @@ import {
 import { loadAdminDashboardData } from "@/app/(app)/admin/dashboardData";
 import { getMyPendingTasks } from "@/app/(app)/shellData";
 import { enforcePasswordChange, isManagerAdmin, listDrivers } from "@/app/actions";
+import UrlTabs from "@/app/components/UrlTabs";
 
 export const dynamic = "force-dynamic";
 
 // =====================================================================
 // 관리자 대시보드 — 관장·master(isManagerAdmin)만.
 //   2026-11 재정리: ① 오늘 ② 기한 알림 ③ 인사·복무 ④ 시스템 상태 ⑤ 바로가기 (+ 직원 계정 관리).
+//   탭(?tab=): 오늘·알림(①②) / 인사·시스템(③④⑤) / 직원 계정.
 //   활동일지·차량 운행 관련 카드(활동 통계·비용·작성자 TOP5·최근 활동·활동 목록 탭)는
 //   대시보드에서만 뺐습니다 — 데이터·테이블·/activities 화면은 그대로입니다.
 // =====================================================================
@@ -48,24 +50,52 @@ export default async function AdminPage() {
         </Link>
       </div>
 
-      <TodaySection d={data} tasks={tasks} />
-
-      <Section title="기한 알림">
-        <div className="space-y-3">
-          <PromotionAlerts />
-          <DeadlineCards d={data} tasks={tasks} />
-        </div>
-      </Section>
-
-      <HrSection d={data} />
-
-      <SystemSection d={data} now={now} />
-
-      <ShortcutSection />
-
-      <Section title="직원 계정 관리">
-        <AdminDashboard employees={employees} />
-      </Section>
+      {/* 화면 탭(주소 ?tab=) — 다섯 구역 + 직원 계정이 한 화면에 쌓여 길었습니다
+          (화면 탭 정리 2단계). 처음 열면 '오늘·알림'. */}
+      <UrlTabs
+        ariaLabel="관리자 대시보드"
+        idPrefix="admin"
+        defaultKey="today"
+        panelClassName="mt-4 space-y-6"
+        items={[
+          {
+            key: "today",
+            label: "오늘·알림",
+            content: (
+              <>
+                <TodaySection d={data} tasks={tasks} />
+                <Section title="기한 알림">
+                  <div className="space-y-3">
+                    <PromotionAlerts />
+                    <DeadlineCards d={data} tasks={tasks} />
+                  </div>
+                </Section>
+              </>
+            ),
+          },
+          {
+            key: "hr",
+            label: "인사·시스템",
+            content: (
+              <>
+                <HrSection d={data} />
+                <SystemSection d={data} now={now} />
+                <ShortcutSection />
+              </>
+            ),
+          },
+          {
+            key: "accounts",
+            label: "직원 계정",
+            count: employees.filter((e) => e.is_active !== false).length,
+            content: (
+              <Section title="직원 계정 관리">
+                <AdminDashboard employees={employees} />
+              </Section>
+            ),
+          },
+        ]}
+      />
     </div>
   );
 }

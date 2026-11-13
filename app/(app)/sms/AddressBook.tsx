@@ -18,7 +18,7 @@ import {
   noticeError,
   noticeWarning,
 } from "@/lib/ui";
-import { modalBackdrop, modalPanel } from "./ui";
+import { modalBackdrop, modalPanel, stepBox } from "./ui";
 
 export type BusinessProgramOption = { id: string; name: string };
 
@@ -178,14 +178,17 @@ async function fetchGroups(): Promise<GroupsResponse> {
 }
 
 // 주소록 관리 — 내 것·공유 목록, 고치기·지우기(만든 사람과 관장·부장).
+//   inline: '주소록·서식' 탭(?tab=library)에 창 없이 바로 펼칩니다(화면 탭 정리 2단계).
 export function GroupManager({
   programs,
   onClose,
   onChanged,
+  inline = false,
 }: {
   programs: BusinessProgramOption[];
-  onClose: () => void;
+  onClose?: () => void;
   onChanged: (message: string) => void;
+  inline?: boolean;
 }) {
   const [groups, setGroups] = useState<SmsGroup[] | null>(null);
   const [missing, setMissing] = useState(false);
@@ -220,16 +223,18 @@ export function GroupManager({
   }
 
   return (
-    <div className={modalBackdrop} role="dialog" aria-modal="true">
-      <div className={`${modalPanel} max-w-2xl`}>
+    <div className={inline ? "" : modalBackdrop} role={inline ? undefined : "dialog"} aria-modal={inline ? undefined : true}>
+      <div className={inline ? stepBox : `${modalPanel} max-w-2xl`}>
         <div className="flex items-center gap-2">
-          <h3 className="text-lg font-bold text-ink">주소록 관리</h3>
+          <h3 className="text-lg font-bold text-ink">{inline ? "주소록" : "주소록 관리"}</h3>
           <button type="button" className={`${btnPrimary} ml-auto`} disabled={missing} onClick={() => setCreating(true)}>
             새 주소록
           </button>
-          <button type="button" className={btnSecondary} onClick={onClose}>
-            닫기
-          </button>
+          {onClose && (
+            <button type="button" className={btnSecondary} onClick={onClose}>
+              닫기
+            </button>
+          )}
         </div>
         {missing && <p className={`${noticeWarning} mt-3`}>주소록 DB 표가 아직 없습니다. 마이그레이션 적용 후 쓸 수 있습니다.</p>}
         {error && <p className={`${noticeError} mt-3`}>{error}</p>}

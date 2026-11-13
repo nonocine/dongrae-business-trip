@@ -41,6 +41,7 @@ import {
   badgeNavy,
   linkCls,
 } from "@/lib/ui";
+import { useUrlTab } from "@/app/components/UrlTabs";
 import Tabs from "@/app/components/Tabs";
 
 // 명함첩 — 촬영/업로드 → AI 판독 → 확인·수정 → 저장, 그리고 목록·상세·수정·삭제.
@@ -57,6 +58,9 @@ import Tabs from "@/app/components/Tabs";
 const inCls =
   "block w-full rounded-md border border-line bg-card px-2.5 py-1.5 text-sm text-ink-body shadow-sm placeholder:text-ink-hint focus:border-navy focus:outline-none focus:ring-1 focus:ring-navy";
 const lblCls = "block text-xs font-medium text-ink-muted";
+
+type CardTab = "list" | "register";
+const CARD_TAB_KEYS: readonly CardTab[] = ["list", "register"];
 
 export default function CardsManager({
   initialCards,
@@ -77,7 +81,15 @@ export default function CardsManager({
   const [scanning, startScan] = useTransition();
 
   // 등록·수정 폼 상태.
-  const [formOpen, setFormOpen] = useState(false);
+  // 화면 탭(주소 ?tab=) — 목록 / 명함 등록(화면 탭 정리 2단계). 예전에는 [+ 명함 등록]을
+  //   누르면 목록 위에 폼이 끼어들었습니다. 이제 등록·수정 폼은 '명함 등록' 탭에 있고,
+  //   목록의 [수정]·위 버튼이 그 탭으로 옮겨 줍니다. 저장·취소하면 목록으로 돌아옵니다.
+  const { value: tab, select: selectTab } = useUrlTab<CardTab>({
+    keys: CARD_TAB_KEYS,
+    defaultKey: "list",
+  });
+  const formOpen = tab === "register";
+  const setFormOpen = (open: boolean) => selectTab(open ? "register" : "list");
   const [editingId, setEditingId] = useState<string | null>(null);
   const [fields, setFields] = useState<CardFields>({ ...EMPTY_FIELDS });
   const [memo, setMemo] = useState("");
@@ -375,25 +387,20 @@ export default function CardsManager({
 
   return (
     <div className="space-y-4">
-      {/* 검색 + 등록 */}
-      <section className={cardCls}>
-        <div className="flex flex-wrap items-center gap-2">
-          <input
-            className={`${inCls} max-w-xs flex-1`}
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-            placeholder="업체·이름·연락처 검색"
-          />
-          <span className="text-xs text-ink-muted">
-            {filtered.length} / {cards.length}건
-          </span>
-          <div className="ml-auto">
-            <button type="button" className={btnPrimary} onClick={openNew}>
-              + 명함 등록
-            </button>
-          </div>
-        </div>
-      </section>
+      <Tabs
+        items={[
+          { key: "list", label: "목록", count: cards.length },
+          { key: "register", label: editingId ? "명함 수정" : "명함 등록" },
+        ]}
+        value={tab}
+        onChange={(k) => {
+          // 탭 줄에서 '명함 등록'을 직접 누르면 빈 폼(수정 중이던 것은 닫힘).
+          if (k === "register") openNew();
+          else selectTab(k);
+        }}
+        ariaLabel="명함첩"
+        idPrefix="cards"
+      />
 
       {msg && (
         <p className={msg.kind === "ok" ? noticeSuccess : noticeError}>
@@ -401,620 +408,645 @@ export default function CardsManager({
         </p>
       )}
 
-      {/* 등록 · 수정 폼 */}
-      {formOpen && (
-        <section className={cardCls}>
-          <div className="flex items-center justify-between gap-2">
-            <h3 className="text-sm font-bold tracking-wide text-navy">
-              {editingId ? "명함 수정" : "명함 등록"}
-            </h3>
-            <button
-              type="button"
-              className="text-xs text-ink-hint hover:underline"
-              onClick={() => {
-                resetForm();
-                setFormOpen(false);
-              }}
-            >
-              닫기 ✕
-            </button>
-          </div>
 
-          {/* 1) 사진 */}
-          <div className="mt-3 rounded-lg border border-dashed border-line bg-surface p-3">
-            <div className="flex flex-wrap items-center gap-2">
+      <div role="tabpanel" id="cards-panel-register" aria-labelledby="cards-tab-register" hidden={tab !== "register"} className="space-y-4">
+        {/* 등록 · 수정 폼 */}
+        {formOpen && (
+          <section className={cardCls}>
+            <div className="flex items-center justify-between gap-2">
+              <h3 className="text-sm font-bold tracking-wide text-navy">
+                {editingId ? "명함 수정" : "명함 등록"}
+              </h3>
               <button
                 type="button"
-                className={btnSecondary}
-                onClick={() => cameraRef.current?.click()}
+                className="text-xs text-ink-hint hover:underline"
+                onClick={() => {
+                  resetForm();
+                  setFormOpen(false);
+                }}
               >
-                📷 사진 촬영
+                닫기 ✕
               </button>
-              <button
-                type="button"
-                className={btnSecondary}
-                onClick={() => fileRef.current?.click()}
-              >
-                🖼️ 파일 선택
-              </button>
+            </div>
+
+            {/* 1) 사진 */}
+            <div className="mt-3 rounded-lg border border-dashed border-line bg-surface p-3">
+              <div className="flex flex-wrap items-center gap-2">
+                <button
+                  type="button"
+                  className={btnSecondary}
+                  onClick={() => cameraRef.current?.click()}
+                >
+                  📷 사진 촬영
+                </button>
+                <button
+                  type="button"
+                  className={btnSecondary}
+                  onClick={() => fileRef.current?.click()}
+                >
+                  🖼️ 파일 선택
+                </button>
+                <button
+                  type="button"
+                  className={btnPrimary}
+                  disabled={!preview || scanning || !scanAvailable}
+                  onClick={runScan}
+                  title={
+                    scanAvailable
+                      ? "명함 사진을 AI 로 읽어 아래 칸을 채웁니다"
+                      : "AI 판독이 설정되지 않았습니다(수기 입력은 가능)"
+                  }
+                >
+                  {scanning ? "읽는 중…" : "🤖 AI로 읽기"}
+                </button>
+                {previewNote && (
+                  <span className="text-[11px] text-ink-hint">{previewNote}</span>
+                )}
+              </div>
+              <input
+                ref={cameraRef}
+                type="file"
+                accept={CARD_ACCEPT}
+                capture="environment"
+                className="hidden"
+                onChange={(e) => {
+                  const f = e.target.files?.[0];
+                  e.target.value = "";
+                  void pickImage(f);
+                }}
+              />
+              <input
+                ref={fileRef}
+                type="file"
+                accept={CARD_ACCEPT}
+                className="hidden"
+                onChange={(e) => {
+                  const f = e.target.files?.[0];
+                  e.target.value = "";
+                  void pickImage(f);
+                }}
+              />
+              {preview && (
+                // 미리보기는 dataURL 이라 next/image 최적화 대상이 아닙니다.
+                // eslint-disable-next-line @next/next/no-img-element
+                <img
+                  src={preview}
+                  alt="명함 미리보기"
+                  className="mt-3 max-h-56 rounded-lg border border-line object-contain"
+                />
+              )}
+              {!preview && hasStoredImage && (
+                <p className="mt-2 text-[11px] text-ink-hint">
+                  기존에 저장된 원본 이미지가 있습니다. 새로 촬영·선택하면 교체됩니다.
+                </p>
+              )}
+              {!scanAvailable && (
+                <p className="mt-2 text-[11px] text-warning">
+                  AI 판독 키(ANTHROPIC_API_KEY)가 설정되지 않아 자동 읽기는 쓸 수
+                  없습니다. 아래 칸에 직접 입력해 저장하세요.
+                </p>
+              )}
+            </div>
+
+            {/* 2) 항목 */}
+            <div className="mt-3 grid grid-cols-1 gap-2 sm:grid-cols-2">
+              {CARD_FIELD_LABELS.map(({ key, label }) => (
+                <div key={key} className={key === "address" ? "sm:col-span-2" : ""}>
+                  <label className={lblCls} htmlFor={`card-${key}`}>
+                    {label}
+                  </label>
+                  <input
+                    id={`card-${key}`}
+                    className={`${inCls} mt-1`}
+                    value={fields[key]}
+                    onChange={(e) =>
+                      setFields({ ...fields, [key]: e.target.value })
+                    }
+                  />
+                </div>
+              ))}
+              <div className="sm:col-span-2">
+                <label className={lblCls} htmlFor="card-memo">
+                  메모
+                </label>
+                <textarea
+                  id="card-memo"
+                  className={`${inCls} mt-1`}
+                  rows={2}
+                  value={memo}
+                  onChange={(e) => setMemo(e.target.value)}
+                  placeholder="만난 자리·용건 등"
+                />
+              </div>
+              {/* 비공개 지정은 관리자만 — 일반 직원 화면엔 이 줄 자체가 없습니다. */}
+              {isManager && (
+                <label className="flex items-center gap-1.5 text-xs text-ink-muted sm:col-span-2">
+                  <input
+                    type="checkbox"
+                    checked={isPrivate}
+                    onChange={(e) => setIsPrivate(e.target.checked)}
+                  />
+                  🔒 비공개 (관장·부장·인사 담당자에게만 보임 — 원본 이미지도 가려짐)
+                </label>
+              )}
+            </div>
+
+            <div className="mt-3 flex flex-wrap gap-2">
               <button
                 type="button"
                 className={btnPrimary}
-                disabled={!preview || scanning || !scanAvailable}
-                onClick={runScan}
-                title={
-                  scanAvailable
-                    ? "명함 사진을 AI 로 읽어 아래 칸을 채웁니다"
-                    : "AI 판독이 설정되지 않았습니다(수기 입력은 가능)"
-                }
+                disabled={busy}
+                onClick={save}
               >
-                {scanning ? "읽는 중…" : "🤖 AI로 읽기"}
+                {editingId ? "수정 저장" : "저장"}
               </button>
-              {previewNote && (
-                <span className="text-[11px] text-ink-hint">{previewNote}</span>
-              )}
+              <button
+                type="button"
+                className={btnSecondary}
+                onClick={() => {
+                  resetForm();
+                  setFormOpen(false);
+                }}
+              >
+                취소
+              </button>
             </div>
-            <input
-              ref={cameraRef}
-              type="file"
-              accept={CARD_ACCEPT}
-              capture="environment"
-              className="hidden"
-              onChange={(e) => {
-                const f = e.target.files?.[0];
-                e.target.value = "";
-                void pickImage(f);
-              }}
-            />
-            <input
-              ref={fileRef}
-              type="file"
-              accept={CARD_ACCEPT}
-              className="hidden"
-              onChange={(e) => {
-                const f = e.target.files?.[0];
-                e.target.value = "";
-                void pickImage(f);
-              }}
-            />
-            {preview && (
-              // 미리보기는 dataURL 이라 next/image 최적화 대상이 아닙니다.
-              // eslint-disable-next-line @next/next/no-img-element
-              <img
-                src={preview}
-                alt="명함 미리보기"
-                className="mt-3 max-h-56 rounded-lg border border-line object-contain"
-              />
-            )}
-            {!preview && hasStoredImage && (
-              <p className="mt-2 text-[11px] text-ink-hint">
-                기존에 저장된 원본 이미지가 있습니다. 새로 촬영·선택하면 교체됩니다.
-              </p>
-            )}
-            {!scanAvailable && (
-              <p className="mt-2 text-[11px] text-warning">
-                AI 판독 키(ANTHROPIC_API_KEY)가 설정되지 않아 자동 읽기는 쓸 수
-                없습니다. 아래 칸에 직접 입력해 저장하세요.
-              </p>
-            )}
-          </div>
+          </section>
+        )}
+      </div>
 
-          {/* 2) 항목 */}
-          <div className="mt-3 grid grid-cols-1 gap-2 sm:grid-cols-2">
-            {CARD_FIELD_LABELS.map(({ key, label }) => (
-              <div key={key} className={key === "address" ? "sm:col-span-2" : ""}>
-                <label className={lblCls} htmlFor={`card-${key}`}>
-                  {label}
-                </label>
-                <input
-                  id={`card-${key}`}
-                  className={`${inCls} mt-1`}
-                  value={fields[key]}
-                  onChange={(e) =>
-                    setFields({ ...fields, [key]: e.target.value })
-                  }
-                />
-              </div>
-            ))}
-            <div className="sm:col-span-2">
-              <label className={lblCls} htmlFor="card-memo">
-                메모
-              </label>
-              <textarea
-                id="card-memo"
-                className={`${inCls} mt-1`}
-                rows={2}
-                value={memo}
-                onChange={(e) => setMemo(e.target.value)}
-                placeholder="만난 자리·용건 등"
-              />
+      <div role="tabpanel" id="cards-panel-list" aria-labelledby="cards-tab-list" hidden={tab !== "list"} className="space-y-4">
+        {/* 검색 + 등록 */}
+        <section className={cardCls}>
+          <div className="flex flex-wrap items-center gap-2">
+            <input
+              className={`${inCls} max-w-xs flex-1`}
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              placeholder="업체·이름·연락처 검색"
+            />
+            <span className="text-xs text-ink-muted">
+              {filtered.length} / {cards.length}건
+            </span>
+            <div className="ml-auto">
+              <button type="button" className={btnPrimary} onClick={openNew}>
+                + 명함 등록
+              </button>
             </div>
-            {/* 비공개 지정은 관리자만 — 일반 직원 화면엔 이 줄 자체가 없습니다. */}
-            {isManager && (
-              <label className="flex items-center gap-1.5 text-xs text-ink-muted sm:col-span-2">
-                <input
-                  type="checkbox"
-                  checked={isPrivate}
-                  onChange={(e) => setIsPrivate(e.target.checked)}
-                />
-                🔒 비공개 (관장·부장·인사 담당자에게만 보임 — 원본 이미지도 가려짐)
-              </label>
-            )}
-          </div>
-
-          <div className="mt-3 flex flex-wrap gap-2">
-            <button
-              type="button"
-              className={btnPrimary}
-              disabled={busy}
-              onClick={save}
-            >
-              {editingId ? "수정 저장" : "저장"}
-            </button>
-            <button
-              type="button"
-              className={btnSecondary}
-              onClick={() => {
-                resetForm();
-                setFormOpen(false);
-              }}
-            >
-              취소
-            </button>
           </div>
         </section>
-      )}
 
-      {/* 거래처 편입 — A) 새 거래처 / B) 기존 거래처에 담당자 추가 */}
-      {linkFor && (
-        <section className={cardCls}>
-          <div className="flex items-center justify-between gap-2">
-            <h3 className="text-sm font-bold tracking-wide text-navy">
-              거래처로 연결 —{" "}
-              {[linkFor.company, linkFor.person_name]
-                .filter(Boolean)
-                .join(" · ") || "명함"}
-            </h3>
-            <button
-              type="button"
-              className="text-xs text-ink-hint hover:underline"
-              onClick={closeLink}
-            >
-              닫기 ✕
-            </button>
-          </div>
+        {/* 거래처 편입 — A) 새 거래처 / B) 기존 거래처에 담당자 추가 */}
+        {linkFor && (
+          <section className={cardCls}>
+            <div className="flex items-center justify-between gap-2">
+              <h3 className="text-sm font-bold tracking-wide text-navy">
+                거래처로 연결 —{" "}
+                {[linkFor.company, linkFor.person_name]
+                  .filter(Boolean)
+                  .join(" · ") || "명함"}
+              </h3>
+              <button
+                type="button"
+                className="text-xs text-ink-hint hover:underline"
+                onClick={closeLink}
+              >
+                닫기 ✕
+              </button>
+            </div>
 
-          <p className="mt-1 text-[11px] text-ink-hint">
-            명함 정보를 거래처로 복사합니다. 명함은 명함첩에 원본 그대로 남고,
-            이후 양쪽은 각자 수정됩니다(자동 동기화 없음).
-          </p>
+            <p className="mt-1 text-[11px] text-ink-hint">
+              명함 정보를 거래처로 복사합니다. 명함은 명함첩에 원본 그대로 남고,
+              이후 양쪽은 각자 수정됩니다(자동 동기화 없음).
+            </p>
 
-          <Tabs
-            variant="segment"
-            stretch
-            ariaLabel="거래처 연결 방식"
-            className="mt-3"
-            value={linkMode}
-            onChange={setLinkMode}
-            items={[
-              { key: "new", label: "새 거래처로 등록" },
-              { key: "existing", label: "기존 거래처에 담당자 추가" },
-            ]}
-          />
+            <Tabs
+              variant="segment"
+              stretch
+              ariaLabel="거래처 연결 방식"
+              className="mt-3"
+              value={linkMode}
+              onChange={setLinkMode}
+              items={[
+                { key: "new", label: "새 거래처로 등록" },
+                { key: "existing", label: "기존 거래처에 담당자 추가" },
+              ]}
+            />
 
-          {linkMode === "new" ? (
-            <>
-              <div className="mt-3 grid grid-cols-1 gap-2 sm:grid-cols-2">
-                <div>
-                  <label className={lblCls} htmlFor="link-name">
-                    거래처명 <span className="text-stamp">*</span>
-                  </label>
-                  <input
-                    id="link-name"
-                    className={`${inCls} mt-1`}
-                    value={linkForm.name}
-                    onChange={(e) =>
-                      setLinkForm({ ...linkForm, name: e.target.value })
-                    }
-                    placeholder="명함의 업체명이 채워집니다"
-                  />
-                </div>
-                <div>
-                  <label className={lblCls} htmlFor="link-category">
-                    분야
-                  </label>
-                  <select
-                    id="link-category"
-                    className={`${inCls} mt-1`}
-                    value={linkForm.category}
-                    onChange={(e) =>
-                      setLinkForm({
-                        ...linkForm,
-                        category: e.target.value as PartnerCategory,
-                      })
-                    }
-                  >
-                    {PARTNER_CATEGORIES.map((c) => (
-                      <option key={c} value={c}>
-                        {c}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-                {(
-                  [
-                    { key: "phone", label: "대표전화" },
-                    { key: "fax", label: "팩스" },
-                    { key: "website", label: "웹사이트" },
-                    { key: "address", label: "주소" },
-                  ] as const
-                ).map(({ key, label }) => (
-                  <div
-                    key={key}
-                    className={key === "address" ? "sm:col-span-2" : ""}
-                  >
-                    <label className={lblCls} htmlFor={`link-${key}`}>
-                      {label}
+            {linkMode === "new" ? (
+              <>
+                <div className="mt-3 grid grid-cols-1 gap-2 sm:grid-cols-2">
+                  <div>
+                    <label className={lblCls} htmlFor="link-name">
+                      거래처명 <span className="text-stamp">*</span>
                     </label>
                     <input
-                      id={`link-${key}`}
+                      id="link-name"
                       className={`${inCls} mt-1`}
-                      value={linkForm[key]}
+                      value={linkForm.name}
                       onChange={(e) =>
-                        setLinkForm({ ...linkForm, [key]: e.target.value })
+                        setLinkForm({ ...linkForm, name: e.target.value })
+                      }
+                      placeholder="명함의 업체명이 채워집니다"
+                    />
+                  </div>
+                  <div>
+                    <label className={lblCls} htmlFor="link-category">
+                      분야
+                    </label>
+                    <select
+                      id="link-category"
+                      className={`${inCls} mt-1`}
+                      value={linkForm.category}
+                      onChange={(e) =>
+                        setLinkForm({
+                          ...linkForm,
+                          category: e.target.value as PartnerCategory,
+                        })
+                      }
+                    >
+                      {PARTNER_CATEGORIES.map((c) => (
+                        <option key={c} value={c}>
+                          {c}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                  {(
+                    [
+                      { key: "phone", label: "대표전화" },
+                      { key: "fax", label: "팩스" },
+                      { key: "website", label: "웹사이트" },
+                      { key: "address", label: "주소" },
+                    ] as const
+                  ).map(({ key, label }) => (
+                    <div
+                      key={key}
+                      className={key === "address" ? "sm:col-span-2" : ""}
+                    >
+                      <label className={lblCls} htmlFor={`link-${key}`}>
+                        {label}
+                      </label>
+                      <input
+                        id={`link-${key}`}
+                        className={`${inCls} mt-1`}
+                        value={linkForm[key]}
+                        onChange={(e) =>
+                          setLinkForm({ ...linkForm, [key]: e.target.value })
+                        }
+                      />
+                    </div>
+                  ))}
+                  <div className="sm:col-span-2">
+                    <label className={lblCls} htmlFor="link-memo">
+                      메모 (인수인계용)
+                    </label>
+                    <textarea
+                      id="link-memo"
+                      className={`${inCls} mt-1`}
+                      rows={2}
+                      value={linkForm.memo}
+                      onChange={(e) =>
+                        setLinkForm({ ...linkForm, memo: e.target.value })
                       }
                     />
                   </div>
-                ))}
-                <div className="sm:col-span-2">
-                  <label className={lblCls} htmlFor="link-memo">
-                    메모 (인수인계용)
-                  </label>
-                  <textarea
-                    id="link-memo"
-                    className={`${inCls} mt-1`}
-                    rows={2}
-                    value={linkForm.memo}
-                    onChange={(e) =>
-                      setLinkForm({ ...linkForm, memo: e.target.value })
-                    }
-                  />
                 </div>
-              </div>
 
-              <div className="mt-3 rounded-lg border border-line bg-surface p-3 text-xs">
-                <p className="font-semibold text-ink-body">
-                  첫 담당자로 등록될 정보 (명함에서 그대로)
-                </p>
-                <p className="mt-1 text-ink-muted">
-                  {[
-                    linkFor.person_name || "(이름 없음)",
-                    linkFor.title,
-                    linkFor.department,
-                  ]
-                    .filter(Boolean)
-                    .join(" · ")}
-                  {linkFor.mobile ? ` · 휴대 ${linkFor.mobile}` : ""}
-                  {linkFor.phone ? ` · 직통 ${linkFor.phone}` : ""}
-                  {linkFor.email ? ` · ${linkFor.email}` : ""}
-                </p>
-              </div>
-
-              <div className="mt-3 flex flex-wrap gap-2">
-                <button
-                  type="button"
-                  className={btnPrimary}
-                  disabled={busy || !linkForm.name.trim()}
-                  onClick={submitLinkNew}
-                >
-                  거래처 만들고 연결
-                </button>
-                <button
-                  type="button"
-                  className={btnSecondary}
-                  onClick={closeLink}
-                >
-                  취소
-                </button>
-              </div>
-            </>
-          ) : (
-            <>
-              <p className="mt-3 text-xs text-ink-muted">
-                같은 거래처가 이미 있으면 새로 만들지 말고 여기서 고르세요.
-                담당자로 추가됩니다.
-              </p>
-              <input
-                className={`${inCls} mt-2 max-w-sm`}
-                value={optionQuery}
-                onChange={(e) => setOptionQuery(e.target.value)}
-                placeholder="거래처명 검색"
-              />
-
-              {visibleOptions.length === 0 ? (
-                <p className="py-6 text-center text-sm text-ink-hint">
-                  {options.length === 0
-                    ? "등록된 거래처가 없습니다. '새 거래처로 등록'을 쓰세요."
-                    : "검색 결과가 없습니다."}
-                </p>
-              ) : (
-                <ul className="mt-2 max-h-64 space-y-1 overflow-y-auto">
-                  {visibleOptions.map((o) => (
-                    <li key={o.id}>
-                      <label
-                        className={`flex cursor-pointer items-center gap-2 rounded-lg border p-2.5 text-sm ${
-                          pickedPartner === o.id
-                            ? "border-navy bg-navy-soft"
-                            : "border-line hover:bg-surface"
-                        }`}
-                      >
-                        <input
-                          type="radio"
-                          name="link-partner"
-                          value={o.id}
-                          checked={pickedPartner === o.id}
-                          onChange={() => setPickedPartner(o.id)}
-                        />
-                        <span className="min-w-0 flex-1">
-                          <strong className="text-ink">{o.name}</strong>
-                          <span className="ml-2 text-xs text-ink-muted">
-                            {o.category} · 담당자 {o.contact_count}명
-                          </span>
-                          {!o.is_active && (
-                            <span className={`${badgeNeutral} ml-2`}>
-                              거래종료
-                            </span>
-                          )}
-                          {isManager && o.is_private && (
-                            <span className={`${badgeWarning} ml-2`}>
-                              🔒 비공개
-                            </span>
-                          )}
-                        </span>
-                      </label>
-                    </li>
-                  ))}
-                </ul>
-              )}
-
-              <div className="mt-3 flex flex-wrap gap-2">
-                <button
-                  type="button"
-                  className={btnPrimary}
-                  disabled={busy || !pickedPartner}
-                  onClick={submitLinkExisting}
-                >
-                  이 거래처에 담당자로 추가
-                </button>
-                <button
-                  type="button"
-                  className={btnSecondary}
-                  onClick={closeLink}
-                >
-                  취소
-                </button>
-              </div>
-            </>
-          )}
-        </section>
-      )}
-
-      {/* 상세 */}
-      {detail && (
-        <section className={cardCls}>
-          <div className="flex items-start justify-between gap-2">
-            <div>
-              <h3 className="flex flex-wrap items-center gap-2 text-sm font-bold text-ink">
-                {detail.company || "(업체 없음)"}
-                {isManager && detail.is_private && (
-                  <span className={badgeWarning}>🔒 비공개</span>
-                )}
-              </h3>
-              <p className="mt-0.5 text-sm text-ink-body">
-                {[detail.person_name, detail.title, detail.department]
-                  .filter(Boolean)
-                  .join(" · ") || "-"}
-              </p>
-            </div>
-            <button
-              type="button"
-              className="text-xs text-ink-hint hover:underline"
-              onClick={() => setDetail(null)}
-            >
-              닫기 ✕
-            </button>
-          </div>
-
-          <dl className="mt-3 grid grid-cols-1 gap-x-4 gap-y-2 text-sm sm:grid-cols-2">
-            {CARD_FIELD_LABELS.map(({ key, label }) => (
-              <div key={key} className="flex gap-2">
-                <dt className="w-20 shrink-0 text-xs text-ink-muted">{label}</dt>
-                <dd className="text-ink-body">
-                  {detail[key] || <span className="text-ink-hint">-</span>}
-                </dd>
-              </div>
-            ))}
-            {detail.memo && (
-              <div className="flex gap-2 sm:col-span-2">
-                <dt className="w-20 shrink-0 text-xs text-ink-muted">메모</dt>
-                <dd className="whitespace-pre-wrap text-ink-body">
-                  {detail.memo}
-                </dd>
-              </div>
-            )}
-          </dl>
-
-          <p className="mt-3 text-[11px] text-ink-hint">
-            등록 {cardDate(detail.created_at)}
-            {detail.registered_by ? ` · ${detail.registered_by}` : ""}
-          </p>
-
-          {/* 거래처 편입 상태 — 연결됐으면 재연결 대신 어디로 갔는지만 알려줍니다. */}
-          {detail.partner_id ? (
-            <div className="mt-3 rounded-lg border border-line bg-surface p-3 text-xs">
-              <span className={badgeNavy}>🤝 거래처 등록됨</span>
-              {detail.partner_name ? (
-                <>
-                  <span className="ml-2 text-ink-body">
-                    <strong>{detail.partner_name}</strong> 거래처의 담당자로
-                    등록되어 있습니다.
-                  </span>
-                  <Link
-                    href={`/hr/partners?id=${detail.partner_id}`}
-                    className={`${linkCls} ml-2`}
-                  >
-                    거래처 보기 →
-                  </Link>
-                </>
-              ) : (
-                // 비공개 거래처에 편입된 경우 — 상호를 감춥니다.
-                <span className="ml-2 text-ink-muted">
-                  이미 거래처로 등록되어 있습니다.
-                </span>
-              )}
-              <p className="mt-1.5 text-[11px] text-ink-hint">
-                거래처로 옮겨간 정보는 연결 시점의 사본입니다. 거래처 쪽을 고쳐도
-                이 명함 원본은 그대로 남고, 그 반대도 마찬가지입니다.
-              </p>
-            </div>
-          ) : (
-            <div className="mt-3 rounded-lg border border-dashed border-line p-3 text-xs">
-              <span className="text-ink-muted">
-                아직 거래처로 등록되지 않은 명함입니다.
-              </span>
-              <button
-                type="button"
-                className={`${btnPrimary} ml-2 h-8 px-3 text-xs`}
-                disabled={busy}
-                onClick={() => openLink(detail)}
-              >
-                🤝 거래처로 연결
-              </button>
-            </div>
-          )}
-
-          <div className="mt-3 flex flex-wrap gap-2">
-            {detail.image_path && (
-              <button
-                type="button"
-                className={`${btnSecondary} h-8 px-3 text-xs`}
-                disabled={busy}
-                onClick={() => viewImage(detail)}
-              >
-                원본 이미지 보기
-              </button>
-            )}
-            <button
-              type="button"
-              className={`${btnSecondary} h-8 px-3 text-xs`}
-              onClick={() => openEdit(detail)}
-            >
-              수정
-            </button>
-            {/* 공개↔비공개 전환은 관리자에게만 보입니다. */}
-            {isManager && (
-              <button
-                type="button"
-                className={`${btnSecondary} h-8 px-3 text-xs`}
-                disabled={busy}
-                onClick={() => togglePrivate(detail)}
-                title={
-                  detail.is_private
-                    ? "전 직원이 볼 수 있게 바꿉니다"
-                    : "관장·부장·인사 담당자에게만 보이게 바꿉니다"
-                }
-              >
-                {detail.is_private ? "🔓 공개로 전환" : "🔒 비공개로 전환"}
-              </button>
-            )}
-            <button
-              type="button"
-              className={`${btnDanger} h-8 px-3 text-xs`}
-              disabled={busy}
-              onClick={() => remove(detail)}
-            >
-              삭제
-            </button>
-          </div>
-        </section>
-      )}
-
-      {/* 목록 */}
-      <section className={cardCls}>
-        <h3 className="mb-3 text-sm font-bold tracking-wide text-navy">
-          명함 목록
-        </h3>
-        {filtered.length === 0 ? (
-          <p className="py-8 text-center text-sm text-ink-hint">
-            {cards.length === 0
-              ? "등록된 명함이 없습니다. 위에서 명함을 등록하세요."
-              : "검색 결과가 없습니다."}
-          </p>
-        ) : (
-          <ul className="space-y-2">
-            {filtered.map((card) => (
-              <li
-                key={card.id}
-                className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-line p-3 text-sm"
-              >
-                <button
-                  type="button"
-                  className="min-w-0 flex-1 text-left"
-                  onClick={() => setDetail(card)}
-                >
-                  <strong className="text-ink">
-                    {card.company || "(업체 없음)"}
-                  </strong>
-                  {card.image_path && (
-                    <span className={`${badgeNeutral} ml-2`}>사진</span>
-                  )}
-                  {isManager && card.is_private && (
-                    <span className={`${badgeWarning} ml-2`}>🔒 비공개</span>
-                  )}
-                  {/* 거래처 편입 여부 — 미편입 명함과 눈으로 구분됩니다. */}
-                  {card.partner_id && (
-                    <span
-                      className={`${badgeNavy} ml-2`}
-                      title={
-                        card.partner_name
-                          ? `${card.partner_name} 거래처로 등록됨`
-                          : "거래처로 등록됨"
-                      }
-                    >
-                      🤝 거래처 등록됨
-                    </span>
-                  )}
-                  <p className="mt-0.5 truncate text-ink-muted">
-                    {[card.person_name, card.title].filter(Boolean).join(" ") ||
-                      "-"}
-                    {card.mobile || card.phone
-                      ? ` · ${card.mobile || card.phone}`
-                      : ""}
-                    {` · 등록 ${cardDate(card.created_at)}`}
+                <div className="mt-3 rounded-lg border border-line bg-surface p-3 text-xs">
+                  <p className="font-semibold text-ink-body">
+                    첫 담당자로 등록될 정보 (명함에서 그대로)
                   </p>
-                </button>
-                <div className="flex shrink-0 gap-1">
+                  <p className="mt-1 text-ink-muted">
+                    {[
+                      linkFor.person_name || "(이름 없음)",
+                      linkFor.title,
+                      linkFor.department,
+                    ]
+                      .filter(Boolean)
+                      .join(" · ")}
+                    {linkFor.mobile ? ` · 휴대 ${linkFor.mobile}` : ""}
+                    {linkFor.phone ? ` · 직통 ${linkFor.phone}` : ""}
+                    {linkFor.email ? ` · ${linkFor.email}` : ""}
+                  </p>
+                </div>
+
+                <div className="mt-3 flex flex-wrap gap-2">
                   <button
                     type="button"
-                    className={`${btnSecondary} h-8 px-3 text-xs`}
-                    onClick={() => openEdit(card)}
+                    className={btnPrimary}
+                    disabled={busy || !linkForm.name.trim()}
+                    onClick={submitLinkNew}
                   >
-                    수정
+                    거래처 만들고 연결
                   </button>
                   <button
                     type="button"
-                    className={`${btnDanger} h-8 px-3 text-xs`}
-                    disabled={busy}
-                    onClick={() => remove(card)}
+                    className={btnSecondary}
+                    onClick={closeLink}
                   >
-                    삭제
+                    취소
                   </button>
                 </div>
-              </li>
-            ))}
-          </ul>
+              </>
+            ) : (
+              <>
+                <p className="mt-3 text-xs text-ink-muted">
+                  같은 거래처가 이미 있으면 새로 만들지 말고 여기서 고르세요.
+                  담당자로 추가됩니다.
+                </p>
+                <input
+                  className={`${inCls} mt-2 max-w-sm`}
+                  value={optionQuery}
+                  onChange={(e) => setOptionQuery(e.target.value)}
+                  placeholder="거래처명 검색"
+                />
+
+                {visibleOptions.length === 0 ? (
+                  <p className="py-6 text-center text-sm text-ink-hint">
+                    {options.length === 0
+                      ? "등록된 거래처가 없습니다. '새 거래처로 등록'을 쓰세요."
+                      : "검색 결과가 없습니다."}
+                  </p>
+                ) : (
+                  <ul className="mt-2 max-h-64 space-y-1 overflow-y-auto">
+                    {visibleOptions.map((o) => (
+                      <li key={o.id}>
+                        <label
+                          className={`flex cursor-pointer items-center gap-2 rounded-lg border p-2.5 text-sm ${
+                            pickedPartner === o.id
+                              ? "border-navy bg-navy-soft"
+                              : "border-line hover:bg-surface"
+                          }`}
+                        >
+                          <input
+                            type="radio"
+                            name="link-partner"
+                            value={o.id}
+                            checked={pickedPartner === o.id}
+                            onChange={() => setPickedPartner(o.id)}
+                          />
+                          <span className="min-w-0 flex-1">
+                            <strong className="text-ink">{o.name}</strong>
+                            <span className="ml-2 text-xs text-ink-muted">
+                              {o.category} · 담당자 {o.contact_count}명
+                            </span>
+                            {!o.is_active && (
+                              <span className={`${badgeNeutral} ml-2`}>
+                                거래종료
+                              </span>
+                            )}
+                            {isManager && o.is_private && (
+                              <span className={`${badgeWarning} ml-2`}>
+                                🔒 비공개
+                              </span>
+                            )}
+                          </span>
+                        </label>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+
+                <div className="mt-3 flex flex-wrap gap-2">
+                  <button
+                    type="button"
+                    className={btnPrimary}
+                    disabled={busy || !pickedPartner}
+                    onClick={submitLinkExisting}
+                  >
+                    이 거래처에 담당자로 추가
+                  </button>
+                  <button
+                    type="button"
+                    className={btnSecondary}
+                    onClick={closeLink}
+                  >
+                    취소
+                  </button>
+                </div>
+              </>
+            )}
+          </section>
         )}
-      </section>
+
+        {/* 상세 */}
+        {detail && (
+          <section className={cardCls}>
+            <div className="flex items-start justify-between gap-2">
+              <div>
+                <h3 className="flex flex-wrap items-center gap-2 text-sm font-bold text-ink">
+                  {detail.company || "(업체 없음)"}
+                  {isManager && detail.is_private && (
+                    <span className={badgeWarning}>🔒 비공개</span>
+                  )}
+                </h3>
+                <p className="mt-0.5 text-sm text-ink-body">
+                  {[detail.person_name, detail.title, detail.department]
+                    .filter(Boolean)
+                    .join(" · ") || "-"}
+                </p>
+              </div>
+              <button
+                type="button"
+                className="text-xs text-ink-hint hover:underline"
+                onClick={() => setDetail(null)}
+              >
+                닫기 ✕
+              </button>
+            </div>
+
+            <dl className="mt-3 grid grid-cols-1 gap-x-4 gap-y-2 text-sm sm:grid-cols-2">
+              {CARD_FIELD_LABELS.map(({ key, label }) => (
+                <div key={key} className="flex gap-2">
+                  <dt className="w-20 shrink-0 text-xs text-ink-muted">{label}</dt>
+                  <dd className="text-ink-body">
+                    {detail[key] || <span className="text-ink-hint">-</span>}
+                  </dd>
+                </div>
+              ))}
+              {detail.memo && (
+                <div className="flex gap-2 sm:col-span-2">
+                  <dt className="w-20 shrink-0 text-xs text-ink-muted">메모</dt>
+                  <dd className="whitespace-pre-wrap text-ink-body">
+                    {detail.memo}
+                  </dd>
+                </div>
+              )}
+            </dl>
+
+            <p className="mt-3 text-[11px] text-ink-hint">
+              등록 {cardDate(detail.created_at)}
+              {detail.registered_by ? ` · ${detail.registered_by}` : ""}
+            </p>
+
+            {/* 거래처 편입 상태 — 연결됐으면 재연결 대신 어디로 갔는지만 알려줍니다. */}
+            {detail.partner_id ? (
+              <div className="mt-3 rounded-lg border border-line bg-surface p-3 text-xs">
+                <span className={badgeNavy}>🤝 거래처 등록됨</span>
+                {detail.partner_name ? (
+                  <>
+                    <span className="ml-2 text-ink-body">
+                      <strong>{detail.partner_name}</strong> 거래처의 담당자로
+                      등록되어 있습니다.
+                    </span>
+                    <Link
+                      href={`/hr/partners?id=${detail.partner_id}`}
+                      className={`${linkCls} ml-2`}
+                    >
+                      거래처 보기 →
+                    </Link>
+                  </>
+                ) : (
+                  // 비공개 거래처에 편입된 경우 — 상호를 감춥니다.
+                  <span className="ml-2 text-ink-muted">
+                    이미 거래처로 등록되어 있습니다.
+                  </span>
+                )}
+                <p className="mt-1.5 text-[11px] text-ink-hint">
+                  거래처로 옮겨간 정보는 연결 시점의 사본입니다. 거래처 쪽을 고쳐도
+                  이 명함 원본은 그대로 남고, 그 반대도 마찬가지입니다.
+                </p>
+              </div>
+            ) : (
+              <div className="mt-3 rounded-lg border border-dashed border-line p-3 text-xs">
+                <span className="text-ink-muted">
+                  아직 거래처로 등록되지 않은 명함입니다.
+                </span>
+                <button
+                  type="button"
+                  className={`${btnPrimary} ml-2 h-8 px-3 text-xs`}
+                  disabled={busy}
+                  onClick={() => openLink(detail)}
+                >
+                  🤝 거래처로 연결
+                </button>
+              </div>
+            )}
+
+            <div className="mt-3 flex flex-wrap gap-2">
+              {detail.image_path && (
+                <button
+                  type="button"
+                  className={`${btnSecondary} h-8 px-3 text-xs`}
+                  disabled={busy}
+                  onClick={() => viewImage(detail)}
+                >
+                  원본 이미지 보기
+                </button>
+              )}
+              <button
+                type="button"
+                className={`${btnSecondary} h-8 px-3 text-xs`}
+                onClick={() => openEdit(detail)}
+              >
+                수정
+              </button>
+              {/* 공개↔비공개 전환은 관리자에게만 보입니다. */}
+              {isManager && (
+                <button
+                  type="button"
+                  className={`${btnSecondary} h-8 px-3 text-xs`}
+                  disabled={busy}
+                  onClick={() => togglePrivate(detail)}
+                  title={
+                    detail.is_private
+                      ? "전 직원이 볼 수 있게 바꿉니다"
+                      : "관장·부장·인사 담당자에게만 보이게 바꿉니다"
+                  }
+                >
+                  {detail.is_private ? "🔓 공개로 전환" : "🔒 비공개로 전환"}
+                </button>
+              )}
+              <button
+                type="button"
+                className={`${btnDanger} h-8 px-3 text-xs`}
+                disabled={busy}
+                onClick={() => remove(detail)}
+              >
+                삭제
+              </button>
+            </div>
+          </section>
+        )}
+
+        {/* 목록 */}
+        <section className={cardCls}>
+          <h3 className="mb-3 text-sm font-bold tracking-wide text-navy">
+            명함 목록
+          </h3>
+          {filtered.length === 0 ? (
+            <p className="py-8 text-center text-sm text-ink-hint">
+              {cards.length === 0
+                ? "등록된 명함이 없습니다. 위에서 명함을 등록하세요."
+                : "검색 결과가 없습니다."}
+            </p>
+          ) : (
+            <ul className="space-y-2">
+              {filtered.map((card) => (
+                <li
+                  key={card.id}
+                  className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-line p-3 text-sm"
+                >
+                  <button
+                    type="button"
+                    className="min-w-0 flex-1 text-left"
+                    onClick={() => setDetail(card)}
+                  >
+                    <strong className="text-ink">
+                      {card.company || "(업체 없음)"}
+                    </strong>
+                    {card.image_path && (
+                      <span className={`${badgeNeutral} ml-2`}>사진</span>
+                    )}
+                    {isManager && card.is_private && (
+                      <span className={`${badgeWarning} ml-2`}>🔒 비공개</span>
+                    )}
+                    {/* 거래처 편입 여부 — 미편입 명함과 눈으로 구분됩니다. */}
+                    {card.partner_id && (
+                      <span
+                        className={`${badgeNavy} ml-2`}
+                        title={
+                          card.partner_name
+                            ? `${card.partner_name} 거래처로 등록됨`
+                            : "거래처로 등록됨"
+                        }
+                      >
+                        🤝 거래처 등록됨
+                      </span>
+                    )}
+                    <p className="mt-0.5 truncate text-ink-muted">
+                      {[card.person_name, card.title].filter(Boolean).join(" ") ||
+                        "-"}
+                      {card.mobile || card.phone
+                        ? ` · ${card.mobile || card.phone}`
+                        : ""}
+                      {` · 등록 ${cardDate(card.created_at)}`}
+                    </p>
+                  </button>
+                  <div className="flex shrink-0 gap-1">
+                    <button
+                      type="button"
+                      className={`${btnSecondary} h-8 px-3 text-xs`}
+                      onClick={() => openEdit(card)}
+                    >
+                      수정
+                    </button>
+                    <button
+                      type="button"
+                      className={`${btnDanger} h-8 px-3 text-xs`}
+                      disabled={busy}
+                      onClick={() => remove(card)}
+                    >
+                      삭제
+                    </button>
+                  </div>
+                </li>
+              ))}
+            </ul>
+          )}
+        </section>
+      </div>
     </div>
   );
 }

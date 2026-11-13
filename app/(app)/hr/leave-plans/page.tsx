@@ -7,6 +7,7 @@ import LeavePromotionBoard from "@/app/(app)/hr/leave-plans/LeavePromotionBoard"
 import LeavePolicySettings from "@/app/(app)/hr/leave-plans/LeavePolicySettings";
 import { loadPromotionBoard, resolveLeavePromotionAccess } from "@/lib/leavePromotionServer";
 import { kstTodayYmd } from "@/lib/erp/duty";
+import UrlTabs from "@/app/components/UrlTabs";
 
 export const dynamic = "force-dynamic";
 
@@ -45,18 +46,40 @@ export default async function LeavePlansPage({
           ← 목록
         </Link>
       </div>
-      <div className="space-y-4">
-        <LeavePolicySettings policy={board.firstYearPolicy} canEdit={access.isM0} />
-        <LeavePromotionBoard board={board} />
-        {overview ? (
-          <div>
-            <h3 className="mb-2 text-base font-bold text-ink">사용계획서 발부·수합</h3>
-            <LeavePlansManager initial={overview} />
-          </div>
-        ) : (
-          <p className="text-xs text-ink-hint">사용계획서 발부·수합은 인사 파일 열람 권한자에게만 보입니다.</p>
-        )}
-      </div>
+      {/* 화면 탭(주소 ?tab=) — 설정·현황판·사용계획서가 한 화면에 쌓여 길었습니다
+          (화면 탭 정리 2단계). 현황판이 기본, 설정은 관장(M0)만. */}
+      <UrlTabs
+        ariaLabel="연차 사용촉진"
+        idPrefix="leave"
+        defaultKey="board"
+        panelClassName="mt-4 space-y-4"
+        items={[
+          {
+            key: "board",
+            label: "현황판",
+            content: <LeavePromotionBoard board={board} />,
+          },
+          {
+            key: "plans",
+            label: "사용계획서",
+            content: overview ? (
+              <LeavePlansManager initial={overview} />
+            ) : (
+              <p className="text-xs text-ink-hint">
+                사용계획서 발부·수합은 인사 파일 열람 권한자에게만 보입니다.
+              </p>
+            ),
+          },
+          {
+            key: "settings",
+            label: "설정",
+            hidden: !access.isM0,
+            content: access.isM0 ? (
+              <LeavePolicySettings policy={board.firstYearPolicy} canEdit />
+            ) : null,
+          },
+        ]}
+      />
     </div>
   );
 }
