@@ -41,6 +41,8 @@ export async function fetchAllRentalsInMonth(
     let q = supabaseAdmin
       .from(RENTAL_TABLE)
       .select(COLUMNS)
+      // 홈페이지에서 삭제된 예약(lib/rentalSync 가 표시)은 화면·MCP 어디서도 안 셉니다.
+      .is("removed_at", null)
       .order("reservation_date", { ascending: true })
       .order("start_time", { ascending: true, nullsFirst: true })
       .order("reservation_no", { ascending: true })

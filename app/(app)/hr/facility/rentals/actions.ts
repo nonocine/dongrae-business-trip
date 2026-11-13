@@ -15,6 +15,10 @@ import {
   type RentalFacilityFilter,
 } from "@/lib/rental";
 import { fetchAllRentalsInMonth, summarizeRentals } from "@/lib/rentalData";
+import {
+  formatRentalSyncSummary,
+  syncRentalToBusinessResults,
+} from "@/lib/businessRentalSync";
 
 // =====================================================================
 // 시설관리 > 대관예약 — /hr/facility/rentals
@@ -118,7 +122,24 @@ export async function syncRentalsNow(): Promise<
         message: summary.message ?? "대관예약을 가져오지 못했습니다.",
       };
     }
+    // 홈페이지에서 삭제(또는 복구)된 예약이 있던 달은 사업실적 자동 행도 바로
+    //   다시 계산합니다 — 표시는 이번 한 번만 일어나므로, 여기서 넘기면 Cron 은
+    //   그 달(이번 달·지난달이 아니면)을 다시 보지 않습니다. 실패해도 동기화
+    //   결과는 그대로 돌려줍니다(로그만).
+    for (const ym of summary.changedMonths) {
+      const [year, month] = ym.split("-").map(Number);
+      try {
+        const r = await syncRentalToBusinessResults({ year, month });
+        console.log(`[대관 지금 동기화 → 사업실적] ${formatRentalSyncSummary(r)}`);
+      } catch (e) {
+        console.error(
+          `[대관 지금 동기화 → 사업실적] ${ym} 실패:`,
+          e instanceof Error ? e.message : e,
+        );
+      }
+    }
     revalidatePath("/hr/facility/rentals");
+    if (summary.changedMonths.length > 0) revalidatePath("/business-results");
     return {
       ok: true,
       upserted: summary.upserted,

@@ -9,13 +9,27 @@
 //     과거까지 넓게 잡고(오늘-180일), 이미 있는 행도 upsert 로 덮습니다.
 //     → 이 동기화는 "증분 추가" 가 아니라 "창 전체 재복제" 입니다.
 //
+//   ★ 홈페이지에서 '삭제'된 예약 (2026-11)
+//     취소(C)와 달리 삭제는 API 응답에서 행이 아예 사라집니다. upsert 만 하면 그 행이
+//     DB 에 '확정'으로 계속 남아(8~11월 148건 실측) 실적·통계가 부풀었습니다.
+//     → 조회한 창 안에서 이번 응답에 없는 행에 removed_at 을 찍습니다(행은 지우지
+//       않음). 다시 나타나면 upsert 가 removed_at=null 로 되돌립니다.
+//     안전장치: 응답 0건·오류·잘린 구간(incomplete)이면 표시하지 않고, 창 안 살아
+//       있는 행의 20% 넘게 한 번에 사라지면 표시하지 않고 관장 DM 으로 경고합니다
+//       (API 장애로 빈/부분 응답이 왔을 때 멀쩡한 예약을 대량으로 빼는 것을 막음).
+//
 //   * 실패는 throw 하지 않고 { ok:false, message } 로 돌려줍니다 — Cron 은
 //     500 을 내되, 화면(수동 버튼)은 조회 자체를 막지 않아야 합니다.
 //   * "use server" 아님 — 라우트/액션이 각자 인증 후 호출(lib/mailCollector 와 동일).
 // =====================================================================
 
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
-import { sendSlack, siteBaseUrl, slackLink } from "@/lib/slack";
+import {
+  sendSlack,
+  sendSlackDMToUser,
+  siteBaseUrl,
+  slackLink,
+} from "@/lib/slack";
 import { fmtKstDateTime } from "@/lib/datetime";
 import { kstTodayYmd } from "@/lib/trainings";
 import { RENTAL_TABLE, toRentalUpsert, type RentalApiItem } from "@/lib/rental";
@@ -43,6 +57,13 @@ const ALERT_KEY = "rental_sync_alert_at";
 const ALERT_INTERVAL_MS = 24 * 60 * 60 * 1000;
 const ALERT_WEBHOOK = "SLACK_WEBHOOK_ADMIN";
 
+// --- 삭제 표시 안전장치 ---
+//   한 번에 창 안 살아 있는 행의 이 비율을 넘게 사라지면 표시하지 않습니다.
+export const REMOVE_MAX_RATIO = 0.2;
+// 경고 DM 받는 사람 — 관장. lib/pendingDigest 와 같은 슬랙 ID.
+const REMOVE_GUARD_DM_USER = "U0ADUPN08Q3";
+const REMOVE_GUARD_ALERT_KEY = "rental_remove_guard_alert_at";
+
 export type RentalSyncResult = {
   ok: boolean;
   message?: string;
@@ -54,6 +75,13 @@ export type RentalSyncResult = {
   //   비어 있어야 정상 — 값이 있으면 그 날짜의 데이터가 불완전합니다.
   incomplete: string[];
   byType: Record<string, number>; // 구분별 행수 — rental/room 양쪽이 왔는지 확인용
+  // 이번에 '삭제됨'으로 표시한 행수 / 표시가 풀린(다시 나타난) 행수.
+  removed: number;
+  restored: number;
+  // 표시를 건너뛴 사유(0건·잘린 구간·20% 초과·확인 실패). 없으면 null.
+  removeSkipped: string | null;
+  // 표시·해제가 일어난 대관일의 월("YYYY-MM") — 사업실적 재계산 대상.
+  changedMonths: string[];
 };
 
 // --- 날짜 유틸 (UTC 고정) ---
@@ -278,6 +306,125 @@ async function collectRange(
   await collectRange(apiKey, addDays(mid, 1), end, out, stats, depth + 1);
 }
 
+// --- 삭제 표시 ---
+export type ExistingRentalRow = {
+  reservation_no: number;
+  reservation_date: string;
+  removed_at: string | null;
+};
+
+// 창 안의 기존 행(살아 있는 것 + 이미 표시된 것) — upsert 전에 읽어야 '다시
+//   나타난' 행을 알 수 있습니다(upsert 가 removed_at 을 null 로 덮으므로).
+async function loadExistingInWindow(window: {
+  start: string;
+  end: string;
+}): Promise<ExistingRentalRow[]> {
+  const out: ExistingRentalRow[] = [];
+  for (let from = 0; ; from += 1000) {
+    const { data, error } = await supabaseAdmin
+      .from(RENTAL_TABLE)
+      .select("reservation_no,reservation_date,removed_at")
+      .gte("reservation_date", window.start)
+      .lte("reservation_date", window.end)
+      .order("reservation_no")
+      .range(from, from + 999);
+    if (error) throw new Error(`기존 대관예약 확인 실패: ${error.message}`);
+    const page = (data ?? []) as ExistingRentalRow[];
+    out.push(...page);
+    if (page.length < 1000) break;
+  }
+  return out;
+}
+
+async function markRemoved(nos: number[], at: string): Promise<void> {
+  for (let i = 0; i < nos.length; i += 200) {
+    const { error } = await supabaseAdmin
+      .from(RENTAL_TABLE)
+      .update({ removed_at: at })
+      .in("reservation_no", nos.slice(i, i + 200))
+      .is("removed_at", null);
+    if (error) throw new Error(`삭제된 예약 표시 실패: ${error.message}`);
+  }
+}
+
+// 20% 초과 경고 — 하루 1회. 부가기능이라 절대 throw 하지 않습니다.
+async function notifyRemoveGuard(
+  missing: number,
+  active: number,
+  window: { start: string; end: string }
+): Promise<void> {
+  try {
+    const now = new Date();
+    const last = await readMark(REMOVE_GUARD_ALERT_KEY);
+    if (last) {
+      const at = Date.parse(last);
+      if (!Number.isNaN(at) && now.getTime() - at < ALERT_INTERVAL_MS) return;
+    }
+    const pct = active > 0 ? Math.round((missing / active) * 100) : 0;
+    const base = siteBaseUrl();
+    const text = [
+      "⚠️ 홈페이지 대관예약 동기화: 한 번에 너무 많은 예약이 홈페이지 응답에서 사라졌습니다.",
+      `기간 ${window.start} ~ ${window.end} · 기존 ${active.toLocaleString("ko-KR")}건 중 ${missing.toLocaleString("ko-KR")}건(${pct}%)이 응답에 없음`,
+      `${Math.round(REMOVE_MAX_RATIO * 100)}%를 넘어 홈페이지 장애일 수 있어 '삭제됨' 표시를 하지 않았습니다(집계는 그대로). 실제로 지운 것이 맞는지 홈페이지에서 확인해 주세요.`,
+      "※ 같은 상황이 반복돼도 이 DM 은 하루 1회만 보냅니다.",
+      base ? slackLink(`${base}/hr/facility/rentals`, "대관예약 조회 열기") : "",
+    ]
+      .filter(Boolean)
+      .join("\n");
+    const res = await sendSlackDMToUser(REMOVE_GUARD_DM_USER, text);
+    if (res.ok) await writeMark(REMOVE_GUARD_ALERT_KEY, now.toISOString());
+  } catch (e) {
+    console.warn(
+      "[rental] 삭제 경고 DM 실패:",
+      e instanceof Error ? e.message : e
+    );
+  }
+}
+
+export type RemovalPlan = {
+  toRemove: ExistingRentalRow[]; // 이번에 표시할 행(건너뛰면 빈 배열)
+  restored: ExistingRentalRow[]; // 표시돼 있었는데 다시 나타난 행
+  missing: number; // 응답에 없는 살아 있는 행수(건너뛰어도 셈)
+  active: number; // 창 안 살아 있는 행수
+  skipped: string | null;
+  overLimit: boolean;
+};
+
+// 기존 행과 이번 응답을 비교해 표시할 것·풀릴 것을 정합니다(DB 접근 없음).
+export function planRemoval(
+  existing: ExistingRentalRow[],
+  seen: Set<number>,
+  opts: { fetched: number; incomplete: string[] }
+): RemovalPlan {
+  const active = existing.filter((r) => r.removed_at == null);
+  const missing = active.filter((r) => !seen.has(r.reservation_no));
+  const restored = existing.filter(
+    (r) => r.removed_at != null && seen.has(r.reservation_no)
+  );
+  const base = {
+    restored,
+    missing: missing.length,
+    active: active.length,
+  };
+  if (opts.fetched === 0 || seen.size === 0)
+    return { ...base, toRemove: [], skipped: "응답 0건", overLimit: false };
+  if (opts.incomplete.length > 0)
+    return {
+      ...base,
+      toRemove: [],
+      skipped: `잘린 구간(${opts.incomplete.join(", ")})이 있어 표시 안 함`,
+      overLimit: false,
+    };
+  if (missing.length > active.length * REMOVE_MAX_RATIO)
+    return {
+      ...base,
+      toRemove: [],
+      skipped: `응답에 없는 예약 ${missing.length}/${active.length}건 — ${Math.round(REMOVE_MAX_RATIO * 100)}% 초과로 표시 안 함`,
+      overLimit: true,
+    };
+  return { ...base, toRemove: missing, skipped: null, overLimit: false };
+}
+
 // --- 저장 ---
 type RentalUpsertRow = NonNullable<ReturnType<typeof toRentalUpsert>>;
 
@@ -320,6 +467,10 @@ export async function runRentalSync(opts?: {
     window,
     incomplete: [],
     byType: {},
+    removed: 0,
+    restored: 0,
+    removeSkipped: null,
+    changedMonths: [],
   };
 
   const apiKey = (process.env.RENTAL_API_KEY ?? "").trim();
@@ -353,6 +504,22 @@ export async function runRentalSync(opts?: {
     byType[row.reservation_type] = (byType[row.reservation_type] ?? 0) + 1;
   }
 
+  // 삭제 표시 계획 — upsert 전에 기존 행을 읽어야 '다시 나타난' 행을 압니다.
+  //   API 호출이 오류면 위에서 이미 return 했으므로 여기 오지 않습니다.
+  let plan: RemovalPlan | null = null;
+  let planError: string | null = null;
+  try {
+    const existing = await loadExistingInWindow(window);
+    plan = planRemoval(existing, new Set(collected.keys()), {
+      fetched: stats.fetched,
+      incomplete: stats.incomplete,
+    });
+  } catch (e) {
+    // 기존 행을 못 읽었으면 표시를 건너뜁니다(복제라는 본 작업은 계속).
+    planError = e instanceof Error ? e.message : String(e);
+    console.warn(`[rental] 삭제 표시 건너뜀: ${planError}`);
+  }
+
   let upserted = 0;
   try {
     upserted = await upsertRows(rows);
@@ -370,6 +537,35 @@ export async function runRentalSync(opts?: {
     };
   }
 
+  // 삭제 표시 — 저장이 성공한 뒤에만. 실패해도 동기화 자체는 성공으로 둡니다.
+  let removed = 0;
+  let removeSkipped: string | null = planError
+    ? `기존 행 확인 실패: ${planError}`
+    : null;
+  const changed = new Set<string>();
+  if (plan) {
+    removeSkipped = plan.skipped;
+    // 다시 나타난 행은 upsert 로 이미 풀렸습니다 — 그 달도 실적 재계산 대상.
+    for (const r of plan.restored) changed.add(r.reservation_date.slice(0, 7));
+    if (plan.overLimit) {
+      console.warn(`[rental] ${plan.skipped}`);
+      await notifyRemoveGuard(plan.missing, plan.active, window);
+    } else if (plan.toRemove.length > 0) {
+      try {
+        await markRemoved(
+          plan.toRemove.map((r) => r.reservation_no),
+          syncedAt.toISOString()
+        );
+        removed = plan.toRemove.length;
+        for (const r of plan.toRemove)
+          changed.add(r.reservation_date.slice(0, 7));
+      } catch (e) {
+        removeSkipped = e instanceof Error ? e.message : String(e);
+        console.warn(`[rental] ${removeSkipped}`);
+      }
+    }
+  }
+
   // 여기까지 왔으면 호출·저장 모두 성공 — 이전 실패의 억제를 풀고 시각을 남깁니다.
   await clearAlertMark();
   await markLastSync(syncedAt);
@@ -382,6 +578,10 @@ export async function runRentalSync(opts?: {
     window,
     incomplete: stats.incomplete,
     byType,
+    removed,
+    restored: plan?.restored.length ?? 0,
+    removeSkipped,
+    changedMonths: [...changed].sort(),
     message:
       stats.incomplete.length > 0
         ? `일부 구간(${stats.incomplete.join(", ")})은 응답 상한을 넘겨 불완전할 수 있습니다.`

@@ -96,7 +96,7 @@ function rentalSnapshotNote(row: BusinessResult): string | null {
   if (same) return null;
   // 제출된 행은 제출 숫자를 그대로 둡니다(lib/businessRentalSync 규칙 a·d).
   if (!row.manual_override)
-    return `대관 기준 ${number.format(snap.operating_days)}일 · ${number.format(snap.participants)}명 (제출된 숫자 유지)`;
+    return `홈페이지 값과 다름: 대관 기준 ${number.format(snap.operating_days)}일 · ${number.format(snap.participants)}명 (제출된 숫자 유지)`;
   // "MM.DD HH:mm" → "MM/DD HH:mm"
   const at = fmtKstDateTime(snap.synced_at ?? row.source_synced_at, {
     year: false,

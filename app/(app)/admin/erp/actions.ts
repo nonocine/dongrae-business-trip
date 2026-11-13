@@ -361,6 +361,7 @@ export async function compareErpRentals(start: string, end: string): Promise<Ren
         .from("rental_reservations")
         .select("reservation_no, reservation_date, start_time, end_time, status, person_total, space_name, program_name, team_name")
         .eq("reservation_type", "rental")
+        .is("removed_at", null)
         .gte("reservation_date", start)
         .lte("reservation_date", end)
         .order("reservation_no")

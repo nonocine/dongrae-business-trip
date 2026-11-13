@@ -1,7 +1,7 @@
 import { runRentalSync } from "@/lib/rentalSync";
 import {
   formatRentalSyncSummary,
-  kstCurrentAndPreviousMonth,
+  rentalResultSyncMonths,
   emptyRentalSyncSummary,
   syncRentalToBusinessResults,
   type RentalResultSyncSummary,
@@ -40,7 +40,9 @@ export async function GET(request: Request) {
   const line =
     `[rental-sync] ${summary.window.start}~${summary.window.end} · ` +
     `호출 ${summary.calls}회 · 저장 ${summary.upserted}건 · ` +
-    `구분 ${JSON.stringify(summary.byType)}` +
+    `구분 ${JSON.stringify(summary.byType)} · ` +
+    `삭제표시 ${summary.removed}건 · 해제 ${summary.restored}건` +
+    (summary.removeSkipped ? ` (표시 건너뜀: ${summary.removeSkipped})` : "") +
     (summary.incomplete.length > 0
       ? ` · 불완전 ${summary.incomplete.join(",")}`
       : "");
@@ -57,10 +59,11 @@ export async function GET(request: Request) {
 
   // 대관 동기화가 성공했을 때만 이어서 사업실적 자동 반입을 돌립니다.
   //   이번 달 + 지난달(한국시간) — 확정 후 취소된 예약을 지난달 실적에도
-  //   반영합니다(업체 권고). 실패해도 대관 동기화 결과는 그대로 돌려주되,
+  //   반영합니다(업체 권고). 홈페이지에서 삭제(또는 복구)된 예약이 있던 달도
+  //   함께 다시 계산합니다. 실패해도 대관 동기화 결과는 그대로 돌려주되,
   //   오류는 로그와 응답에 남깁니다.
   const businessResults: RentalResultSyncSummary[] = [];
-  for (const { year, month } of kstCurrentAndPreviousMonth()) {
+  for (const { year, month } of rentalResultSyncMonths(summary.changedMonths)) {
     let result: RentalResultSyncSummary;
     try {
       result = await syncRentalToBusinessResults({ year, month });

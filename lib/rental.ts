@@ -40,6 +40,9 @@ export type RentalRow = {
   status_name: string | null; // 홈페이지가 준 표기("확정"·"신청 중"·"취소")
   reg_date: string | null; // 신청 접수 시각
   synced_at: string | null; // 이 행을 마지막으로 동기화한 시각
+  // 홈페이지에서 삭제돼 API 응답에서 사라진 시각(lib/rentalSync 가 표시).
+  //   값이 있으면 화면·집계·실적 연동 어디서도 세지 않습니다. 다시 나타나면 null.
+  removed_at?: string | null;
 };
 
 // 업체 API 응답의 list 원소(모든 값이 문자열로 올 수 있다고 보고 느슨하게 받음).
@@ -292,7 +295,12 @@ function num(v: unknown): number {
 export function toRentalUpsert(
   item: RentalApiItem,
   syncedAt: string
-): Omit<RentalRow, "synced_at"> & { synced_at: string } | null {
+):
+  | (Omit<RentalRow, "synced_at" | "removed_at"> & {
+      synced_at: string;
+      removed_at: null;
+    })
+  | null {
   const no = Number(item.reservation_no);
   if (!Number.isInteger(no)) return null;
   const date = nz(item.reservation_date);
@@ -319,6 +327,9 @@ export function toRentalUpsert(
     // ★ synced_at 은 DB 기본값(now())이 insert 때만 걸리고 upsert 로 덮을 때는
     //   갱신되지 않습니다(실측 확인). 매번 명시해야 "마지막 동기화 시각" 이 됩니다.
     synced_at: syncedAt,
+    // 응답에 있다 = 홈페이지에 있다. 전에 '삭제됨'으로 표시됐던 행이 다시
+    //   나타나면 이 upsert 가 표시를 풉니다.
+    removed_at: null,
   };
 }
 

@@ -169,6 +169,23 @@ export function kstCurrentAndPreviousMonth(): { year: number; month: number }[] 
   return [{ year: y, month: m }, prev];
 }
 
+// 사업실적 재계산 대상 월 — 이번 달·지난달 + 대관 동기화에서 '삭제됨' 표시·해제가
+//   일어난 달(lib/rentalSync changedMonths). 그 달의 자동 행이 이번 달·지난달이
+//   아니어도 바로 다시 계산되게 합니다(제출된 행은 snapshot 만 갱신 — 규칙 d·e).
+export function rentalResultSyncMonths(
+  changedMonths: string[] = [],
+): { year: number; month: number }[] {
+  const out = kstCurrentAndPreviousMonth();
+  const seen = new Set(out.map((m) => `${m.year}-${p2(m.month)}`));
+  for (const ym of [...changedMonths].sort().reverse()) {
+    const m = /^(\d{4})-(\d{2})$/.exec(ym);
+    if (!m || seen.has(ym)) continue;
+    seen.add(ym);
+    out.push({ year: Number(m[1]), month: Number(m[2]) });
+  }
+  return out;
+}
+
 export function rentalSourceKey(linkId: string, year: number, month: number) {
   return `${linkId}:${year}-${p2(month)}`;
 }
@@ -261,6 +278,8 @@ export async function loadReservations(
         "reservation_no,reservation_type,reservation_date,space_name,program_name,person_total",
       )
       .eq("status", "Y")
+      // 홈페이지에서 삭제된 예약은 실적에 넣지 않습니다(lib/rentalSync 가 표시).
+      .is("removed_at", null)
       .gte("reservation_date", start)
       .lt("reservation_date", end);
     q =

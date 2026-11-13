@@ -177,7 +177,7 @@ async function fetchDb(): Promise<R[]> {
   const out: R[] = [];
   for (let from = 0; ; from += 1000) {
     const res = await fetch(
-      `${base}/rest/v1/rental_reservations?select=reservation_no,reservation_type,reservation_date,space_name,room_name,purpose,program_name,person_total,status&reservation_date=gte.${START}&reservation_date=lte.${END}&order=reservation_no`,
+      `${base}/rest/v1/rental_reservations?select=reservation_no,reservation_type,reservation_date,space_name,room_name,purpose,program_name,person_total,status&reservation_date=gte.${START}&reservation_date=lte.${END}&order=reservation_no${process.env.PREVIEW_INCLUDE_REMOVED ? "" : "&removed_at=is.null"}`,
       { headers: { apikey: key, Authorization: `Bearer ${key}`, Range: `${from}-${from + 999}` } },
     );
     const page = (await res.json()) as R[];

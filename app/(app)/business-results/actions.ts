@@ -1555,6 +1555,7 @@ export async function loadRentalProgramOptions(): Promise<
         .from(RENTAL_TABLE)
         .select("program_name,space_name")
         .eq("status", "Y")
+        .is("removed_at", null)
         .gte("reservation_date", from)
         .lte("reservation_date", today)
         .not("program_name", "is", null)
