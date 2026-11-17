@@ -109,7 +109,9 @@ export async function POST(req: Request) {
   if (up.error) return fail(500, `PDF 저장 실패: ${up.error.message}`);
 
   const safeName = training.name.replace(/[\\/:*?"<>|\r\n\t]+/g, "_").trim() || "교육";
-  const filename = `${training.year}_${safeName}_수료증_${withCert.length}명.pdf`;
+  // 교육명에 이미 연도(예: "2026년")가 있으면 앞에 연도를 또 붙이지 않습니다.
+  const yearPrefix = /(19|20)\d{2}/.test(safeName) ? "" : `${training.year}_`;
+  const filename = `${yearPrefix}${safeName}_수료증_${withCert.length}명.pdf`;
   const signed = await storage.createSignedUrl(tmpPath, 600, { download: filename });
   if (signed.error || !signed.data) return fail(500, "다운로드 주소를 만들지 못했습니다.");
 
