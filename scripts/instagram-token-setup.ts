@@ -14,6 +14,7 @@
 //     3) DB(integration_tokens)에 저장 — 앱은 DB 토큰을 먼저 씁니다(배포 없이 즉시 반영)
 //     4) Vercel 운영(Production) 환경변수 INSTAGRAM_ACCESS_TOKEN 교체(rm → add, 민감 변수)
 //        값은 표준입력으로만 넘깁니다(명령줄 인자에 안 실음).
+//   * Vercel 단계만 다시: node --env-file=.env.local --import tsx scripts/instagram-token-setup.ts --vercel-only
 //   * 이후 연장은 /api/cron/instagram-token 이 50일마다 자동으로 합니다.
 // =====================================================================
 import { execFileSync, spawnSync } from "node:child_process";
@@ -112,21 +113,54 @@ async function main() {
   if (error) fail(`DB 저장 실패: ${hide(error.message)}`);
   console.log(`✔ DB 저장 완료(만료 예정 ${new Date(now.getTime() + expiresIn * 1000).toISOString().slice(0, 10)})`);
 
-  // 4) Vercel 운영 환경변수 교체 — rm 후 add(민감 변수). 값은 stdin 으로만.
-  const npx = process.platform === "win32" ? "npx.cmd" : "npx";
-  const rm = spawnSync(npx, ["--yes", VERCEL, "env", "rm", ENV_NAME, "production", "--yes"], {
-    encoding: "utf8",
-    shell: process.platform === "win32",
-  });
-  console.log(rm.status === 0 ? "✔ 기존 운영 환경변수 삭제" : `· 기존 값 삭제 건너뜀: ${hide((rm.stderr || "").trim().split("\n").pop() ?? "")}`);
-  const add = spawnSync(npx, ["--yes", VERCEL, "env", "add", ENV_NAME, "production", "--sensitive"], {
-    input: token,
-    encoding: "utf8",
-    shell: process.platform === "win32",
-  });
-  if (add.status !== 0) fail(`Vercel 환경변수 등록 실패: ${hide((add.stderr || add.stdout || "").trim())}`);
-  console.log("✔ Vercel 운영 환경변수 등록(민감 변수)");
+  // 4) Vercel 운영 환경변수 교체
+  replaceVercelEnv(token, hide);
   console.log("완료 — 앱은 DB 토큰을 바로 씁니다. 환경변수는 다음 배포부터 반영(비상용 예비).");
 }
 
-main().catch((e) => fail(redact(e instanceof Error ? e.message : String(e))));
+// Vercel 운영 환경변수 교체 — rm 후 add(민감 변수). 값은 stdin 으로만.
+//   ⚠️ 기존 변수가 여러 환경(개발·미리보기·운영)에 한 줄로 걸려 있으면 운영만 따로 못 지워
+//   변수 전체를 지웁니다(옛 값은 이미 만료된 토큰). 새 값은 운영(Production)에만 둡니다.
+function replaceVercelEnv(token: string, hide: (t: string) => string) {
+  const npx = process.platform === "win32" ? "npx.cmd" : "npx";
+  const run = (args: string[], input?: string) =>
+    spawnSync(npx, ["--yes", VERCEL, ...args], {
+      input,
+      encoding: "utf8",
+      shell: process.platform === "win32",
+    });
+  const last = (r: ReturnType<typeof run>) =>
+    hide(
+      [r.stderr ?? "", r.stdout ?? ""]
+        .join("\n")
+        .split("\n")
+        .filter((l) => /error/i.test(l))
+        .pop() ?? "",
+    );
+
+  // 비대화형 삭제는 --confirm-name 으로 변수 이름을 한 번 더 적어야 합니다(Vercel CLI 65).
+  const rm = run(["env", "rm", ENV_NAME, "--confirm-name", ENV_NAME]);
+  console.log(rm.status === 0 ? "✔ 기존 환경변수 삭제" : `· 기존 값 삭제 건너뜀(없을 수 있음): ${last(rm)}`);
+  const add = run(["env", "add", ENV_NAME, "--environment", "production", "--sensitive", "--yes"], token);
+  if (add.status !== 0) fail(`Vercel 환경변수 등록 실패: ${last(add)}`);
+  console.log("✔ Vercel 운영(Production) 환경변수 등록(민감 변수)");
+}
+
+// --vercel-only: DB 에 이미 저장된 토큰으로 Vercel 교체만 다시 합니다(클립보드 안 씀).
+async function vercelOnly() {
+  const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
+  const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  if (!url || !key) fail("NEXT_PUBLIC_SUPABASE_URL / SUPABASE_SERVICE_ROLE_KEY 가 없습니다(.env.local 확인).");
+  const db = createClient(url, key, { auth: { persistSession: false } });
+  const { data, error } = await db
+    .from("integration_tokens")
+    .select("access_token")
+    .eq("provider", "instagram")
+    .maybeSingle();
+  const token = (data as { access_token?: string } | null)?.access_token?.trim();
+  if (error || !token) fail("DB 에 저장된 인스타그램 토큰이 없습니다.");
+  replaceVercelEnv(token, (t) => redact(t, [token]));
+  console.log("완료 — 다음 배포부터 운영 환경변수에도 새 토큰이 반영됩니다.");
+}
+
+(process.argv.includes("--vercel-only") ? vercelOnly() : main()).catch((e) => fail(redact(e instanceof Error ? e.message : String(e))));
