@@ -13,17 +13,11 @@ import { useMemo, useState } from "react";
 import type { CalendarDuty } from "@/lib/erp/view";
 import { DUTY_COLOR_CLASS, DUTY_COLOR_LABEL, addDaysYmd, dayLabel, type DutyColorKey } from "@/lib/erp/duty";
 import { getHolidayName } from "@/lib/koreanHolidays";
-import { badgeWarning, cardCls } from "@/lib/ui";
+import { cardCls } from "@/lib/ui";
+import { DutyItemList, dutiesOnDay, dutyChipCls, layoutWeek, peopleLabel, type WeekSeg } from "@/app/(app)/duties/dutyParts";
 
 const MAX_LANES = 3;
 const WD = ["월", "화", "수", "목", "금", "토", "일"];
-
-type Seg = { duty: CalendarDuty; people: CalendarDuty["people"]; col: number; span: number; lane: number };
-
-function peopleLabel(people: CalendarDuty["people"]): string {
-  if (!people.length) return "";
-  return people.length > 1 ? `${people[0].name} 외 ${people.length - 1}명` : people[0].name;
-}
 
 export default function DutyCalendar({
   month,
@@ -69,40 +63,18 @@ export default function DutyCalendar({
     [items, type, dept]
   );
 
-  // 주별 막대 배치.
+  // 주별 막대 배치(공용 layoutWeek — 메인 화면 복무 현황판과 같은 규칙).
   const weekRows = useMemo(() => {
-    const rows: { start: string; days: string[]; segs: Seg[]; hidden: number[] }[] = [];
+    const rows: { start: string; days: string[]; segs: WeekSeg[]; hidden: number[] }[] = [];
     for (let w = 0; w < weeks; w++) {
       const start = addDaysYmd(gridStart, w * 7);
-      const end = addDaysYmd(start, 6);
       const days = Array.from({ length: 7 }, (_, k) => addDaysYmd(start, k));
-      const parts = shown
-        .filter((x) => x.duty.start <= end && x.duty.end >= start)
-        .map((x) => {
-          const s = x.duty.start < start ? start : x.duty.start;
-          const e = x.duty.end > end ? end : x.duty.end;
-          return { ...x, col: days.indexOf(s), span: days.indexOf(e) - days.indexOf(s) + 1 };
-        })
-        .sort((a, b) => a.col - b.col || b.span - a.span || a.duty.time.localeCompare(b.duty.time));
-      const laneEnd: number[] = []; // 레인별 마지막으로 찬 칸
-      const segs: Seg[] = [];
-      const hidden = Array(7).fill(0);
-      for (const p of parts) {
-        let lane = laneEnd.findIndex((last) => last < p.col);
-        if (lane === -1) {
-          lane = laneEnd.length;
-          laneEnd.push(-1);
-        }
-        laneEnd[lane] = p.col + p.span - 1;
-        if (lane < MAX_LANES) segs.push({ duty: p.duty, people: p.people, col: p.col, span: p.span, lane });
-        else for (let k = p.col; k < p.col + p.span; k++) hidden[k]++;
-      }
-      rows.push({ start, days, segs, hidden });
+      rows.push({ start, days, ...layoutWeek(shown, days, MAX_LANES) });
     }
     return rows;
   }, [shown, weeks, gridStart]);
 
-  const onDay = (d: string) => shown.filter((x) => x.duty.start <= d && x.duty.end >= d);
+  const onDay = (d: string) => dutiesOnDay(shown, d);
   const [y, m] = month.split("-").map(Number);
   const prev = `${m === 1 ? y - 1 : y}-${String(m === 1 ? 12 : m - 1).padStart(2, "0")}`;
   const next = `${m === 12 ? y + 1 : y}-${String(m === 12 ? 1 : m + 1).padStart(2, "0")}`;
@@ -124,25 +96,7 @@ export default function DutyCalendar({
           {holiday && <span className="ml-1 text-xs font-normal text-stamp">{holiday}</span>}
           <span className="ml-1 text-xs font-normal text-ink-muted">{list.length}건</span>
         </h3>
-        {list.length === 0 ? (
-          <p className="text-xs text-ink-hint">등록된 복무가 없습니다.</p>
-        ) : (
-          <ul className="space-y-2">
-            {list.map((x) => (
-              <li key={x.duty.id} className="rounded-md border border-line p-2 text-sm">
-                <div className="flex flex-wrap items-center gap-1.5">
-                  <span className={`rounded border px-1.5 py-0.5 text-[11px] font-semibold ${DUTY_COLOR_CLASS[x.duty.color]}`}>
-                    {x.duty.type}
-                  </span>
-                  {x.duty.inProgress && <span className={badgeWarning}>결재 중</span>}
-                </div>
-                <p className="mt-1 font-medium text-ink">{x.people.map((p) => p.name).join(", ")}</p>
-                <p className="text-xs text-ink-muted">{x.duty.time}</p>
-                {x.duty.location && <p className="text-xs text-ink-body">장소: {x.duty.location}</p>}
-              </li>
-            ))}
-          </ul>
-        )}
+        <DutyItemList list={list} />
       </div>
     );
   };
@@ -242,9 +196,7 @@ export default function DutyCalendar({
                     type="button"
                     onClick={() => setSelected(row.days[s.col])}
                     title={`${s.people.map((p) => p.name).join(", ")} · ${s.duty.type} · ${s.duty.time}`}
-                    className={`pointer-events-auto mx-0.5 truncate rounded border px-1 text-left text-[11px] leading-[1.25rem] ${DUTY_COLOR_CLASS[s.duty.color]} ${
-                      s.duty.inProgress ? "border-dashed" : ""
-                    }`}
+                    className={`pointer-events-auto mx-0.5 truncate rounded border px-1 text-left text-[11px] leading-[1.25rem] ${dutyChipCls(s.duty)}`}
                     style={{ gridColumn: `${s.col + 1} / span ${s.span}`, gridRow: s.lane + 2 }}
                   >
                     {peopleLabel(s.people)} {s.duty.type}

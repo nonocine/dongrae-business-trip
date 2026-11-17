@@ -1,4 +1,4 @@
-import type { ReactNode } from "react";
+import { Suspense, type ReactNode } from "react";
 import Link from "next/link";
 import { getMyProfile, getMyPhotoUrl } from "@/app/(app)/profile/hr/actions";
 import { getMyLeavePlanNotice } from "@/app/(app)/profile/hr/leavePlanActions";
@@ -18,7 +18,7 @@ import {
   type MenuItem,
 } from "@/lib/menu";
 import { cardCls } from "@/lib/ui";
-import { countAbsentToday } from "@/lib/erp/view";
+import HomeDutyBoard, { HomeDutyBoardSkeleton } from "@/app/components/HomeDutyBoard";
 
 // =====================================================================
 // 직원 첫 접속 대시보드 — 권한등급(M0)·직무(employee_roles)별 메뉴 분기.
@@ -232,7 +232,6 @@ export default async function EmployeeDashboard({
     recentAnnouncements,
     judgeAssignments,
     leavePlanNotice,
-    absentToday,
     pendingTasks,
   ] = await Promise.all([
     getShellData(),
@@ -241,8 +240,6 @@ export default async function EmployeeDashboard({
     listAnnouncements(3),
     getMyJudgeAssignments(),
     getMyLeavePlanNotice(),
-    // ERP 복무 — 오늘 부재 인원(재직자, 휴근·초과·야근 제외). 실패해도 대시보드는 그립니다.
-    countAbsentToday().catch(() => null),
     // 확인할 일 — 대상자(M0·hr 직무)가 아니면 빈 목록(lib/pendingTasks).
     getMyPendingTasks(),
   ]);
@@ -309,9 +306,6 @@ export default async function EmployeeDashboard({
 
   return (
     <div className="space-y-4">
-      {/* 확인할 일 — 맨 위(공지사항보다 위). 대상자에게만, 0건이면 숨김. */}
-      <PendingTasksCard tasks={pendingTasks} />
-
       {/* 인사말 헤더 */}
       <section className={cardCls}>
         <div className="flex flex-wrap items-center gap-2">
@@ -347,6 +341,9 @@ export default async function EmployeeDashboard({
           </p>
         )}
       </section>
+
+      {/* 확인할 일 — 인사말 바로 아래(복무 현황판·공지사항보다 위). 대상자에게만, 0건이면 숨김. */}
+      <PendingTasksCard tasks={pendingTasks} />
 
       {/* 내 심사 배정 — 면접 심사위원으로 배정된 공고가 1건 이상일 때만 노출.
           배정 없는 대다수 직원에겐 카드 자체가 안 보임. 클릭 시 심사화면으로 진입하고,
@@ -389,28 +386,11 @@ export default async function EmployeeDashboard({
         </section>
       )}
 
-      {/* 오늘 부재 — ERP 복무(진행·완료) 기준. 누르면 복무 현황판. */}
-      {absentToday != null && (
-        <Link
-          href="/duties"
-          className={`${cardCls} flex items-center justify-between gap-3 transition hover:border-navy hover:bg-navy-soft/30`}
-        >
-          <span className="flex items-center gap-2">
-            <span aria-hidden className="text-2xl">
-              🗓
-            </span>
-            <span>
-              <span className="block text-sm font-semibold text-ink">
-                오늘 부재 <b className="text-navy">{absentToday}</b>명
-              </span>
-              <span className="block text-xs text-ink-muted">휴가·출장·외근 등 — 복무 현황판에서 보기 (ERP 기준)</span>
-            </span>
-          </span>
-          <span aria-hidden className="text-ink-hint">
-            →
-          </span>
-        </Link>
-      )}
+      {/* 복무 현황판 — ERP 복무. 이 구역만 따로 불러와(스트리밍) 메인 화면을 늦추지 않습니다.
+          보는 권한은 /duties 와 같습니다(못 보면 구역 자체가 빠짐). */}
+      <Suspense fallback={<HomeDutyBoardSkeleton />}>
+        <HomeDutyBoard />
+      </Suspense>
 
       {/* 공지사항 미리보기 — 최신 3건(고정 우선) */}
       <section className={cardCls}>
