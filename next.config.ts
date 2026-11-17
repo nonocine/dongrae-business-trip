@@ -30,6 +30,8 @@ const nextConfig: NextConfig = {
     // 연차 사용촉진 촉구서·지정 통보서·이행 현황 PDF(나눔고딕).
     "/hr/leave-plans": ["./lib/fonts/*.ttf"],
     "/hr/leave-plans/**": ["./lib/fonts/*.ttf"],
+    // 의무교육 수료증 일괄 받기 — 표지(나눔고딕).
+    "/hr/trainings/**": ["./lib/fonts/*.ttf"],
   },
 };
 

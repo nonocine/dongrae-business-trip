@@ -226,9 +226,89 @@ export default function TrainingsManager({
     [matrix.employees]
   );
 
+  // --- 수료증 일괄 받기 — 교육 1개 + 체크한 직원(표 순서) → 서버에서 PDF 한 부로 합침 ---
+  const [bundleTid, setBundleTid] = useState("");
+  const [picked, setPicked] = useState<Set<string>>(() => new Set());
+  const [bundleCover, setBundleCover] = useState(true);
+  const [bundling, setBundling] = useState(false);
+  const bundleTraining = matrix.trainings.find((t) => t.id === bundleTid) ?? null;
+  const pickedRows = matrix.employees.filter((e) => picked.has(e.driver_id));
+  const pickedWithCert = bundleTraining
+    ? pickedRows.filter((e) => compMap.get(cellKey(bundleTraining.id, e.driver_id))?.has_cert)
+    : [];
+  const pickedMissing = bundleTraining
+    ? pickedRows.filter((e) => !compMap.get(cellKey(bundleTraining.id, e.driver_id))?.has_cert)
+    : [];
+  const allPicked =
+    matrix.employees.length > 0 && matrix.employees.every((e) => picked.has(e.driver_id));
+
+  function togglePick(id: string, on: boolean) {
+    setPicked((s) => {
+      const n = new Set(s);
+      if (on) n.add(id);
+      else n.delete(id);
+      return n;
+    });
+  }
+
+  async function downloadBundle() {
+    if (!bundleTraining || pickedWithCert.length === 0) return;
+    if (
+      pickedMissing.length > 0 &&
+      !confirm(
+        `수료증 미등록: ${pickedMissing.map((e) => e.name).join(", ")} — 이 직원을 빼고 받습니다.\n\n` +
+          `${pickedWithCert.length}명의 수료증을 받을까요?`
+      )
+    )
+      return;
+    setBundling(true);
+    setMsg(null);
+    try {
+      const res = await fetch("/hr/trainings/certificates", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          trainingId: bundleTraining.id,
+          // 미등록 직원도 함께 보냅니다 — 서버가 다시 판정해 빼고 표지의 미등록 명단에 적습니다.
+          driverIds: pickedRows.map((e) => e.driver_id),
+          cover: bundleCover,
+        }),
+      });
+      const data = (await res.json().catch(() => null)) as
+        | { ok: true; url: string; filename: string; included: number; missing: string[]; failed: string[] }
+        | { ok: false; message: string }
+        | null;
+      if (!data || !data.ok) {
+        setMsg({ kind: "err", text: data && !data.ok ? data.message : "수료증 PDF 를 만들지 못했습니다." });
+        return;
+      }
+      const a = document.createElement("a");
+      a.href = data.url;
+      a.download = data.filename;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      setMsg({
+        kind: data.failed.length > 0 ? "err" : "ok",
+        text:
+          `${data.filename} — ${data.included}명 수료증을 받았습니다.` +
+          (data.missing.length ? ` (미등록 제외: ${data.missing.join(", ")})` : "") +
+          (data.failed.length
+            ? ` 단, ${data.failed.join(", ")} 의 수료증은 파일 문제로 넣지 못해 안내 장으로 대신했습니다.`
+            : ""),
+      });
+    } catch {
+      setMsg({ kind: "err", text: "수료증 PDF 를 만드는 중 연결이 끊겼습니다. 다시 시도해 주세요." });
+    } finally {
+      setBundling(false);
+    }
+  }
+
   function reload(y: number) {
     setMsg(null);
     setSel(null);
+    setBundleTid("");
+    setPicked(new Set());
     startLoad(async () => {
       const [t, m] = await Promise.all([listTrainings(y), getTrainingMatrix(y)]);
       setTrainings(t);
@@ -594,12 +674,90 @@ export default function TrainingsManager({
                     </p>
                   ) : (
                     <>
+                      {/* 수료증 일괄 받기 — 교육을 고르고 직원을 체크 */}
+                      <div className="mb-3 rounded-lg border border-line bg-surface p-3">
+                        <div className="flex flex-wrap items-end gap-3">
+                          <div className="min-w-0">
+                            <label className={lblCls} htmlFor="bundle-training">
+                              수료증 받을 교육
+                            </label>
+                            <select
+                              id="bundle-training"
+                              className={`${inCls} mt-1 w-full max-w-xs sm:w-64`}
+                              value={bundleTid}
+                              disabled={bundling}
+                              onChange={(e) => setBundleTid(e.target.value)}
+                            >
+                              <option value="">교육 선택</option>
+                              {matrix.trainings.map((t) => (
+                                <option key={t.id} value={t.id}>
+                                  {t.name}
+                                </option>
+                              ))}
+                            </select>
+                          </div>
+                          <label className="flex h-10 items-center gap-1.5 text-xs text-ink-body sm:h-[38px]">
+                            <input
+                              type="checkbox"
+                              checked={bundleCover}
+                              disabled={bundling}
+                              onChange={(e) => setBundleCover(e.target.checked)}
+                            />
+                            표지 넣기
+                          </label>
+                          <button
+                            type="button"
+                            className={`${btnPrimary} h-10 px-4 text-sm sm:h-[38px]`}
+                            disabled={!bundleTraining || pickedWithCert.length === 0 || bundling}
+                            onClick={downloadBundle}
+                            title={
+                              !bundleTraining
+                                ? "먼저 교육을 고르세요"
+                                : pickedRows.length === 0
+                                  ? "표에서 직원을 체크하세요"
+                                  : pickedWithCert.length === 0
+                                    ? "선택한 직원 모두 이 교육의 수료증이 없습니다"
+                                    : undefined
+                            }
+                          >
+                            {bundling
+                              ? "PDF 만드는 중…"
+                              : `선택한 직원 수료증 받기(${pickedRows.length}명)`}
+                          </button>
+                        </div>
+                        <p className="mt-2 text-[11px] text-ink-hint">
+                          {!bundleTraining
+                            ? "교육을 고르면 표 왼쪽 체크칸으로 직원을 고를 수 있습니다. 선택한 직원의 수료증을 표 순서대로 PDF 한 부로 합쳐 받습니다(이미지 수료증도 PDF 장으로 바뀝니다)."
+                            : pickedRows.length === 0
+                              ? "표 왼쪽 체크칸으로 직원을 고르세요(머리칸 체크 = 전체 선택)."
+                              : `선택 ${pickedRows.length}명 — 수료증 있음 ${pickedWithCert.length}명` +
+                                (pickedMissing.length
+                                  ? ` · 미등록 ${pickedMissing.length}명(${pickedMissing.map((e) => e.name).join(", ")}) — 받을 때 빠집니다`
+                                  : "")}
+                        </p>
+                      </div>
+
                       <div className="overflow-x-auto">
                         <table className="border-collapse text-xs">
                           <thead>
                             <tr>
                               <th className="sticky left-0 z-10 min-w-[96px] border-b border-line bg-card px-2 py-2 text-left text-navy">
-                                직원
+                                <label className="flex items-center gap-1.5">
+                                  <input
+                                    type="checkbox"
+                                    aria-label="직원 전체 선택"
+                                    disabled={!bundleTraining || bundling}
+                                    checked={allPicked}
+                                    onChange={(e) =>
+                                      setPicked(
+                                        e.target.checked
+                                          ? new Set(matrix.employees.map((x) => x.driver_id))
+                                          : new Set()
+                                      )
+                                    }
+                                  />
+                                  직원
+                                </label>
                               </th>
                               {matrix.trainings.map((t) => {
                                 const overdue = t.dday != null && t.dday < 0;
@@ -608,7 +766,9 @@ export default function TrainingsManager({
                                 return (
                                   <th
                                     key={t.id}
-                                    className="min-w-[92px] border-b border-l border-line bg-card px-1.5 py-2 align-bottom"
+                                    className={`min-w-[92px] border-b border-l border-line px-1.5 py-2 align-bottom ${
+                                      t.id === bundleTid ? "bg-navy-soft/40" : "bg-card"
+                                    }`}
                                   >
                                     <div className="flex flex-col gap-0.5">
                                       <span className="line-clamp-2 font-semibold text-ink-body">
@@ -656,12 +816,23 @@ export default function TrainingsManager({
                             {matrix.employees.map((emp) => (
                               <tr key={emp.driver_id}>
                                 <th className="sticky left-0 z-10 border-b border-line bg-card px-2 py-1.5 text-left font-medium text-ink-body">
-                                  {emp.name}
-                                  {emp.rank && (
-                                    <span className="ml-1 text-[10px] text-ink-hint">
-                                      {emp.rank}
+                                  <label className="flex items-center gap-1.5">
+                                    <input
+                                      type="checkbox"
+                                      aria-label={`${emp.name} 선택`}
+                                      disabled={!bundleTraining || bundling}
+                                      checked={picked.has(emp.driver_id)}
+                                      onChange={(e) => togglePick(emp.driver_id, e.target.checked)}
+                                    />
+                                    <span>
+                                      {emp.name}
+                                      {emp.rank && (
+                                        <span className="ml-1 text-[10px] text-ink-hint">
+                                          {emp.rank}
+                                        </span>
+                                      )}
                                     </span>
-                                  )}
+                                  </label>
                                 </th>
                                 {matrix.trainings.map((t) => {
                                   const key = cellKey(t.id, emp.driver_id);
