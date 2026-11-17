@@ -471,12 +471,19 @@ export default function BusinessResultsDashboard({
   //   문구가 그대로 옵니다(다른 화면은 영향 없음).
   function runImport(
     channel: string,
-    load: () => Promise<{ saved: number; skipped: number }>,
+    load: () => Promise<
+      { ok: true; saved: number; skipped: number } | { ok: false; message: string }
+    >,
   ) {
     setNotice(null);
     startTransition(async () => {
       try {
         const res = await load();
+        // 인스타그램 토큰 만료 등은 서버가 안내 문구로 돌려줍니다(빨간 오류 아님).
+        if (!res.ok) {
+          setNotice({ ok: false, text: res.message });
+          return;
+        }
         setNotice({
           ok: true,
           text:

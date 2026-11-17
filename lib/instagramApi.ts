@@ -15,8 +15,9 @@
 //   * ⚠️ 토큰(INSTAGRAM_ACCESS_TOKEN)은 서버에서만 읽고, 로그·에러 메시지·화면
 //     어디에도 값이 실리지 않게 합니다. 밖으로 나가는 문자열은 redact() 를 한 번
 //     통과시킵니다(요청 URL 을 그대로 찍는 코드를 두지 마세요).
-//   * 실패는 throw 합니다 — 알림(슬랙)과 달리 사용자가 직접 누른 동작이라 조용히
-//     넘기면 안 됩니다. 대신 이 기능만 막히고 다른 화면은 그대로입니다.
+//   * 실패는 throw 합니다 — 서버 액션(importInstagramPromotions)이 받아 결과 객체로
+//     바꿔 화면에 안내만 띄웁니다(빨간 서버 오류 없음). 이 기능만 막히고 다른 화면은 그대로입니다.
+//   * 토큰 보관·자동 연장은 lib/instagramToken.ts(DB 우선, 없으면 환경변수).
 //   * 캐시하지 않습니다(누를 때마다 최신 목록).
 //   * 서버 전용 모듈("use server" 아님) — 서버 액션이 import 합니다.
 // =====================================================================
@@ -34,6 +35,28 @@ const TIMEOUT_MS = 8000;
 const NOT_CONFIGURED =
   "인스타그램 가져오기가 아직 설정되지 않았습니다. 관리자에게 문의해 주세요.";
 const FAILED = "인스타그램 연결에 문제가 있습니다. 관리자에게 문의해 주세요.";
+// 토큰 만료·폐기(OAuthException code 190 등) — 화면에는 이 문구만 보입니다(2026-11).
+export const INSTAGRAM_EXPIRED =
+  "인스타그램 연결이 만료되었습니다. 관리자에게 알려 주세요";
+
+// 토큰 문제(만료·폐기·권한 없음)로 실패했을 때. 화면은 INSTAGRAM_EXPIRED 만 보여 주고,
+//   reason(redact 통과)은 서버 로그·관장 DM 용입니다.
+export class InstagramTokenError extends Error {
+  constructor(public reason: string) {
+    super(INSTAGRAM_EXPIRED);
+    this.name = "InstagramTokenError";
+  }
+}
+
+// Meta 오류 본문이 '토큰 문제' 인지 — code 190(만료·폐기), 102(세션), 10·200번대(권한),
+//   또는 type OAuthException. 그 밖(429·5xx·네트워크)은 일시 장애로 봅니다.
+export function isTokenErrorBody(body: unknown): boolean {
+  const err = (body as { error?: Record<string, unknown> } | null)?.error;
+  if (!err) return false;
+  const code = Number(err.code);
+  if (code === 190 || code === 102 || code === 10 || (code >= 200 && code < 300)) return true;
+  return err.type === "OAuthException";
+}
 
 export type InstagramMedia = {
   id: string;
@@ -54,10 +77,15 @@ export function isInstagramConfigured(): boolean {
 
 // ⚠️ 밖으로 나가는 모든 문자열의 마지막 방어선 — 토큰 값과 access_token 파라미터를
 //    지웁니다. 로그·에러 메시지 어느 쪽이든 이걸 통과시킨 뒤에 씁니다.
-export function redact(text: string): string {
-  const token = process.env.INSTAGRAM_ACCESS_TOKEN?.trim();
-  const withoutToken = token ? text.split(token).join("***") : text;
-  return withoutToken.replace(/access_token=[^&\s"']+/gi, "access_token=***");
+//    extra 에는 DB 에 보관된 토큰·앱 시크릿처럼 환경변수 밖의 비밀값을 넘깁니다.
+export function redact(text: string, extra: (string | null | undefined)[] = []): string {
+  let out = text;
+  for (const secret of [process.env.INSTAGRAM_ACCESS_TOKEN?.trim(), ...extra]) {
+    if (secret && secret.length >= 8) out = out.split(secret).join("***");
+  }
+  return out
+    .replace(/access_token=[^&\s"']+/gi, "access_token=***")
+    .replace(/client_secret=[^&\s"']+/gi, "client_secret=***");
 }
 
 function toMedia(raw: Record<string, unknown>): InstagramMedia {
@@ -89,16 +117,18 @@ function errorReason(body: unknown, status: number): string {
   return `HTTP ${status}`;
 }
 
-// 최근 게시물 목록. 실패는 throw — 호출부(서버 액션)가 메시지를 그대로 씁니다.
-export async function fetchRecentInstagramMedia(): Promise<InstagramMedia[]> {
-  const token = process.env.INSTAGRAM_ACCESS_TOKEN?.trim();
-  if (!token) throw new Error(NOT_CONFIGURED);
-
-  const url =
-    `${HOST}/${API_VERSION}/me/media` +
-    `?fields=${encodeURIComponent(FIELDS)}` +
-    `&limit=${LIMIT}` +
-    `&access_token=${encodeURIComponent(token)}`;
+// graph.instagram.com GET 공용. 성공하면 본문(JSON), 실패하면 throw —
+//   토큰 문제는 InstagramTokenError, 그 밖은 Error(FAILED + 사유). 메시지는 모두 redact 통과.
+export async function instagramGet(
+  path: string,
+  params: Record<string, string>,
+  token: string,
+  opts: { versioned?: boolean; secrets?: string[] } = {},
+): Promise<Record<string, unknown>> {
+  const qs = new URLSearchParams({ ...params, access_token: token });
+  const base = opts.versioned === false ? HOST : `${HOST}/${API_VERSION}`;
+  const url = `${base}${path}?${qs.toString()}`;
+  const hide = (t: string) => redact(t, [token, ...(opts.secrets ?? [])]);
 
   const ctrl = new AbortController();
   const timer = setTimeout(() => ctrl.abort(), TIMEOUT_MS);
@@ -107,7 +137,7 @@ export async function fetchRecentInstagramMedia(): Promise<InstagramMedia[]> {
     res = await fetch(url, { signal: ctrl.signal, cache: "no-store" });
   } catch (e) {
     // ⚠️ fetch 실패 메시지에 요청 URL 이 섞일 수 있어 반드시 redact 합니다.
-    const reason = redact(e instanceof Error ? e.message : "요청 실패");
+    const reason = hide(e instanceof Error ? e.message : "요청 실패");
     console.warn("[instagram] 요청 실패:", reason);
     throw new Error(`${FAILED} (사유: ${reason})`);
   } finally {
@@ -122,12 +152,28 @@ export async function fetchRecentInstagramMedia(): Promise<InstagramMedia[]> {
   }
 
   if (!res.ok || (body as { error?: unknown } | null)?.error) {
-    const reason = redact(errorReason(body, res.status));
+    const reason = hide(errorReason(body, res.status));
     console.warn("[instagram] 응답 오류:", reason);
+    if (isTokenErrorBody(body)) throw new InstagramTokenError(reason);
     throw new Error(`${FAILED} (사유: ${reason})`);
   }
+  return (body ?? {}) as Record<string, unknown>;
+}
 
-  const data = (body as { data?: unknown } | null)?.data;
+// 최근 게시물 목록. 실패는 throw — 호출부(서버 액션)가 결과 객체로 바꿔 화면에 안내합니다.
+//   token 을 안 주면 환경변수를 씁니다(DB 보관 토큰은 lib/instagramToken 이 골라 넘김).
+export async function fetchRecentInstagramMedia(
+  tokenOverride?: string | null,
+): Promise<InstagramMedia[]> {
+  const token = tokenOverride?.trim() || process.env.INSTAGRAM_ACCESS_TOKEN?.trim();
+  if (!token) throw new Error(NOT_CONFIGURED);
+
+  const body = await instagramGet(
+    "/me/media",
+    { fields: FIELDS, limit: String(LIMIT) },
+    token,
+  );
+  const data = body.data;
   if (!Array.isArray(data)) return [];
   return data
     .map((row) => toMedia(row as Record<string, unknown>))

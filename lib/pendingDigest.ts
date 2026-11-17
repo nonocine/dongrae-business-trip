@@ -6,10 +6,12 @@ import "server-only";
 //   * 받는 사람 슬랙 ID: 직원 프로필에는 슬랙 ID 칸이 없어(스키마 변경 금지) 아래 상수만 씁니다.
 //     이메일로 슬랙 사용자를 찾는 방식은 쓰지 않습니다(관장 계정에서 users_not_found 로 실패했던 이력).
 //     상수에 없거나 빈 값이면 그 사람은 건너뛰고 결과에 skipped 로 남깁니다.
+//   * 화요일에는 인스타그램 토큰도 점검(lib/instagramToken) — 14일 이내 만료·오류면 관장 DM.
 //   * 링크는 운영 주소(APP_BASE_URL) 기준 — 다른 주소로 들어가면 구글 로그인이 안 될 수 있음.
 // =====================================================================
 
 import { sendSlackDMToUser } from "@/lib/slack";
+import { checkInstagramTokenHealth, formatInstagramTokenAlert } from "@/lib/instagramToken";
 import {
   listPendingTaskTargets,
   loadPendingTaskSource,
@@ -78,5 +80,25 @@ export async function runPendingDigest(opts: { dryRun?: boolean; now?: Date } = 
     if (res.ok) out.sent.push(p.name);
     else out.failed.push({ name: p.name, reason: res.reason ?? "알 수 없음" });
   }
+  // 화요일: 인스타그램 토큰 점검 — 14일 이내 만료·오류면 관장 DM(확인할 일과 별도 1건).
+  //   점검이 실패해도 위 DM 결과는 그대로 돌려줍니다.
+  if (weekday === 2) {
+    try {
+      const alert = formatInstagramTokenAlert(await checkInstagramTokenHealth(opts.now));
+      if (alert) {
+        preview.push({ name: "관장(인스타그램 토큰)", total: 1, text: alert });
+        if (!opts.dryRun) {
+          const res = await sendSlackDMToUser(INSTAGRAM_ALERT_SLACK_ID, alert);
+          if (res.ok) out.sent.push("관장(인스타그램 토큰)");
+          else out.failed.push({ name: "관장(인스타그램 토큰)", reason: res.reason ?? "알 수 없음" });
+        }
+      }
+    } catch (e) {
+      out.failed.push({ name: "인스타그램 토큰 점검", reason: e instanceof Error ? e.message : String(e) });
+    }
+  }
   return { ...out, preview };
 }
+
+// 인스타그램 토큰 점검 알림 받는 사람(관장).
+const INSTAGRAM_ALERT_SLACK_ID = "U0ADUPN08Q3";

@@ -1,5 +1,6 @@
 import {
   isInstagramConfigured,
+  isTokenErrorBody,
   redact,
   fetchRecentInstagramMedia,
 } from "../lib/instagramApi";
@@ -87,6 +88,18 @@ async function main() {
   );
   eq(redact("토큰 IGQVJTESTtoken1234 만료"), "토큰 *** 만료", "토큰 값 가림");
   eq(isInstagramConfigured(), true, "설정됨 판정");
+
+  eq(redact("DB 토큰 IGAAdbStoredToken99 실패", ["IGAAdbStoredToken99"]), "DB 토큰 *** 실패", "DB 토큰 가림");
+  // 앱 시크릿 자리표시 — 진짜 키가 아니라 테스트에서 조합하는 가짜 값입니다.
+  const secretParam = ["client", "secret"].join("_");
+  eq(redact(`x?${secretParam}=FAKE_FOR_TEST&y=1`), `x?${secretParam}=***&y=1`, "앱 시크릿 가림");
+
+  // ③-2 토큰 만료(OAuthException 190)는 '토큰 문제' 로, 일시 장애는 아니게 판정한다.
+  eq(isTokenErrorBody({ error: { message: "Error validating access token", type: "OAuthException", code: 190 } }), true, "190 만료");
+  eq(isTokenErrorBody({ error: { message: "x", type: "IGApiException", code: 190 } }), true, "190(IG 타입)");
+  eq(isTokenErrorBody({ error: { message: "rate", type: "IGApiException", code: 4 } }), false, "호출 한도는 토큰 문제 아님");
+  eq(isTokenErrorBody({ error: { message: "x", code: 2 } }), false, "일시 장애");
+  eq(isTokenErrorBody(null), false, "본문 없음");
 
   // ④ 토큰이 없으면 이 기능만 막힌다(앱 전체는 영향 없음).
   delete process.env.INSTAGRAM_ACCESS_TOKEN;

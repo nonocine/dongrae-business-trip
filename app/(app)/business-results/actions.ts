@@ -6,8 +6,12 @@ import { supabaseAdmin } from "@/lib/supabaseAdmin";
 import { kstTodayYmd } from "@/lib/trainings";
 import {
   fetchRecentInstagramMedia,
+  INSTAGRAM_EXPIRED,
+  InstagramTokenError,
   isInstagramConfigured,
+  type InstagramMedia,
 } from "@/lib/instagramApi";
+import { currentInstagramToken } from "@/lib/instagramToken";
 import { fetchNaverBlogFeed } from "@/lib/naverBlogApi";
 import { fetchHomepageNewsFeed } from "@/lib/homepageNewsApi";
 import { kstYmdFromIso, promotionContent } from "@/lib/promotionImport";
@@ -1263,6 +1267,8 @@ export type PromotionImportResult = {
   saved: number;
   skipped: number;
 };
+// 인스타그램 가져오기 실패(토큰 만료 등) — 화면에 message 만 안내합니다.
+export type PromotionImportFailure = { ok: false; message: string };
 
 // 이미 등록된 링크 집합 — 연·월과 무관하게 전체에서 확인합니다.
 //   인스타그램 permalink 든 블로그 link 든 같은 url 컬럼을 보므로, 채널이
@@ -1338,9 +1344,26 @@ async function insertAutoPromotions(
 // 인스타그램 — 최근 게시물 중 아직 등록 안 된 것을 전부 등록합니다.
 //   토큰 미설정·API 오류는 그대로 throw 되어 화면에 안내 문구로 표시됩니다
 //   (다른 기능은 영향 없음).
-export async function importInstagramPromotions(): Promise<PromotionImportResult> {
+//   ★ 2026-11: 인스타그램 쪽 실패는 throw 하지 않고 { ok:false, message } 로 돌려줍니다 —
+//     운영 빌드에서 서버 액션 throw 는 빨간 서버 오류로 가려지기 때문입니다. 토큰 만료·폐기면
+//     "인스타그램 연결이 만료되었습니다…" 안내만 뜹니다. 블로그·보도자료는 종전 그대로.
+export async function importInstagramPromotions(): Promise<
+  PromotionImportResult | PromotionImportFailure
+> {
   const user = await requireUser();
-  const media = await fetchRecentInstagramMedia();
+  let media: InstagramMedia[];
+  try {
+    media = await fetchRecentInstagramMedia(await currentInstagramToken());
+  } catch (e) {
+    if (e instanceof InstagramTokenError) {
+      console.warn("[instagram] 토큰 문제로 가져오기 실패:", e.reason);
+      return { ok: false, message: INSTAGRAM_EXPIRED };
+    }
+    return {
+      ok: false,
+      message: e instanceof Error ? e.message : "인스타그램 게시물을 가져오지 못했습니다.",
+    };
+  }
   return insertAutoPromotions(
     media.map((m) => ({
       url: m.permalink,
