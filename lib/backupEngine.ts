@@ -277,6 +277,8 @@ export const BACKUP_EXCLUDED: Readonly<Record<string, string>> = {
   file_backup_runs: "파일 백업 실행 기록(backup_logs 와 같은 이유)",
   recruitment_scores_backup_v1: "채용 v1.2 점수 임시 백업본(2026-05) — 원본은 recruitment_scores",
   mail_messages_backup_20260901: "메일 정리 전 임시 사본(2026-09-01) — 원본은 mail_messages",
+  // 비밀값 — 백업 파일로 내보내지 않음
+  integration_tokens: "외부 연동 토큰 — 재발급 가능, 백업 금지",
   // 다시 받을 수 있는 캐시
   rental_reservations: "대관 시스템에서 매일 다시 받는 사본(rental-sync Cron)",
   // 실행·발송·접속 기록(로그) — 2026-11 점검

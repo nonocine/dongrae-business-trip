@@ -14,10 +14,14 @@ import "server-only";
 //     못 씁니다 — 만료일은 발급·연장 때 받은 expires_in 으로 DB 에 적어 두고, 유효성은
 //     /me 호출로 확인합니다.
 //   * ⚠️ 토큰 값은 어디에도 출력하지 않습니다. 사유 문자열은 redact 통과.
+//   * DB 의 access_token 칸에는 암호문만 둡니다(직원 주민번호와 같은 lib/credentialCrypto,
+//     CREDENTIAL_MASTER_KEY). 저장·연장은 encryptSecret, 읽기는 decryptSecret.
+//     전환 전 평문 1건은 scripts/instagram-token-setup.ts --encrypt-existing 으로 바꿉니다.
 // =====================================================================
 
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
 import { instagramGet, InstagramTokenError, redact } from "@/lib/instagramApi";
+import { decryptSecret, encryptSecret, looksEncrypted } from "@/lib/credentialCrypto";
 
 const PROVIDER = "instagram";
 const DAY = 24 * 3600 * 1000;
@@ -40,8 +44,17 @@ export async function loadStoredInstagramToken(): Promise<StoredToken | null> {
       .maybeSingle();
     if (error || !data) return null;
     const row = data as StoredToken;
-    return row.access_token?.trim() ? row : null;
-  } catch {
+    const stored = row.access_token?.trim();
+    if (!stored) return null;
+    if (!looksEncrypted(stored)) {
+      // 암호화 전환 전 평문 — 전환 스크립트를 돌릴 때까지만 읽어 줍니다(값은 안 찍음).
+      console.warn("[instagram] DB 토큰이 아직 평문입니다 — --encrypt-existing 으로 암호화하세요.");
+      return row;
+    }
+    return { ...row, access_token: decryptSecret(stored) };
+  } catch (e) {
+    // 복호화 실패(키 불일치 등)면 환경변수로 폴백합니다. 원인 문구에는 값이 없습니다.
+    console.warn("[instagram] DB 토큰 읽기 실패:", e instanceof Error ? e.message : "알 수 없음");
     return null;
   }
 }
@@ -56,7 +69,7 @@ export async function saveInstagramToken(token: string, expiresInSec: number | n
   const now = new Date();
   const { error } = await supabaseAdmin.from("integration_tokens").upsert({
     provider: PROVIDER,
-    access_token: token,
+    access_token: encryptSecret(token),
     expires_at: expiresInSec ? new Date(now.getTime() + expiresInSec * 1000).toISOString() : null,
     refreshed_at: now.toISOString(),
     last_error: null,

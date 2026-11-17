@@ -14,12 +14,16 @@
 //     3) DB(integration_tokens)에 저장 — 앱은 DB 토큰을 먼저 씁니다(배포 없이 즉시 반영)
 //     4) Vercel 운영(Production) 환경변수 INSTAGRAM_ACCESS_TOKEN 교체(rm → add, 민감 변수)
 //        값은 표준입력으로만 넘깁니다(명령줄 인자에 안 실음).
+//   * DB 에는 암호문만 저장합니다(lib/credentialCrypto, CREDENTIAL_MASTER_KEY — .env.local 키가
+//     운영과 같아야 운영에서 풀 수 있음).
+//   * 평문 → 암호문 일회성 전환: ... scripts/instagram-token-setup.ts --encrypt-existing
 //   * Vercel 단계만 다시: node --env-file=.env.local --import tsx scripts/instagram-token-setup.ts --vercel-only
 //   * 이후 연장은 /api/cron/instagram-token 이 50일마다 자동으로 합니다.
 // =====================================================================
 import { execFileSync, spawnSync } from "node:child_process";
 import { createClient } from "@supabase/supabase-js";
 import { instagramGet, InstagramTokenError, redact } from "../lib/instagramApi";
+import { decryptSecret, encryptSecret, looksEncrypted } from "../lib/credentialCrypto";
 
 const VERCEL = "vercel@65.17.0";
 const ENV_NAME = "INSTAGRAM_ACCESS_TOKEN";
@@ -104,7 +108,7 @@ async function main() {
   const now = new Date();
   const { error } = await db.from("integration_tokens").upsert({
     provider: "instagram",
-    access_token: token,
+    access_token: encryptSecret(token),
     expires_at: new Date(now.getTime() + expiresIn * 1000).toISOString(),
     refreshed_at: now.toISOString(),
     last_error: null,
@@ -157,10 +161,47 @@ async function vercelOnly() {
     .select("access_token")
     .eq("provider", "instagram")
     .maybeSingle();
-  const token = (data as { access_token?: string } | null)?.access_token?.trim();
-  if (error || !token) fail("DB 에 저장된 인스타그램 토큰이 없습니다.");
+  const stored = (data as { access_token?: string } | null)?.access_token?.trim();
+  if (error || !stored) fail("DB 에 저장된 인스타그램 토큰이 없습니다.");
+  const token = looksEncrypted(stored) ? decryptSecret(stored) : stored;
   replaceVercelEnv(token, (t) => redact(t, [token]));
   console.log("완료 — 다음 배포부터 운영 환경변수에도 새 토큰이 반영됩니다.");
 }
 
-(process.argv.includes("--vercel-only") ? vercelOnly() : main()).catch((e) => fail(redact(e instanceof Error ? e.message : String(e))));
+// --encrypt-existing: DB 에 평문으로 남은 토큰 1건을 암호문으로 바꿉니다(일회성).
+//   이미 암호문이면 아무것도 안 합니다. 바꾼 뒤 다시 풀어 원래 값과 같은지 확인합니다.
+async function encryptExisting() {
+  const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
+  const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  if (!url || !key) fail("NEXT_PUBLIC_SUPABASE_URL / SUPABASE_SERVICE_ROLE_KEY 가 없습니다(.env.local 확인).");
+  const db = createClient(url, key, { auth: { persistSession: false } });
+  const { data, error } = await db
+    .from("integration_tokens")
+    .select("provider,access_token");
+  if (error) fail(`읽기 실패: ${error.message}`);
+  let changed = 0;
+  for (const row of (data ?? []) as { provider: string; access_token: string }[]) {
+    const plain = row.access_token?.trim();
+    if (!plain || looksEncrypted(plain)) {
+      console.log(`· ${row.provider}: 이미 암호문 — 건너뜀`);
+      continue;
+    }
+    const enc = encryptSecret(plain);
+    if (decryptSecret(enc) !== plain) fail(`${row.provider}: 암호화 검증 실패 — 바꾸지 않았습니다.`);
+    const { error: upErr } = await db
+      .from("integration_tokens")
+      .update({ access_token: enc, updated_at: new Date().toISOString() })
+      .eq("provider", row.provider)
+      .eq("access_token", row.access_token); // 그 사이 Cron 이 바꿨으면 덮어쓰지 않음
+    if (upErr) fail(`${row.provider}: 저장 실패 — ${redact(upErr.message, [plain])}`);
+    changed++;
+    console.log(`✔ ${row.provider}: 평문 → 암호문 전환`);
+  }
+  console.log(`완료 — ${changed}건 전환`);
+}
+
+(process.argv.includes("--encrypt-existing")
+  ? encryptExisting()
+  : process.argv.includes("--vercel-only")
+    ? vercelOnly()
+    : main()).catch((e) => fail(redact(e instanceof Error ? e.message : String(e))));
