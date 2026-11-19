@@ -128,6 +128,7 @@ export const BACKUP_TABLES: readonly string[] = [
   "business_programs",
   "business_promotions",
   "business_program_rental_links", // ③ 사업 ↔ 대관 프로그램 연결
+  "business_program_name_exclusions", // 직접 입력 이름 '프로그램 아님' 표시(2026-11)
   "report_rooms",
   "coin_pay_results",
   // --- 공용 메일함 ---

@@ -33,6 +33,7 @@ import {
 import CoinPayTab from "./CoinPayTab";
 import DetailRowsEditor from "./DetailRowsEditor";
 import ProgramRegistryManager from "./ProgramRegistryManager";
+import ProgramAdminTab from "./ProgramAdminTab";
 import StaffTrainingTab from "./StaffTrainingTab";
 import ProgramResultForm, { type CarryOver } from "./ProgramResultForm";
 import { fmtKstDateTime } from "@/lib/datetime";
@@ -46,7 +47,8 @@ type Tab =
   | "coinpay"
   | "onna"
   | "trainings"
-  | "report";
+  | "report"
+  | "registry";
 // key 는 저장·집계와 무관한 화면 상태값이라 라벨만 바꿔도 안전하다.
 //   ("사업실적 입력" → "청소년 활동" 은 라벨 변경일 뿐 key 는 programs 그대로)
 type ProgramView = "input" | "list";
@@ -59,8 +61,12 @@ const tabs: TabItem<Tab>[] = [
   { key: "onna", label: "온나", icon: "house" },
   { key: "trainings", label: "종사자 교육", icon: "presentation" },
   { key: "report", label: "종합보고서", icon: "fileText" },
+  // 프로그램(세부사업) 등록·관리 — 관리자(관장·master)에게만 보입니다.
+  //   주소 키는 registry(?tab=registry). ?tab=programs 는 이미 '청소년 활동'이
+  //   쓰고 있어 옛 링크가 깨지지 않게 다른 키를 씁니다.
+  { key: "registry", label: "프로그램 관리", icon: "layers" },
 ];
-const TAB_KEYS: readonly Tab[] = tabs.map((t) => t.key);
+const ADMIN_TABS: readonly Tab[] = ["registry"];
 // 홍보 채널(구분). 자동 수집(인스타그램="SNS", 블로그="블로그")도 여기 있는
 //   값만 씁니다 — 채널이 늘어도 새 구분값을 만들지 않습니다.
 //   * "카카오"는 카카오톡 채널 발송 건수를 담당자가 수기로 입력하는 칸입니다.
@@ -179,8 +185,13 @@ export default function BusinessResultsDashboard({
 }) {
   const router = useRouter();
   // 화면 탭(주소 ?tab=) — 새로 고침·링크·뒤로가기에도 보던 탭이 남게(화면 탭 정리 2단계).
+  const visibleTabs = useMemo(
+    () => tabs.filter((t) => data.isAdmin || !ADMIN_TABS.includes(t.key)),
+    [data.isAdmin],
+  );
+  const visibleKeys = useMemo(() => visibleTabs.map((t) => t.key), [visibleTabs]);
   const { value: tab, select: setTab } = useUrlTab<Tab>({
-    keys: TAB_KEYS,
+    keys: visibleKeys,
     defaultKey: "overview",
   });
   // 청소년 활동 탭 안 하위 탭(?sub=) — 입력 폼 아래로 그 달 실적 목록이 길게 붙어,
@@ -193,6 +204,8 @@ export default function BusinessResultsDashboard({
   const [notice, setNotice] = useState<{ ok: boolean; text: string } | null>(
     null,
   );
+  // '목록에 없음 → 직접 입력' 으로 저장한 이름 — 프로그램 관리 등록 안내.
+  const [unregName, setUnregName] = useState<string | null>(null);
   const [editing, setEditing] = useState<BusinessResult | null>(null);
   // 홍보·대외협력 수정 대상(폼 프리필). 저장·취소 시 null 로 되돌립니다.
   const [editingPromo, setEditingPromo] = useState<PromotionResult | null>(null);
@@ -642,11 +655,45 @@ export default function BusinessResultsDashboard({
           </div>
         </div>
       </section>
-      <Tabs ariaLabel="사업실적 메뉴" value={tab} onChange={setTab} items={tabs} />
+      <Tabs
+        ariaLabel="사업실적 메뉴"
+        value={tab}
+        onChange={setTab}
+        items={visibleTabs}
+      />
       {notice && (
         <p className={notice.ok ? noticeSuccess : noticeError}>
           {notice.text}
         </p>
+      )}
+      {unregName && tab === "programs" && (
+        <div className="flex flex-wrap items-center gap-2 rounded-lg border border-warning/40 bg-warning-soft px-3 py-2 text-sm text-ink-body">
+          <span>
+            &lsquo;{unregName}&rsquo;은(는) 등록된 프로그램 목록에 없는 이름입니다.{" "}
+            {data.isAdmin
+              ? "프로그램 관리에 등록하시겠습니까?"
+              : "자주 쓰는 사업이면 관장님께 프로그램 등록을 요청해 주세요."}
+          </span>
+          {data.isAdmin && (
+            <button
+              type="button"
+              className="rounded-lg border border-line bg-card px-3 py-1 text-xs font-bold text-navy hover:bg-navy-soft"
+              onClick={() => {
+                setUnregName(null);
+                setTab("registry");
+              }}
+            >
+              프로그램 관리로 이동
+            </button>
+          )}
+          <button
+            type="button"
+            className="ml-auto text-xs text-ink-muted hover:underline"
+            onClick={() => setUnregName(null)}
+          >
+            닫기
+          </button>
+        </div>
       )}
       {tab === "overview" && (
         <div className="space-y-4">
@@ -1017,11 +1064,14 @@ export default function BusinessResultsDashboard({
               onSaved={(text) => {
                 const wasEditing = !!editing;
                 setEditing(null);
+                setUnregName(null);
                 setNotice({ ok: true, text });
                 if (wasEditing) setProgramView("list");
               }}
+              onUnregisteredSaved={setUnregName}
               onSavedAndNext={(carry) => {
                 setEditing(null);
+                setUnregName(null);
                 setCarryOver(carry);
                 setNewFormSeq((n) => n + 1);
                 setNotice({
@@ -1141,12 +1191,16 @@ export default function BusinessResultsDashboard({
               ))}
             </div>
           </section>
-          {data.isAdmin && programView === "list" && (
-            <ProgramRegistryManager
-              registry={data.registry}
-              rentalLinks={data.rentalLinks ?? []}
-            />
-          )}
+        </div>
+      )}
+      {tab === "registry" && data.isAdmin && (
+        <div className="space-y-4">
+          <ProgramAdminTab />
+          {/* 분야 추가·이름변경, 표시순서, 대관 연결 설정(종전 '사업 등록 관리'). */}
+          <ProgramRegistryManager
+            registry={data.registry}
+            rentalLinks={data.rentalLinks ?? []}
+          />
         </div>
       )}
       {tab === "promotions" && (

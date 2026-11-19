@@ -73,6 +73,7 @@ export default function ProgramResultForm({
   onCancel,
   onSaved,
   onSavedAndNext,
+  onUnregisteredSaved,
 }: {
   year: number;
   month: number;
@@ -82,6 +83,9 @@ export default function ProgramResultForm({
   onCancel: () => void;
   onSaved: (message: string) => void;
   onSavedAndNext: (carry: CarryOver) => void;
+  // '직접 입력'(등록 목록에 없는 이름)으로 저장했을 때 — 화면이 프로그램 관리
+  //   등록 안내를 띄웁니다.
+  onUnregisteredSaved?: (name: string) => void;
 }) {
   const router = useRouter();
   const [pending, start] = useTransition();
@@ -106,10 +110,15 @@ export default function ProgramResultForm({
     () => registry.categories.find((c) => c.name === category)?.id ?? "",
     [registry.categories, category],
   );
+  // 사용 중인 등록 프로그램만, 고른 분야 안에서. 수정 중인 실적에 이미 연결된
+  //   프로그램은 (사용 중지됐거나, 직접 입력 정리로 연결돼 실적의 분야 글자와
+  //   프로그램 분야가 달라도) 목록에 함께 둡니다 — 안 그러면 선택이 빈칸으로 보입니다.
   const programOptions = useMemo(
     () =>
       registry.programs.filter(
-        (p) => p.category_id === categoryId && (p.is_active || p.id === editing?.program_id),
+        (p) =>
+          p.id === editing?.program_id ||
+          (p.category_id === categoryId && p.is_active),
       ),
     [registry.programs, categoryId, editing?.program_id],
   );
@@ -177,6 +186,9 @@ export default function ProgramResultForm({
         } else {
           onSaved("저장했습니다.");
         }
+        // 안내는 저장 알림 뒤에 — 저장 알림이 안내를 지우므로 순서가 중요합니다.
+        if (useRegistry && programChoice === CUSTOM && customName.trim())
+          onUnregisteredSaved?.(customName.trim());
         router.refresh();
       } catch (err) {
         setError(err instanceof Error ? err.message : "저장하지 못했습니다.");
@@ -251,7 +263,7 @@ export default function ProgramResultForm({
                 {p.name}
               </option>
             ))}
-            <option value={CUSTOM}>직접 입력</option>
+            <option value={CUSTOM}>목록에 없음 → 직접 입력</option>
           </select>
         ) : (
           <input

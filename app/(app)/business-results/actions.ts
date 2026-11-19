@@ -39,6 +39,7 @@ import {
   type RentalSnapshot,
 } from "@/lib/businessRentalSync";
 import { RENTAL_TABLE } from "@/lib/rental";
+import { insertProgramRow, updateProgramRow } from "@/lib/businessProgramAdmin";
 
 
 export type BusinessResult = {
@@ -481,6 +482,16 @@ export async function saveBusinessResult(
           )
         )
           patch.manual_override = true;
+      } else if (
+        prev &&
+        programId &&
+        prev.program_id === programId &&
+        typeof prev.program_name === "string" &&
+        prev.program_name
+      ) {
+        // 같은 등록 프로그램 그대로 다시 저장 — 그 뒤 프로그램 이름이 바뀌었어도
+        //   이 실적의 '당시 이름'은 바꾸지 않습니다(이름 변경이 과거 행에 번지지 않게).
+        patch.program_name = prev.program_name;
       }
 
       const saved = await writeBusinessResultRow(id, patch);
@@ -1181,21 +1192,9 @@ export async function createBusinessProgram(
 ): Promise<ActionResult> {
   try {
     await requireAdmin();
-    const nm = name.trim();
-    if (!categoryId) return { ok: false, message: "분야를 선택하세요." };
-    if (!nm) return { ok: false, message: "사업명을 입력하세요." };
-    const { data: rows } = await supabaseAdmin
-      .from("business_programs")
-      .select("sort_order")
-      .eq("category_id", categoryId);
-    const max = (rows ?? []).reduce(
-      (m, r) => Math.max(m, Number((r as { sort_order: unknown }).sort_order)),
-      0,
-    );
-    const { error } = await supabaseAdmin
-      .from("business_programs")
-      .insert({ category_id: categoryId, name: nm, sort_order: max + 1 });
-    if (error) throw new Error(error.message);
+    // 같은 분야 이름 중복(공백·따옴표 무시) 검사는 [프로그램 관리] 탭과 같은 경로.
+    const res = await insertProgramRow({ category_id: categoryId, name });
+    if ("error" in res) return { ok: false, message: res.error };
     revalidatePath("/business-results");
     return { ok: true };
   } catch (e) {
@@ -1210,23 +1209,10 @@ export async function updateBusinessProgram(
   try {
     await requireAdmin();
     if (!id) return { ok: false, message: "대상이 없습니다." };
-    const row: Record<string, unknown> = {};
-    if (patch.name !== undefined) {
-      const nm = patch.name.trim();
-      if (!nm) return { ok: false, message: "사업명을 입력하세요." };
-      row.name = nm;
-    }
-    if (patch.sort_order !== undefined) row.sort_order = patch.sort_order;
-    if (patch.is_active !== undefined) row.is_active = patch.is_active;
-    const { data, error } = await supabaseAdmin
-      .from("business_programs")
-      .update(row)
-      .eq("id", id)
-      .select("id")
-      .maybeSingle();
-    if (error) throw new Error(error.message);
-    if (!data)
-      return { ok: false, message: "사업을 찾을 수 없습니다. 화면을 새로 고쳐주세요." };
+    // 이름을 바꾸면 예전 이름이 다른 이름(aliases)에 자동으로 남습니다
+    //   (과거 실적의 당시 이름은 business_results.program_name 에 그대로).
+    const message = await updateProgramRow(id, patch);
+    if (message) return { ok: false, message };
     revalidatePath("/business-results");
     return { ok: true };
   } catch (e) {

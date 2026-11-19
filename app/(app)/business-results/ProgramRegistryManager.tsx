@@ -168,7 +168,7 @@ export default function ProgramRegistryManager({
     <section className={cardCls}>
       <div className="flex items-center justify-between gap-3">
         <div>
-          <h3 className="font-bold text-ink">사업 등록 관리</h3>
+          <h3 className="font-bold text-ink">분야·표시순서·대관 연결 설정</h3>
           <p className="mt-1 text-xs text-ink-muted">
             분야 {registry.categories.length}개 · 사업{" "}
             {registry.programs.length}개 (관리자 전용)
