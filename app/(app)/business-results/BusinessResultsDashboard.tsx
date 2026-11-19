@@ -61,7 +61,7 @@ const tabs: TabItem<Tab>[] = [
   { key: "onna", label: "온나", icon: "house" },
   { key: "trainings", label: "종사자 교육", icon: "presentation" },
   { key: "report", label: "종합보고서", icon: "fileText" },
-  // 프로그램(세부사업) 등록·관리 — 관리자(관장·master)에게만 보입니다.
+  // 프로그램(세부사업) 등록·관리 — 관장·부장·master·business_admin 직무에게만.
   //   주소 키는 registry(?tab=registry). ?tab=programs 는 이미 '청소년 활동'이
   //   쓰고 있어 옛 링크가 깨지지 않게 다른 키를 씁니다.
   { key: "registry", label: "프로그램 관리", icon: "layers" },
@@ -186,8 +186,9 @@ export default function BusinessResultsDashboard({
   const router = useRouter();
   // 화면 탭(주소 ?tab=) — 새로 고침·링크·뒤로가기에도 보던 탭이 남게(화면 탭 정리 2단계).
   const visibleTabs = useMemo(
-    () => tabs.filter((t) => data.isAdmin || !ADMIN_TABS.includes(t.key)),
-    [data.isAdmin],
+    () =>
+      tabs.filter((t) => data.canManagePrograms || !ADMIN_TABS.includes(t.key)),
+    [data.canManagePrograms],
   );
   const visibleKeys = useMemo(() => visibleTabs.map((t) => t.key), [visibleTabs]);
   const { value: tab, select: setTab } = useUrlTab<Tab>({
@@ -670,11 +671,11 @@ export default function BusinessResultsDashboard({
         <div className="flex flex-wrap items-center gap-2 rounded-lg border border-warning/40 bg-warning-soft px-3 py-2 text-sm text-ink-body">
           <span>
             &lsquo;{unregName}&rsquo;은(는) 등록된 프로그램 목록에 없는 이름입니다.{" "}
-            {data.isAdmin
+            {data.canManagePrograms
               ? "프로그램 관리에 등록하시겠습니까?"
-              : "자주 쓰는 사업이면 관장님께 프로그램 등록을 요청해 주세요."}
+              : "프로그램 관리 담당자(관장·부장·김혜지 팀장)에게 등록을 요청하세요."}
           </span>
-          {data.isAdmin && (
+          {data.canManagePrograms && (
             <button
               type="button"
               className="rounded-lg border border-line bg-card px-3 py-1 text-xs font-bold text-navy hover:bg-navy-soft"
@@ -1193,7 +1194,7 @@ export default function BusinessResultsDashboard({
           </section>
         </div>
       )}
-      {tab === "registry" && data.isAdmin && (
+      {tab === "registry" && data.canManagePrograms && (
         <div className="space-y-4">
           <ProgramAdminTab />
           {/* 분야 추가·이름변경, 표시순서, 대관 연결 설정(종전 '사업 등록 관리'). */}

@@ -171,7 +171,7 @@ export default function ProgramRegistryManager({
           <h3 className="font-bold text-ink">분야·표시순서·대관 연결 설정</h3>
           <p className="mt-1 text-xs text-ink-muted">
             분야 {registry.categories.length}개 · 사업{" "}
-            {registry.programs.length}개 (관리자 전용)
+            {registry.programs.length}개 (프로그램 관리 담당자 전용)
           </p>
         </div>
         <button

@@ -41,6 +41,13 @@ export const EMPLOYEE_ROLES: EmployeeRole[] = [
     description: "학생·보호자 관리(동래방카)",
   },
   {
+    // 사업실적 [프로그램 관리] 탭·분야/대관 연결 설정(lib/businessProgramAccess).
+    //   관장·부장(M0)·master 는 이 행 없이도 자동 포함. 부여는 DB 에서 직접.
+    key: "business_admin",
+    label: "사업실적 프로그램 관리",
+    description: "사업실적 프로그램 등록·수정·미등록 이름 정리·분야/대관 연결 설정",
+  },
+  {
     // 다른 직원의 인사 파일(인사기록·계약·급여·연가·증명서·의무교육 개인별) 열람.
     //   관장·부장은 이 행 없이도 자동 포함(lib/personnel.ts). hr·회계 직무와 별개.
     key: "personnel",

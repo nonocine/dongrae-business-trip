@@ -1,6 +1,6 @@
 "use client";
 
-// 사업실적 [프로그램 관리] 탭 (?tab=registry, 관리자 전용 — 관장·master).
+// 사업실적 [프로그램 관리] 탭 (?tab=registry, 관장·부장·master·business_admin 직무 — lib/businessProgramAccess).
 //   1) 프로그램 목록 — 분야별 묶음, 이름·담당자·다른 이름·사용 여부·올해 실적 건수,
 //      대관 연결(읽기 전용 요약). 새 등록 / 수정 / 사용 중지(삭제 없음).
 //   2) 미등록 이름 정리 — program_id 없이 직접 입력된 실적 이름을 묶어(공백·따옴표

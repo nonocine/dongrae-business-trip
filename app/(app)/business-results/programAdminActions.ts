@@ -1,10 +1,11 @@
 "use server";
 
 // 사업실적 [프로그램 관리] 탭 서버 액션.
-//   권한 — 기존 '사업 등록 관리'(분야·사업 설정)와 같습니다: isManagerAdmin
-//   (구글 로그인 관장 또는 master). 오류는 throw 하지 않고 { ok:false } 로 돌려줍니다.
+//   권한 — 분야·사업 설정과 같습니다: 관장·부장 등 M0 · master · business_admin 직무
+//   (lib/businessProgramAccess). 오류는 throw 하지 않고 { ok:false } 로 돌려줍니다.
 import { revalidatePath } from "next/cache";
-import { getSession, isManagerAdmin } from "@/app/actions";
+import { getSession } from "@/app/actions";
+import { canManageBusinessPrograms } from "@/lib/businessProgramAccess";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
 import { kstTodayYmd } from "@/lib/trainings";
 import { programNameKey } from "@/lib/businessProgramNames";
@@ -23,8 +24,8 @@ type Result<T = object> = ({ ok: true } & T) | Fail;
 async function requireAdmin() {
   const session = await getSession();
   if (!session) throw new Error("로그인이 필요합니다.");
-  if (!(await isManagerAdmin()))
-    throw new Error("관리자(관장)만 사용할 수 있습니다.");
+  if (!(await canManageBusinessPrograms()))
+    throw new Error("프로그램 관리 권한이 없습니다.");
   return session;
 }
 

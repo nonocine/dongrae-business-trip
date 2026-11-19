@@ -40,6 +40,7 @@ import {
 } from "@/lib/businessRentalSync";
 import { RENTAL_TABLE } from "@/lib/rental";
 import { insertProgramRow, updateProgramRow } from "@/lib/businessProgramAdmin";
+import { canManageBusinessPrograms } from "@/lib/businessProgramAccess";
 
 
 export type BusinessResult = {
@@ -168,6 +169,8 @@ export type StaffTrainingResult = {
 export type BusinessResultsData = {
   configured: boolean;
   isAdmin: boolean;
+  // 프로그램 관리 탭·분야/대관 연결 설정 — 관장·부장·master·business_admin 직무.
+  canManagePrograms: boolean;
   results: BusinessResult[];
   promotions: PromotionResult[];
   registry: ProgramRegistry;
@@ -210,10 +213,12 @@ async function requireUser() {
   };
 }
 
-// 레지스트리 관리(분야·사업 등록/수정)는 관리자 세션 전용.
-async function requireAdmin() {
+// 레지스트리 관리(분야·사업 등록/수정)·대관 연결 — 프로그램 관리 권한
+//   (관장·부장 등 M0 · master · business_admin 직무, lib/businessProgramAccess).
+async function requireProgramManager() {
   const user = await requireUser();
-  if (!user.isAdmin) throw new Error("관리자만 사용할 수 있습니다.");
+  if (!(await canManageBusinessPrograms()))
+    throw new Error("프로그램 관리 권한이 없습니다.");
   return user;
 }
 
@@ -327,6 +332,7 @@ export async function getBusinessResultsData(
     return {
       configured: false,
       isAdmin: false,
+      canManagePrograms: false,
       results: [],
       promotions: [],
       registry: EMPTY_REGISTRY,
@@ -338,7 +344,10 @@ export async function getBusinessResultsData(
       staffTrainingConfigured: false,
       staffTrainings: [],
     };
-  const isAdmin = await isManagerAdmin();
+  const [isAdmin, canManagePrograms] = await Promise.all([
+    isManagerAdmin(),
+    canManageBusinessPrograms(),
+  ]);
 
   const [rows, registry, coinPay, staff] =
     await Promise.all([
@@ -352,6 +361,7 @@ export async function getBusinessResultsData(
     return {
       configured: false,
       isAdmin,
+      canManagePrograms,
       results: [],
       promotions: [],
       registry,
@@ -367,12 +377,13 @@ export async function getBusinessResultsData(
   const results = rows.results;
   const [detailData, rentalLinks] = await Promise.all([
     loadDetails(results.map((r) => r.id)),
-    isAdmin ? loadRentalLinks() : Promise.resolve([] as RentalLink[]),
+    canManagePrograms ? loadRentalLinks() : Promise.resolve([] as RentalLink[]),
   ]);
 
   return {
     configured: true,
     isAdmin,
+    canManagePrograms,
     results,
     promotions: rows.promotions,
     registry,
@@ -1134,7 +1145,7 @@ export async function createBusinessCategory(
   name: string,
 ): Promise<ActionResult> {
   try {
-    await requireAdmin();
+    await requireProgramManager();
     const nm = name.trim();
     if (!nm) return { ok: false, message: "분야명을 입력하세요." };
     const { data: rows } = await supabaseAdmin
@@ -1160,7 +1171,7 @@ export async function updateBusinessCategory(
   patch: { name?: string; sort_order?: number; is_active?: boolean },
 ): Promise<ActionResult> {
   try {
-    await requireAdmin();
+    await requireProgramManager();
     if (!id) return { ok: false, message: "대상이 없습니다." };
     const row: Record<string, unknown> = {};
     if (patch.name !== undefined) {
@@ -1191,7 +1202,7 @@ export async function createBusinessProgram(
   name: string,
 ): Promise<ActionResult> {
   try {
-    await requireAdmin();
+    await requireProgramManager();
     // 같은 분야 이름 중복(공백·따옴표 무시) 검사는 [프로그램 관리] 탭과 같은 경로.
     const res = await insertProgramRow({ category_id: categoryId, name });
     if ("error" in res) return { ok: false, message: res.error };
@@ -1207,7 +1218,7 @@ export async function updateBusinessProgram(
   patch: { name?: string; sort_order?: number; is_active?: boolean },
 ): Promise<ActionResult> {
   try {
-    await requireAdmin();
+    await requireProgramManager();
     if (!id) return { ok: false, message: "대상이 없습니다." };
     // 이름을 바꾸면 예전 이름이 다른 이름(aliases)에 자동으로 남습니다
     //   (과거 실적의 당시 이름은 business_results.program_name 에 그대로).
@@ -1552,7 +1563,7 @@ export async function loadRentalProgramOptions(): Promise<
   { ok: true; options: RentalProgramOption[] } | { ok: false; message: string }
 > {
   try {
-    await requireAdmin();
+    await requireProgramManager();
     const today = kstTodayYmd();
     const [y, m] = today.split("-").map(Number);
     const from = new Date(Date.UTC(y, m - 1 - 6, 1)).toISOString().slice(0, 10);
@@ -1611,7 +1622,7 @@ export async function createRentalLink(input: {
   start_month: string; // "YYYY-MM"
 }): Promise<ActionResult> {
   try {
-    const user = await requireAdmin();
+    const user = await requireProgramManager();
     const name = input.rental_program_name.trim();
     if (!input.program_id) return { ok: false, message: "사업이 없습니다." };
     if (!name) return { ok: false, message: "대관 프로그램을 선택하세요." };
@@ -1646,7 +1657,7 @@ export async function updateRentalLink(
   patch: { is_active: boolean },
 ): Promise<ActionResult> {
   try {
-    await requireAdmin();
+    await requireProgramManager();
     const { data, error } = await supabaseAdmin
       .from(RENTAL_LINK_TABLE)
       .update({
@@ -1673,7 +1684,7 @@ export async function updateRentalLink(
 //   일반 행처럼 삭제할 수 있게 됩니다 — deleteBusinessResult 참고).
 export async function deleteRentalLink(id: string): Promise<ActionResult> {
   try {
-    await requireAdmin();
+    await requireProgramManager();
     const { data, error } = await supabaseAdmin
       .from(RENTAL_LINK_TABLE)
       .delete()
