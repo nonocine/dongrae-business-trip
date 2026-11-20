@@ -10,7 +10,13 @@ import {
   monthRangeLabel,
   programNameKey,
 } from "@/lib/businessProgramNames";
-import { RENTAL_LINK_TABLE, type RentalLink } from "@/lib/businessRentalSync";
+import {
+  parseRentalSourceKey,
+  RENTAL_LINK_TABLE,
+  RENTAL_SOURCE_TYPE,
+  syncRentalToBusinessResults,
+  type RentalLink,
+} from "@/lib/businessRentalSync";
 
 export const EXCLUSION_TABLE = "business_program_name_exclusions";
 
@@ -409,4 +415,240 @@ export async function linkUnregisteredRows(
     .select("id");
   if (error) throw new Error(error.message);
   return (data ?? []).length;
+}
+
+// =====================================================================
+// 다른 프로그램과 합치기 (김혜지 팀장 요청 2026-11)
+//   남길 프로그램 1개 + 합쳐질 프로그램 → 합쳐질 프로그램의
+//     · 실적(business_results.program_id) 과 대관 연결(business_program_rental_links)
+//       을 남길 프로그램으로 옮기고
+//     · 이름(과 다른 이름)을 남길 프로그램 aliases 에 더하고
+//     · 사용 중지합니다.
+//   실적 숫자·당시 이름(program_name)·분야 글자는 건드리지 않습니다.
+//   같은 달에 남길 프로그램 실적 행이 2개 이상 되면
+//     · 자동(대관) 행 — 그 연결·그 달을 다시 계산(syncRentalToBusinessResults).
+//       제출됐거나 사람이 고친 자동 행은 동기화 규칙대로 숫자를 지키고 경고합니다.
+//     · 수기 행 — 그대로 두고 경고.
+// =====================================================================
+
+export type MergeRowInfo = {
+  id: string;
+  report_year: number;
+  report_month: number;
+  source_type: string | null;
+  source_key: string | null;
+  status: string | null;
+  manual_override: boolean | null;
+  moved: boolean; // 합쳐질 프로그램에서 옮겨 온 행
+};
+
+export type MergeDuplicatePlan = {
+  // 다시 계산할 자동 행(연결·연·월).
+  resync: { linkId: string; year: number; month: number }[];
+  // 사람이 봐야 하는 달 — 화면 경고용 문장.
+  warnings: string[];
+  // 행이 2개 이상인 달 수.
+  duplicateMonths: number;
+};
+
+// 합친 뒤(남길 프로그램 기준) 행 목록 → 같은 달 중복 처리 계획. 순수 함수.
+//   옮겨 온 행이 끼어 있는 달만 봅니다(원래부터 남길 프로그램에 있던 중복은 이번 작업과 무관).
+export function planMergeDuplicates(rows: MergeRowInfo[]): MergeDuplicatePlan {
+  const byMonth = new Map<string, MergeRowInfo[]>();
+  for (const r of rows) {
+    const k = `${r.report_year}-${String(r.report_month).padStart(2, "0")}`;
+    const list = byMonth.get(k) ?? [];
+    list.push(r);
+    byMonth.set(k, list);
+  }
+  const plan: MergeDuplicatePlan = { resync: [], warnings: [], duplicateMonths: 0 };
+  const seen = new Set<string>();
+  for (const [ym, list] of [...byMonth].sort(([a], [b]) => a.localeCompare(b))) {
+    if (list.length < 2 || !list.some((r) => r.moved)) continue;
+    plan.duplicateMonths += 1;
+    const [y, m] = ym.split("-").map(Number);
+    let manual = 0;
+    let locked = 0;
+    for (const r of list) {
+      if (r.source_type === RENTAL_SOURCE_TYPE) {
+        const parsed = parseRentalSourceKey(r.source_key);
+        if (parsed) {
+          const key = `${parsed.linkId}:${parsed.year}-${parsed.month}`;
+          if (!seen.has(key)) {
+            seen.add(key);
+            plan.resync.push(parsed);
+          }
+        }
+        if (r.status === "submitted" || r.manual_override) locked += 1;
+      } else {
+        manual += 1;
+      }
+    }
+    const parts: string[] = [];
+    if (manual > 0) parts.push(`수기 행 ${manual}개(그대로 둠)`);
+    if (locked > 0) parts.push(`제출·수기 수정된 자동 행 ${locked}개(숫자 유지)`);
+    if (parts.length > 0)
+      plan.warnings.push(
+        `${y}년 ${m}월: 실적 행 ${list.length}개 — ${parts.join(", ")}. 중복 여부를 확인해 주세요.`,
+      );
+  }
+  return plan;
+}
+
+export type MergePreview = {
+  keep: { id: string; name: string };
+  merge: { id: string; name: string; resultCount: number; linkCount: number }[];
+  resultCount: number;
+  linkCount: number;
+  duplicateMonths: number;
+  warnings: string[];
+};
+
+const MERGE_ROW_COLS =
+  "id,program_id,report_year,report_month,source_type,source_key,status,manual_override";
+
+async function loadMergeRows(programIds: string[]) {
+  const { rows, error } = await pagedSelect<
+    Omit<MergeRowInfo, "moved"> & { program_id: string }
+  >((a, b) =>
+    supabaseAdmin
+      .from("business_results")
+      .select(MERGE_ROW_COLS)
+      .in("program_id", programIds)
+      .order("id")
+      .range(a, b),
+  );
+  if (error) throw new Error(error.message ?? "실적 조회 실패");
+  return rows;
+}
+
+async function validateMerge(keepId: string, mergeIds: string[]) {
+  const ids = [...new Set(mergeIds.filter(Boolean))];
+  if (!keepId) return { error: "남길 프로그램을 고르세요." } as const;
+  if (ids.length === 0) return { error: "합쳐질 프로그램을 고르세요." } as const;
+  if (ids.includes(keepId))
+    return { error: "남길 프로그램은 합쳐질 프로그램에 넣을 수 없습니다." } as const;
+  const { extended, programs } = await loadAdminPrograms();
+  if (!extended)
+    return {
+      error: "다른 이름 칸이 아직 DB에 없습니다(business_program_admin.sql 적용 필요).",
+    } as const;
+  const keep = programs.find((p) => p.id === keepId);
+  const merge = ids.map((id) => programs.find((p) => p.id === id));
+  if (!keep || merge.some((p) => !p))
+    return { error: "프로그램을 찾을 수 없습니다. 화면을 새로 고쳐주세요." } as const;
+  return { keep, merge: merge as AdminProgram[] } as const;
+}
+
+export async function previewProgramMerge(
+  keepId: string,
+  mergeIds: string[],
+): Promise<MergePreview | { error: string }> {
+  const v = await validateMerge(keepId, mergeIds);
+  if ("error" in v) return { error: v.error as string };
+  const mergeSet = new Set(v.merge.map((p) => p.id));
+  const rows = await loadMergeRows([v.keep.id, ...mergeSet]);
+  const { data: linkData, error: linkError } = await supabaseAdmin
+    .from(RENTAL_LINK_TABLE)
+    .select("id,program_id")
+    .in("program_id", [...mergeSet]);
+  if (linkError && !tableMissing(linkError)) throw new Error(linkError.message);
+  const links = (linkData ?? []) as { id: string; program_id: string }[];
+  const plan = planMergeDuplicates(
+    rows.map((r) => ({ ...r, moved: mergeSet.has(r.program_id) })),
+  );
+  const merge = v.merge.map((p) => ({
+    id: p.id,
+    name: p.name,
+    resultCount: rows.filter((r) => r.program_id === p.id).length,
+    linkCount: links.filter((l) => l.program_id === p.id).length,
+  }));
+  return {
+    keep: { id: v.keep.id, name: v.keep.name },
+    merge,
+    resultCount: merge.reduce((s, m) => s + m.resultCount, 0),
+    linkCount: merge.reduce((s, m) => s + m.linkCount, 0),
+    duplicateMonths: plan.duplicateMonths,
+    warnings: plan.warnings,
+  };
+}
+
+export type MergeResult = {
+  movedResults: number;
+  movedLinks: number;
+  resynced: number;
+  warnings: string[];
+};
+
+export async function mergeProgramRows(
+  keepId: string,
+  mergeIds: string[],
+): Promise<MergeResult | { error: string }> {
+  const v = await validateMerge(keepId, mergeIds);
+  if ("error" in v) return { error: v.error as string };
+  const mergeList = v.merge.map((p) => p.id);
+
+  // 1) 실적 program_id 옮기기 — 숫자·당시 이름은 보내지 않습니다.
+  const { data: moved, error: moveError } = await supabaseAdmin
+    .from("business_results")
+    .update({ program_id: v.keep.id })
+    .in("program_id", mergeList)
+    .select("id");
+  if (moveError) throw new Error(`실적 옮기기 실패: ${moveError.message}`);
+  const movedIds = new Set(((moved ?? []) as { id: string }[]).map((r) => r.id));
+
+  // 2) 대관 연결 옮기기 — 연결 id 가 그대로라 자동 행의 source_key 도 그대로입니다.
+  let movedLinks = 0;
+  const { data: linkRows, error: linkError } = await supabaseAdmin
+    .from(RENTAL_LINK_TABLE)
+    .update({ program_id: v.keep.id, updated_at: new Date().toISOString() })
+    .in("program_id", mergeList)
+    .select("id");
+  if (linkError && !tableMissing(linkError))
+    throw new Error(`대관 연결 옮기기 실패: ${linkError.message}`);
+  movedLinks = (linkRows ?? []).length;
+
+  // 3) 이름 → 남길 프로그램 다른 이름. 합쳐질 프로그램의 다른 이름도 함께 옮깁니다.
+  let aliases = [...v.keep.aliases];
+  for (const p of v.merge)
+    for (const n of [p.name, ...p.aliases])
+      if (!hasSameNameKey([v.keep.name, ...aliases], n)) aliases = [...aliases, n.trim()];
+  const now = new Date().toISOString();
+  const { error: aliasError } = await supabaseAdmin
+    .from("business_programs")
+    .update({ aliases, updated_at: now })
+    .eq("id", v.keep.id);
+  if (aliasError) throw new Error(`다른 이름 저장 실패: ${aliasError.message}`);
+
+  // 4) 합쳐질 프로그램 사용 중지 + 메모.
+  for (const p of v.merge) {
+    const mark = `'${v.keep.name}'(으)로 합침`;
+    const { error } = await supabaseAdmin
+      .from("business_programs")
+      .update({
+        is_active: false,
+        note: p.note ? `${p.note} · ${mark}` : mark,
+        updated_at: now,
+      })
+      .eq("id", p.id);
+    if (error) throw new Error(`사용 중지 실패(${p.name}): ${error.message}`);
+  }
+
+  // 5) 같은 달 중복 — 자동 행 다시 계산, 수기 행은 경고.
+  const rows = await loadMergeRows([v.keep.id]);
+  const plan = planMergeDuplicates(
+    rows.map((r) => ({ ...r, moved: movedIds.has(r.id) })),
+  );
+  const warnings = [...plan.warnings];
+  let resynced = 0;
+  for (const t of plan.resync) {
+    const s = await syncRentalToBusinessResults({
+      year: t.year,
+      month: t.month,
+      linkId: t.linkId,
+    });
+    resynced += 1;
+    for (const e of s.errors) warnings.push(`다시 계산 실패 ${e}`);
+  }
+  return { movedResults: movedIds.size, movedLinks, resynced, warnings };
 }

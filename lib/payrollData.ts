@@ -1,5 +1,5 @@
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
-import type { PayItem, PayrollRecord } from "@/lib/salary";
+import { isPayrollTeam, type PayItem, type PayrollRecord } from "@/lib/salary";
 
 // =====================================================================
 // 월별 급여 레코드 조회 — 화면(monthlyActions.listMonthlyPayroll)과 MCP 가
@@ -36,6 +36,7 @@ export function toPayrollRecord(raw: Record<string, unknown>): PayrollRecord {
     confirmed_at: (raw.confirmed_at as string | null) ?? null,
     confirmed_by: (raw.confirmed_by as string | null) ?? null,
     emailed_at: (raw.emailed_at as string | null) ?? null,
+    team: isPayrollTeam(raw.team) ? raw.team : null,
   };
 }
 

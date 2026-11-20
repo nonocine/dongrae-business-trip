@@ -4,13 +4,15 @@
 //     가족수당·교통보조비·지급총액·갑근세·주민세·국민연금·국민건강·고용보험·
 //     상조회비·공제액·차인지급액·비고.
 //   * 국민건강 열 = health + longterm_care 합산(실제 대장 양식과 동일).
-//   * 그룹: 센터 / 방과후아카데미, 각 그룹 소계 + 맨 아래 총합계.
+//   * 그룹: 센터 / 배치지도사 / 방과후아카데미, 각 그룹 소계 + 맨 아래 총합계.
+//   * 소속별 대장(team 지정)은 그 소속 행만 넘겨받아 같은 양식으로 만듭니다
+//     (제목에 소속 이름만 덧붙임). 행 순서는 넘겨받은 순서 그대로입니다.
 //   * 0원 항목은 빈칸, 천단위 콤마. 초안이면 제목에 "(초안)".
 //   * @/ 별칭·DB 의존 없음 — Route Handler 가 데이터를 만들어 넘깁니다.
 // =====================================================================
 
 import ExcelJS from "exceljs";
-import { type PayItem, type PayrollTeam, TEAM_LABEL } from "./salary";
+import { type PayItem, type PayrollTeam, PAYROLL_TEAMS, TEAM_LABEL } from "./salary";
 
 // 대장 매핑에 필요한 최소 레코드 형태(payroll_records / MonthlyRow 공용).
 type LedgerRecordLike = {
@@ -202,8 +204,13 @@ export async function buildPayrollLedgerWorkbook(input: {
   month: number;
   draft: boolean;
   rows: LedgerRowInput[];
+  // 소속별 대장이면 그 소속 — 제목에 "(센터)" 처럼 붙습니다. 없으면 전체.
+  team?: PayrollTeam | null;
 }): Promise<ArrayBuffer> {
-  const { year, month, draft, rows } = input;
+  const { year, month, draft } = input;
+  const rows = input.team
+    ? input.rows.filter((r) => r.team === input.team)
+    : input.rows;
 
   const wb = new ExcelJS.Workbook();
   wb.creator = "동래구청소년센터";
@@ -212,7 +219,9 @@ export async function buildPayrollLedgerWorkbook(input: {
   });
 
   // 제목.
-  const title = `${draft ? "(초안) " : ""}${year}년 ${month}월 급여대장`;
+  const title = `${draft ? "(초안) " : ""}${year}년 ${month}월 급여대장${
+    input.team ? ` (${TEAM_LABEL[input.team]})` : ""
+  }`;
   const titleRow = ws.addRow([title]);
   titleRow.font = { bold: true, size: 15 };
   titleRow.height = 24;
@@ -265,8 +274,8 @@ export async function buildPayrollLedgerWorkbook(input: {
     void cells;
   };
 
-  // 그룹 순서: 센터 → 방과후아카데미. 있는 그룹만.
-  const teamsOrder: PayrollTeam[] = ["center", "afterschool"];
+  // 그룹 순서: 센터 → 배치지도사 → 방과후아카데미. 있는 그룹만.
+  const teamsOrder: PayrollTeam[] = PAYROLL_TEAMS;
   let seq = 1;
   for (const team of teamsOrder) {
     const teamRows = rows.filter((r) => r.team === team);

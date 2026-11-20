@@ -14,6 +14,10 @@ import {
   insertProgramRow,
   linkUnregisteredRows,
   loadProgramAdminData,
+  mergeProgramRows,
+  previewProgramMerge,
+  type MergePreview,
+  type MergeResult,
   updateProgramRow,
   type ProgramAdminData,
 } from "@/lib/businessProgramAdmin";
@@ -174,5 +178,36 @@ export async function unmarkNotProgram(key: string): Promise<Result> {
     return { ok: true };
   } catch (e) {
     return fail(e, "되돌리지 못했습니다.");
+  }
+}
+
+// 다른 프로그램과 합치기 — 확인창용 건수 미리보기.
+export async function getProgramMergePreview(
+  keepId: string,
+  mergeIds: string[],
+): Promise<Result<{ preview: MergePreview }>> {
+  try {
+    await requireAdmin();
+    const res = await previewProgramMerge(keepId, mergeIds);
+    if ("error" in res) return { ok: false, message: res.error };
+    return { ok: true, preview: res };
+  } catch (e) {
+    return fail(e, "합칠 건수를 확인하지 못했습니다.");
+  }
+}
+
+// 다른 프로그램과 합치기 — 실행.
+export async function mergePrograms(
+  keepId: string,
+  mergeIds: string[],
+): Promise<Result<{ result: MergeResult }>> {
+  try {
+    await requireAdmin();
+    const res = await mergeProgramRows(keepId, mergeIds);
+    if ("error" in res) return { ok: false, message: res.error };
+    revalidatePath("/business-results");
+    return { ok: true, result: res };
+  } catch (e) {
+    return fail(e, "프로그램을 합치지 못했습니다.");
   }
 }

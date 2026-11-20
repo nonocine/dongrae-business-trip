@@ -25,6 +25,8 @@ import {
 import {
   createProgram,
   getProgramAdminData,
+  getProgramMergePreview,
+  mergePrograms,
   linkNamesToProgram,
   markNotProgram,
   registerNamesAsProgram,
@@ -174,6 +176,8 @@ export default function ProgramAdminTab() {
   // 열린 입력 — 새 등록("new") 또는 수정 중인 프로그램 id.
   const [editId, setEditId] = useState<string | null>(null);
   const [form, setForm] = useState<FormState>(emptyForm());
+  // 합치기 패널 — null=닫힘, ""=남길 프로그램 미선택, id=그 프로그램을 남김.
+  const [mergeKeep, setMergeKeep] = useState<string | null>(null);
 
   const reload = useCallback(async () => {
     const res = await getProgramAdminData();
@@ -342,14 +346,24 @@ export default function ProgramAdminTab() {
               입력 목록에서만 숨깁니다(과거 실적 이름은 그대로).
             </p>
           </div>
-          <button
-            type="button"
-            className={btnPrimary}
-            disabled={pending}
-            onClick={openNew}
-          >
-            + 새 프로그램 등록
-          </button>
+          <div className="flex flex-wrap gap-2">
+            <button
+              type="button"
+              className={btnSecondary}
+              disabled={pending}
+              onClick={() => setMergeKeep((v) => (v === null ? "" : null))}
+            >
+              다른 프로그램과 합치기
+            </button>
+            <button
+              type="button"
+              className={btnPrimary}
+              disabled={pending}
+              onClick={openNew}
+            >
+              + 새 프로그램 등록
+            </button>
+          </div>
         </div>
 
         {!data.extended && (
@@ -362,6 +376,16 @@ export default function ProgramAdminTab() {
           <p className={`mt-3 ${msg.ok ? noticeSuccess : noticeError}`}>{msg.text}</p>
         )}
         {editId === "new" && formBox}
+        {mergeKeep !== null && (
+          <MergePanel
+            key={mergeKeep}
+            data={data}
+            initialKeep={mergeKeep}
+            pending={pending}
+            run={run}
+            onClose={() => setMergeKeep(null)}
+          />
+        )}
 
         <div className="mt-3 flex flex-wrap items-center gap-3">
           <input
@@ -443,6 +467,15 @@ export default function ProgramAdminTab() {
                               type="button"
                               className={rowBtn}
                               disabled={pending}
+                              title="이 프로그램을 남기고 다른 프로그램을 합칩니다"
+                              onClick={() => setMergeKeep(p.id)}
+                            >
+                              합치기
+                            </button>
+                            <button
+                              type="button"
+                              className={rowBtn}
+                              disabled={pending}
                               onClick={() => {
                                 if (
                                   p.is_active &&
@@ -478,6 +511,208 @@ export default function ProgramAdminTab() {
       </section>
 
       <UnregisteredNames data={data} pending={pending} run={run} />
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------
+// 다른 프로그램과 합치기
+//   남길 프로그램 1개 + 합쳐질 프로그램(여러 개 가능) → 확인창에 옮겨질 실적·대관 연결
+//   건수를 보여 준 뒤 실행합니다. 실적 숫자·당시 이름은 바뀌지 않습니다.
+// ---------------------------------------------------------------------
+type RunFn = (
+  task: () => Promise<{ ok: true } | { ok: false; message: string }>,
+  okText: string | ((res: Record<string, unknown>) => string),
+  after?: () => void,
+) => void;
+
+function MergePanel({
+  data,
+  initialKeep,
+  pending,
+  run,
+  onClose,
+}: {
+  data: ProgramAdminData;
+  initialKeep: string;
+  pending: boolean;
+  run: RunFn;
+  onClose: () => void;
+}) {
+  const [keep, setKeep] = useState(initialKeep);
+  const [picked, setPicked] = useState<string[]>([]);
+  const [q, setQ] = useState("");
+  const [checking, setChecking] = useState(false);
+  const [error, setError] = useState("");
+  const [warnings, setWarnings] = useState<string[]>([]);
+
+  const nameOf = (id: string) => data.programs.find((p) => p.id === id)?.name ?? "";
+  const candidates = data.programs.filter((p) => {
+    if (p.id === keep) return false;
+    const t = q.trim().toLowerCase();
+    if (!t) return true;
+    return [p.name, ...p.aliases].join(" ").toLowerCase().includes(t);
+  });
+
+  async function submit() {
+    setError("");
+    setWarnings([]);
+    setChecking(true);
+    let preview;
+    try {
+      const res = await getProgramMergePreview(keep, picked);
+      if (!res.ok) {
+        setError(res.message);
+        return;
+      }
+      preview = res.preview;
+    } catch {
+      setError("합칠 건수를 확인하지 못했습니다.");
+      return;
+    } finally {
+      setChecking(false);
+    }
+    const lines = [
+      `'${preview.keep.name}'(남길 프로그램)에 아래 프로그램을 합칩니다.`,
+      "",
+      ...preview.merge.map(
+        (m) => `· ${m.name} — 실적 ${m.resultCount}건 · 대관 연결 ${m.linkCount}건`,
+      ),
+      "",
+      `옮겨질 실적 ${preview.resultCount}건 · 대관 연결 ${preview.linkCount}건`,
+      "합쳐질 프로그램 이름은 다른 이름에 남고, 그 프로그램은 사용 중지됩니다.",
+      "실적 숫자와 당시 이름은 바뀌지 않습니다.",
+    ];
+    if (preview.duplicateMonths > 0)
+      lines.push(
+        "",
+        `⚠ 같은 달 실적 행이 2개 이상 되는 달 ${preview.duplicateMonths}개 — 자동(대관) 행은 다시 계산하고, 수기 행은 그대로 둡니다.`,
+        ...preview.warnings,
+      );
+    if (!confirm(lines.join("\n"))) return;
+    run(
+      async () => {
+        const res = await mergePrograms(keep, picked);
+        if (res.ok) setWarnings(res.result.warnings);
+        return res;
+      },
+      (res) => {
+        const r = (res as { result: { movedResults: number; movedLinks: number; resynced: number } }).result;
+        return `'${preview.keep.name}'(으)로 합쳤습니다 — 실적 ${r.movedResults}건 · 대관 연결 ${r.movedLinks}건 옮김${r.resynced ? ` · 자동 행 ${r.resynced}건 다시 계산` : ""}.`;
+      },
+      () => setPicked([]),
+    );
+  }
+
+  return (
+    <div className="mt-3 rounded-lg border border-navy/30 bg-surface p-3">
+      <div className="flex items-center justify-between gap-2">
+        <p className="text-sm font-bold text-ink">다른 프로그램과 합치기</p>
+        <button type="button" className={rowBtn} onClick={onClose}>
+          닫기
+        </button>
+      </div>
+      <p className="mt-1 text-xs leading-5 text-ink-muted">
+        합쳐질 프로그램의 실적과 대관 연결을 남길 프로그램으로 옮기고, 합쳐질 프로그램은
+        사용 중지합니다. 실적 숫자와 당시 이름은 바뀌지 않습니다.
+      </p>
+      <label className={`${labelCls} mt-3 block`}>
+        남길 프로그램
+        <select
+          className={inputCls}
+          value={keep}
+          onChange={(e) => {
+            setKeep(e.target.value);
+            setPicked((list) => list.filter((id) => id !== e.target.value));
+          }}
+        >
+          <option value="">선택하세요</option>
+          {data.categories.map((c) => (
+            <optgroup key={c.id} label={c.name}>
+              {data.programs
+                .filter((p) => p.category_id === c.id)
+                .map((p) => (
+                  <option key={p.id} value={p.id}>
+                    {p.name}
+                    {p.is_active ? "" : " (사용 중지)"}
+                  </option>
+                ))}
+            </optgroup>
+          ))}
+        </select>
+      </label>
+      <div className="mt-3">
+        <p className={labelCls}>
+          합쳐질 프로그램 {picked.length > 0 && `(${picked.length}개 선택)`}
+        </p>
+        <input
+          className={`${inputCls} mt-1 max-w-xs`}
+          value={q}
+          onChange={(e) => setQ(e.target.value)}
+          placeholder="이름 검색"
+          aria-label="합쳐질 프로그램 검색"
+        />
+        <div className="mt-2 max-h-60 overflow-y-auto rounded border border-line bg-white p-2">
+          {data.categories.map((c) => {
+            const list = candidates.filter((p) => p.category_id === c.id);
+            if (list.length === 0) return null;
+            return (
+              <div key={c.id} className="mb-2">
+                <p className="text-xs font-semibold text-ink-hint">{c.name}</p>
+                {list.map((p) => (
+                  <label key={p.id} className="flex items-center gap-2 py-0.5 text-sm">
+                    <input
+                      type="checkbox"
+                      checked={picked.includes(p.id)}
+                      onChange={(e) =>
+                        setPicked((cur) =>
+                          e.target.checked ? [...cur, p.id] : cur.filter((x) => x !== p.id),
+                        )
+                      }
+                    />
+                    <span className={p.is_active ? "text-ink-body" : "text-ink-hint"}>
+                      {p.name}
+                      {p.is_active ? "" : " (사용 중지)"}
+                    </span>
+                    <span className="text-xs tabular-nums text-ink-hint">
+                      {data.year}년 {data.yearCounts[p.id] ?? 0}건
+                    </span>
+                  </label>
+                ))}
+              </div>
+            );
+          })}
+        </div>
+        {picked.length > 0 && (
+          <p className="mt-1 text-xs text-ink-muted">
+            선택: {picked.map(nameOf).join(", ")}
+          </p>
+        )}
+      </div>
+      {error && <p className={`mt-2 ${noticeError}`}>{error}</p>}
+      {warnings.length > 0 && (
+        <div className={`mt-2 ${noticeWarning}`}>
+          <p className="font-semibold">확인이 필요한 달</p>
+          <ul className="mt-1 list-disc pl-4 text-xs">
+            {warnings.map((w) => (
+              <li key={w}>{w}</li>
+            ))}
+          </ul>
+        </div>
+      )}
+      <div className="mt-3 flex gap-2">
+        <button
+          type="button"
+          className={btnPrimary}
+          disabled={pending || checking || !keep || picked.length === 0 || !data.extended}
+          onClick={submit}
+        >
+          {checking ? "확인 중…" : "합치기"}
+        </button>
+        <button type="button" className={btnSecondary} onClick={onClose}>
+          취소
+        </button>
+      </div>
     </div>
   );
 }

@@ -177,19 +177,29 @@ export type EmployeeSalaryProfileRow = {
   extra: SalaryExtra;
 };
 
-// 급여대장 그룹(팀) — 센터 / 방과후아카데미 2그룹.
-export type PayrollTeam = "center" | "afterschool";
+// 급여대장 그룹(소속) — 센터 / 배치지도사 / 방과후아카데미 3그룹.
+//   * 배치지도사(placement)는 2026-11 김혜지 팀장 요청으로 추가. 기존 저장값
+//     (center·afterschool)은 그대로 유효합니다.
+//   * PAYROLL_TEAMS 순서가 급여대장 그룹 순서입니다.
+export type PayrollTeam = "center" | "placement" | "afterschool";
+export const PAYROLL_TEAMS: PayrollTeam[] = ["center", "placement", "afterschool"];
 export const TEAM_LABEL: Record<PayrollTeam, string> = {
   center: "센터",
+  placement: "배치지도사",
   afterschool: "방과후아카데미",
 };
 export const TEAM_OPTIONS: { value: SalaryTeamValue; label: string }[] = [
   { value: "", label: "자동(이름 기준)" },
   { value: "center", label: "센터" },
+  { value: "placement", label: "배치지도사" },
   { value: "afterschool", label: "방과후아카데미" },
 ];
 // extra.team 저장값 — "" 는 미지정(이름 시드로 자동 분류).
 export type SalaryTeamValue = "" | PayrollTeam;
+
+export function isPayrollTeam(v: unknown): v is PayrollTeam {
+  return v === "center" || v === "placement" || v === "afterschool";
+}
 
 // 팀 시드 — extra.team 미설정 직원의 이름 기반 기본 분류.
 //   실제 2026-07 급여대장 기준 방과후아카데미 인원. 화면에서 extra.team 을
@@ -202,7 +212,7 @@ export function resolveTeam(input: {
   team?: SalaryTeamValue | null;
   name?: string | null;
 }): PayrollTeam {
-  if (input.team === "center" || input.team === "afterschool") return input.team;
+  if (isPayrollTeam(input.team)) return input.team;
   const nm = (input.name ?? "").replace(/\s+/g, "");
   return AFTERSCHOOL_SEED_NAMES.includes(nm) ? "afterschool" : "center";
 }
@@ -218,7 +228,7 @@ export function effectiveTeamValue(
 ): SalaryTeamValue {
   for (const p of profiles) {
     const t = p?.extra?.team;
-    if (t === "center" || t === "afterschool") return t;
+    if (isPayrollTeam(t)) return t;
   }
   return "";
 }
@@ -323,7 +333,7 @@ export function normalizeSalaryExtra(raw: unknown): SalaryExtra {
     longterm_care: num(r.longterm_care),
     employment_ins: num(r.employment_ins),
     // 소속 팀 — 잘못된/없는 값은 ""(미지정)로 보정(하위호환).
-    team: r.team === "center" || r.team === "afterschool" ? r.team : "",
+    team: isPayrollTeam(r.team) ? r.team : "",
   };
 }
 
@@ -528,6 +538,9 @@ export type PayrollRecord = {
   confirmed_at: string | null;
   confirmed_by: string | null;
   emailed_at: string | null;
+  // 급여 생성 시점의 소속(payroll_records.team, 2026-11 추가). 그 전 레코드나
+  //   칸 적용 전이면 null → 호출부가 지금 설정으로 판정합니다.
+  team?: PayrollTeam | null;
 };
 
 // "이 달 추가 항목" 프리셋 — 명절 있는 달·연말에만 담당자가 더하는 변동 지급.
@@ -631,4 +644,78 @@ export function validateMonthRanges(
     }
   }
   return { ok: true };
+}
+
+// =====================================================================
+// 급여대장 출력 순서 (2026-11 김혜지 팀장 요청)
+//   * 저장된 순서 = driver_id 배열(settings 'payroll_staff_order').
+//   * 급여대장·월별 목록은 소속 그룹(PAYROLL_TEAMS 순) → 그 안에서 저장 순서.
+//   * 저장 순서에 없는 직원(신규)은 그룹 맨 아래, 이름순.
+// =====================================================================
+export const PAYROLL_ORDER_SETTING_KEY = "payroll_staff_order";
+
+export function parsePayrollOrder(raw: string | null | undefined): string[] {
+  if (!raw) return [];
+  try {
+    const v = JSON.parse(raw);
+    if (!Array.isArray(v)) return [];
+    return [...new Set(v.filter((x): x is string => typeof x === "string" && !!x))];
+  } catch {
+    return [];
+  }
+}
+
+export function sortPayrollRows<
+  T extends { driver_id: string; team: PayrollTeam; name: string },
+>(rows: T[], order: string[]): T[] {
+  const idx = new Map(order.map((id, i) => [id, i]));
+  const teamIdx = (t: PayrollTeam) => PAYROLL_TEAMS.indexOf(t);
+  return [...rows].sort((a, b) => {
+    if (a.team !== b.team) return teamIdx(a.team) - teamIdx(b.team);
+    const ia = idx.get(a.driver_id);
+    const ib = idx.get(b.driver_id);
+    if (ia != null && ib != null) return ia - ib;
+    if (ia != null) return -1;
+    if (ib != null) return 1;
+    return a.name.localeCompare(b.name, "ko");
+  });
+}
+
+// 화면 순서 목록(저장 순서 + 신규 맨 아래). 저장 순서에 없는 직원은 뒤에 이름순.
+export function applyPayrollOrder<T extends { driver_id: string; name: string }>(
+  staff: T[],
+  order: string[],
+): T[] {
+  const idx = new Map(order.map((id, i) => [id, i]));
+  return [...staff].sort((a, b) => {
+    const ia = idx.get(a.driver_id);
+    const ib = idx.get(b.driver_id);
+    if (ia != null && ib != null) return ia - ib;
+    if (ia != null) return -1;
+    if (ib != null) return 1;
+    return a.name.localeCompare(b.name, "ko");
+  });
+}
+
+// [직급순] — 급수(1급 먼저) → 호봉 높은 순 → 이름.
+export function sortStaffByGrade<
+  T extends { grade: string; step: number; name: string },
+>(staff: T[]): T[] {
+  return [...staff].sort((a, b) => {
+    const g = gradeSortKey(a.grade) - gradeSortKey(b.grade);
+    if (g !== 0) return g;
+    if (a.step !== b.step) return b.step - a.step;
+    return a.name.localeCompare(b.name, "ko");
+  });
+}
+
+// [소속순] — 센터 → 배치지도사 → 방과후아카데미. 같은 소속 안은 지금 순서 유지.
+export function sortStaffByTeam<T extends { team: PayrollTeam }>(staff: T[]): T[] {
+  return staff
+    .map((s, i) => ({ s, i }))
+    .sort(
+      (a, b) =>
+        PAYROLL_TEAMS.indexOf(a.s.team) - PAYROLL_TEAMS.indexOf(b.s.team) || a.i - b.i,
+    )
+    .map((x) => x.s);
 }

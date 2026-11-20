@@ -33,6 +33,8 @@
     "test:credential": "node --import tsx scripts/test-credential-crypto.ts",
     "test:instagram": "node --import tsx scripts/test-instagram-import.ts",
     "test:ledger": "node --import tsx scripts/test-payroll-ledger.ts",
+    "test:salary-ledger": "node --import tsx scripts/test-salary-ledger-teams.ts",
+    "test:program-merge": "node --import tsx scripts/test-business-program-merge.ts",
     "test:keyword": "node --import tsx scripts/test-mail-keyword.ts",
     "reclassify:mail": "node --import tsx scripts/reclassify-mail.ts",
     "test:rental": "node --import tsx scripts/test-rental-sync.ts",

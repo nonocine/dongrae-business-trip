@@ -5,6 +5,7 @@ import {
   ledgerColsFromRecord,
   type LedgerRowInput,
 } from "@/lib/salaryLedger";
+import { isPayrollTeam, TEAM_LABEL } from "@/lib/salary";
 
 // exceljs 는 Node 런타임 필요. 대장은 매 요청 최신값으로.
 export const runtime = "nodejs";
@@ -32,6 +33,13 @@ export async function GET(request: Request) {
     return new Response("연·월이 올바르지 않습니다.", { status: 400 });
   }
 
+  // team=center|placement|afterschool → 그 소속만. 없거나 all 이면 전체.
+  const teamParam = url.searchParams.get("team");
+  const team = isPayrollTeam(teamParam) ? teamParam : null;
+  if (teamParam && teamParam !== "all" && !team) {
+    return new Response("소속 구분이 올바르지 않습니다.", { status: 400 });
+  }
+
   const list = await listMonthlyPayroll({ year, month });
   if (list.rows.length === 0) {
     return new Response(
@@ -47,9 +55,23 @@ export async function GET(request: Request) {
 
   // 확정본은 표기 없음, 하나라도 미확정이면 (초안).
   const draft = !list.allConfirmed;
-  const buffer = await buildPayrollLedgerWorkbook({ year, month, draft, rows });
+  if (team && !rows.some((r) => r.team === team)) {
+    return new Response(
+      `${year}년 ${month}월 ${TEAM_LABEL[team]} 소속 급여 레코드가 없습니다.`,
+      { status: 404 }
+    );
+  }
+  const buffer = await buildPayrollLedgerWorkbook({
+    year,
+    month,
+    draft,
+    rows,
+    team,
+  });
 
-  const filename = `${year}년_${month}월_급여대장${draft ? "(초안)" : ""}.xlsx`;
+  const filename = `${year}년_${month}월_급여대장${
+    team ? `_${TEAM_LABEL[team]}` : ""
+  }${draft ? "(초안)" : ""}.xlsx`;
   return new Response(buffer, {
     status: 200,
     headers: {

@@ -1160,7 +1160,7 @@ function EmployeeSalaryEditor({
           ))}
         </select>
         <span className="text-[11px] text-ink-hint">
-          급여대장에서 센터/방과후아카데미 그룹을 나누는 기준입니다.
+          급여대장에서 센터/배치지도사/방과후아카데미 그룹을 나누는 기준입니다. (이미 생성한 달의 급여대장은 생성 당시 소속 그대로)
         </span>
       </div>
 

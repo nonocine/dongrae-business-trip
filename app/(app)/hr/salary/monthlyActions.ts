@@ -15,6 +15,9 @@ import {
   resolveTeam,
   effectiveTeamValue,
   TEAM_LABEL,
+  PAYROLL_ORDER_SETTING_KEY,
+  parsePayrollOrder,
+  sortPayrollRows,
   type PayItem,
   type PayrollRecord,
   type PayrollTeam,
@@ -150,6 +153,40 @@ function configFor(ctx: GenContext, month: number): Record<string, number> {
   return salaryConfigForMonth(ctx.configRows, month);
 }
 
+// 직원의 지금 소속(급여 설정 기준) — 생성 시점 스냅샷이 없을 때의 대체값.
+function currentTeam(ctx: GenContext, driverId: string): PayrollTeam {
+  return resolveTeam({
+    team: effectiveTeamValue(ctx.profilesByDriver.get(driverId) ?? []),
+    name: ctx.empByDriver.get(driverId)?.name ?? "",
+  });
+}
+
+// 레코드의 소속 — 생성 시점 값(payroll_records.team) 우선, 없으면 지금 설정.
+//   ⇒ 생성 뒤 소속을 바꿔도 그 달 급여대장은 바뀌지 않습니다(칸 적용 후 생성분부터).
+function recordTeam(ctx: GenContext, rec: PayrollRecord): PayrollTeam {
+  return rec.team ?? currentTeam(ctx, rec.driver_id);
+}
+
+// payroll_records.team 칸이 아직 없을 때(마이그레이션 전) — 칸 없이 다시 씁니다.
+function teamColumnMissing(e: { code?: string; message?: string } | null) {
+  return (
+    !!e &&
+    (e.code === "42703" || e.code === "PGRST204") &&
+    (e.message ?? "").includes("team")
+  );
+}
+
+// 급여대장 출력 순서(driver_id 배열) — settings 단일 키.
+async function loadPayrollOrder(): Promise<string[]> {
+  const { data, error } = await supabaseAdmin
+    .from("settings")
+    .select("value")
+    .eq("key", PAYROLL_ORDER_SETTING_KEY)
+    .maybeSingle();
+  if (error) throw new Error(error.message);
+  return parsePayrollOrder((data as { value?: string } | null)?.value);
+}
+
 // 해당 월을 포함하는 급여 설정 구간(없으면 null). 비겹침 전제라 첫 일치.
 function profileForMonth(rows: ProfileRow[], month: number): ProfileRow | null {
   return rows.find((r) => rangeIncludesMonth(r, month)) ?? null;
@@ -280,12 +317,23 @@ export async function generateMonthlyPayroll(input: {
         total_pay: totals.total_pay,
         total_deduct: totals.total_deduct,
         net_pay: totals.net_pay,
+        // 생성 시점 소속 스냅샷 — 이후 소속을 바꿔도 이 달 대장은 그대로.
+        team: currentTeam(ctx, driverId),
+      };
+      const withoutTeam = () => {
+        const { team: _t, ...rest } = payload;
+        void _t;
+        return rest;
       };
 
       if (!existRec) {
-        const { error } = await supabaseAdmin
+        let { error } = await supabaseAdmin
           .from("payroll_records")
           .insert(payload);
+        if (teamColumnMissing(error))
+          ({ error } = await supabaseAdmin
+            .from("payroll_records")
+            .insert(withoutTeam()));
         if (error) throw new Error(error.message);
         created++;
       } else if (existRec.confirmed_at) {
@@ -293,10 +341,15 @@ export async function generateMonthlyPayroll(input: {
       } else if (!input.overwriteDrafts) {
         existingDrafts.push(emp.name); // 초안 존재 → 확인 필요
       } else {
-        const { error } = await supabaseAdmin
+        let { error } = await supabaseAdmin
           .from("payroll_records")
           .update(payload)
           .eq("id", existRec.id);
+        if (teamColumnMissing(error))
+          ({ error } = await supabaseAdmin
+            .from("payroll_records")
+            .update(withoutTeam())
+            .eq("id", existRec.id));
         if (error) throw new Error(error.message);
         updated++;
       }
@@ -374,11 +427,8 @@ export async function listMonthlyPayroll(input: {
       ctx.profilesByDriver.get(rec.driver_id) ?? [],
       month
     );
-    // 팀은 직원 단위 — 구간 중 지정된 값 우선(일부 구간만 지정돼도 시드에 밀리지 않게).
-    const team = resolveTeam({
-      team: effectiveTeamValue(ctx.profilesByDriver.get(rec.driver_id) ?? []),
-      name: emp?.name ?? "",
-    });
+    // 소속 — 생성 시점 스냅샷 우선, 없으면 지금 설정(구간 중 지정값 우선).
+    const team = recordTeam(ctx, rec);
     // 설정과 다름 — 설정 기준 재계산과 저장값 비교.
     let modified = false;
     if (prof) {
@@ -405,12 +455,11 @@ export async function listMonthlyPayroll(input: {
     });
   }
 
-  // 정렬: 팀(센터→방과후) → 이름.
-  const teamOrder: Record<PayrollTeam, number> = { center: 0, afterschool: 1 };
-  rows.sort((a, b) => {
-    if (a.team !== b.team) return teamOrder[a.team] - teamOrder[b.team];
-    return a.name.localeCompare(b.name, "ko");
-  });
+  // 정렬: 소속(센터→배치지도사→방과후) → 저장한 출력 순서 → (신규) 이름.
+  const order = await loadPayrollOrder();
+  const sorted = sortPayrollRows(rows, order);
+  rows.length = 0;
+  rows.push(...sorted);
 
   // 대상인데 레코드 없는 직원.
   const missingNames: string[] = [];
@@ -866,10 +915,7 @@ export async function listPayslipTargets(input: {
     .filter((r) => r.confirmed_at) // 확정 건만 발송 대상
     .map((r) => {
       const emp = ctx.empByDriver.get(r.driver_id);
-      const team = resolveTeam({
-        team: effectiveTeamValue(ctx.profilesByDriver.get(r.driver_id) ?? []),
-        name: emp?.name ?? "",
-      });
+      const team = recordTeam(ctx, r);
       return {
         driver_id: r.driver_id,
         name: emp?.name ?? "(이름 없음)",
@@ -972,10 +1018,7 @@ export async function sendPayslips(input: {
       }
 
       try {
-        const team = resolveTeam({
-          team: effectiveTeamValue(ctx.profilesByDriver.get(rec.driver_id) ?? []),
-          name,
-        });
+        const team = recordTeam(ctx, rec);
         // ★본인 레코드(rec)로만 PDF 생성 → 교차 발송 방지.
         const pdf = await buildPayslipPdf(rec, {
           name,
@@ -1019,6 +1062,74 @@ export async function sendPayslips(input: {
     return {
       ok: false,
       message: e instanceof Error ? e.message : "발송 중 오류가 발생했습니다.",
+    };
+  }
+}
+
+// =====================================================================
+// PART 6. 급여대장 출력 순서 — 드래그 지정 · [직급순] · [소속순]
+//   저장 = settings 'payroll_staff_order'(driver_id 배열). 이후 모든 급여대장에 적용.
+//   목록에 없는 직원(신규)은 그룹 맨 아래(sortPayrollRows).
+// =====================================================================
+export type PayrollOrderStaff = {
+  driver_id: string;
+  name: string;
+  rank: string | null;
+  team: PayrollTeam;
+  grade: string;
+  step: number;
+  resigned: boolean;
+};
+
+export async function getPayrollOrderData(input: {
+  year: number;
+}): Promise<{ order: string[]; staff: PayrollOrderStaff[] }> {
+  await requireSalaryAccess({ personnel: true });
+  const year = Number(input.year);
+  const ctx = await loadContext(year);
+  const order = await loadPayrollOrder();
+  const staff: PayrollOrderStaff[] = [];
+  for (const [driverId, profs] of ctx.profilesByDriver) {
+    const emp = ctx.empByDriver.get(driverId);
+    if (!emp || profs.length === 0) continue;
+    // 가장 늦은 구간의 급수·호봉(직급순 기준).
+    const last = [...profs].sort((a, b) => b.start_month - a.start_month)[0];
+    staff.push({
+      driver_id: driverId,
+      name: emp.name,
+      rank: emp.rank,
+      team: currentTeam(ctx, driverId),
+      grade: last.grade,
+      step: last.step,
+      resigned: emp.employment_status === "resigned",
+    });
+  }
+  return { order, staff };
+}
+
+export async function savePayrollOrder(input: {
+  driverIds: string[];
+}): Promise<{ ok: true } | { ok: false; message: string }> {
+  try {
+    await requireSalaryAccess({ personnel: true });
+    const ids = parsePayrollOrder(JSON.stringify(input.driverIds ?? []));
+    // 화면에 안 보인 직원(다른 연도 등)의 기존 순서는 뒤에 그대로 이어 둡니다.
+    const prev = await loadPayrollOrder();
+    const seen = new Set(ids);
+    const next = [...ids, ...prev.filter((id) => !seen.has(id))];
+    const { error } = await supabaseAdmin
+      .from("settings")
+      .upsert(
+        { key: PAYROLL_ORDER_SETTING_KEY, value: JSON.stringify(next) },
+        { onConflict: "key" }
+      );
+    if (error) throw new Error(error.message);
+    revalidatePath("/hr/salary");
+    return { ok: true };
+  } catch (e) {
+    return {
+      ok: false,
+      message: e instanceof Error ? e.message : "순서를 저장하지 못했습니다.",
     };
   }
 }

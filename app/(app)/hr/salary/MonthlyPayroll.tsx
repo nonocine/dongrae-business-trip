@@ -11,6 +11,9 @@ import {
   applyEdiUpload,
   listPayslipTargets,
   sendPayslips,
+  getPayrollOrderData,
+  savePayrollOrder,
+  type PayrollOrderStaff,
   type MonthlyRow,
   type MonthlyListResult,
   type EdiPreviewResult,
@@ -20,7 +23,11 @@ import {
 import {
   formatKRW,
   PAY_ADDON_PRESETS,
+  PAYROLL_TEAMS,
   TEAM_LABEL,
+  applyPayrollOrder,
+  sortStaffByGrade,
+  sortStaffByTeam,
   type PayItem,
 } from "@/lib/salary";
 import {
@@ -225,12 +232,30 @@ export default function MonthlyPayrollSection({
               </button>
             )}
             {hasRows && (
-              <a
-                href={`/hr/salary/ledger?year=${year}&month=${month}`}
-                className={btnSecondary}
-              >
-                급여대장 다운로드{!allConfirmed ? " (초안)" : ""}
-              </a>
+              <span className="flex flex-wrap items-center gap-1">
+                <span className="text-xs font-semibold text-navy">
+                  급여대장{!allConfirmed ? "(초안)" : ""}
+                </span>
+                <a
+                  href={`/hr/salary/ledger?year=${year}&month=${month}`}
+                  className={btnSecondary}
+                  title="전체 — 소속 구분(소계) 포함"
+                >
+                  전체
+                </a>
+                {PAYROLL_TEAMS.filter((t) => rows.some((r) => r.team === t)).map(
+                  (t) => (
+                    <a
+                      key={t}
+                      href={`/hr/salary/ledger?year=${year}&month=${month}&team=${t}`}
+                      className={btnSecondary}
+                      title={`${TEAM_LABEL[t]} 소속 직원만`}
+                    >
+                      {TEAM_LABEL[t]}
+                    </a>
+                  )
+                )}
+              </span>
             )}
             {hasRows && (
               <button
@@ -316,6 +341,9 @@ export default function MonthlyPayrollSection({
         )}
       </section>
 
+      {/* 급여대장 출력 순서 */}
+      <PayrollOrderPanel key={year} year={year} onSaved={() => load()} />
+
       {/* 4대보험 EDI 업로드 */}
       <EdiUploadPanel
         year={year}
@@ -332,6 +360,197 @@ export default function MonthlyPayrollSection({
         />
       )}
     </div>
+  );
+}
+
+// =====================================================================
+// 급여대장 출력 순서 — 드래그(또는 ▲▼)로 지정 · [직급순] [소속순] 자동 정렬 · 저장.
+//   저장한 순서는 이후 모든 급여대장(전체·소속별)과 월별 목록에 쓰입니다.
+//   대장은 소속 그룹(센터→배치지도사→방과후) 안에서 이 순서를 따르고,
+//   저장 뒤 새로 들어온 직원은 그룹 맨 아래에 붙습니다.
+// =====================================================================
+function PayrollOrderPanel({
+  year,
+  onSaved,
+}: {
+  year: number;
+  onSaved: () => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const [list, setList] = useState<PayrollOrderStaff[] | null>(null);
+  const [dirty, setDirty] = useState(false);
+  const [dragIdx, setDragIdx] = useState<number | null>(null);
+  const [pending, start] = useTransition();
+  const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
+
+  function load() {
+    setMsg(null);
+    start(async () => {
+      try {
+        const res = await getPayrollOrderData({ year });
+        setList(applyPayrollOrder(res.staff, res.order));
+        setDirty(false);
+      } catch {
+        setMsg({ ok: false, text: "순서를 불러오지 못했습니다." });
+      }
+    });
+  }
+
+  function move(from: number, to: number) {
+    setList((cur) => {
+      if (!cur || to < 0 || to >= cur.length || from === to) return cur;
+      const next = [...cur];
+      const [it] = next.splice(from, 1);
+      next.splice(to, 0, it);
+      return next;
+    });
+    setDirty(true);
+  }
+
+  function save() {
+    if (!list) return;
+    setMsg(null);
+    start(async () => {
+      const res = await savePayrollOrder({
+        driverIds: list.map((s) => s.driver_id),
+      });
+      if (!res.ok) {
+        setMsg({ ok: false, text: res.message });
+        return;
+      }
+      setDirty(false);
+      setMsg({ ok: true, text: "출력 순서를 저장했습니다. 이후 급여대장에 적용됩니다." });
+      onSaved();
+    });
+  }
+
+  return (
+    <section className={cardCls}>
+      <div className="flex flex-wrap items-center gap-2">
+        <h3 className="text-sm font-bold text-ink">급여대장 출력 순서</h3>
+        <span className="text-[11px] text-ink-hint">
+          소속(센터→배치지도사→방과후아카데미) 안에서 이 순서로 출력 · 신규 직원은 맨 아래
+        </span>
+        <button
+          type="button"
+          className={`ml-auto ${btnSecondary}`}
+          onClick={() => {
+            if (!open) load();
+            setOpen(!open);
+          }}
+        >
+          {open ? "접기" : "순서 정하기"}
+        </button>
+      </div>
+      {open && (
+        <div className="mt-3">
+          <div className="flex flex-wrap gap-2">
+            <button
+              type="button"
+              className={btnSecondary}
+              disabled={pending || !list}
+              onClick={() => {
+                setList((cur) => (cur ? sortStaffByGrade(cur) : cur));
+                setDirty(true);
+              }}
+            >
+              직급순
+            </button>
+            <button
+              type="button"
+              className={btnSecondary}
+              disabled={pending || !list}
+              onClick={() => {
+                setList((cur) => (cur ? sortStaffByTeam(cur) : cur));
+                setDirty(true);
+              }}
+            >
+              소속순
+            </button>
+            <button
+              type="button"
+              className={btnPrimary}
+              disabled={pending || !list || !dirty}
+              onClick={save}
+            >
+              {pending ? "처리 중…" : "순서 저장"}
+            </button>
+            {dirty && (
+              <button
+                type="button"
+                className={btnSecondary}
+                disabled={pending}
+                onClick={load}
+              >
+                되돌리기
+              </button>
+            )}
+          </div>
+          {msg && (
+            <p className={`mt-2 ${msg.ok ? noticeSuccess : noticeError}`}>{msg.text}</p>
+          )}
+          {!list ? (
+            <p className="py-4 text-center text-xs text-ink-hint">불러오는 중…</p>
+          ) : list.length === 0 ? (
+            <p className="py-4 text-center text-xs text-ink-hint">
+              {year}년 급여 설정이 있는 직원이 없습니다.
+            </p>
+          ) : (
+            <ol className="mt-3 divide-y divide-line rounded-md border border-line">
+              {list.map((s, i) => (
+                <li
+                  key={s.driver_id}
+                  draggable
+                  onDragStart={() => setDragIdx(i)}
+                  onDragOver={(e) => e.preventDefault()}
+                  onDrop={(e) => {
+                    e.preventDefault();
+                    if (dragIdx != null) move(dragIdx, i);
+                    setDragIdx(null);
+                  }}
+                  onDragEnd={() => setDragIdx(null)}
+                  className={`flex cursor-grab items-center gap-2 px-3 py-1.5 text-sm ${
+                    dragIdx === i ? "bg-navy-soft" : "bg-card"
+                  } ${s.resigned ? "opacity-60" : ""}`}
+                >
+                  <span aria-hidden className="text-ink-hint">⠿</span>
+                  <span className="w-6 text-right text-xs tabular-nums text-ink-hint">
+                    {i + 1}
+                  </span>
+                  <span className="font-medium text-ink">{s.name}</span>
+                  {s.rank && <span className="text-xs text-ink-hint">{s.rank}</span>}
+                  <span className="text-xs text-ink-muted">
+                    {s.grade} {s.step}호봉
+                  </span>
+                  <span className={badgeNavy}>{TEAM_LABEL[s.team]}</span>
+                  {s.resigned && <span className={badgeNeutral}>퇴사</span>}
+                  <span className="ml-auto flex gap-1">
+                    <button
+                      type="button"
+                      aria-label={`${s.name} 위로`}
+                      className="rounded border border-line px-1.5 text-xs text-ink-muted hover:bg-surface disabled:opacity-40"
+                      disabled={i === 0}
+                      onClick={() => move(i, i - 1)}
+                    >
+                      ▲
+                    </button>
+                    <button
+                      type="button"
+                      aria-label={`${s.name} 아래로`}
+                      className="rounded border border-line px-1.5 text-xs text-ink-muted hover:bg-surface disabled:opacity-40"
+                      disabled={i === list.length - 1}
+                      onClick={() => move(i, i + 1)}
+                    >
+                      ▼
+                    </button>
+                  </span>
+                </li>
+              ))}
+            </ol>
+          )}
+        </div>
+      )}
+    </section>
   );
 }
 
